@@ -92,7 +92,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 }
 
 func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
+	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	_ = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.TrieOfAccountsBucket, dbutils.TrieOfStorageBucket)
 
 	if cache != nil {
@@ -115,19 +115,15 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		}, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRootOnCache(cache)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
 		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
 		writes := cache.PrepareWrites()
 		flushTrieWritesToDB(writes, db)
 		cache.TurnWritesToReads(writes)
@@ -138,27 +134,19 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
 		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Debug("Collection finished",
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
-		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return next(k, k, value)
-		}
-
-		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
@@ -274,7 +262,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
@@ -384,20 +372,15 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		}, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRootOnCache(cache)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
-		fmt.Printf("root3: %x,%x\n", hash, expectedRootHash)
 		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
 
 		writes := cache.PrepareWrites()
 		flushTrieWritesToDB(writes, db)
@@ -409,19 +392,15 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
 		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
 		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { // hack to prevent use of APPEND
 			return next(k, k, value)
 		}
@@ -516,19 +495,15 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		}, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRootOnCache(cache)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
 		if hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
 
 		writes := cache.PrepareWrites()
 		flushTrieWritesToDB(writes, db)
@@ -541,19 +516,15 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 			return err
 		}
-		t := time.Now()
+		calcStart := time.Now()
 		hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 		if err != nil {
 			return err
 		}
-		generationIHTook := time.Since(t)
 		if hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-			"root hash", hash.Hex(),
-			"gen AccTrie", generationIHTook,
-		)
+		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
 		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return next(k, k, value)
 		}
