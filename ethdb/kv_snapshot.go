@@ -221,34 +221,6 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	return tx, nil
 }
 
-func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
-	v, err := s.dbTX.HasOne(bucket, key)
-	if err != nil {
-		return false, err
-	}
-	if !v {
-		snTx, err := s.getSnapshotTX(bucket)
-		if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
-			return false, err
-		}
-		//process only db buckets
-		if errors.Is(err, ErrUnavailableSnapshot) {
-			return v, nil
-		}
-
-		v, err := snTx.GetOne(bucket, key)
-		if err != nil {
-			return false, err
-		}
-		if bytes.Equal(v, DeletedValue) {
-			return false, nil
-		}
-
-		return true, nil
-	}
-	return v, nil
-}
-
 func (s *sn2TX) Commit(ctx context.Context) error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()

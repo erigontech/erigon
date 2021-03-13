@@ -119,16 +119,6 @@ func (m *mutation) hasMem(table string, key []byte) bool {
 	return m.puts.Has(&m.searchItem)
 }
 
-func (m *mutation) Has(table string, key []byte) (bool, error) {
-	if m.hasMem(table, key) {
-		return true, nil
-	}
-	if m.db != nil {
-		return m.db.Has(table, key)
-	}
-	return false, nil
-}
-
 func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
 		return 0, nil
@@ -393,10 +383,6 @@ func (d *RWCounterDecorator) Get(bucket string, key []byte) ([]byte, error) {
 	return d.Database.Get(bucket, key)
 }
 
-func (d *RWCounterDecorator) Has(bucket string, key []byte) (bool, error) {
-	atomic.AddUint64(&d.DBCounterStats.Has, 1)
-	return d.Database.Has(bucket, key)
-}
 func (d *RWCounterDecorator) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
 	return d.Database.Walk(bucket, startkey, fixedbits, walker)

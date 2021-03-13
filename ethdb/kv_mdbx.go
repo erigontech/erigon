@@ -757,34 +757,6 @@ func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		c := tx.Cursor(bucket).(*MdbxCursor)
-		if err := c.initCursor(); err != nil {
-			return false, err
-		}
-		defer c.Close()
-		_, v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		return bytes.Equal(key[to:], v[:from-to]), nil
-	}
-
-	if _, err := tx.get(mdbx.DBI(b.DBI), key); err == nil {
-		return true, nil
-	} else if mdbx.IsNotFound(err) {
-		return false, nil
-	} else {
-		return false, err
-	}
-}
-
 func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	// non-native for now
 	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)

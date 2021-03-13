@@ -121,19 +121,6 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	return 0, nil
 }
 
-func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
-	var has bool
-	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.GetOne(bucket, key)
-		if err != nil {
-			return err
-		}
-		has = v != nil
-		return nil
-	})
-	return has, err
-}
-
 func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 	casted, ok := db.kv.(HasStats)
 	if !ok {

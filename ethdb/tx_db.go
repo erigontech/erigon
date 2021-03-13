@@ -127,14 +127,6 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
-	v, err := m.Get(bucket, key)
-	if err != nil {
-		return false, err
-	}
-	return v != nil, nil
-}
-
 func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
 	if m.db == nil {
 		return 0, nil
