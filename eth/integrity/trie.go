@@ -46,8 +46,8 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 				log.Info("trie account integrity", "key", fmt.Sprintf("%x", k))
 			}
 
-			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
-			AssertSubset(k, hasBranch, hasState)
+			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
+			AssertSubset(k, hasTree, hasState)
 			AssertSubset(k, hasHash, hasState)
 			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
@@ -55,7 +55,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 			found := false
 			var parentK []byte
 
-			// must have parent with right hasBranch bit
+			// must have parent with right hasTree bit
 			for i := len(k) - 1; i > 0 && !found; i-- {
 				parentK = k[:i]
 				kParent, vParent, err := trieAcc2.SeekExact(parentK)
@@ -66,10 +66,10 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 					continue
 				}
 				found = true
-				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
-				parentHasBit := 1<<uint16(k[len(parentK)])&parentHasBranch != 0
+				parenthasTree := binary.BigEndian.Uint16(vParent[2:])
+				parentHasBit := 1<<uint16(k[len(parentK)])&parenthasTree != 0
 				if !parentHasBit {
-					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
+					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parenthasTree))
 				}
 			}
 			if !found && len(k) > 1 {
@@ -80,7 +80,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 			seek = seek[:len(k)+1]
 			copy(seek, k)
 			for i := uint16(0); i < 16; i++ {
-				if 1<<i&hasBranch == 0 {
+				if 1<<i&hasTree == 0 {
 					continue
 				}
 				seek[len(seek)-1] = uint8(i)
@@ -89,10 +89,10 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 					panic(err)
 				}
 				if k2 == nil {
-					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->nil", k, hasBranch, i, seek))
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->nil", k, hasTree, i, seek))
 				}
 				if !bytes.HasPrefix(k2, seek) {
-					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->%x", k, hasBranch, i, seek, k2))
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->%x", k, hasTree, i, seek, k2))
 				}
 			}
 
@@ -145,8 +145,8 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 				log.Info("trie storage integrity", "key", fmt.Sprintf("%x", k))
 			}
 
-			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
-			AssertSubset(k, hasBranch, hasState)
+			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
+			AssertSubset(k, hasTree, hasState)
 			AssertSubset(k, hasHash, hasState)
 			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
@@ -155,7 +155,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 			found := false
 			var parentK []byte
 
-			// must have parent with right hasBranch bit
+			// must have parent with right hasTree bit
 			for i := len(k) - 1; i >= 40 && !found; i-- {
 				parentK = k[:i]
 				kParent, vParent, err := trieStorage.SeekExact(parentK)
@@ -181,7 +181,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 			seek = seek[:len(k)+1]
 			copy(seek, k)
 			for i := uint16(0); i < 16; i++ {
-				if 1<<i&hasBranch == 0 {
+				if 1<<i&hasTree == 0 {
 					continue
 				}
 				seek[len(seek)-1] = uint8(i)
@@ -190,7 +190,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 					panic(err)
 				}
 				if !bytes.HasPrefix(k2, seek) {
-					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasBranch, i))
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasTree, i))
 				}
 			}
 
