@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "types/types.proto";
+
 package remote;
 
 option go_package = "./remote;remote";
@@ -8,19 +10,19 @@ option java_package = "io.turbo-geth.db";
 option java_outer_classname = "ETHBACKEND";
 
 service ETHBACKEND {
-  rpc Add(TxRequest) returns(AddReply);
-  rpc Etherbase(EtherbaseRequest) returns(EtherbaseReply);
-  rpc NetVersion(NetVersionRequest) returns(NetVersionReply);
-  rpc Subscribe(SubscribeRequest) returns(stream SubscribeReply);
+  rpc Add(TxRequest) returns (AddReply);
+  rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
+  rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
 }
 
 message TxRequest { bytes signedtx = 1; }
 
-message AddReply { bytes hash = 1; }
+message AddReply { types.H256 hash = 1; }
 
 message EtherbaseRequest {}
 
-message EtherbaseReply { bytes hash = 1; }
+message EtherbaseReply { types.H256 hash = 1; }
 
 message NetVersionRequest {}
 
