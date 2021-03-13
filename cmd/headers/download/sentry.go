@@ -116,6 +116,26 @@ func makeP2PServer(
 	p2pConfig.Protocols = []p2p.Protocol{}
 	p2pConfig.NodeDatabase = fmt.Sprintf("nodes_%x", genesisHash)
 	p2pConfig.ListenAddr = fmt.Sprintf(":%d", port)
+	var urls []string
+	switch genesisHash {
+	case params.MainnetGenesisHash:
+		urls = params.MainnetBootnodes
+	case params.RopstenGenesisHash:
+		urls = params.RopstenBootnodes
+	case params.GoerliGenesisHash:
+		urls = params.GoerliBootnodes
+	}
+	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
+	for _, url := range urls {
+		if url != "" {
+			node, err := enode.Parse(enode.ValidSchemes, url)
+			if err != nil {
+				log.Crit("Bootstrap URL invalid", "enode", url, "err", err)
+				continue
+			}
+			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
+		}
+	}
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
 			Name:           eth.ProtocolName,

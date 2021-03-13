@@ -293,6 +293,10 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 		networkID = 3
 		genesis = core.DefaultRopstenGenesisBlock()
 		genesisHash = params.RopstenGenesisHash
+	case "goerli":
+		networkID = 5
+		genesis = core.DefaultGoerliGenesisBlock()
+		genesisHash = params.GoerliGenesisHash
 	default:
 		return nil, fmt.Errorf("chain %s is not known", chain)
 	}

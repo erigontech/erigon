@@ -531,17 +531,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
 	stride := uint64(8 * 192)
-	if hd.topSeenHeight <= hd.highestInDb+stride {
-		return nil
-	}
-	length := (hd.topSeenHeight - hd.highestInDb - stride) / stride
-	if length > 192 {
-		length = 192
-	}
-	if length <= 0 {
-		return nil // No need in sketelon request
-	}
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
+	return &HeaderRequest{Number: hd.highestInDb + stride, Length: 192, Skip: stride, Reverse: false}
 }
 
 func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
