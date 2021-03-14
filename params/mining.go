@@ -10,6 +10,7 @@ import (
 
 // MiningConfig is the configuration parameters of mining.
 type MiningConfig struct {
+	Enabled   bool
 	Etherbase common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
 	Notify    []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
 	ExtraData hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner

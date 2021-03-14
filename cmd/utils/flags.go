@@ -1290,6 +1290,9 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.Enabled = true
+	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
 	}
