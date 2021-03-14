@@ -8,6 +8,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
@@ -52,8 +54,31 @@ type StageParameters struct {
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
-	miningBlock           *types.Block
-	miningStateRoot       common.Hash
+	mining                *MiningStagesParameters
+}
+
+type MiningStagesParameters struct {
+	// configs
+	*miner.Config
+	consensusEngine consensus.Engine
+	// noempty is the flag used to control whether the feature of pre-seal empty
+	// block is enabled. The default value is false(pre-seal is enabled by default).
+	// But in some special scenario the consensus engine will seal blocks instantaneously,
+	// in this case this feature will add all empty blocks into canonical chain
+	// non-stop and no real transaction will be included.
+	noempty                   bool
+	localUncles, remoteUncles map[common.Hash]*types.Block
+
+	// runtime dat
+	block     *types.Block
+	stateRoot common.Hash
+	receipts  types.Receipts
+	coinbase  common.Address
+}
+
+func NewMiningStagesParameters(cfg *miner.Config, consensusEngine consensus.Engine, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
+	return &MiningStagesParameters{Config: cfg, consensusEngine: consensusEngine, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
+
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -392,22 +417,25 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningCreateBlock,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningExecuteBlockStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
-							world.QuitCh,
-							ExecuteBlockStageParams{
-								WriteReceipts:         world.storageMode.Receipts,
-								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
-								ChangeSetHook:         world.changeSetHook,
-								ReaderBuilder:         world.stateReaderBuilder,
-								WriterBuilder:         world.stateWriterBuilder,
-								SilkwormExecutionFunc: world.silkwormExecutionFunc,
-							})
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						block, err := SpawnMiningCreateBlockStage(s, world.TX,
+							world.mining.consensusEngine,
+							world.chainConfig,
+							world.txPool,
+							world.mining.ExtraData,
+							world.mining.GasFloor,
+							world.mining.GasCeil,
+							world.mining.coinbase,
+							world.mining.localUncles,
+							world.mining.remoteUncles,
+							world.mining.noempty,
+							world.QuitCh)
+						if err != nil {
+							return err
+						}
+						world.mining.block = block
 						return nil
 					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
 			},
 		},
@@ -419,7 +447,7 @@ func MiningStages() StageBuilders {
 					Description: "Mining: execute new block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningExecuteBlockStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
+							world.chainConfig, world.chainContext, world.vmConfig, world.mining.block,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -431,9 +459,7 @@ func MiningStages() StageBuilders {
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
 							})
 					},
-					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return nil
-					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
 			},
 		},
@@ -445,7 +471,7 @@ func MiningStages() StageBuilders {
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningExecuteBlockStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
+							world.chainConfig, world.chainContext, world.vmConfig, world.mining.block,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -457,9 +483,7 @@ func MiningStages() StageBuilders {
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
 							})
 					},
-					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return nil
-					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
 			},
 		},
@@ -487,7 +511,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.miningStateRoot = stateRoot
+						world.mining.stateRoot = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -501,7 +525,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinalStage(s, world.TX, world.miningBlock, world.miningStateRoot, world.QuitCh)
+						return SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.stateRoot, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

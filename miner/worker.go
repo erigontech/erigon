@@ -79,8 +79,8 @@ const (
 	// increasing upper limit or decreasing lower limit so that the limit can be reachable.
 	intervalAdjustBias = 200 * 1000.0 * 1000.0
 
-	// staleThreshold is the maximum depth of the acceptable stale block.
-	staleThreshold = 7
+	// StaleThreshold is the maximum depth of the acceptable stale block.
+	StaleThreshold = 7
 )
 
 // task contains all information for consensus engine sealing and result submitting.
@@ -192,7 +192,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		mux:                mux,
 		chain:              eth.BlockChain(),
 		hooks:              h,
-		uncles:             newUncles(),
+		uncles:             NewUnclesSet(),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
 		exitCh:             make(chan struct{}),
@@ -990,7 +990,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		for _, blocks := range []map[common.Hash]*types.Block{u.localUncles, u.remoteUncles} {
 			// Clean up stale uncle blocks first
 			for hash, uncle := range blocks {
-				if uncle.NumberU64()+staleThreshold <= header.Number.Uint64() {
+				if uncle.NumberU64()+StaleThreshold <= header.Number.Uint64() {
 					delete(blocks, hash)
 				}
 			}

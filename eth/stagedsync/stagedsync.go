@@ -65,6 +65,7 @@ func (stagedSync *StagedSync) Prepare(
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
 	initialCycle bool,
+	miningConfig *MiningStagesParameters,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -104,6 +105,7 @@ func (stagedSync *StagedSync) Prepare(
 			notifier:              stagedSync.Notifier,
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
+			mining:                miningConfig,
 		},
 	)
 	state := NewState(stages)

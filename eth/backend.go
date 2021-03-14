@@ -431,6 +431,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
+	if config.SyncMode == downloader.StagedSync {
+		config.Miner.ExtraData = makeExtraData(config.Miner.ExtraData)
+	}
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:   chainDb,
 		Chain:      eth.blockchain,
@@ -444,7 +447,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}); err != nil {
 		return nil, err
 	}
-	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 	eth.handler.SetStagedSync(stagedSync)

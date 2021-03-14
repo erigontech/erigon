@@ -672,7 +672,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, hook, false)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, hook, false, nil)
 	if err != nil {
 		panic(err)
 	}

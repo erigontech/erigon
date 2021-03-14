@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
@@ -125,9 +126,10 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
-	chainConfig *params.ChainConfig
-	lightchain  LightChain
-	blockchain  BlockChain
+	chainConfig  *params.ChainConfig
+	miningConfig *miner.Config
+	lightchain   LightChain
+	blockchain   BlockChain
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -251,7 +253,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, miningConfig *miner.Config, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -264,6 +266,7 @@ func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainCon
 		rttEstimate:   uint64(rttMaxEstimate),
 		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
+		miningConfig:  miningConfig,
 		blockchain:    chain,
 		lightchain:    lightchain,
 		dropPeer:      dropPeer,
@@ -590,6 +593,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			poolStart,
 			nil,
 			false,
+			nil,
 		)
 		if err != nil {
 			return err
@@ -655,13 +659,12 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return nil
 		}
 
-		tx, err = d.stateDB.Begin(context.Background(), ethdb.RW)
-		if err != nil {
+		if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
 			return err
 		}
 		defer tx.Rollback()
 
-		d.miningState, err = d.mining.Prepare(
+		if d.miningState, err = d.mining.Prepare(
 			d,
 			d.chainConfig,
 			cc,
@@ -678,15 +681,15 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			nil,
-		)
-		if err != nil {
+			stagedsync.NewMiningStagesParameters(d.miningConfig, d.blockchain.Engine(), false, nil, nil),
+		); err != nil {
 			return err
 		}
-		err = d.miningState.Run(tx, tx)
-		if err != nil {
+		if err = d.miningState.Run(tx, tx); err != nil {
 			return err
 		}
-
+		tx.Rollback()
+		d.blockchain.Engine()
 		return nil
 	}
 

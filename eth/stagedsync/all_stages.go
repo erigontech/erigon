@@ -344,6 +344,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		nil,
 		nil,
 		false,
+		nil,
 	)
 	if err1 != nil {
 		return err1
@@ -433,6 +434,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		false,
+		nil,
 	)
 	if err2 != nil {
 		return false, err2
