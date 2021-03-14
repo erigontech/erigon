@@ -55,7 +55,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -1290,7 +1289,7 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
-func setMiner(ctx *cli.Context, cfg *miner.Config) {
+func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
 	}

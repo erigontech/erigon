@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
@@ -127,7 +126,7 @@ type Downloader struct {
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
 	chainConfig  *params.ChainConfig
-	miningConfig *miner.Config
+	miningConfig *params.MiningConfig
 	lightchain   LightChain
 	blockchain   BlockChain
 
@@ -253,7 +252,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, miningConfig *miner.Config, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}

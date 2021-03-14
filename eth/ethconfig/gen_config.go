@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -46,7 +45,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TrieTimeout             time.Duration
 		SnapshotCache           int
 		Preimages               bool
-		Miner                   miner.Config
+		Miner                   params.MiningConfig
 		Ethash                  ethash.Config
 		TxPool                  core.TxPoolConfig
 		GPO                     gasprice.Config
@@ -131,7 +130,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TrieTimeout             *time.Duration
 		SnapshotCache           *int
 		Preimages               *bool
-		Miner                   *miner.Config
+		Miner                   *params.MiningConfig
 		Ethash                  *ethash.Config
 		TxPool                  *core.TxPoolConfig
 		GPO                     *gasprice.Config

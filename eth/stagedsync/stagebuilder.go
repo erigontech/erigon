@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
@@ -58,7 +57,8 @@ type StageParameters struct {
 
 type MiningStagesParameters struct {
 	// configs
-	*miner.Config
+	*params.MiningConfig
+
 	// noempty is the flag used to control whether the feature of pre-seal empty
 	// block is enabled. The default value is false(pre-seal is enabled by default).
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
@@ -68,12 +68,11 @@ type MiningStagesParameters struct {
 	localUncles, remoteUncles map[common.Hash]*types.Block
 
 	// runtime dat
-	block    *miningBlock
-	coinbase common.Address
+	block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *miner.Config, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
-	return &MiningStagesParameters{Config: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
 
 }
 
@@ -419,7 +418,7 @@ func MiningStages() StageBuilders {
 							world.mining.ExtraData,
 							world.mining.GasFloor,
 							world.mining.GasCeil,
-							world.mining.coinbase,
+							world.mining.Etherbase,
 							world.mining.localUncles,
 							world.mining.remoteUncles,
 							world.mining.noempty,
@@ -447,7 +446,7 @@ func MiningStages() StageBuilders {
 							world.vmConfig,
 							world.chainContext,
 							world.txPool,
-							world.mining.coinbase,
+							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)
 						if err != nil {
