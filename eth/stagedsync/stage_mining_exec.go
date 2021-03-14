@@ -22,6 +22,7 @@ import (
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, coinbase common.Address, noempty bool, quit <-chan struct{}) (*miningBlock, error) {
+	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
 	batch := tx.NewBatch()
@@ -109,7 +110,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 
 			// Start executing the transaction
 			ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
-			vmConfig.NoReceipts = false
 			logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, cc, ibs, stateWriter, current)
 
 			switch err {
