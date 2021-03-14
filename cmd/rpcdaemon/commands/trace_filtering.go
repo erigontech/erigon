@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -297,11 +297,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else {
 			// In this case, we're processing a transaction hash
 			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, txOrBlockHash)
-			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
-			trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType}, chainConfig)
+			trace, err := transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, &tracers.TraceConfig{Tracer: &traceType}, chainConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -368,13 +368,13 @@ func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Database, ctx context.Con
 	traceType := "callTracer" // nolint: goconst
 
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, txHash)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}
 
 	// Time spent 176 out of 205
-	trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType}, chainConfig)
+	trace, err := transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, &tracers.TraceConfig{Tracer: &traceType}, chainConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -97,9 +97,9 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockN
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(GasCap)
 
-	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
+	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 
-	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{})
+	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -121,19 +121,21 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockN
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, db ethdb.Database) vm.Context {
-	return vm.Context{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHashGetter(requireCanonical, db),
-		Origin:      msg.From(),
-		Coinbase:    header.Coinbase,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int).SetUint64(header.Time),
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		GasLimit:    header.GasLimit,
-		GasPrice:    msg.GasPrice().ToBig(),
-	}
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, db ethdb.Database) (vm.BlockContext, vm.TxContext) {
+	return vm.BlockContext{
+			CanTransfer: core.CanTransfer,
+			Transfer:    core.Transfer,
+			GetHash:     getHashGetter(requireCanonical, db),
+			Coinbase:    header.Coinbase,
+			BlockNumber: new(big.Int).Set(header.Number),
+			Time:        new(big.Int).SetUint64(header.Time),
+			Difficulty:  new(big.Int).Set(header.Difficulty),
+			GasLimit:    header.GasLimit,
+		},
+		vm.TxContext{
+			Origin:   msg.From(),
+			GasPrice: msg.GasPrice().ToBig(),
+		}
 }
 
 func getHashGetter(requireCanonical bool, db ethdb.Database) func(uint64) common.Hash {
