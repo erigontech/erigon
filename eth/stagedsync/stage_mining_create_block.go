@@ -35,7 +35,6 @@ type miningBlock struct {
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, cc *core.TinyChainContext, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, noempty bool, quit <-chan struct{}) (*miningBlock, error) {
-
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7

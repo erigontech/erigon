@@ -15,9 +15,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-// SpawnMiningCreateBlockStage
+// SpawnMiningExecStage
 //TODO:
-// - from uncles we nned only their hashes and numbers, but whole types.Block object received
 // - I don't understand meaning of `noempty` variable
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
