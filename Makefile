@@ -90,6 +90,7 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 mdbx:
