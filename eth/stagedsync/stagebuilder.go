@@ -68,10 +68,8 @@ type MiningStagesParameters struct {
 	localUncles, remoteUncles map[common.Hash]*types.Block
 
 	// runtime dat
-	block     *types.Block
-	stateRoot common.Hash
-	receipts  types.Receipts
-	coinbase  common.Address
+	block    *miningBlock
+	coinbase common.Address
 }
 
 func NewMiningStagesParameters(cfg *miner.Config, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
@@ -415,11 +413,9 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningCreateBlock,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, receipts, err := SpawnMiningCreateBlockStage(s, world.TX,
+						block, err := SpawnMiningCreateBlockStage(s, world.TX,
 							world.chainConfig,
-							world.vmConfig,
 							world.chainContext,
-							world.txPool,
 							world.mining.ExtraData,
 							world.mining.GasFloor,
 							world.mining.GasCeil,
@@ -432,7 +428,32 @@ func MiningStages() StageBuilders {
 							return err
 						}
 						world.mining.block = block
-						world.mining.receipts = receipts
+						return nil
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.MiningExecution,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningExecution,
+					Description: "Mining: construct new block from tx pool",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						block, err := SpawnMiningExecStage(s, world.TX,
+							world.mining.block,
+							world.chainConfig,
+							world.vmConfig,
+							world.chainContext,
+							world.txPool,
+							world.mining.coinbase,
+							world.mining.noempty,
+							world.QuitCh)
+						if err != nil {
+							return err
+						}
+						world.mining.block = block
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -463,7 +484,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.mining.stateRoot = stateRoot
+						world.mining.block.header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -477,11 +498,11 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.receipts, world.mining.stateRoot, world.QuitCh)
+						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.QuitCh)
 						if err != nil {
 							return err
 						}
-						world.mining.block = block
+						_ = block
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
