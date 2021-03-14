@@ -6,8 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func SpawnMiningFinalStage(s *StageState, tx ethdb.Database, block *types.Block, stateRoot common.Hash, quit <-chan struct{}) (*types.Block, error) {
-	receipts := copyReceipts(nil) // TODO: read receipts from DB
+func SpawnMiningFinalStage(s *StageState, tx ethdb.Database, block *types.Block, receipts types.Receipts, stateRoot common.Hash, quit <-chan struct{}) (*types.Block, error) {
 	header := block.Header()
 	header.Root = stateRoot
 	s.Done()

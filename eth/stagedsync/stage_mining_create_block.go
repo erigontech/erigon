@@ -31,19 +31,19 @@ import (
 // - I don't understand meaning of `noempty` variable
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, noempty bool, quit <-chan struct{}) (*types.Block, error) {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, noempty bool, quit <-chan struct{}) (*types.Block, types.Receipts, error) {
 	if coinbase == (common.Address{}) {
-		return nil, fmt.Errorf("refusing to mine without etherbase")
+		return nil, nil, fmt.Errorf("refusing to mine without etherbase")
 	}
 
 	logPrefix := s.state.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
-		return nil, fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return nil, nil, fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop TG?
-		return nil, fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+		return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
 
 	engine := cc.Engine()
@@ -79,7 +79,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 
 		header   *types.Header
 		txs      []*types.Transaction
-		receipts []*types.Receipt
+		receipts types.Receipts
 
 		ibs         *state.IntraBlockState // apply state changes here
 		stateWriter state.StateWriter
@@ -130,10 +130,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 		}
 		if !chainConfig.IsByzantium(current.header.Number) {
 			batch.Rollback()
-		} else {
-			if err = batch.CommitAndBegin(context.Background()); err != nil {
-				return nil, err
-			}
+		}
+		if err = batch.CommitAndBegin(context.Background()); err != nil {
+			return nil, err
 		}
 
 		current.txs = append(current.txs, txn)
@@ -284,7 +283,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return nil, fmt.Errorf("mining failed")
+		return nil, nil, fmt.Errorf("mining failed")
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
@@ -379,14 +378,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 	// Fill the block with all available pending transactions.
 	pending, err := txPool.Pending()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pending transactions: %w", err)
+		return nil, nil, fmt.Errorf("failed to fetch pending transactions: %w", err)
 	}
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if len(pending) == 0 && !noempty {
-		return types.NewBlock(current.header, nil, makeUncles(current.uncles), nil), nil
+		return types.NewBlock(current.header, nil, makeUncles(current.uncles), nil), nil, nil
 	}
 
 	// Split the pending transactions into locals and remotes
@@ -401,13 +400,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(current.signer, localTxs)
 		if commitTransactions(current, txs, coinbase) {
-			return nil, common.ErrStopped
+			return nil, nil, common.ErrStopped
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(current.signer, remoteTxs)
 		if commitTransactions(current, txs, coinbase) {
-			return nil, common.ErrStopped
+			return nil, nil, common.ErrStopped
 		}
 	}
 
@@ -423,10 +422,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 		}
 		return block, nil
 	}
-	// Deep copy receipts here to avoid interaction between different tasks.
-	block, err := NewBlock(engine, current.ibs, current.stateWriter, chainConfig, header, current.txs, uncles, copyReceipts(current.receipts))
+	block, err := NewBlock(engine, current.ibs, current.stateWriter, chainConfig, header, current.txs, uncles, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	/*
@@ -458,5 +456,5 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 	*/
 
 	s.Done()
-	return block, nil
+	return block, current.receipts, nil
 }

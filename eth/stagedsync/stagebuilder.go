@@ -415,7 +415,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningCreateBlock,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningCreateBlockStage(s, world.TX,
+						block, receipts, err := SpawnMiningCreateBlockStage(s, world.TX,
 							world.chainConfig,
 							world.vmConfig,
 							world.chainContext,
@@ -432,55 +432,8 @@ func MiningStages() StageBuilders {
 							return err
 						}
 						world.mining.block = block
+						world.mining.receipts = receipts
 						return nil
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
-				}
-			},
-		},
-		{
-			ID: stages.MiningExecution,
-			Build: func(world StageParameters) *Stage {
-				return &Stage{
-					ID:          stages.MiningExecution,
-					Description: "Mining: execute new block",
-					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningExecuteBlockStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig, world.mining.block,
-							world.QuitCh,
-							ExecuteBlockStageParams{
-								WriteReceipts:         world.storageMode.Receipts,
-								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
-								ChangeSetHook:         world.changeSetHook,
-								ReaderBuilder:         world.stateReaderBuilder,
-								WriterBuilder:         world.stateWriterBuilder,
-								SilkwormExecutionFunc: world.silkwormExecutionFunc,
-							})
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
-				}
-			},
-		},
-		{
-			ID: stages.MiningExecution,
-			Build: func(world StageParameters) *Stage {
-				return &Stage{
-					ID:          stages.MiningExecution,
-					Description: "Execute blocks w/o hash checks",
-					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningExecuteBlockStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig, world.mining.block,
-							world.QuitCh,
-							ExecuteBlockStageParams{
-								WriteReceipts:         world.storageMode.Receipts,
-								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
-								ChangeSetHook:         world.changeSetHook,
-								ReaderBuilder:         world.stateReaderBuilder,
-								WriterBuilder:         world.stateWriterBuilder,
-								SilkwormExecutionFunc: world.silkwormExecutionFunc,
-							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
@@ -524,7 +477,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.stateRoot, world.QuitCh)
+						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.receipts, world.mining.stateRoot, world.QuitCh)
 						if err != nil {
 							return err
 						}
