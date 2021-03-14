@@ -39,7 +39,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	executionAt, err := s.ExecutionAt(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	if executionAt == s.BlockNumber {
 		s.Done()

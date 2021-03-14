@@ -213,9 +213,8 @@ func (m *mutation) CommitAndBegin(ctx context.Context) error {
 	return err
 }
 
-func (m *mutation) RollbackAndBegin(ctx context.Context) error {
+func (m *mutation) RollbackAndBegin() {
 	m.Rollback()
-	return nil
 }
 
 func (m *mutation) doCommit(tx RwTx) error {

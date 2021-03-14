@@ -8,7 +8,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -60,7 +59,6 @@ type StageParameters struct {
 type MiningStagesParameters struct {
 	// configs
 	*miner.Config
-	consensusEngine consensus.Engine
 	// noempty is the flag used to control whether the feature of pre-seal empty
 	// block is enabled. The default value is false(pre-seal is enabled by default).
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
@@ -76,8 +74,8 @@ type MiningStagesParameters struct {
 	coinbase  common.Address
 }
 
-func NewMiningStagesParameters(cfg *miner.Config, consensusEngine consensus.Engine, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
-	return &MiningStagesParameters{Config: cfg, consensusEngine: consensusEngine, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
+func NewMiningStagesParameters(cfg *miner.Config, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
+	return &MiningStagesParameters{Config: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
 
 }
 
@@ -418,8 +416,9 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						block, err := SpawnMiningCreateBlockStage(s, world.TX,
-							world.mining.consensusEngine,
 							world.chainConfig,
+							world.vmConfig,
+							world.chainContext,
 							world.txPool,
 							world.mining.ExtraData,
 							world.mining.GasFloor,
@@ -525,7 +524,12 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.stateRoot, world.QuitCh)
+						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.mining.stateRoot, world.QuitCh)
+						if err != nil {
+							return err
+						}
+						world.mining.block = block
+						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

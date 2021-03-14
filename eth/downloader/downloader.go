@@ -664,6 +664,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 		defer tx.Rollback()
 
+		cc.SetDB(tx)
+		cc.SetEngine(d.blockchain.Engine())
 		if d.miningState, err = d.mining.Prepare(
 			d,
 			d.chainConfig,
@@ -681,7 +683,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			nil,
-			stagedsync.NewMiningStagesParameters(d.miningConfig, d.blockchain.Engine(), false, nil, nil),
+			stagedsync.NewMiningStagesParameters(d.miningConfig, false, nil, nil),
 		); err != nil {
 			return err
 		}

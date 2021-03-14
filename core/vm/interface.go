@@ -42,7 +42,7 @@ type IntraBlockState interface {
 	GetCodeSize(common.Address) int
 
 	AddRefund(uint64)
-	SubRefund(uint64)
+w	SubRefund(uint64)
 	GetRefund() uint64
 
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
