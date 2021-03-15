@@ -34,24 +34,24 @@ type miningBlock struct {
 // - from uncles we nned only their hashes and numbers, but whole types.Block object received
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, quit <-chan struct{}) (*miningBlock, error) {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, quit <-chan struct{}) error {
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
 	)
 
 	if coinbase == (common.Address{}) {
-		return nil, fmt.Errorf("refusing to mine without etherbase")
+		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
 	logPrefix := s.state.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
-		return nil, fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop TG?
-		return nil, fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
 
 	blockNum := executionAt + 1
@@ -122,7 +122,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return nil, fmt.Errorf("mining failed")
+		return fmt.Errorf("mining failed")
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
@@ -212,5 +212,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 		}
 	}
 
-	return &miningBlock{header: header, uncles: makeUncles(env.uncles)}, nil
+	current.header = header
+	current.uncles = makeUncles(env.uncles)
+	return nil
 }

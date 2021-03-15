@@ -72,7 +72,7 @@ type MiningStagesParameters struct {
 }
 
 func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles}
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, block: &miningBlock{}}
 
 }
 
@@ -412,7 +412,8 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningCreateBlock,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningCreateBlockStage(s, world.TX,
+						return SpawnMiningCreateBlockStage(s, world.TX,
+							world.mining.block,
 							world.chainConfig,
 							world.chainContext.Engine(),
 							world.mining.ExtraData,
@@ -422,11 +423,6 @@ func MiningStages() StageBuilders {
 							world.mining.localUncles,
 							world.mining.remoteUncles,
 							world.QuitCh)
-						if err != nil {
-							return err
-						}
-						world.mining.block = block
-						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
@@ -439,7 +435,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningExecution,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningExecStage(s, world.TX,
+						return SpawnMiningExecStage(s, world.TX,
 							world.mining.block,
 							world.chainConfig,
 							world.vmConfig,
@@ -448,11 +444,6 @@ func MiningStages() StageBuilders {
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)
-						if err != nil {
-							return err
-						}
-						world.mining.block = block
-						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
@@ -501,6 +492,7 @@ func MiningStages() StageBuilders {
 							return err
 						}
 						_ = block
+						*world.mining.block = miningBlock{}
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },

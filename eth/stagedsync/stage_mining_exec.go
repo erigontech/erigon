@@ -19,7 +19,7 @@ import (
 //TODO:
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, coinbase common.Address, noempty bool, quit <-chan struct{}) (*miningBlock, error) {
+func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
@@ -173,20 +173,20 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
 		log.Info("Commit an empty block", "number", current.header.Number)
-		return current, nil
+		return nil
 	}
 
 	// Fill the block with all available pending transactions.
 	pending, err := txPool.Pending()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pending transactions: %w", err)
+		return fmt.Errorf("failed to fetch pending transactions: %w", err)
 	}
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if len(pending) == 0 && !noempty {
-		return current, nil
+		return nil
 	}
 
 	// Split the pending transactions into locals and remotes
@@ -201,23 +201,23 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(signer, localTxs)
 		if commitTransactions(current, txs, coinbase) {
-			return nil, common.ErrStopped
+			return common.ErrStopped
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
 		if commitTransactions(current, txs, coinbase) {
-			return nil, common.ErrStopped
+			return common.ErrStopped
 		}
 	}
 
 	engine.Finalize(chainConfig, current.header, ibs, current.txs, current.uncles)
 	ctx := chainConfig.WithEIPsFlags(context.Background(), current.header.Number)
 	if err = ibs.FinalizeTx(ctx, stateWriter); err != nil {
-		return nil, err
+		return err
 	}
 	if err = stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("[%s]: writing changesets for block %d failed: %v", logPrefix, current.header.Number.Uint64(), err)
+		return fmt.Errorf("[%s]: writing changesets for block %d failed: %v", logPrefix, current.header.Number.Uint64(), err)
 	}
 
 	/*
@@ -249,5 +249,5 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	*/
 
 	s.Done()
-	return current, nil
+	return nil
 }
