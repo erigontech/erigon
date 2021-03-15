@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/eth"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/params"
 
 	"github.com/stretchr/testify/assert"
 )
