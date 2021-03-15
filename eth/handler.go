@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -159,6 +160,10 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		log.Error("Get storage mode", "err", err)
 	}
 	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Chain, nil, h.removePeer, sm)
+	stagedSync := stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
+	h.downloader.SetStagedSync(stagedSync)
+	h.downloader.SetTmpDir(h.tmpdir)
+	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {

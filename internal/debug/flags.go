@@ -128,6 +128,12 @@ var DeprecatedFlags = []cli.Flag{
 
 var glogger *log.GlogHandler
 
+func init() {
+	glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	glogger.Verbosity(log.LvlInfo)
+	log.Root().SetHandler(glogger)
+}
+
 func SetupCobra(cmd *cobra.Command) error {
 	flags := cmd.Flags()
 
