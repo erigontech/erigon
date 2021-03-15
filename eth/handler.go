@@ -126,6 +126,7 @@ type handler struct {
 	tmpdir        string
 	cacheSize     datasize.ByteSize
 	batchSize     datasize.ByteSize
+	stagedSync    *stagedsync.StagedSync
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -160,8 +161,6 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		log.Error("Get storage mode", "err", err)
 	}
 	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Chain, nil, h.removePeer, sm)
-	stagedSync := stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
-	h.downloader.SetStagedSync(stagedSync)
 	h.downloader.SetTmpDir(h.tmpdir)
 	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
@@ -205,6 +204,10 @@ func (h *handler) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
 	if h.downloader != nil {
 		h.downloader.SetBatchSize(cacheSize, batchSize)
 	}
+}
+
+func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
+	h.stagedSync = stagedSync
 }
 
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
