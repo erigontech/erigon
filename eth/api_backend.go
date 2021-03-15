@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -65,10 +65,8 @@ func (b *EthAPIBackend) SetHead(number uint64) {
 func (b *EthAPIBackend) resolveBlockNumber(blockNr rpc.BlockNumber) uint64 {
 	// Pending block is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
-		//block := b.eth.miner.PendingBlock()
-		//return block.NumberU64()
-		log.Error("TG doesn't support pending blocks api yet")
-		return 0
+		block := b.eth.miner.PendingBlock()
+		return block.NumberU64()
 	}
 
 	if blockNr == rpc.LatestBlockNumber {
@@ -80,9 +78,8 @@ func (b *EthAPIBackend) resolveBlockNumber(blockNr rpc.BlockNumber) uint64 {
 func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
-		//block := b.eth.miner.PendingBlock()
-		//return block.Header(), nil
-		return nil, fmt.Errorf("TG doesn't support pending blocks api yet")
+		block := b.eth.miner.PendingBlock()
+		return block.Header(), nil
 	}
 	// Otherwise resolve and return the block
 	bn := b.resolveBlockNumber(blockNr)
@@ -113,9 +110,8 @@ func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*ty
 func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Block, error) {
 	// Pending block is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
-		//block := b.eth.miner.PendingBlock()
-		//return block, nil
-		return nil, fmt.Errorf("TG doesn't support pending blocks api yet")
+		block := b.eth.miner.PendingBlock()
+		return block, nil
 	}
 	// Otherwise resolve and return the block
 	bn := b.resolveBlockNumber(blockNr)
@@ -150,9 +146,8 @@ func (b *EthAPIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash r
 func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.IntraBlockState, *types.Header, error) {
 	// Pending state is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
-		//block, state, _ := b.eth.miner.Pending()
-		//return state, block.Header(), nil
-		return nil, nil, fmt.Errorf("TG doesn't support pending blocks api yet")
+		block, state, _ := b.eth.miner.Pending()
+		return state, block.Header(), nil
 	}
 	// Otherwise resolve the block number and return its state
 	bn := b.resolveBlockNumber(blockNr)
@@ -272,8 +267,7 @@ func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEven
 }
 
 func (b *EthAPIBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	panic("TG doesn't have miner object")
-	//return b.eth.miner.SubscribePendingLogs(ch)
+	return b.eth.miner.SubscribePendingLogs(ch)
 }
 
 func (b *EthAPIBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
@@ -391,9 +385,9 @@ func (b *EthAPIBackend) CurrentHeader() *types.Header {
 	return b.eth.blockchain.CurrentHeader()
 }
 
-//func (b *EthAPIBackend) Miner() *miner.Miner {
-//	return b.eth.Miner()
-//}
+func (b *EthAPIBackend) Miner() *miner.Miner {
+	return b.eth.Miner()
+}
 
 func (b *EthAPIBackend) StartMining(threads int) error {
 	return b.eth.StartMining(threads)

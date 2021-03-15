@@ -58,6 +58,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -98,7 +99,7 @@ type Ethereum struct {
 
 	APIBackend *EthAPIBackend
 
-	//miner     *miner.Miner
+	miner     *miner.Miner
 	gasPrice  *uint256.Int
 	etherbase common.Address
 
@@ -446,7 +447,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}); err != nil {
 		return nil, err
 	}
-	//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	//if config.SyncMode != downloader.StagedSync {
+	//	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	//}
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 	eth.handler.SetStagedSync(stagedSync)
@@ -463,8 +466,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	if config.SyncMode != downloader.StagedSync {
-		//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-		//_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 		eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	}
 
@@ -688,13 +691,13 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool {
 }
 
 // SetEtherbase sets the mining reward address.
-//func (s *Ethereum) SetEtherbase(etherbase common.Address) {
-//	s.lock.Lock()
-//	s.etherbase = etherbase
-//	s.lock.Unlock()
-//
-//	s.miner.SetEtherbase(etherbase)
-//}
+func (s *Ethereum) SetEtherbase(etherbase common.Address) {
+	s.lock.Lock()
+	s.etherbase = etherbase
+	s.lock.Unlock()
+
+	s.miner.SetEtherbase(etherbase)
+}
 
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
@@ -712,33 +715,34 @@ func (s *Ethereum) StartMining(threads int) error {
 		th.SetThreads(threads)
 	}
 	// If the miner was not running, initialize it
-	//if !s.IsMining() {
-	// Propagate the initial price point to the transaction pool
-	s.lock.RLock()
-	price := s.gasPrice
-	s.lock.RUnlock()
-	s.txPool.SetGasPrice(price)
+	if s.config.SyncMode == downloader.StagedSync || !s.IsMining() {
+		// Propagate the initial price point to the transaction pool
+		s.lock.RLock()
+		price := s.gasPrice
+		s.lock.RUnlock()
+		s.txPool.SetGasPrice(price)
 
-	// Configure the local mining address
-	eb, err := s.Etherbase()
-	if err != nil {
-		log.Error("Cannot start mining without etherbase", "err", err)
-		return fmt.Errorf("etherbase missing: %v", err)
-	}
-	if clique, ok := s.engine.(*clique.Clique); ok {
-		wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
-		if wallet == nil || err != nil {
-			log.Error("Etherbase account unavailable locally", "err", err)
-			return fmt.Errorf("signer missing: %v", err)
+		// Configure the local mining address
+		eb, err := s.Etherbase()
+		if err != nil {
+			log.Error("Cannot start mining without etherbase", "err", err)
+			return fmt.Errorf("etherbase missing: %v", err)
 		}
-		clique.Authorize(eb, wallet.SignData)
+		if clique, ok := s.engine.(*clique.Clique); ok {
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+			if wallet == nil || err != nil {
+				log.Error("Etherbase account unavailable locally", "err", err)
+				return fmt.Errorf("signer missing: %v", err)
+			}
+			clique.Authorize(eb, wallet.SignData)
+		}
+		// If mining is started, we can disable the transaction rejection mechanism
+		// introduced to speed sync times.
+		atomic.StoreUint32(&s.handler.acceptTxs, 1)
+		if s.config.SyncMode != downloader.StagedSync {
+			go s.miner.Start(eb)
+		}
 	}
-	// If mining is started, we can disable the transaction rejection mechanism
-	// introduced to speed sync times.
-	atomic.StoreUint32(&s.handler.acceptTxs, 1)
-
-	//go s.miner.Start(eb)
-	//}
 	return nil
 }
 
@@ -753,11 +757,13 @@ func (s *Ethereum) StopMining() {
 		th.SetThreads(-1)
 	}
 	// Stop the block creating itself
-	//s.miner.Stop()
+	if s.config.SyncMode != downloader.StagedSync {
+		s.miner.Stop()
+	}
 }
 
-//func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
-//func (s *Ethereum) Miner() *miner.Miner { return s.miner }
+func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
+func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
 func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
@@ -813,7 +819,9 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	s.miner.Stop()
+	if s.config.SyncMode != downloader.StagedSync {
+		s.miner.Stop()
+	}
 	s.blockchain.Stop()
 	s.engine.Close()
 	s.eventMux.Stop()
