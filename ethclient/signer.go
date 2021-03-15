@@ -18,7 +18,6 @@ package ethclient
 
 import (
 	"errors"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -58,7 +57,7 @@ func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Tra
 	return s.addr, nil
 }
 
-func (s *senderFromServer) ChainID() *big.Int {
+func (s *senderFromServer) ChainID() *big.uint256 {
 	panic("can't sign with senderFromServer")
 }
 
