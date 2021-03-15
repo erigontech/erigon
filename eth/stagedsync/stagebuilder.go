@@ -496,7 +496,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningFinalStage(s, world.TX, world.mining.block, world.QuitCh)
+						block, err := SpawnMiningFinishStage(s, world.TX, world.mining.block, world.chainContext.Engine(), world.chainConfig, world.QuitCh)
 						if err != nil {
 							return err
 						}
