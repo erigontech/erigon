@@ -18,18 +18,18 @@ package ethtest
 
 import (
 	"crypto/rand"
-	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 // largeNumber returns a very large big.Int.
-func largeNumber(megabytes int) *big.Int {
+func largeNumber(megabytes int) *uint256.Int {
 	buf := make([]byte, megabytes*1024*1024)
 	rand.Read(buf)
-	bigint := new(big.Int)
+	bigint := new(uint256.Int)
 	bigint.SetBytes(buf)
 	return bigint
 }
@@ -74,7 +74,7 @@ func largeHeader() *types.Header {
 		Time:        1337,
 		ParentHash:  randHash(),
 		Root:        randHash(),
-		Number:      largeNumber(2),
-		Difficulty:  largeNumber(2),
+		Number:      largeNumber(2).ToBig(),
+		Difficulty:  largeNumber(2).ToBig(),
 	}
 }

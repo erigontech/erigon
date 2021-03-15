@@ -166,11 +166,11 @@ func (s *Suite) TestLargeAnnounce_66(t *utesting.T) {
 		},
 		{
 			Block: s.fullChain.blocks[nextBlock],
-			TD:    largeNumber(2),
+			TD:    largeNumber(2).ToBig(),
 		},
 		{
 			Block: largeBlock(),
-			TD:    largeNumber(2),
+			TD:    largeNumber(2).ToBig(),
 		},
 		{
 			Block: s.fullChain.blocks[nextBlock],
@@ -286,7 +286,7 @@ func (s *Suite) TestMaliciousStatus_66(t *utesting.T) {
 	status := &Status{
 		ProtocolVersion: uint32(66),
 		NetworkID:       s.chain.chainConfig.ChainID.Uint64(),
-		TD:              largeNumber(2),
+		TD:              largeNumber(2).ToBig(),
 		Head:            s.chain.blocks[s.chain.Len()-1].Hash(),
 		Genesis:         s.chain.blocks[0].Hash(),
 		ForkID:          s.chain.ForkID(),

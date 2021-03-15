@@ -22,10 +22,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/internal/utesting"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
@@ -266,7 +265,7 @@ func (c *Conn) negotiateEthProtocol(caps []p2p.Cap) {
 // statusExchange performs a `Status` message exchange with the given
 // node.
 func (c *Conn) statusExchange(t *utesting.T, chain *Chain, status *Status) Message {
-	defer c.SetDeadline(time.Time{})  //nolint:errcheck
+	defer c.SetDeadline(time.Time{})                //nolint:errcheck
 	c.SetDeadline(time.Now().Add(20 * time.Second)) //nolint:errcheck
 
 	// read status message from client

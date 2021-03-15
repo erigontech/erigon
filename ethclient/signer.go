@@ -57,7 +57,7 @@ func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Tra
 	return s.addr, nil
 }
 
-func (s *senderFromServer) ChainID() *big.uint256 {
+func (s *senderFromServer) ChainID() *uint256.Int {
 	panic("can't sign with senderFromServer")
 }
 
