@@ -208,6 +208,9 @@ func (h *handler) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
 
 func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	h.stagedSync = stagedSync
+	if h.downloader != nil {
+		h.downloader.SetStagedSync(stagedSync)
+	}
 }
 
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
