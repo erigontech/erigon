@@ -13,7 +13,7 @@ type miningUncles struct {
 	sync.RWMutex
 }
 
-func NewUnclesSet() *miningUncles {
+func newUncles() *miningUncles {
 	return &miningUncles{
 		localUncles:  make(map[common.Hash]*types.Block),
 		remoteUncles: make(map[common.Hash]*types.Block),

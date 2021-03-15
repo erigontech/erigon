@@ -192,7 +192,7 @@ func newWorker(config *params.MiningConfig, chainConfig *params.ChainConfig, eng
 		mux:                mux,
 		chain:              eth.BlockChain(),
 		hooks:              h,
-		uncles:             NewUnclesSet(),
+		uncles:             newUncles(),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
 		exitCh:             make(chan struct{}),
