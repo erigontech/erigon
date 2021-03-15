@@ -414,14 +414,13 @@ func MiningStages() StageBuilders {
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						block, err := SpawnMiningCreateBlockStage(s, world.TX,
 							world.chainConfig,
-							world.chainContext,
+							world.chainContext.Engine(),
 							world.mining.ExtraData,
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
 							world.mining.localUncles,
 							world.mining.remoteUncles,
-							world.mining.noempty,
 							world.QuitCh)
 						if err != nil {
 							return err

@@ -446,9 +446,10 @@ func TestLogFilter(t *testing.T) {
 	if nsend := backend.logsFeed.Send(allLogs); nsend == 0 {
 		t.Fatal("Logs event not delivered")
 	}
-	if nsend := backend.pendingLogsFeed.Send(allLogs); nsend == 0 {
-		t.Fatal("Pending logs event not delivered")
-	}
+	//TG doesn't support peending logs feed yet
+	//if nsend := backend.pendingLogsFeed.Send(allLogs); nsend == 0 {
+	//	t.Fatal("Pending logs event not delivered")
+	//}
 
 	for i, tt := range testCases {
 		var fetched []*types.Log

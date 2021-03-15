@@ -17,7 +17,6 @@ import (
 
 // SpawnMiningExecStage
 //TODO:
-// - I don't understand meaning of `noempty` variable
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, coinbase common.Address, noempty bool, quit <-chan struct{}) (*miningBlock, error) {
@@ -170,18 +169,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		return false
 	}
 
-	//TODO: what is it??
-	//
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
-	//if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
-	//	now := time.Now()
-	//	if err = w.commit(ctx, uncles, nil, false, tstart); err != nil {
-	//		log.Error("Failed to commit empty block", "err", err)
-	//		ctx.CancelFunc()
-	//	}
-	//	log.Info("Commit an empty block", "number", header.Number, "duration", time.Since(now))
-	//}
+	if !noempty {
+		log.Info("Commit an empty block", "number", current.header.Number)
+		return current, nil
+	}
 
 	// Fill the block with all available pending transactions.
 	pending, err := txPool.Pending()

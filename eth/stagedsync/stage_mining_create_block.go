@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -31,10 +32,9 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - from uncles we nned only their hashes and numbers, but whole types.Block object received
-// - I don't understand meaning of `noempty` variable
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, cc *core.TinyChainContext, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, noempty bool, quit <-chan struct{}) (*miningBlock, error) {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, quit <-chan struct{}) (*miningBlock, error) {
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -54,7 +54,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 		return nil, fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
 
-	engine := cc.Engine()
 	blockNum := executionAt + 1
 	chain := ChainReader{chainConfig, tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
