@@ -27,9 +27,6 @@ import (
 )
 
 func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
-	//nolint
-	cache = nil
-
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return trie.EmptyRoot, err
