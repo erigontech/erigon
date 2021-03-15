@@ -551,8 +551,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 
 		canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
-		canRunMinningCycle := height-origin < 2 // TODO: replace with better heuristic (maybe base on time spent for staged sync)
-		fmt.Printf("aaa: %t,%t\n", d.miningConfig.Enabled, canRunMinningCycle)
+		syncCycleStart := time.Now()
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -656,7 +655,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return errTx
 		}
 
-		if !d.miningConfig.Enabled || !canRunMinningCycle {
+		// heuristic - run mining only if we are on top of chain
+		canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
+		if !d.miningConfig.Enabled || !canRunMiningCycle {
 			return nil
 		}
 
