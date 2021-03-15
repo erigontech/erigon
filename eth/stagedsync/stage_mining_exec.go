@@ -141,6 +141,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			}
 		}
 
+		_ = coalescedLogs
 		/*
 			if !w.isRunning() && len(coalescedLogs) > 0 {
 				// We don't push the pendingLogsEvent while we are mining. The reason is that

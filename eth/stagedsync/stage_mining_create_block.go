@@ -79,11 +79,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 
 	type envT struct {
 		signer    types.Signer
-		ancestors mapset.Set    // ancestor set (used for checking uncle parent validity)
-		family    mapset.Set    // family set (used for checking uncle invalidity)
-		uncles    mapset.Set    // uncle set
-		tcount    int           // tx count in cycle
-		gasPool   *core.GasPool // available gas used to pack transactions
+		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
+		family    mapset.Set // family set (used for checking uncle invalidity)
+		uncles    mapset.Set // uncle set
 
 		ibs         *state.IntraBlockState // apply state changes here
 		stateWriter state.WriterWithChangeSets
@@ -116,7 +114,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, chainConfig *
 	header.Coinbase = coinbase
 	//}
 
-	if err := engine.Prepare(chain, header); err != nil {
+	if err = engine.Prepare(chain, header); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
