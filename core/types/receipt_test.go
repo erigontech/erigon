@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -132,23 +133,23 @@ func TestDeriveFields(t *testing.T) {
 	txs := Transactions{
 		NewTx(&LegacyTx{
 			Nonce:    1,
-			Value:    big.NewInt(1),
+			Value:    uint256.NewInt().SetUint64(1),
 			Gas:      1,
-			GasPrice: big.NewInt(1),
+			GasPrice: uint256.NewInt().SetUint64(1),
 		}),
 		NewTx(&LegacyTx{
 			To:       &to2,
 			Nonce:    2,
-			Value:    big.NewInt(2),
+			Value:    uint256.NewInt().SetUint64(2),
 			Gas:      2,
-			GasPrice: big.NewInt(2),
+			GasPrice: uint256.NewInt().SetUint64(2),
 		}),
 		NewTx(&AccessListTx{
 			To:       &to3,
 			Nonce:    3,
-			Value:    big.NewInt(3),
+			Value:    uint256.NewInt().SetUint64(3),
 			Gas:      3,
-			GasPrice: big.NewInt(3),
+			GasPrice: uint256.NewInt().SetUint64(3),
 		}),
 	}
 	// Create the corresponding receipts

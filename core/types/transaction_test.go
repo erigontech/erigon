@@ -20,13 +20,15 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
+	"math/big"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -56,12 +58,12 @@ var (
 	)
 
 	emptyEip2718Tx = NewTx(&AccessListTx{
-		ChainID:  big.NewInt(1),
+		ChainID:  uint256.NewInt().SetUint64(1),
 		Nonce:    3,
 		To:       &testAddr,
-		Value:    big.NewInt(10),
+		Value:    uint256.NewInt().SetUint64(10),
 		Gas:      25000,
-		GasPrice: big.NewInt(1),
+		GasPrice: uint256.NewInt().SetUint64(1),
 		Data:     common.FromHex("5544"),
 	})
 
@@ -120,8 +122,8 @@ func TestEIP2930Signer(t *testing.T) {
 		signer1 = NewEIP2930Signer(big.NewInt(1))
 		signer2 = NewEIP2930Signer(big.NewInt(2))
 		tx0     = NewTx(&AccessListTx{Nonce: 1})
-		tx1     = NewTx(&AccessListTx{ChainID: big.NewInt(1), Nonce: 1})
-		tx2, _  = SignNewTx(key, signer2, &AccessListTx{ChainID: big.NewInt(2), Nonce: 1})
+		tx1     = NewTx(&AccessListTx{ChainID: uint256.NewInt().SetUint64(1), Nonce: 1})
+		tx2, _  = SignNewTx(key, signer2, &AccessListTx{ChainID: uint256.NewInt().SetUint64(2), Nonce: 1})
 	)
 
 	tests := []struct {
@@ -379,7 +381,7 @@ func TestTransactionCoding(t *testing.T) {
 				Nonce:    i,
 				To:       &recipient,
 				Gas:      1,
-				GasPrice: big.NewInt(2),
+				GasPrice: uint256.NewInt().SetUint64(2),
 				Data:     []byte("abcdef"),
 			}
 		case 1:
@@ -387,37 +389,37 @@ func TestTransactionCoding(t *testing.T) {
 			txdata = &LegacyTx{
 				Nonce:    i,
 				Gas:      1,
-				GasPrice: big.NewInt(2),
+				GasPrice: uint256.NewInt().SetUint64(2),
 				Data:     []byte("abcdef"),
 			}
 		case 2:
 			// Tx with non-zero access list.
 			txdata = &AccessListTx{
-				ChainID:    big.NewInt(1),
+				ChainID:    uint256.NewInt().SetUint64(1),
 				Nonce:      i,
 				To:         &recipient,
 				Gas:        123457,
-				GasPrice:   big.NewInt(10),
+				GasPrice:   uint256.NewInt().SetUint64(10),
 				AccessList: accesses,
 				Data:       []byte("abcdef"),
 			}
 		case 3:
 			// Tx with empty access list.
 			txdata = &AccessListTx{
-				ChainID:  big.NewInt(1),
+				ChainID:  uint256.NewInt().SetUint64(1),
 				Nonce:    i,
 				To:       &recipient,
 				Gas:      123457,
-				GasPrice: big.NewInt(10),
+				GasPrice: uint256.NewInt().SetUint64(10),
 				Data:     []byte("abcdef"),
 			}
 		case 4:
 			// Contract creation with access list.
 			txdata = &AccessListTx{
-				ChainID:    big.NewInt(1),
+				ChainID:    uint256.NewInt().SetUint64(1),
 				Nonce:      i,
 				Gas:        123457,
-				GasPrice:   big.NewInt(10),
+				GasPrice:   uint256.NewInt().SetUint64(10),
 				AccessList: accesses,
 			}
 		}
@@ -477,8 +479,8 @@ func assertEqual(orig *Transaction, cpy *Transaction) error {
 		if !reflect.DeepEqual(orig.AccessList(), cpy.AccessList()) {
 			return fmt.Errorf("access list wrong!")
 		}
-		if tx.ChainID().Cmp(parsedTx.ChainID()) != 0 {
-			t.Errorf("invalid chain id, want %d, got %d", tx.ChainID(), parsedTx.ChainID())
+		if orig.ChainId().Cmp(cpy.ChainId()) != 0 {
+			return fmt.Errorf("invalid chain id, want %d, got %d", orig.ChainId(), cpy.ChainId())
 		}
 	}
 	return nil
