@@ -40,6 +40,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+
+	"github.com/holiman/uint256"
 )
 
 // Verify that Client implements the ethereum interfaces.
@@ -320,12 +322,6 @@ func testHeader(t *testing.T, chain []*types.Block, client *rpc.Client) {
 }
 
 func testBalanceAt(t *testing.T, client *rpc.Client) {
-	t.Skip("Leaks")
-	backend, _ := newTestBackend(t)
-	defer backend.Close()
-	client, _ := backend.Attach()
-	defer client.Close()
-
 	tests := map[string]struct {
 		account common.Address
 		block   *big.Int
@@ -481,8 +477,8 @@ func testCallContract(t *testing.T, client *rpc.Client) {
 		From:     testAddr,
 		To:       &common.Address{},
 		Gas:      21000,
-		GasPrice: big.NewInt(1),
-		Value:    big.NewInt(1),
+		GasPrice: uint256.NewInt().SetUint64(1),
+		Value:    uint256.NewInt().SetUint64(1),
 	}
 	gas, err := ec.EstimateGas(context.Background(), msg)
 	if err != nil {
@@ -571,8 +567,8 @@ func sendTransaction(ec *Client) error {
 		return err
 	}
 	// Create transaction
-	tx := types.NewTransaction(0, common.Address{1}, big.NewInt(1), 22000, big.NewInt(1), nil)
-	signer := types.LatestSignerForChainID(chainID)
+	tx := types.NewTransaction(0, common.Address{1}, uint256.NewInt().SetUint64(1), 22000, uint256.NewInt().SetUint64(1), nil)
+	signer := types.LatestSignerForChainID(big.NewInt(int64(chainID.Uint64())))
 	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), testKey)
 	if err != nil {
 		return err
