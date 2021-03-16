@@ -148,7 +148,11 @@ func (t *BlockTest) Run(_ bool) error {
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}
-	return t.validateImportedHeaders(db, config, engine, validBlocks)
+	err = t.validateImportedHeaders(db, config, engine, validBlocks)
+	if err!=nil {
+		return err
+	}
+	return err
 }
 
 func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {

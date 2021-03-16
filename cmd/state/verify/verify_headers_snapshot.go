@@ -15,13 +15,13 @@ import (
 func HeadersSnapshot(snapshotPath string) error {
 	snKV := ethdb.NewLMDB().Path(snapshotPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket:              dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header
 	err := snKV.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeadersBucket)
 		k, v, innerErr := c.First()
 		for {
 			if len(k) == 0 && len(v) == 0 {

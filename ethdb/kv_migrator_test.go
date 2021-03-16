@@ -83,14 +83,14 @@ func TestReadOnlyMode(t *testing.T) {
 	}
 	db1 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
 	db2 := NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 
@@ -99,7 +99,7 @@ func TestReadOnlyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := tx.Cursor(dbutils.HeaderPrefix)
+	c := tx.Cursor(dbutils.HeadersBucket)
 	_, _, err = c.Seek([]byte("some prefix"))
 	if err != nil {
 		t.Fatal(err)

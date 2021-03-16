@@ -38,10 +38,7 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 }
 
 func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
-	return etl.Transform(logPrefix, db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-		if !dbutils.CheckCanonicalKey(k) {
-			return nil
-		}
+	return etl.Transform(logPrefix, db, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(db, blockHash, blocknum)
