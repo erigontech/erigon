@@ -83,9 +83,9 @@ func (r *RequestStorage) Len() uint64 {
 }
 
 func (r *RequestStorage) Get(n uint64) (*VerifyRequest, bool) {
-	r.Lock()
+	r.RLock()
 	req, ok := r.Storage[n]
-	r.Unlock()
+	r.RUnlock()
 	return req, ok
 }
 

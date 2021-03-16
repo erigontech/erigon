@@ -161,7 +161,7 @@ func testVerifyHeadersCliqueOnly(t *testing.T, toVerify int) {
 	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique[:toVerify])
 	headers := toHeaders(hardTips)
 
-	const repeats = 5
+	const repeats = 1
 
 	var resCliqueProcess time.Duration
 
@@ -177,7 +177,6 @@ type engineConstructor func(db ethdb.Database) consensus.Engine
 
 func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis, engineConstr engineConstructor) time.Duration {
 	db := ethdb.NewMemDatabase()
-	defer db.Close()
 
 	engine := engineConstr(db)
 	defer engine.Close()
@@ -253,7 +252,6 @@ loop:
 
 func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.Genesis, consensusConfig interface{}) time.Duration {
 	db := ethdb.NewMemDatabase()
-	defer db.Close()
 
 	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
 	if err != nil {
@@ -282,7 +280,10 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 
 		err = stagedsync.VerifyHeaders(db, headers[from:to], engine, 1)
 		if err != nil {
-			t.Error("error while VerifyHeaders", err)
+			t.Error("error while VerifyHeaders",
+				"from", headers[from].Number.Uint64(),
+				"to", headers[to].Number.Uint64(),
+				"error", err)
 			break
 		}
 

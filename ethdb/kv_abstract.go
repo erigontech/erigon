@@ -188,3 +188,5 @@ const (
 	Remote DbProvider = iota
 	Lmdb
 )
+
+var ErrDBClosed = errors.New("db closed")

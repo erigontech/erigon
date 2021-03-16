@@ -20,12 +20,14 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -382,7 +384,10 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, flags); err != nil {
-		panic(err)
+		if !errors.Is(err, ErrDBClosed) {
+			panic(err)
+		}
+		return nil, err
 	}
 	return batch, nil
 }

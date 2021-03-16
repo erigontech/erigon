@@ -264,6 +264,7 @@ var idID = new(uint64)
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
+	fmt.Println("CLOSE-CALLED", debug.Callers(10))
 	if ok := atomic.CompareAndSwapUint32(db.status, statusOK, statusClosed); !ok {
 		return
 	}
@@ -302,13 +303,15 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 
 func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return nil, fmt.Errorf("db closed")
+		fmt.Println("begin-err-1", atomic.LoadUint32(db.status), db.env == nil)
+		return nil, ErrDBClosed
 	}
 	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
 			if atomic.LoadUint32(db.status) != statusOK {
-				err = fmt.Errorf("db closed")
+				fmt.Println("begin-err-2", atomic.LoadUint32(db.status))
+				err = ErrDBClosed
 				return
 			}
 			db.wg.Add(1)
@@ -406,7 +409,7 @@ func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return fmt.Errorf("db closed")
+		return ErrDBClosed
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
@@ -423,7 +426,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 
 func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return fmt.Errorf("db closed")
+		return ErrDBClosed
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
@@ -577,7 +580,7 @@ func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 
 func (tx *MdbxTx) Commit(ctx context.Context) error {
 	if tx.db.env == nil {
-		return fmt.Errorf("db closed")
+		return ErrDBClosed
 	}
 	if tx.tx == nil {
 		return nil

@@ -175,7 +175,9 @@ var (
 	SyncStageUnwind     = "SSU2"
 	SyncStageUnwindOld1 = "SSU"
 
-	CliqueBucket = "clique-"
+	CliqueBucket             = "clique-"
+	CliqueSnapshotBucket     = "snap"
+	CliqueLastSnapshotBucket = "lastSnap"
 
 	// this bucket stored in separated database
 	InodesBucket = "inodes"
@@ -248,6 +250,8 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	CliqueBucket,
+	CliqueLastSnapshotBucket,
+	CliqueSnapshotBucket,
 	SyncStageProgress,
 	SyncStageUnwind,
 	PlainStateBucket,
