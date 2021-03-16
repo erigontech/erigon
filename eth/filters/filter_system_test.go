@@ -629,7 +629,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	timeout := 100 * time.Millisecond
 
 	var (
-		db      = rawdb.NewMemoryDatabase()
+		db      = ethdb.NewMemoryDatabase()
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, false, timeout)
 		done    = make(chan struct{})
@@ -645,7 +645,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 			default:
 			}
 
-			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(big.Int), 0, new(big.Int), nil)
+			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(), 0, uint256.NewInt(), nil)
 			backend.txFeed.Send(core.NewTxsEvent{Txs: []*types.Transaction{tx}})
 			i++
 		}
