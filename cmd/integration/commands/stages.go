@@ -311,7 +311,7 @@ func init() {
 
 func stageSenders(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, bc, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -365,7 +365,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		panic(err)
 	}
 
-	cc, bc, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -407,7 +407,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, bc, _, _, cache, progress := newSync(ctx.Done(), db, tx, nil)
+	_, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, tx, nil)
 	defer bc.Stop()
 
 	var err1 error
@@ -452,7 +452,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 func stageHashState(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, bc, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -478,7 +478,7 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, bc, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -507,7 +507,7 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, bc, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -553,7 +553,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 func stageHistory(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, bc, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -594,7 +594,7 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 
 func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, bc, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -645,7 +645,7 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, *stagedsync.State, *shards.StateCache, progressFunc) {
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (*core.TinyChainContext, *core.BlockChain, *core.TxPool, *stagedsync.State, *stagedsync.State, *shards.StateCache, progressFunc) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -655,6 +655,8 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 	if err != nil {
 		panic(err)
 	}
+
+	txPool := core.NewTxPool(core.TxPoolConfig{}, chainConfig, db, core.NewTxSenderCacher(runtime.NumCPU()))
 
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
@@ -671,7 +673,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, hook, false, nil)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, hook, false, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -680,7 +682,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, nil, false, miningParams)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, nil, false, miningParams)
 	if err != nil {
 		panic(err)
 	}
@@ -699,7 +701,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		}
 		return s
 	}
-	return cc, bc, st, stMining, cache, progress
+	return cc, bc, txPool, st, stMining, cache, progress
 }
 
 func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig, *core.BlockChain, error) {

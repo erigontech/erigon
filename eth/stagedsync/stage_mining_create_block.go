@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -63,7 +63,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		return err
 	}
 	for _, u := range nonCanonicalBlocks {
-		if eth.IsLocalBlock(engine, coinbase, txPoolLocals, u.Header()) {
+		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u.Header()) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u

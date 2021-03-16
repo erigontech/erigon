@@ -190,7 +190,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	cc, bc, st, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, st, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,

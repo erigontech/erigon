@@ -48,6 +48,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -645,32 +646,7 @@ func (s *Ethereum) isLocalBlock(block *types.Block) bool {
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
-	return IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
-}
-
-// IsLocalBlock checks whether the specified block is mined
-// by local miner accounts.
-//
-// We regard two types of accounts as local miner account: etherbase
-// and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
-	author, err := engine.Author(header)
-	if err != nil {
-		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)
-		return false
-	}
-	// Check whether the given address is etherbase.
-	if author == etherbase {
-		return true
-	}
-	// Check whether the given address is specified by `txpool.local`
-	// CLI flag.
-	for _, account := range txPoolLocals {
-		if account == author {
-			return true
-		}
-	}
-	return false
+	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
 }
 
 // shouldPreserve checks whether we should preserve the given block

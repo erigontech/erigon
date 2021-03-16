@@ -157,8 +157,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	defer tx.Rollback()
 
 	mux := new(event.TypeMux)
-
-	cc, bc, st, miningSt, cache, progress := newSync(ch, db, tx, stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil))
+	cc, bc, txPool, st, miningSt, cache, progress := newSync(ch, db, tx, stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil))
 	defer bc.Stop()
 	minedBlockSub := mux.Subscribe(core.NewMinedBlockEvent{})
 
@@ -255,6 +254,13 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 
 			//TODO: clean txPool, get next block and put all transactions from block to txPool
+			//nextBlock, err := rawdb.ReadBlockByNumber(tx, execToBlock)
+			//if err != nil {
+			//	panic(err)
+			//}
+			//txPool.AddLocals(nextBlock.Transactions())
+			//txPool.Stop()
+			_ = txPool
 			if err := miningSt.Run(db, tx); err != nil {
 				return err
 			}
@@ -321,7 +327,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, bc, st, _, cache, progress := newSync(ch, db, tx, nil)
+	_, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 
 	var err error
@@ -386,7 +392,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, _, cache, progress := newSync(ch, db, tx, nil)
+	cc, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 
 	var err error
