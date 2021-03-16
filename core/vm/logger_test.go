@@ -56,7 +56,6 @@ func TestStoreCapture(t *testing.T) {
 		env      = NewEVM(BlockContext{}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
-		rstack   = stack.NewReturnStack()
 		stack    = stack.New()
 		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
