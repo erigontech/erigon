@@ -653,7 +653,7 @@ func TestForkedSync64Full(t *testing.T) { testForkedSync(t, 64, FullSync) }
 func TestForkedSync65Full(t *testing.T) { testForkedSync(t, 65, FullSync) }
 func TestForkedSync66Full(t *testing.T) { testForkedSync(t, 66, FullSync) }
 
-func testForkedSync(t *testing.T, protocol int, mode SyncMode) {
+func testForkedSync(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -681,7 +681,7 @@ func TestHeavyForkedSync64Full(t *testing.T) { testHeavyForkedSync(t, 64, FullSy
 func TestHeavyForkedSync65Full(t *testing.T) { testHeavyForkedSync(t, 65, FullSync) }
 func TestHeavyForkedSync66Full(t *testing.T) { testHeavyForkedSync(t, 66, FullSync) }
 
-func testHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
+func testHeavyForkedSync(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -711,7 +711,7 @@ func TestBoundedForkedSync64Full(t *testing.T) { testBoundedForkedSync(t, 64, Fu
 func TestBoundedForkedSync65Full(t *testing.T) { testBoundedForkedSync(t, 65, FullSync) }
 func TestBoundedForkedSync66Full(t *testing.T) { testBoundedForkedSync(t, 66, FullSync) }
 
-func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
+func testBoundedForkedSync(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -786,7 +786,7 @@ func TestCancel64Full(t *testing.T) { testCancel(t, 64, FullSync) }
 func TestCancel65Full(t *testing.T) { testCancel(t, 65, FullSync) }
 func TestCancel66Full(t *testing.T) { testCancel(t, 66, FullSync) }
 
-func testCancel(t *testing.T, protocol int, mode SyncMode) {
+func testCancel(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -814,7 +814,7 @@ func TestMultiSynchronisation64Full(t *testing.T) { testMultiSynchronisation(t, 
 func TestMultiSynchronisation65Full(t *testing.T) { testMultiSynchronisation(t, 65, FullSync) }
 func TestMultiSynchronisation66Full(t *testing.T) { testMultiSynchronisation(t, 66, FullSync) }
 
-func testMultiSynchronisation(t *testing.T, protocol int, mode SyncMode) {
+func testMultiSynchronisation(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 
@@ -836,9 +836,9 @@ func testMultiSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 // and not wreak havoc on other nodes in the network.
 func TestMultiProtoSynchronisation64Full(t *testing.T) { testMultiProtoSync(t, 64, FullSync) }
 func TestMultiProtoSynchronisation65Full(t *testing.T) { testMultiProtoSync(t, 65, FullSync) }
-func TestMultiProtoSynchronisation65Full(t *testing.T) { testMultiProtoSync(t, 66, FullSync) }
+func TestMultiProtoSynchronisation66Full(t *testing.T) { testMultiProtoSync(t, 66, FullSync) }
 
-func testMultiProtoSync(t *testing.T, protocol int, mode SyncMode) {
+func testMultiProtoSync(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -872,7 +872,7 @@ func TestEmptyShortCircuit64Full(t *testing.T) { testEmptyShortCircuit(t, 64, Fu
 func TestEmptyShortCircuit65Full(t *testing.T) { testEmptyShortCircuit(t, 65, FullSync) }
 func TestEmptyShortCircuit66Full(t *testing.T) { testEmptyShortCircuit(t, 66, FullSync) }
 
-func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
+func testEmptyShortCircuit(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 
@@ -920,7 +920,7 @@ func TestMissingHeaderAttack64Full(t *testing.T) { testMissingHeaderAttack(t, 64
 func TestMissingHeaderAttack65Full(t *testing.T) { testMissingHeaderAttack(t, 65, FullSync) }
 func TestMissingHeaderAttack66Full(t *testing.T) { testMissingHeaderAttack(t, 66, FullSync) }
 
-func testMissingHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
+func testMissingHeaderAttack(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -947,7 +947,7 @@ func TestShiftedHeaderAttack64Full(t *testing.T) { testShiftedHeaderAttack(t, 64
 func TestShiftedHeaderAttack65Full(t *testing.T) { testShiftedHeaderAttack(t, 65, FullSync) }
 func TestShiftedHeaderAttack66Full(t *testing.T) { testShiftedHeaderAttack(t, 66, FullSync) }
 
-func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
+func testShiftedHeaderAttack(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -980,7 +980,7 @@ func testShiftedHeaderAttack(t *testing.T, protocol int, mode SyncMode) {
 //func TestInvalidHeaderRollback64Fast(t *testing.T) { testInvalidHeaderRollback(t, 64, FastSync) }
 //func TestInvalidHeaderRollback65Fast(t *testing.T) { testInvalidHeaderRollback(t, 65, FastSync) }
 
-func testInvalidHeaderRollback(t *testing.T, protocol int, mode SyncMode) {
+func testInvalidHeaderRollback(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 
 	// Create a small enough block chain to download
@@ -1070,7 +1070,7 @@ func TestHighTDStarvationAttack64Full(t *testing.T) { testHighTDStarvationAttack
 func TestHighTDStarvationAttack65Full(t *testing.T) { testHighTDStarvationAttack(t, 65, FullSync) }
 func TestHighTDStarvationAttack66Full(t *testing.T) { testHighTDStarvationAttack(t, 66, FullSync) }
 
-func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
+func testHighTDStarvationAttack(t *testing.T, protocol uint, mode SyncMode) {
 	t.Skip("we ignore handshake TD")
 	tester := newTester()
 
@@ -1087,7 +1087,7 @@ func TestBlockHeaderAttackerDropping64(t *testing.T) { testBlockHeaderAttackerDr
 func TestBlockHeaderAttackerDropping65(t *testing.T) { testBlockHeaderAttackerDropping(t, 65) }
 func TestBlockHeaderAttackerDropping66(t *testing.T) { testBlockHeaderAttackerDropping(t, 66) }
 
-func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
+func testBlockHeaderAttackerDropping(t *testing.T, protocol uint) {
 	// Define the disconnection requirement for individual hash fetch errors
 	tests := []struct {
 		result error
@@ -1140,7 +1140,7 @@ func TestSyncProgress64Full(t *testing.T) { testSyncProgress(t, 64, FullSync) }
 func TestSyncProgress65Full(t *testing.T) { testSyncProgress(t, 65, FullSync) }
 func TestSyncProgress66Full(t *testing.T) { testSyncProgress(t, 66, FullSync) }
 
-func testSyncProgress(t *testing.T, protocol int, mode SyncMode) {
+func testSyncProgress(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1219,7 +1219,7 @@ func TestForkedSyncProgress64Full(t *testing.T) { testForkedSyncProgress(t, 64, 
 func TestForkedSyncProgress65Full(t *testing.T) { testForkedSyncProgress(t, 65, FullSync) }
 func TestForkedSyncProgress66Full(t *testing.T) { testForkedSyncProgress(t, 66, FullSync) }
 
-func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
+func testForkedSyncProgress(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1290,7 +1290,7 @@ func TestFailedSyncProgress64Full(t *testing.T) { testFailedSyncProgress(t, 64, 
 func TestFailedSyncProgress65Full(t *testing.T) { testFailedSyncProgress(t, 65, FullSync) }
 func TestFailedSyncProgress66Full(t *testing.T) { testFailedSyncProgress(t, 66, FullSync) }
 
-func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
+func testFailedSyncProgress(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1359,7 +1359,7 @@ func TestFakedSyncProgress64Full(t *testing.T) { testFakedSyncProgress(t, 64, Fu
 func TestFakedSyncProgress65Full(t *testing.T) { testFakedSyncProgress(t, 65, FullSync) }
 func TestFakedSyncProgress66Full(t *testing.T) { testFakedSyncProgress(t, 66, FullSync) }
 
-func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
+func testFakedSyncProgress(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -1589,7 +1589,7 @@ func TestCheckpointEnforcement64Full(t *testing.T) { testCheckpointEnforcement(t
 func TestCheckpointEnforcement65Full(t *testing.T) { testCheckpointEnforcement(t, 65, FullSync) }
 func TestCheckpointEnforcement66Full(t *testing.T) { testCheckpointEnforcement(t, 66, FullSync) }
 
-func testCheckpointEnforcement(t *testing.T, protocol int, mode SyncMode) {
+func testCheckpointEnforcement(t *testing.T, protocol uint, mode SyncMode) {
 	// Create a new tester with a particular hard coded checkpoint block
 	tester := newTester()
 	defer tester.terminate()
