@@ -167,7 +167,7 @@ type eip2930Signer struct{ EIP155Signer }
 
 // NewEIP2930Signer returns a signer that accepts EIP-2930 access list transactions,
 // EIP-155 replay protected transactions, and legacy Homestead transactions.
-func NewEIP2930Signer(chainId *big.Int) Signer {
+func NewEIP2930Signer(chainId *big.Int) eip2930Signer {
 	return eip2930Signer{NewEIP155Signer(chainId)}
 }
 
@@ -181,6 +181,10 @@ func (s eip2930Signer) Equal(s2 Signer) bool {
 }
 
 func (s eip2930Signer) Sender(tx *Transaction) (common.Address, error) {
+	return s.SenderWithContext(secp256k1.DefaultContext, tx)
+}
+
+func (s eip2930Signer) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
 	V, R, S := tx.RawSignatureValues()
 	switch tx.Type() {
 	case LegacyTxType:
@@ -199,7 +203,7 @@ func (s eip2930Signer) Sender(tx *Transaction) (common.Address, error) {
 	if tx.ChainId().Cmp(s.chainID) != 0 {
 		return common.Address{}, ErrInvalidChainId
 	}
-	return recoverPlain(secp256k1.DefaultContext, s.Hash(tx), R, S, V, true)
+	return recoverPlain(context, s.Hash(tx), R, S, V, true)
 }
 
 func (s eip2930Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
