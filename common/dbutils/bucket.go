@@ -148,8 +148,6 @@ var (
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h"         // block_num_u64 + hash -> header
-	HeaderTDSuffix     = []byte("t") // block_num_u64 + hash + headerTDSuffix -> td
-	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
 	HeaderNumberBucket = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
 	HeaderCanonicalBucket       = "canonical_headers" // block_num_u64 -> header hash
