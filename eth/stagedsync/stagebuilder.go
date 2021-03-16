@@ -423,8 +423,7 @@ func MiningStages() StageBuilders {
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
-							world.mining.localUncles,
-							world.mining.remoteUncles,
+							world.txPool.Locals(),
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },

@@ -642,21 +642,30 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
 func (s *Ethereum) isLocalBlock(block *types.Block) bool {
-	author, err := s.engine.Author(block.Header())
-	if err != nil {
-		log.Warn("Failed to retrieve block author", "number", block.NumberU64(), "hash", block.Hash(), "err", err)
-		return false
-	}
-	// Check whether the given address is etherbase.
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
+	return IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
+}
+
+// IsLocalBlock checks whether the specified block is mined
+// by local miner accounts.
+//
+// We regard two types of accounts as local miner account: etherbase
+// and accounts specified via `txpool.locals` flag.
+func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
+	author, err := engine.Author(header)
+	if err != nil {
+		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)
+		return false
+	}
+	// Check whether the given address is etherbase.
 	if author == etherbase {
 		return true
 	}
 	// Check whether the given address is specified by `txpool.local`
 	// CLI flag.
-	for _, account := range s.config.TxPool.Locals {
+	for _, account := range txPoolLocals {
 		if account == author {
 			return true
 		}

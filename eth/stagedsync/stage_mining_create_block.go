@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -34,7 +35,7 @@ type miningBlock struct {
 // - from uncles we nned only their hashes and numbers, but whole types.Block object received
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, localUncles, remoteUncles map[common.Hash]*types.Block, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, quit <-chan struct{}) error {
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -55,6 +56,21 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	}
 
 	blockNum := executionAt + 1
+
+	localUncles := map[common.Hash]*types.Block{}
+	remoteUncles := map[common.Hash]*types.Block{}
+	nonCanonicalBlocks, err := readNonCanonicalBlocks(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	for _, u := range nonCanonicalBlocks {
+		if eth.IsLocalBlock(engine, coinbase, txPoolLocals, u.Header()) {
+			localUncles[u.Hash()] = u
+		} else {
+			remoteUncles[u.Hash()] = u
+		}
+
+	}
 	chain := ChainReader{chainConfig, tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
@@ -215,4 +231,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	current.header = header
 	current.uncles = makeUncles(env.uncles)
 	return nil
+}
+
+func readNonCanonicalBlocks(tx ethdb.Database, blockNum uint64) ([]*types.Block, error) {
+	//todo: implement me
+	return nil, nil
 }
