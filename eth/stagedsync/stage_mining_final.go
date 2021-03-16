@@ -36,6 +36,8 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 		log.Warn("Block sealing failed", "err", err)
 	}
 
+	//TODO: why worker.go does insert new block to chain?
+
 	// Broadcast the block and announce chain insertion event
 	_ = mux.Post(core.NewMinedBlockEvent{Block: block})
 
