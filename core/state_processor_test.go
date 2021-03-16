@@ -17,16 +17,18 @@
 package core
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"golang.org/x/crypto/sha3"
 )
@@ -39,7 +41,7 @@ func TestStateProcessorErrors(t *testing.T) {
 	var (
 		signer     = types.HomesteadSigner{}
 		testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		db         = rawdb.NewMemoryDatabase()
+		db         = ethdb.NewMemDatabase()
 		gspec      = &Genesis{
 			Config: params.TestChainConfig,
 		}
@@ -47,51 +49,54 @@ func TestStateProcessorErrors(t *testing.T) {
 		blockchain, _ = NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil)
 	)
 	defer blockchain.Stop()
-	var makeTx = func(nonce uint64, to common.Address, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) *types.Transaction {
+	var makeTx = func(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, data), signer, testKey)
 		return tx
 	}
+
+	uint256Zero := uint256.NewInt()
+	uint256FF, _ := uint256.FromBig(big.NewInt(0xffffff))
 	for i, tt := range []struct {
 		txs  []*types.Transaction
 		want string
 	}{
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
-				makeTx(0, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
+				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
+				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 1 [0x36bfa6d14f1cd35a1be8cc2322982a595fabc0e799f09c1de3bad7bd5b1f7626]: nonce too low: address 0x71562b71999873DB5b286dF957af199Ec94617F7, tx: 0 state: 1",
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(100, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
+				makeTx(100, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 0 [0x51cd272d41ef6011d8138e18bf4043797aca9b713c7d39a97563f9bbe6bdbe6f]: nonce too high: address 0x71562b71999873DB5b286dF957af199Ec94617F7, tx: 100 state: 0",
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, big.NewInt(0), 21000000, nil, nil),
+				makeTx(0, common.Address{}, uint256Zero, 21000000, nil, nil),
 			},
 			want: "could not apply tx 0 [0x54c58b530824b0bb84b7a98183f08913b5d74e1cebc368515ef3c65edf8eb56a]: gas limit reached",
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, big.NewInt(1), params.TxGas, nil, nil),
+				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 0 [0x3094b17498940d92b13baccf356ce8bfd6f221e926abc903d642fa1466c5b50e]: insufficient funds for transfer: address 0x71562b71999873DB5b286dF957af199Ec94617F7",
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, big.NewInt(0), params.TxGas, big.NewInt(0xffffff), nil),
+				makeTx(0, common.Address{}, uint256Zero, params.TxGas, uint256FF, nil),
 			},
 			want: "could not apply tx 0 [0xaa3f7d86802b1f364576d9071bf231e31d61b392d306831ac9cf706ff5371ce0]: insufficient funds for gas * price + value: address 0x71562b71999873DB5b286dF957af199Ec94617F7 have 0 want 352321515000",
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
-				makeTx(1, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
-				makeTx(2, common.Address{}, big.NewInt(0), params.TxGas, nil, nil),
-				makeTx(3, common.Address{}, big.NewInt(0), params.TxGas-1000, big.NewInt(0), nil),
+				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
+				makeTx(1, common.Address{}, uint256Zero, params.TxGas, nil, nil),
+				makeTx(2, common.Address{}, uint256Zero, params.TxGas, nil, nil),
+				makeTx(3, common.Address{}, uint256Zero, params.TxGas-1000, uint256Zero, nil),
 			},
 			want: "could not apply tx 3 [0x836fab5882205362680e49b311a20646de03b630920f18ec6ee3b111a2cf6835]: intrinsic gas too low: have 20000, want 21000",
 		},
@@ -100,7 +105,7 @@ func TestStateProcessorErrors(t *testing.T) {
 		// multiplication len(data) +gas_per_byte overflows uint64. Not testable at the moment
 	} {
 		block := GenerateBadBlock(genesis, ethash.NewFaker(), tt.txs)
-		_, err := blockchain.InsertChain(types.Blocks{block})
+		_, err := blockchain.InsertChain(context.TODO(), types.Blocks{block})
 		if err == nil {
 			t.Fatal("block imported without errors")
 		}
@@ -118,12 +123,8 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(&fakeChainReader{params.TestChainConfig}, parent.Time()+10, &types.Header{
-			Number:     parent.Number(),
-			Time:       parent.Time(),
-			Difficulty: parent.Difficulty(),
-			UncleHash:  parent.UncleHash(),
-		}),
+		Difficulty: engine.CalcDifficulty(&fakeChainReader{params.TestChainConfig}, parent.Time()+10,
+			parent.Time(), parent.Difficulty(), parent.Number(), parent.Hash(), parent.UncleHash()),
 		GasLimit:  CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
 		Number:    new(big.Int).Add(parent.Number(), common.Big1),
 		Time:      parent.Time() + 10,
@@ -139,7 +140,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	for _, tx := range txs {
 		txh := tx.Hash()
 		hasher.Write(txh[:])
-		receipt := types.NewReceipt(nil, false, cumulativeGas+tx.Gas())
+		receipt := types.NewReceipt(false, cumulativeGas+tx.Gas())
 		receipt.TxHash = tx.Hash()
 		receipt.GasUsed = tx.Gas()
 		receipts = append(receipts, receipt)

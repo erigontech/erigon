@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -33,13 +34,19 @@ import (
 func verifyUnbrokenCanonchain(hc *HeaderChain) error {
 	h := hc.CurrentHeader()
 	for {
-		canonHash := rawdb.ReadCanonicalHash(hc.chainDb, h.Number.Uint64())
+		canonHash, err := rawdb.ReadCanonicalHash(hc.chainDb, h.Number.Uint64())
+		if err != nil {
+			return err
+		}
 		if exp := h.Hash(); canonHash != exp {
 			return fmt.Errorf("Canon hash chain broken, block %d got %x, expected %x",
 				h.Number, canonHash[:8], exp[:8])
 		}
 		// Verify that we have the TD
-		if td := rawdb.ReadTd(hc.chainDb, canonHash, h.Number.Uint64()); td == nil {
+		if td, errTd := rawdb.ReadTd(hc.chainDb, canonHash, h.Number.Uint64()); td == nil || errTd != nil {
+			if errTd != nil {
+				return errTd
+			}
 			return fmt.Errorf("Canon TD missing at block %d", h.Number)
 		}
 		if h.Number.Uint64() == 0 {
@@ -69,7 +76,7 @@ func testInsert(t *testing.T, hc *HeaderChain, chain []*types.Header, wantStatus
 // This test checks status reporting of InsertHeaderChain.
 func TestHeaderInsertion(t *testing.T) {
 	var (
-		db      = rawdb.NewMemoryDatabase()
+		db      = ethdb.NewMemDatabase()
 		genesis = new(Genesis).MustCommit(db)
 	)
 
