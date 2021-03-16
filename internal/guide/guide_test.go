@@ -31,7 +31,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+
+	"github.com/holiman/uint256"
 )
 
 // Tests that the account management snippets work correctly.
@@ -75,7 +78,7 @@ func TestAccountManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create signer account: %v", err)
 	}
-	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, big.NewInt(0), nil)
+	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(0), 0, uint256.NewInt().SetUint64(0), nil)
 	chain := big.NewInt(1)
 
 	// Sign a transaction with a single authorization
