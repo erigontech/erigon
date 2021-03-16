@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -84,7 +85,8 @@ func Fuzz(data []byte) int {
 
 var minDifficulty = big.NewInt(0x2000)
 
-type calculator func(time uint64, parent *types.Header) *big.Int
+type calculator func(time uint64, parentTime uint64, parentDifficulty *big.Int, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int
+type calculatorU256 func(time uint64, parent *types.Header) *big.Int
 
 func (f *fuzzer) fuzz() int {
 	// A parent header
@@ -128,13 +130,13 @@ func (f *fuzzer) fuzz() int {
 
 	for i, pair := range []struct {
 		bigFn  calculator
-		u256Fn calculator
+		u256Fn calculatorU256
 	}{
 		{ethash.FrontierDifficultyCalulator, ethash.CalcDifficultyFrontierU256},
 		{ethash.HomesteadDifficultyCalulator, ethash.CalcDifficultyHomesteadU256},
 		{ethash.DynamicDifficultyCalculator(bombDelay), ethash.MakeDifficultyCalculatorU256(bombDelay)},
 	} {
-		want := pair.bigFn(time, header)
+		want := pair.bigFn(time, header.Time, header.Difficulty, header.Number, header.UncleHash)
 		have := pair.u256Fn(time, header)
 		if want.Cmp(have) != 0 {
 			panic(fmt.Sprintf("pair %d: want %x have %x\nparent.Number: %x\np.Time: %x\nc.Time: %x\nBombdelay: %v\n", i, want, have,

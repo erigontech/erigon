@@ -337,9 +337,9 @@ func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentD
 	case config.IsByzantium(next):
 		return calcDifficultyByzantium(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsHomestead(next):
-		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	default:
-		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	}
 }
 
@@ -419,7 +419,7 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time, parentTime uint64, 
 // calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
 // parent block's time and difficulty. The calculation uses the Homestead rules.
-func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
+func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, _ common.Hash) *big.Int {
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
 	// algorithm:
 	// diff = (parent_diff +
@@ -468,7 +468,7 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNu
 // calcDifficultyFrontier is the difficulty adjustment algorithm. It returns the
 // difficulty that a new block should have when created at time given the parent
 // block's time and difficulty. The calculation uses the Frontier rules.
-func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
+func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, _ common.Hash) *big.Int {
 	diff := new(big.Int)
 	adjust := new(big.Int).Div(parentDifficulty, params.DifficultyBoundDivisor)
 	bigTime := new(big.Int)

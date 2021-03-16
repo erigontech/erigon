@@ -102,9 +102,9 @@ func randSlice(min, max uint32) []byte {
 func TestDifficultyCalculators(t *testing.T) {
 	rand.Seed(2)
 
-	wrap := func(f func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int) func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, unkleHash common.Hash) *big.Int {
-		return func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, unkleHash common.Hash) *big.Int {
-			return f(time, parentTime, parentDifficulty, parentNumber)
+	wrap := func(f func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int) func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
+		return func(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int {
+			return f(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 		}
 	}
 	for i := 0; i < 5000; i++ {
@@ -160,7 +160,7 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	b.Run("big-frontier", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			calcDifficultyFrontier(1000014, h.Time, h.Difficulty, h.Number)
+			calcDifficultyFrontier(1000014, h.Time, h.Difficulty, h.Number, h.UncleHash)
 		}
 	})
 	b.Run("u256-frontier", func(b *testing.B) {
@@ -172,7 +172,7 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	b.Run("big-homestead", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			calcDifficultyHomestead(1000014, h.Time, h.Difficulty, h.Number)
+			calcDifficultyHomestead(1000014, h.Time, h.Difficulty, h.Number, h.UncleHash)
 		}
 	})
 	b.Run("u256-homestead", func(b *testing.B) {
