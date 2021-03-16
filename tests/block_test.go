@@ -66,7 +66,7 @@ func TestBlockchain(t *testing.T) {
 
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp5.json`, "Needs to be fixed for TG")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		if err := bt.checkFailure(t, name+"/trie", test.Run(false)); err != nil {
+		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false)); err != nil {
 			t.Errorf("test without snapshotter failed: %v", err)
 		}
 		if err := bt.checkFailure(t, test.Run(false)); err != nil {
