@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -159,6 +160,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 	cc, bc, st, miningSt, cache, progress := newSync(ch, db, tx, stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil))
 	defer bc.Stop()
+	minedBlockSub := mux.Subscribe(core.NewMinedBlockEvent{})
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
@@ -252,13 +254,17 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				return err
 			}
 
+			//TODO: clean txPool, get next block and put all transactions from block to txPool
 			if err := miningSt.Run(db, tx); err != nil {
 				return err
 			}
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			//TODO: subscribe to mux and compare block hash with result of next step
+
+			minedBlock := <-minedBlockSub.Chan()
+			//TODO: check that mined block has same state root
+			_ = minedBlock
 		}
 		st.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		if err := st.Run(db, tx); err != nil {
@@ -267,7 +273,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
-
 		execAtBlock = progress(stages.Execution).BlockNumber
 		if execAtBlock == stopAt {
 			break
