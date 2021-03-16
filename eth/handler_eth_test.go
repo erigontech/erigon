@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -28,15 +29,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+
+	"github.com/holiman/uint256"
 )
 
 // testEthHandler is a mock event handler to listen for inbound network requests
@@ -95,8 +98,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = rawdb.NewMemoryDatabase()
-		dbProFork = rawdb.NewMemoryDatabase()
+		dbNoFork  = ethdb.NewMemoryDatabase()
+		dbProFork = ethdb.NewMemoryDatabase()
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
@@ -107,8 +110,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil, nil)
 		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil, nil)
 
-		blocksNoFork, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil)
-		blocksProFork, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil)
+		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false)
+		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false)
 
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:   dbNoFork,
@@ -166,8 +169,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	chainNoFork.InsertChain(blocksNoFork[:1])
-	chainProFork.InsertChain(blocksProFork[:1])
+	chainNoFork.InsertChain(context.TODO(), blocksNoFork[:1])
+	chainProFork.InsertChain(context.TODO(), blocksProFork[:1])
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -197,8 +200,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	chainNoFork.InsertChain(blocksNoFork[1:2])
-	chainProFork.InsertChain(blocksProFork[1:2])
+	chainNoFork.InsertChain(context.TODO(), blocksNoFork[1:2])
+	chainProFork.InsertChain(context.TODO(), blocksProFork[1:2])
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -273,7 +276,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
-	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 100000, big.NewInt(0), nil)
+	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
 	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
 	if err := src.SendTransactions([]*types.Transaction{tx}); err != nil {
@@ -304,7 +307,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 
 	insert := make([]*types.Transaction, 100)
 	for nonce := range insert {
-		tx := types.NewTransaction(uint64(nonce), common.Address{}, big.NewInt(0), 100000, big.NewInt(0), make([]byte, txsyncPackSize/10))
+		tx := types.NewTransaction(uint64(nonce), common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), make([]byte, txsyncPackSize/10))
 		tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
 		insert[nonce] = tx
@@ -440,7 +443,7 @@ func testTransactionPropagation(t *testing.T, protocol uint) {
 	// Fill the source pool with transactions and wait for them at the sinks
 	txs := make([]*types.Transaction, 1024)
 	for nonce := range txs {
-		tx := types.NewTransaction(uint64(nonce), common.Address{}, big.NewInt(0), 100000, big.NewInt(0), nil)
+		tx := types.NewTransaction(uint64(nonce), common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
 		tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
 
 		txs[nonce] = tx
