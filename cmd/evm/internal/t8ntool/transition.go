@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -213,14 +213,15 @@ func Main(ctx *cli.Context) error {
 	// Iterate over all the tests, run them and aggregate the results
 
 	// Run the test and aggregate the result
-	db, result, err := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
+	_, result, err := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
 	if err != nil {
 		return err
 	}
 	body, _ := rlp.EncodeToBytes(txs)
 	// Dump the excution result
 	collector := make(Alloc)
-	state.DumpToCollector(collector, false, false, false, nil, -1)
+	// TODO: Where DumpToCollector is declared?
+	//state.DumpToCollector(collector, false, false, false, nil, -1)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 
 }
@@ -257,7 +258,6 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	t.tx = &tx
 	return nil
 }
-	dumper := state.NewDumper(tx, 0)
 
 // signUnsignedTransactions converts the input txs to canonical transactions.
 //

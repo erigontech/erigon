@@ -26,11 +26,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/turbo-geth/internal/testlog"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -231,6 +231,19 @@ func Test_checkPath(t *testing.T) {
 	}
 }
 
+func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
+	t.Helper()
+
+	srv := newHTTPServer(testlog.Logger(t, log.LvlDebug), rpc.DefaultHTTPTimeouts)
+	assert.NoError(t, srv.enableRPC(nil, *conf, nil))
+	if ws {
+		assert.NoError(t, srv.enableWS(nil, *wsConf, nil))
+	}
+	assert.NoError(t, srv.setListenAddr("localhost", 0))
+	assert.NoError(t, srv.start())
+	return srv
+}
+
 func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
 	t.Helper()
 
@@ -253,18 +266,13 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 	t.Logf("checking WebSocket on %s (origin %q)", url, browserOrigin)
 
 	headers := make(http.Header)
-
-	assert.NoError(t, srv.enableRPC(nil, conf, nil))
-	if ws {
-		assert.NoError(t, srv.enableWS(nil, wsConf, nil))
-		"Sec-WebSocket-Version": []string{"13"},
+	if browserOrigin != "" {
 		headers.Set("Origin", browserOrigin)
 	}
-	assert.NoError(t, srv.setListenAddr("localhost", 0))
+	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
 	if conn != nil {
 		conn.Close()
 	}
-
 	return err
 }
 
@@ -291,14 +299,21 @@ func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
 	return !strings.Contains(string(respBody), "error")
 }
 
-func testRequest(t *testing.T, key, value, host string, srv *httpServer) *http.Response {
-	if len(extraHeaders)%2 != 0 {
+// rpcRequest performs a JSON-RPC request to the given URL.
+func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response {
+	t.Helper()
 
-	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}`))
-	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
+	// Create the request.
+	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`))
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		t.Fatal("could not create http request:", err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	// Apply extra headers.
+	if len(extraHeaders)%2 != 0 {
 		panic("odd extraHeaders length")
-	if key != "" && value != "" {
-		req.Header.Set(key, value)
 	}
 	for i := 0; i < len(extraHeaders); i += 2 {
 		key, value := extraHeaders[i], extraHeaders[i+1]

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 )
 
@@ -38,7 +38,7 @@ func TestTraceTransaction(t *testing.T) {
 	}
 	api := NewPrivateDebugAPI(db, 0)
 	for _, tt := range debugTraceTransactionTests {
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &eth.TraceConfig{})
+		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{})
 		if err1 != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
 		}
@@ -63,7 +63,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := NewPrivateDebugAPI(db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var norefunds bool = true
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &eth.TraceConfig{NoRefunds: &norefunds})
+		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds})
 		if err1 != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
 		}

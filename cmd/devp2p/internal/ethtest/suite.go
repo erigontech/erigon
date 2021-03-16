@@ -22,8 +22,11 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
 	"github.com/stretchr/testify/assert"
@@ -124,7 +127,7 @@ func (s *Suite) TestMaliciousStatus(t *utesting.T) {
 	status := &Status{
 		ProtocolVersion: uint32(conn.ethProtocolVersion),
 		NetworkID:       s.chain.chainConfig.ChainID.Uint64(),
-		TD:              largeNumber(2),
+		TD:              largeNumber(2).ToBig(),
 		Head:            s.chain.blocks[s.chain.Len()-1].Hash(),
 		Genesis:         s.chain.blocks[0].Hash(),
 		ForkID:          s.chain.ForkID(),
@@ -315,11 +318,11 @@ func (s *Suite) TestLargeAnnounce(t *utesting.T) {
 		},
 		{
 			Block: s.fullChain.blocks[nextBlock],
-			TD:    largeNumber(2),
+			TD:    largeNumber(2).ToBig(),
 		},
 		{
 			Block: largeBlock(),
-			TD:    largeNumber(2),
+			TD:    largeNumber(2).ToBig(),
 		},
 		{
 			Block: s.fullChain.blocks[nextBlock],

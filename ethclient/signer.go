@@ -22,7 +22,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 )
@@ -58,7 +57,7 @@ func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Tra
 	return s.addr, nil
 }
 
-func (s *senderFromServer) ChainID() *big.Int {
+func (s *senderFromServer) ChainID() *uint256.Int {
 	panic("can't sign with senderFromServer")
 }
 

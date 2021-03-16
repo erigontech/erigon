@@ -279,6 +279,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reorgShutdownCh: make(chan struct{}),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
+		chaindb:         chaindb,
 	}
 
 	return pool
