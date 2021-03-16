@@ -1289,6 +1289,45 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
+func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
+	flags := cmd.Flags()
+	var err error
+	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	extraDataStr, err := flags.GetString(MinerExtraDataFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.ExtraData = []byte(extraDataStr)
+	cfg.GasFloor, err = flags.GetUint64(MinerGasTargetFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.GasCeil, err = flags.GetUint64(MinerGasLimitFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.GasPrice = big.NewInt(price)
+	cfg.Recommit, err = flags.GetDuration(MinerRecommitIntervalFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Noverify, err = flags.GetBool(MinerNoVerfiyFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true

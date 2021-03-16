@@ -19,7 +19,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +42,9 @@ Examples:
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := syncBySmallSteps(db, ctx); err != nil {
+		miningConfig := &params.MiningConfig{}
+		utils.SetupMinerCobra(cmd, miningConfig)
+		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -117,7 +121,7 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx context.Context) error {
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
@@ -150,9 +154,12 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, cache, progress := newSync(ch, db, tx, changeSetHook)
+	mux := new(event.TypeMux)
+
+	cc, bc, st, miningSt, cache, progress := newSync(ch, db, tx, stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil))
 	defer bc.Stop()
-	cc.SetDB(tx)
+
+	_ = miningSt
 
 	tx, err1 = tx.Begin(ctx, ethdb.RW)
 	if err1 != nil {
@@ -289,9 +296,8 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
+	_, bc, st, _, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
-	cc.SetDB(tx)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)
@@ -355,9 +361,8 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, _, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
-	cc.SetDB(tx)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)

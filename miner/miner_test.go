@@ -248,7 +248,6 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
 	backend := NewMockBackend(bc, pool)
 	// Create event Mux
-	mux := new(event.TypeMux)
-	// Create Miner
+	m // Create Miner
 	return New(backend, &config, chainConfig, mux, engine, nil), mux
 }
