@@ -18,6 +18,7 @@ import (
 var (
 	// gitCommit is injected through the build flags (see Makefile)
 	gitCommit string
+	gitBranch string
 )
 
 func main() {
@@ -50,7 +51,8 @@ func runTurboGeth(cliCtx *cli.Context) {
 	ctx := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
-	tg := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit})
+	log.Info("Build info", "git_branch", gitBranch, "git_commit", gitCommit)
+	tg := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
 	tg.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
 		var lc net.ListenConfig
 		return lc.Listen(ctx, network, addr)

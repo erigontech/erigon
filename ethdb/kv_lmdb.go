@@ -326,6 +326,46 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
+func (db *LmdbKV) CollectMetrics() {
+	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	dbSize.Update(fileInfo.Size())
+
+	if err := db.View(context.Background(), func(tx Tx) error {
+		stat, _ := tx.(*lmdbTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
+		tableScsLeaf.Update(int64(stat.LeafPages))
+		tableScsBranch.Update(int64(stat.BranchPages))
+		tableScsOverflow.Update(int64(stat.OverflowPages))
+		tableScsEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.PlainStateBucket)
+		tableStateLeaf.Update(int64(stat.LeafPages))
+		tableStateBranch.Update(int64(stat.BranchPages))
+		tableStateOverflow.Update(int64(stat.OverflowPages))
+		tableStateEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.Log)
+		tableLogLeaf.Update(int64(stat.LeafPages))
+		tableLogBranch.Update(int64(stat.BranchPages))
+		tableLogOverflow.Update(int64(stat.OverflowPages))
+		tableLogEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.EthTx)
+		tableTxLeaf.Update(int64(stat.LeafPages))
+		tableTxBranch.Update(int64(stat.BranchPages))
+		tableTxOverflow.Update(int64(stat.OverflowPages))
+		tableTxEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*lmdbTx).BucketStat("gc")
+		tableGcLeaf.Update(int64(stat.LeafPages))
+		tableGcBranch.Update(int64(stat.BranchPages))
+		tableGcOverflow.Update(int64(stat.OverflowPages))
+		tableGcEntries.Update(int64(stat.Entries))
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+}
+
 func (db *LmdbKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
@@ -548,10 +588,11 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *lmdbTx) ClearBucket(bucket string) error {
-	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return err
+	dbi := tx.db.buckets[bucket].DBI
+	if dbi == NonExistingDBI {
+		return nil
 	}
-	return tx.CreateBucket(bucket)
+	return tx.tx.Drop(lmdb.DBI(dbi), false)
 }
 
 func (tx *lmdbTx) DropBucket(bucket string) error {

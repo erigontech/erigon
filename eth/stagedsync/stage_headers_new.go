@@ -18,13 +18,6 @@ import (
 
 // HeadersForward progresses Headers stage in the forward direction
 func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
-	files, buffer := hd.PrepareStageData()
-	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
-		return nil
-	}
-
-	logPrefix := s.LogPrefix()
-
 	var headerProgress uint64
 	var err error
 	var tx ethdb.DbWithPendingMutations
@@ -33,7 +26,6 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 		tx = db.(ethdb.DbWithPendingMutations)
 		useExternalTx = true
 	} else {
-		var err error
 		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
@@ -44,6 +36,31 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	if err != nil {
 		return err
 	}
+	logPrefix := s.LogPrefix()
+	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
+	hash, err1 := rawdb.ReadCanonicalHash(tx, headerProgress)
+	if err1 != nil {
+		return err1
+	}
+	if hash == (common.Hash{}) {
+		if err = fixCanonicalChain(logPrefix, headerProgress, tx); err != nil {
+			return err
+		}
+		if !useExternalTx {
+			if _, err = tx.Commit(); err != nil {
+				return err
+			}
+		}
+		s.Done()
+		return nil
+	}
+
+	files, buffer := hd.PrepareStageData()
+	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
+		s.Done()
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
@@ -81,16 +98,21 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	}); err1 != nil {
 		return err1
 	}
+	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
+		return err
+	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx); err != nil {
-			return fmt.Errorf("%s: failed to unwind to %d: %v", logPrefix, headerInserter.UnwindPoint(), err)
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
+			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
+	} else {
+		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), batch); err != nil {
+			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
+		}
+		s.Done()
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
-	}
-	if err := s.DoneAndUpdate(tx, headerInserter.GetHighest()); err != nil {
-		return err
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
@@ -101,6 +123,61 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	for _, file := range files {
 		if err := os.Remove(file); err != nil {
 			log.Error("Could not remove", "file", file, "error", err)
+		}
+	}
+	return nil
+}
+
+func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMutations) error {
+	ancestorHash := rawdb.ReadHeadHeaderHash(tx)
+	ancestorHeight := height
+	var ch common.Hash
+	var err error
+	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
+		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
+			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
+		}
+		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
+		ancestorHash = ancestor.ParentHash
+		ancestorHeight--
+	}
+	if err != nil {
+		return fmt.Errorf("[%s] reading canonical hash for %d: %w", logPrefix, ancestorHeight, err)
+	}
+	return nil
+}
+
+func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
+	var err error
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	// Delete canonical hashes that are being unwound
+	var headerProgress uint64
+	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
+		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
+			return err
+		}
+	}
+	if err = u.Skip(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
 		}
 	}
 	return nil

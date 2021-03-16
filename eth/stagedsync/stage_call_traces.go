@@ -144,7 +144,10 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNum)
+		if errSenders != nil {
+			return errSenders
+		}
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -292,7 +295,10 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(db, blockHash, blockNum)
+		senders, errSenders := rawdb.ReadSenders(db, blockHash, blockNum)
+		if errSenders != nil {
+			return errSenders
+		}
 		block.Body().SendersToTxs(senders)
 
 		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)

@@ -74,7 +74,7 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
 		hardCoded = hardCoded1
 	} else {
-		log.Error("VerifySeals", "error", err1)
+		//log.Error("VerifySeals", "error", err1)
 		return
 	}
 	if err1 := hd.FlushBuffer(); err1 != nil {
@@ -171,45 +171,60 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			Forks:   controlServer.forks,
 		},
 	}
-	//nolint:govet
-	callCtx, _ := context.WithCancel(ctx)
+	callCtx, cancelFn := context.WithCancel(ctx)
 	if _, err = sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
+		cancelFn()
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
+	cancelFn()
 	go func() {
-		//nolint:govet
-		callCtx, _ = context.WithCancel(ctx)
-		receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
-		if err2 != nil {
-			log.Error("Receive messages failed", "error", err2)
-		} else {
-			inreq, err := receiveClient.Recv()
-			for ; err == nil; inreq, err = receiveClient.Recv() {
-				if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
-					log.Error("Handling incoming message", "error", err1)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			callCtx, cancelFn = context.WithCancel(ctx)
+			receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+			if err2 != nil {
+				log.Error("Receive messages failed", "error", err2)
+			} else {
+				inreq, err := receiveClient.Recv()
+				for ; err == nil; inreq, err = receiveClient.Recv() {
+					if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
+						log.Error("Handling incoming message", "error", err1)
+					}
+				}
+				if err != nil && !errors.Is(err, io.EOF) {
+					log.Error("Receive loop terminated", "error", err)
 				}
 			}
-			if err != nil && !errors.Is(err, io.EOF) {
-				log.Error("Receive loop terminated", "error", err)
-			}
+			cancelFn()
 		}
 	}()
 	go func() {
-		//nolint:govet
-		callCtx, _ = context.WithCancel(ctx)
-		receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
-		if err3 != nil {
-			log.Error("Receive upload messages failed", "error", err3)
-		} else {
-			inreq, err := receiveUploadClient.Recv()
-			for ; err == nil; inreq, err = receiveUploadClient.Recv() {
-				if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
-					log.Error("Handling incoming message", "error", err1)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			callCtx, cancelFn = context.WithCancel(ctx)
+			receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+			if err3 != nil {
+				log.Error("Receive upload messages failed", "error", err3)
+			} else {
+				inreq, err := receiveUploadClient.Recv()
+				for ; err == nil; inreq, err = receiveUploadClient.Recv() {
+					if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
+						log.Error("Handling incoming message", "error", err1)
+					}
+				}
+				if err != nil && !errors.Is(err, io.EOF) {
+					log.Error("Receive upload loop terminated", "error", err)
 				}
 			}
-			if err != nil && !errors.Is(err, io.EOF) {
-				log.Error("Receive upload loop terminated", "error", err)
-			}
+			cancelFn()
 		}
 	}()
 
@@ -235,7 +250,10 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
-	sentryServer := &SentryServerImpl{}
+	sentryServer := &SentryServerImpl{
+		receiveCh:       make(chan StreamMsg, 1024),
+		receiveUploadCh: make(chan StreamMsg, 1024),
+	}
 	var err error
 	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
 	if err != nil {
@@ -375,7 +393,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	hd.SetHardCodedTips(hardTips)
 	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
-	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{}), db: db}
+	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
 	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
@@ -547,7 +565,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	if _, err1 := cs.sentryClient.PeerMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", request.Block.NumberU64()))
+	log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), inreq.PeerId))
 	return nil
 }
 
@@ -830,7 +848,7 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 		callCtx, _ := context.WithCancel(ctx)
 		_, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
 		if err1 != nil {
-			log.Error("Could not send header request", "err", err)
+			log.Error("Could not send header request", "err", err1)
 			continue
 		}
 	}

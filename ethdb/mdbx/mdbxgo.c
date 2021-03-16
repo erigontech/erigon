@@ -121,10 +121,6 @@ MDBX_cmp_func *mdbxgo_get_cmp_exclude_suffix32() {
   return mdbxgo_dup_cmp_exclude_suffix32;
 }
 
-//int mdbxgo_set_dupsort_cmp_exclude_suffix32(MDBX_txn *txn, MDBX_dbi dbi) {
-//    return mdbx_set_dupsort(txn, dbi, mdbxgo_dup_cmp_exclude_suffix32);
-//}
-
 int mdbxgo_cmp(MDBX_txn *txn, MDBX_dbi dbi, char *adata, size_t an, char *bdata, size_t bn) {
     MDBX_val a;
     MDBXGO_SET_VAL(&a, an, adata);
@@ -132,12 +128,6 @@ int mdbxgo_cmp(MDBX_txn *txn, MDBX_dbi dbi, char *adata, size_t an, char *bdata,
     MDBXGO_SET_VAL(&b, bn, bdata);
     return mdbx_cmp(txn, dbi, &a, &b);
 }
-
-//int mdbx_cmp(const MDBX_txn *txn,
-//                                                    MDBX_dbi dbi,
-//                                                    const MDBX_val *a,
-//                                                    const MDBX_val *b);
-
 
 int mdbxgo_dcmp(MDBX_txn *txn, MDBX_dbi dbi, char *adata, size_t an, char *bdata, size_t bn) {
     MDBX_val a;
@@ -147,22 +137,6 @@ int mdbxgo_dcmp(MDBX_txn *txn, MDBX_dbi dbi, char *adata, size_t an, char *bdata
     return mdbx_dcmp(txn, dbi, &a, &b);
 }
 
-void mdbxgo_log_stderr(MDBX_log_level_t loglevel, const char *function,
-                             int line, const char *msg,
-                             va_list args) MDBX_CXX17_NOEXCEPT {
-    if (function && line > 0)
-       fprintf(stderr, "%s:%d ", function, line);
-    else if (function)
-       fprintf(stderr, "%s: ", function);
-    else if (line > 0)
-       fprintf(stderr, "%d: ", line);
-    vfprintf(stderr, msg, args);
-    fflush(stderr);
-}
-
-MDBX_debug_func *mdbxgo_stderr_logger() {
-  return mdbxgo_log_stderr;
-}
 
 
 

@@ -60,7 +60,10 @@ func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
 	}
 	block := rawdb.ReadBlock(tx, blockHash, blockNum)
 
-	senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+	senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNum)
+	if errSenders != nil {
+		return nil, errSenders
+	}
 	block.Body().SendersToTxs(senders)
 
 	return block, nil
@@ -114,7 +117,6 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cac
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
-	params.Cache = nil
 	prevStageProgress, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart

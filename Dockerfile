@@ -3,6 +3,9 @@ FROM golang:1.15-alpine3.12 as builder
 ARG git_commit
 ENV GIT_COMMIT=$git_commit
 
+ARG git_branch
+ENV GIT_BRANCH=$git_branch
+
 # for linters to avoid warnings. we won't use linters in Docker anyway
 ENV LATEST_COMMIT="undefined"
 

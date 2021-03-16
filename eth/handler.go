@@ -75,7 +75,7 @@ type ProtocolManager struct {
 	txpool      txPool
 	chainConfig *params.ChainConfig
 	blockchain  *core.BlockChain
-	chaindb     *ethdb.ObjectDatabase
+	chaindb     ethdb.Database
 	maxPeers    int
 
 	stagedSync   *stagedsync.StagedSync
@@ -112,7 +112,7 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine *process.RemoteEngine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine *process.RemoteEngine, blockchain *core.BlockChain, chaindb ethdb.Database, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	if stagedSync == nil {
 		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
@@ -183,7 +183,7 @@ func (pm *ProtocolManager) SetBatchSize(cacheSize, batchSize datasize.ByteSize) 
 	}
 }
 
-func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase) {
+func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -69,12 +70,40 @@ var cmdCompareStates = &cobra.Command{
 	},
 }
 
-var cmdToMdbx = &cobra.Command{
-	Use:   "to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.reference'",
+var cmdLmdbToMdbx = &cobra.Command{
+	Use:   "lmdb_to_mdbx",
+	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := toMdbx(ctx, chaindata, toChaindata)
+		err := lmdbToMdbx(ctx, chaindata, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdLmdbToLmdb = &cobra.Command{
+	Use:   "lmdb_to_lmdb",
+	Short: "copy data from '--chaindata' to '--chaindata.to'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := lmdbToLmdb(ctx, chaindata, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdMdbxToMdbx = &cobra.Command{
+	Use:   "mdbx_to_mdbx",
+	Short: "copy data from '--chaindata' to '--chaindata.to'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := mdbxToMdbx(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -85,7 +114,7 @@ var cmdToMdbx = &cobra.Command{
 
 var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.reference'",
+	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		err := fToMdbx(ctx, toChaindata)
@@ -110,11 +139,23 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareStates)
 
-	withChaindata(cmdToMdbx)
-	withToChaindata(cmdToMdbx)
-	withBucket(cmdToMdbx)
+	withChaindata(cmdLmdbToMdbx)
+	withToChaindata(cmdLmdbToMdbx)
+	withBucket(cmdLmdbToMdbx)
 
-	rootCmd.AddCommand(cmdToMdbx)
+	rootCmd.AddCommand(cmdLmdbToMdbx)
+
+	withChaindata(cmdLmdbToLmdb)
+	withToChaindata(cmdLmdbToLmdb)
+	withBucket(cmdLmdbToLmdb)
+
+	rootCmd.AddCommand(cmdLmdbToLmdb)
+
+	withChaindata(cmdMdbxToMdbx)
+	withToChaindata(cmdMdbxToMdbx)
+	withBucket(cmdMdbxToMdbx)
+
+	rootCmd.AddCommand(cmdMdbxToMdbx)
 
 	withToChaindata(cmdFToMdbx)
 	withFile(cmdFToMdbx)
@@ -358,14 +399,29 @@ MainLoop:
 
 	return nil
 }
-func toMdbx(ctx context.Context, from, to string) error {
+
+func lmdbToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
-		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
-	}).MustOpen()
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	return kv2kv(ctx, src, dst)
+}
 
+func lmdbToLmdb(ctx context.Context, from, to string) error {
+	_ = os.RemoveAll(to)
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
+	dst := ethdb.NewLMDB().Path(to).MustOpen()
+	return kv2kv(ctx, src, dst)
+}
+
+func mdbxToMdbx(ctx context.Context, from, to string) error {
+	_ = os.RemoveAll(to)
+	src := ethdb.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	return kv2kv(ctx, src, dst)
+}
+
+func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 	srcTx, err1 := src.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return err1
@@ -456,6 +512,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err
 	}
 	srcTx.Rollback()
-	fmt.Printf("done!\n")
+	log.Info("done")
 	return nil
 }

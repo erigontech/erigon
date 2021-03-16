@@ -92,6 +92,10 @@ func (s *SnapshotKV2) Close() {
 	}
 }
 
+func (s *SnapshotKV2) CollectMetrics() {
+	s.db.CollectMetrics()
+}
+
 func (s *SnapshotKV2) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	dbTx, err := s.db.Begin(ctx, flags)
 	if err != nil {

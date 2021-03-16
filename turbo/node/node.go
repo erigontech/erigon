@@ -20,7 +20,7 @@ import (
 
 	"github.com/urfave/cli"
 
-	gopsutil "github.com/shirou/gopsutil/mem"
+	gopsutil "github.com/shirou/gopsutil/v3/mem"
 )
 
 // TurboGethNode represents a single node, that runs sync and p2p network.
@@ -59,6 +59,7 @@ func (tg *TurboGethNode) run() {
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
 	GitCommit     string
+	GitBranch     string
 	CustomBuckets dbutils.BucketsCfg
 }
 
@@ -80,6 +81,8 @@ func New(
 	ethConfig.StagedSync = sync
 
 	ethereum := utils.RegisterEthService(node, ethConfig)
+
+	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
 	return &TurboGethNode{stack: node, backend: ethereum}
 }
@@ -183,5 +186,5 @@ func prepare(ctx *cli.Context) {
 	utils.SetupMetrics(ctx)
 
 	// Start system runtime metrics collection
-	go metrics.CollectProcessMetrics(3 * time.Second)
+	go metrics.CollectProcessMetrics(10 * time.Second)
 }

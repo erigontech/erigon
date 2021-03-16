@@ -162,9 +162,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		for _, addr := range historyFilter {
 
 			addrBytes := addr.Bytes()
-			blockNumbers, err := retrieveHistory(tx, addr, fromBlock, toBlock)
-			if err != nil {
-				return nil, err
+			blockNumbers, errHistory := retrieveHistory(tx, addr, fromBlock, toBlock)
+			if errHistory != nil {
+				return nil, errHistory
 			}
 
 			for _, num := range blockNumbers {
@@ -172,7 +172,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 				if err != nil {
 					return nil, err
 				}
-				senders := rawdb.ReadSenders(tx, block.Hash(), num)
+				senders, errSenders := rawdb.ReadSenders(tx, block.Hash(), num)
+				if errSenders != nil {
+					return nil, errSenders
+				}
 				for i, txn := range block.Transactions() {
 					if uint64(len(filteredHashes)) == maxTracesCount {
 						if uint64(len(filteredHashes)) == api.maxTraces {

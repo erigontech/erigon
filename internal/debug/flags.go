@@ -207,12 +207,11 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
+		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
 	}
 
 	if metrics.Enabled && metricsAddr != "" {
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		log.Info("Enabling stand-alone metrics HTTP endpoint", "addr", address)
 		exp.Setup(address)
 	}
 
@@ -267,7 +266,7 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
+		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
 	}
 
 	pprofEnabled := ctx.GlobalBool(pprofFlag.Name)
@@ -276,7 +275,6 @@ func Setup(ctx *cli.Context) error {
 	if metrics.Enabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.GlobalInt(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		log.Info("Enabling stand-alone metrics HTTP endpoint", "addr", address)
 		exp.Setup(address)
 	}
 

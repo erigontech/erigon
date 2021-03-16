@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -63,11 +62,6 @@ func (m *TxDb) Sequence(bucket string, amount uint64) (res uint64, err error) {
 }
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		if bucket == dbutils.PlainStateBucket {
-			defer dbPutTimer.UpdateSince(time.Now())
-		}
-	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursor(bucket).Put(key, value)
 }
@@ -113,15 +107,15 @@ func (m *TxDb) KV() KV {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
-// Can only be called from the worker thread
+// Last can only be called from the transaction thread
 func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 	return m.cursor(bucket).Last()
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
-	if metrics.Enabled {
-		defer dbGetTimer.UpdateSince(time.Now())
-	}
+	//if metrics.Enabled {
+	//	defer dbGetTimer.UpdateSince(time.Now())
+	//}
 
 	_, v, err := m.cursor(bucket).SeekExact(key)
 	if err != nil {
@@ -131,13 +125,6 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 	return v, nil
-}
-
-func (m *TxDb) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
-	if m.db != nil {
-		return m.db.GetIndexChunk(bucket, key, timestamp)
-	}
-	return nil, ErrKeyNotFound
 }
 
 func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
@@ -235,8 +222,20 @@ func (m *TxDb) IdealBatchSize() int {
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
-	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
-	defer c.Close()
+	// get cursor out of pool, then calls txDb.Put/Get/Delete on same bucket inside Walk callback - will not affect state of Walk
+	c, ok := m.cursors[bucket]
+	if ok {
+		delete(m.cursors, bucket)
+	} else {
+		c = m.tx.Cursor(bucket)
+	}
+	defer func() { // put cursor back to pool if can
+		if _, ok = m.cursors[bucket]; ok {
+			c.Close()
+		} else {
+			m.cursors[bucket] = c
+		}
+	}()
 	return Walk(c, startkey, fixedbits, walker)
 }
 
@@ -278,14 +277,8 @@ func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (m *TxDb) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	m.panicOnEmptyDB()
-	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
-	defer c.Close()
-	return MultiWalk(c, startkeys, fixedbits, walker)
-}
-
-func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
+// MultiWalk is similar to multiple Walk calls folded into one.
+func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error { //nolint
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]

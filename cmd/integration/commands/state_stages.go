@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -21,17 +20,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/spf13/cobra"
 )
 
 var stateStags = &cobra.Command{
 	Use: "state_stages",
-	Short: `Move all StateStages (which happen after senders) forward. 
-			Stops at StageSenders progress or at "--block".
-			Each iteration test will move forward "--unwind.every" blocks, then unwind "--unwind" blocks.
-			Use reset_state command to re-run this test.
-			When finish all cycles, does comparison to "--chaindata.reference" if flag provided.
+	Short: `Run all StateStages (which happen after senders) in loop.
+Examples: 
+--unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
+--unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
+--unwind=10  # 10 blocks back, then stop
+--integrity.fast=false --integrity.slow=false # Performs DB integrity checks each step. You can disable slow or fast checks.
+--block # Stop at exact blocks
+--chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -117,6 +118,9 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)
@@ -146,7 +150,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -172,8 +176,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		stopAt = 1
 	}
 
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -215,6 +217,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
+					Cache:         cache,
 					BatchSize:     batchSize,
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
@@ -286,7 +289,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -294,13 +297,6 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	tx, err = tx.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
-	}
-
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
 	}
 
 	_ = clearUnwindStack(tx, context.Background())
@@ -359,7 +355,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -388,6 +384,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 				ToBlock:       to, // limit execution to the specified block
 				WriteReceipts: true,
 				BatchSize:     batchSize,
+				Cache:         cache,
 				ChangeSetHook: nil,
 			}); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
@@ -470,16 +467,11 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 }
 
 func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) error {
-	currentKey := dbutils.EncodeBlockNumber(blockNum)
-
-	vv, ok := changeset.Mapper[changeSetBucket]
-	if !ok {
-		return errors.New("unknown bucket type")
-	}
-
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		var k = address
-		bm, innerErr := bitmapdb.Get64(db, vv.IndexBucket, k, blockN-1, blockN+1)
+	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
+	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
+	if err := changeset.Walk(db, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		k := dbutils.CompositeKeyWithoutIncarnation(address)
+		bm, innerErr := bitmapdb.Get64(db, indexBucket, k, blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}

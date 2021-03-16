@@ -29,7 +29,7 @@ type StageParameters struct {
 	chainConfig  *params.ChainConfig
 	chainContext *core.TinyChainContext
 	vmConfig     *vm.Config
-	db           ethdb.Database
+	DB           ethdb.Database
 	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
@@ -108,7 +108,7 @@ func DefaultStages() StageBuilders {
 						return SpawnHeaderDownloadStage(s, u, world.d, world.headersFetchers)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -120,10 +120,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.DB, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -138,7 +138,7 @@ func DefaultStages() StageBuilders {
 						return spawnBodyDownloadStage(s, u, world.d, world.pid, world.prefetchedBlocks)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindBodyDownloadStage(u, world.db)
+						return unwindBodyDownloadStage(u, world.DB)
 					},
 				}
 			},

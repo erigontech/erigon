@@ -928,16 +928,16 @@ func TestNextSubtreeHex(t *testing.T) {
 //
 //	ih := AccTrie(nil, nil, nil, nil)
 //
-//	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-//	ih.k[2], ih.v[2], ih.hasBranch[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
+//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+//	ih.k[2], ih.v[2], ih.hasTree[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
 //	ih.lvl = 2
 //	ih.hashID[2] = 1
 //	ih.hashID[1] = 0
 //	assert.True(ih._nextSiblingOfParentInMem())
 //	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
 //
-//	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-//	ih.k[3], ih.v[3], ih.hasBranch[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
+//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+//	ih.k[3], ih.v[3], ih.hasTree[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
 //	ih.lvl = 3
 //	ih.hashID[3] = 1
 //	ih.hashID[1] = 0
@@ -958,7 +958,7 @@ func TestNextSubtreeHex(t *testing.T) {
 //	rl.AddHex(common.FromHex("0101"))
 //	canUse := func(prefix []byte) bool { return !rl.Retain(prefix) }
 //	i := 0
-//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h common.Hash, hasBranch, skipState bool) (toChild bool, err error) {
+//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h common.Hash, hasTree, skipState bool) (toChild bool, err error) {
 //		i++
 //		switch i {
 //		case 1:
@@ -973,7 +973,7 @@ func TestNextSubtreeHex(t *testing.T) {
 //		if ok := canUse(ihK); ok {
 //			return false, nil
 //		}
-//		return hasBranch, nil
+//		return hasTree, nil
 //	}, func(cur []byte) {
 //		panic(fmt.Errorf("key %x not found in cache", cur))
 //	}); err != nil {

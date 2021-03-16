@@ -27,19 +27,21 @@ import (
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem            bool
-	exclusive        bool
-	flags            uint
-	path             string
-	bucketsCfg       BucketConfigsFunc
-	mapSize          datasize.ByteSize
-	maxFreelistReuse uint
+	inMem             bool
+	exclusive         bool
+	flags             uint
+	path              string
+	bucketsCfg        BucketConfigsFunc
+	mapSize           datasize.ByteSize
+	dirtyListMaxPages uint64
+	maxFreelistReuse  uint
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		bucketsCfg:        DefaultBucketConfigs,
+		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		dirtyListMaxPages: 128 * 1024,
 	}
 }
 
@@ -83,24 +85,8 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (KV, error) {
-	env, err := mdbx.NewEnv()
-	if err != nil {
-		return nil, err
-	}
-
-	err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
-	if err != nil {
-		return nil, err
-	}
-
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
-	err = env.SetMaxDBs(100)
-	if err != nil {
-		return nil, err
-	}
-
 	var logger log.Logger
+	var err error
 	if opts.inMem {
 		logger = log.New("mdbx", "inMem")
 		opts.path, err = ioutil.TempDir(os.TempDir(), "mdbx")
@@ -111,30 +97,50 @@ func (opts MdbxOpts) Open() (KV, error) {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
-	if opts.mapSize == 0 {
-		if opts.inMem {
-			opts.mapSize = 64 * datasize.MB
-		} else {
-			opts.mapSize = LMDBDefaultMapSize
-		}
+	env, err := mdbx.NewEnv()
+	if err != nil {
+		return nil, err
 	}
+	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
-	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, -1); err != nil {
+	if err = env.SetMaxDBs(100); err != nil {
+		return nil, err
+	}
+	if err = env.SetOption(mdbx.OptMaxReaders, 256); err != nil {
 		return nil, err
 	}
 
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-	}
+	if opts.flags&mdbx.Accede == 0 {
+		if opts.mapSize == 0 {
+			if opts.inMem {
+				opts.mapSize = 64 * datasize.MB
+			} else {
+				opts.mapSize = LMDBDefaultMapSize
+			}
+		}
 
-	if err = os.MkdirAll(opts.path, 0744); err != nil {
-		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			return nil, err
+		}
+
+		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
+			return nil, err
+		}
+
+		if opts.maxFreelistReuse == 0 {
+			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+		}
+
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	var flags = opts.flags
 	if opts.inMem {
 		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+		opts.dirtyListMaxPages = 8 * 1024
 	}
 
 	err = env.Open(opts.path, flags, 0664)
@@ -299,6 +305,46 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 		return 0, err
 	}
 	return uint64(fileInfo.Size()), nil
+}
+
+func (db *MdbxKV) CollectMetrics() {
+	info, _ := db.env.Info()
+	dbSize.Update(int64(info.Geo.Current))
+
+	if err := db.View(context.Background(), func(tx Tx) error {
+		stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
+		tableScsLeaf.Update(int64(stat.LeafPages))
+		tableScsBranch.Update(int64(stat.BranchPages))
+		tableScsOverflow.Update(int64(stat.OverflowPages))
+		tableScsEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
+		tableStateLeaf.Update(int64(stat.LeafPages))
+		tableStateBranch.Update(int64(stat.BranchPages))
+		tableStateOverflow.Update(int64(stat.OverflowPages))
+		tableStateEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
+		tableLogLeaf.Update(int64(stat.LeafPages))
+		tableLogBranch.Update(int64(stat.BranchPages))
+		tableLogOverflow.Update(int64(stat.OverflowPages))
+		tableLogEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
+		tableTxLeaf.Update(int64(stat.LeafPages))
+		tableTxBranch.Update(int64(stat.BranchPages))
+		tableTxOverflow.Update(int64(stat.OverflowPages))
+		tableTxEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*MdbxTx).BucketStat("gc")
+		tableGcLeaf.Update(int64(stat.LeafPages))
+		tableGcBranch.Update(int64(stat.BranchPages))
+		tableGcOverflow.Update(int64(stat.OverflowPages))
+		tableGcEntries.Update(int64(stat.Entries))
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
@@ -557,10 +603,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 	if dbi == NonExistingDBI {
 		return nil
 	}
-	if err := tx.tx.Drop(mdbx.DBI(dbi), false); err != nil {
-		return err
-	}
-	return nil
+	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
