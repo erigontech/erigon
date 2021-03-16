@@ -38,7 +38,7 @@ import (
 
 // Tests block storage and retrieval operations.
 func TestBadBlockStorage(t *testing.T) {
-	db := NewMemoryDatabase()
+	db := ethdb.NewMemDatabase()
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
