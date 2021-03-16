@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -31,20 +32,18 @@ func TestFastSyncDisabling65(t *testing.T) { testFastSyncDisabling(t, 65) }
 
 // Tests that fast sync gets disabled as soon as a real block is successfully
 // imported into the blockchain.
-func testFastSyncDisabling(t *testing.T, protocol int) {
+func testFastSyncDisabling(t *testing.T, protocol uint) {
 	t.Skip("should be restored. skipped for turbo-geth")
 
-	// Create a pristine protocol manager, check that fast sync is left enabled
-	pmEmpty, clear := newTestProtocolManagerMust(t, downloader.FastSync, 0, nil, nil)
-	defer clear()
+	// Create an empty handler and ensure it's in fast sync mode
+	empty := newTestHandler()
 	if atomic.LoadUint32(&empty.handler.fastSync) == 0 {
 		t.Fatalf("fast sync disabled on pristine blockchain")
 	}
 	defer empty.close()
 
-	// Create a full protocol manager, check that fast sync gets disabled
-	pmFull, clearFull := newTestProtocolManagerMust(t, downloader.FastSync, 1024, nil, nil)
-	defer clearFull()
+	// Create a full handler and ensure fast sync ends up disabled
+	full := newTestHandlerWithBlocks(1024)
 	if atomic.LoadUint32(&full.handler.fastSync) == 1 {
 		t.Fatalf("fast sync not disabled on non-empty blockchain")
 	}
@@ -55,8 +54,8 @@ func testFastSyncDisabling(t *testing.T, protocol int) {
 	defer emptyPipe.Close()
 	defer fullPipe.Close()
 
-	go pmFull.handle(pmFull.newPeer(protocol, p2p.NewPeer(enode.ID{}, "empty", nil), io2, pmFull.txpool.Get))   //nolint:errcheck
-	go pmEmpty.handle(pmEmpty.newPeer(protocol, p2p.NewPeer(enode.ID{}, "full", nil), io1, pmEmpty.txpool.Get)) //nolint:errcheck
+	emptyPeer := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), emptyPipe, empty.txpool)
+	fullPeer := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), fullPipe, full.txpool)
 	defer emptyPeer.Close()
 	defer fullPeer.Close()
 

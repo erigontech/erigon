@@ -159,6 +159,11 @@ func (ps *peerSet) peerWithHighestNumber() *eth.Peer {
 	return bestPeer
 }
 
+// peerWithHighestTD is an alias to the highest number for testing and rebase simplicity
+func (ps *peerSet) peerWithHighestTD() *eth.Peer {
+	return ps.peerWithHighestNumber()
+}
+
 // close disconnects all peers.
 func (ps *peerSet) close() {
 	ps.lock.Lock()
