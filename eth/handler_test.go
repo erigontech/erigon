@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math/big"
 	"sort"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -131,7 +131,7 @@ func newTestHandler() *testHandler {
 // given number of initial blocks.
 func newTestHandlerWithBlocks(blocks int) *testHandler {
 	// Create a database pre-initialize with a genesis block
-	db := rawdb.NewMemoryDatabase()
+	db := ethdb.NewMemoryDatabase()
 	(&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
@@ -139,8 +139,8 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 
 	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 
-	bs, _ := core.GenerateChain(params.TestChainConfig, chain.Genesis(), ethash.NewFaker(), db, blocks, nil)
-	if _, err := chain.InsertChain(bs); err != nil {
+	bs, _, _ := core.GenerateChain(params.TestChainConfig, chain.Genesis(), ethash.NewFaker(), db, blocks, nil, false)
+	if _, err := chain.InsertChain(context.TODO(), bs); err != nil {
 		panic(err)
 	}
 	txpool := newTestTxPool()

@@ -138,7 +138,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 	}
 	h := &handler{
 		networkID:  config.Network,
-		forkFilter: forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), config.Chain.CurrentHeader().Number.Uint64()),
+		forkFilter: forkid.NewFilterAutofork(config.Chain.Config(), config.Chain.Genesis().Hash(), config.Chain.CurrentHeader().Number.Uint64()),
 		eventMux:   config.EventMux,
 		database:   config.Database,
 		txpool:     config.TxPool,
