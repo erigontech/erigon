@@ -17,6 +17,7 @@
 package graphql
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 
@@ -190,7 +192,7 @@ func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 	return stack
 }
 
-func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolint:unparam
+func createGQLService(t *testing.T, stack *node.Node) { //nolint:unparam
 	// create backend
 	ethConf := &ethconfig.Config{
 		Genesis: &core.Genesis{
@@ -201,7 +203,7 @@ func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolin
 		Ethash: ethash.Config{
 			PowMode: ethash.ModeFake,
 		},
-		NetworkId:               1337,
+		NetworkID:               1337,
 		TrieCleanCache:          5,
 		TrieCleanCacheJournal:   "triecache",
 		TrieCleanCacheRejournal: 60 * time.Minute,
@@ -214,9 +216,11 @@ func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolin
 		t.Fatalf("could not create eth backend: %v", err)
 	}
 	// Create some blocks and import them
-	chain, _ := core.GenerateChain(params.AllEthashProtocolChanges, ethBackend.BlockChain().Genesis(),
-		ethash.NewFaker(), ethBackend.ChainDb(), 10, func(i int, gen *core.BlockGen) {})
-	_, err = ethBackend.BlockChain().InsertChain(chain)
+	chain, _, _ := core.GenerateChain(
+		params.AllEthashProtocolChanges,
+		ethBackend.BlockChain().Genesis(),
+		ethash.NewFaker(), ethBackend.ChainDb().(*ethdb.ObjectDatabase), 10, func(i int, gen *core.BlockGen) {}, false)
+	_, err = ethBackend.BlockChain().InsertChain(context.TODO(), chain)
 	if err != nil {
 		t.Fatalf("could not create import blocks: %v", err)
 	}

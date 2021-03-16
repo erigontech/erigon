@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 

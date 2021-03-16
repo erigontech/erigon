@@ -17,8 +17,10 @@
 package graphql
 
 import (
+	"encoding/json"
+	"net/http"
+
 	"github.com/graph-gophers/graphql-go"
-	"github.com/graph-gophers/graphql-go/relay"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/node"
 )
