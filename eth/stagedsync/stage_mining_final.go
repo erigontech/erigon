@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -39,7 +37,6 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 	}
 
 	//TODO: why worker.go does insert new block to chain?
-	fmt.Printf("mined1: %d\n", block.Transactions().Len())
 
 	// Broadcast the block and announce chain insertion event
 	_ = mux.Post(core.NewMinedBlockEvent{Block: block})
