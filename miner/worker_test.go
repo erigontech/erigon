@@ -85,11 +85,12 @@ func init() {
 	}
 
 	signer := types.LatestSigner(params.TestChainConfig)
+	chainId, _ := uint256.FromBig(params.TestChainConfig.ChainID)
 	tx1 := types.MustSignNewTx(testBankKey, signer, &types.AccessListTx{
-		ChainID: params.TestChainConfig.ChainID,
+		ChainID: chainId,
 		Nonce:   0,
 		To:      &testUserAddress,
-		Value:   big.NewInt(1000),
+		Value:   uint256.NewInt().SetUint64(1000),
 		Gas:     params.TxGas,
 	})
 	pendingTxs = append(pendingTxs, tx1)
@@ -97,7 +98,7 @@ func init() {
 	tx2 := types.MustSignNewTx(testBankKey, signer, &types.LegacyTx{
 		Nonce: 1,
 		To:    &testUserAddress,
-		Value: big.NewInt(1000),
+		Value: uint256.NewInt().SetUint64(1000),
 		Gas:   params.TxGas,
 	})
 	newTxs = append(newTxs, tx2)
