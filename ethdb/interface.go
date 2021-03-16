@@ -134,6 +134,7 @@ type DbWithPendingMutations interface {
 	// tx.Commit()
 	//
 	CommitAndBegin(ctx context.Context) error
+	RollbackAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
 }

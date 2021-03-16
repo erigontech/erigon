@@ -105,6 +105,7 @@ func init() {
 	withBlock(stateStags)
 	withBatchSize(stateStags)
 	withIntegrityChecks(stateStags)
+	withMining(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
@@ -158,6 +159,25 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 	cc, bc, st, miningSt, cache, progress := newSync(ch, db, tx, stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil))
 	defer bc.Stop()
+
+	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
+		return func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
+			if err := stagedsync.SpawnExecuteBlocksStage(
+				stageState, tx,
+				bc.Config(), cc, bc.GetVMConfig(),
+				ch,
+				stagedsync.ExecuteBlockStageParams{
+					ToBlock:       execToBlock, // limit execution to the specified block
+					WriteReceipts: sm.Receipts,
+					Cache:         cache,
+					BatchSize:     batchSize,
+					ChangeSetHook: changeSetHook,
+				}); err != nil {
+				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
+			}
+			return nil
+		}
+	}
 
 	_ = miningSt
 
@@ -214,36 +234,36 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				unwind = 0
 			}
 		}
-
-		// set block limit of execute stage
-		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(
-				stageState, tx,
-				bc.Config(), cc, bc.GetVMConfig(),
-				ch,
-				stagedsync.ExecuteBlockStageParams{
-					ToBlock:       execToBlock, // limit execution to the specified block
-					WriteReceipts: sm.Receipts,
-					Cache:         cache,
-					BatchSize:     batchSize,
-					ChangeSetHook: changeSetHook,
-				}); err != nil {
-				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
+		if miningConfig.Enabled {
+			// set block limit of execute stage
+			st.MockExecFunc(stages.Execution, execUntilFunc(execToBlock-1))
+			if err := st.Run(db, tx); err != nil {
+				return err
 			}
-			return nil
-		})
 
+			if integrityFast {
+				if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
+					return err
+				}
+				integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
+			}
+
+			if err := tx.CommitAndBegin(context.Background()); err != nil {
+				return err
+			}
+
+			if err := miningSt.Run(db, tx); err != nil {
+				return err
+			}
+			if err := tx.RollbackAndBegin(context.Background()); err != nil {
+				return err
+			}
+			//TODO: subscribe to mux and compare block hash with result of next step
+		}
+		st.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-
-		if integrityFast {
-			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
-				return err
-			}
-			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
-		}
-
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}

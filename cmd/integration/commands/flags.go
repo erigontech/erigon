@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
 )
@@ -42,6 +43,18 @@ func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+}
+
+func withMining(cmd *cobra.Command) {
+	cmd.Flags().Bool("mine", false, "Enable mining")
+	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
+	cmd.Flags().Uint64("miner.gastarget", eth.DefaultConfig.Miner.GasFloor, "Target gas floor for mined blocks")
+	cmd.Flags().Uint64("miner.gaslimit", eth.DefaultConfig.Miner.GasCeil, "Target gas ceiling for mined blocks")
+	cmd.Flags().Int64("miner.gasprice", eth.DefaultConfig.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
+	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
+	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
+	cmd.Flags().Duration("miner.recommit", eth.DefaultConfig.Miner.Recommit, "Time interval to recreate the block being mined")
+	cmd.Flags().Bool("miner.noverify", false, "Disable remote sealing verification")
 }
 
 func withFile(cmd *cobra.Command) {
