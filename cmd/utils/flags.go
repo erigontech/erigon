@@ -1326,6 +1326,30 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
+
+	// Extract the current etherbase, new flag overriding legacy one
+	var etherbase string
+	etherbase, err = flags.GetString(MinerEtherbaseFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+
+	//TODO: need add keystore support - see method setEtherbase
+	/*
+		// Convert the etherbase into an address and configure it
+		if etherbase != "" {
+			if ks != nil {
+				account, err := MakeAddress(ks, etherbase)
+				if err != nil {
+					Fatalf("Invalid miner etherbase: %v", err)
+				}
+				cfg.Etherbase = account.Address
+			} else {
+				Fatalf("No etherbase configured")
+			}
+		}
+	*/
+	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

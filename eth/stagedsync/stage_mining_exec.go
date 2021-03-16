@@ -173,6 +173,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
 		log.Info("Commit an empty block", "number", current.header.Number)
+		s.Done()
 		return nil
 	}
 
@@ -186,6 +187,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if len(pending) == 0 && !noempty {
+		s.Done()
 		return nil
 	}
 

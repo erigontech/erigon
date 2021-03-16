@@ -204,6 +204,12 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		stopAt = 1
 	}
 
+	go func() {
+		for minedBlock := range minedBlockSub.Chan() {
+			fmt.Printf("mined: %d\n", minedBlock.Data.(core.NewMinedBlockEvent).Block.Transactions().Len())
+		}
+	}()
+
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -268,9 +274,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				return err
 			}
 
-			minedBlock := <-minedBlockSub.Chan()
 			//TODO: check that mined block has same state root
-			_ = minedBlock
+			//minedBlock := <-minedBlockSub.Chan()
 		}
 		st.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		if err := st.Run(db, tx); err != nil {

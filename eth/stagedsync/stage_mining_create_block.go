@@ -229,6 +229,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 
 	current.header = header
 	current.uncles = makeUncles(env.uncles)
+	s.Done()
 	return nil
 }
 

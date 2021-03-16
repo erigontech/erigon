@@ -680,8 +680,8 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 	}
 
 	stMining, err := stagedsync.New(
-		stagedsync.DefaultStages(),
-		stagedsync.DefaultUnwindOrder(),
+		stagedsync.MiningStages(),
+		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, nil, false, miningParams)
 	if err != nil {
