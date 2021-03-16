@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
@@ -67,12 +68,14 @@ type MiningStagesParameters struct {
 	noempty                   bool
 	localUncles, remoteUncles map[common.Hash]*types.Block
 
+	mux *event.TypeMux // Event multiplexer to announce sync operation events
+
 	// runtime dat
 	block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, block: &miningBlock{}}
 
 }
 
@@ -487,13 +490,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						block, err := SpawnMiningFinishStage(s, world.TX, world.mining.block, world.chainContext.Engine(), world.chainConfig, world.QuitCh)
-						if err != nil {
-							return err
-						}
-						_ = block
-						*world.mining.block = miningBlock{}
-						return nil
+						return SpawnMiningFinishStage(s, world.TX, world.mining.block, world.mining.mux, world.chainContext.Engine(), world.chainConfig, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
