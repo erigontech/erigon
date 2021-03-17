@@ -46,7 +46,9 @@ func TestSignify(t *testing.T) {
 
 	data := make([]byte, 1024)
 	rand.Read(data)
-	tmpFile.Write(data)
+	if _, err = tmpFile.Write(data); err != nil {
+		t.Fatal(err)
+	}
 
 	if err = tmpFile.Close(); err != nil {
 		t.Fatal(err)
@@ -90,7 +92,9 @@ func TestSignifyTrustedCommentTooManyLines(t *testing.T) {
 
 	data := make([]byte, 1024)
 	rand.Read(data)
-	tmpFile.Write(data)
+	if _, err = tmpFile.Write(data); err != nil {
+		t.Fatal(err)
+	}
 
 	if err = tmpFile.Close(); err != nil {
 		t.Fatal(err)
@@ -115,7 +119,9 @@ func TestSignifyTrustedCommentTooManyLinesLF(t *testing.T) {
 
 	data := make([]byte, 1024)
 	rand.Read(data)
-	tmpFile.Write(data)
+	if _, err = tmpFile.Write(data); err != nil {
+		t.Fatal(err)
+	}
 
 	if err = tmpFile.Close(); err != nil {
 		t.Fatal(err)
@@ -140,7 +146,9 @@ func TestSignifyTrustedCommentEmpty(t *testing.T) {
 
 	data := make([]byte, 1024)
 	rand.Read(data)
-	tmpFile.Write(data)
+	if _, err = tmpFile.Write(data); err != nil {
+		t.Fatal(err)
+	}
 
 	if err = tmpFile.Close(); err != nil {
 		t.Fatal(err)

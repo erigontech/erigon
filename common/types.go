@@ -250,6 +250,7 @@ func (a *Address) checksumHex() []byte {
 
 	// compute checksum
 	sha := sha3.NewLegacyKeccak256()
+	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
 	for i := 2; i < len(buf); i++ {

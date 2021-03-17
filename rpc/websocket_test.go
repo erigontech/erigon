@@ -168,7 +168,9 @@ func TestClientWebsocketLargeMessage(t *testing.T) {
 	defer httpsrv.Close()
 
 	respLength := wsMessageSizeLimit - 50
-	srv.RegisterName("test", largeRespService{respLength})
+	if err := srv.RegisterName("test", largeRespService{respLength}); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := DialWebsocket(context.Background(), wsURL, "")
 	if err != nil {

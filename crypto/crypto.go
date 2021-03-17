@@ -73,7 +73,9 @@ func NewKeccakState() KeccakState {
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
 func HashData(kh KeccakState, data []byte) (h common.Hash) {
 	kh.Reset()
+	//nolint:errcheck
 	kh.Write(data)
+	//nolint:errcheck
 	kh.Read(h[:])
 	return h
 }

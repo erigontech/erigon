@@ -42,7 +42,9 @@ func (e *testEncoder) EncodeRLP(w io.Writer) error {
 	if e.err != nil {
 		return e.err
 	}
-	w.Write([]byte{0, 1, 0, 1, 0, 1, 0, 1, 0, 1})
+	if _, err := w.Write([]byte{0, 1, 0, 1, 0, 1, 0, 1, 0, 1}); err != nil {
+		return err
+	}
 	return nil
 }
 
