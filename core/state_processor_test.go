@@ -81,7 +81,7 @@ func TestStateProcessorErrors(t *testing.T) {
 		},
 		{
 			txs: []*types.Transaction{
-				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
+				makeTx(0, common.Address{}, uint256.NewInt().SetUint64(1), params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 0 [0x3094b17498940d92b13baccf356ce8bfd6f221e926abc903d642fa1466c5b50e]: insufficient funds for transfer: address 0x71562b71999873DB5b286dF957af199Ec94617F7",
 		},
