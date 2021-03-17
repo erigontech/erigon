@@ -22,13 +22,14 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -48,8 +49,8 @@ var (
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
 	db     ethdb.Database
-	chain  *core.BlockChain
 	txpool *core.TxPool
+	chain  *core.BlockChain
 }
 
 // newTestBackend creates an empty chain and wraps it into a mock backend.
@@ -62,24 +63,24 @@ func newTestBackend(blocks int) *testBackend {
 func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
 	db := ethdb.NewMemoryDatabase()
-	(&core.Genesis{
+	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}).MustCommit(db)
 
-	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-
-	bs, _ := core.GenerateChain(params.TestChainConfig, chain.Genesis(), ethash.NewFaker(), db, blocks, generator)
-	if _, err := chain.InsertChain(bs); err != nil {
+	bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
 		panic(err)
 	}
 	txconfig := core.DefaultTxPoolConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
+	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	txCacher := core.NewTxSenderCacher(1)
 	return &testBackend{
 		db:     db,
+		txpool: core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
 		chain:  chain,
-		txpool: core.NewTxPool(txconfig, params.TestChainConfig, chain),
 	}
 }
 
@@ -343,105 +344,6 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 	}
 }
 
-// Tests that the state trie nodes can be retrieved based on hashes.
-func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
-func TestGetNodeData65(t *testing.T) { testGetNodeData(t, 65) }
-
-func testGetNodeData(t *testing.T, protocol uint) {
-	// Define three accounts to simulate transactions with
-	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
-	acc2Addr := crypto.PubkeyToAddress(acc2Key.PublicKey)
-
-	signer := types.HomesteadSigner{}
-	// Create a chain generator with some simple transactions (blatantly stolen from @fjl/chain_markets_test)
-	generator := func(i int, block *core.BlockGen) {
-		switch i {
-		case 0:
-			// In block 1, the test bank sends account #1 some ether.
-			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, big.NewInt(10000), params.TxGas, nil, nil), signer, testKey)
-			block.AddTx(tx)
-		case 1:
-			// In block 2, the test bank sends some more ether to account #1.
-			// acc1Addr passes it on to account #2.
-			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, testKey)
-			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, acc1Key)
-			block.AddTx(tx1)
-			block.AddTx(tx2)
-		case 2:
-			// Block 3 is empty but was mined by account #2.
-			block.SetCoinbase(acc2Addr)
-			block.SetExtra([]byte("yeehaw"))
-		case 3:
-			// Block 4 includes blocks 2 and 3 as uncle headers (with modified extra data).
-			b2 := block.PrevBlock(1).Header()
-			b2.Extra = []byte("foo")
-			block.AddUncle(b2)
-			b3 := block.PrevBlock(2).Header()
-			b3.Extra = []byte("foo")
-			block.AddUncle(b3)
-		}
-	}
-	// Assemble the test environment
-	backend := newTestBackendWithGenerator(4, generator)
-	defer backend.close()
-
-	peer, _ := newTestPeer("peer", protocol, backend)
-	defer peer.close()
-
-	// Fetch for now the entire chain db
-	var hashes []common.Hash
-
-	it := backend.db.NewIterator(nil, nil)
-	for it.Next() {
-		if key := it.Key(); len(key) == common.HashLength {
-			hashes = append(hashes, common.BytesToHash(key))
-		}
-	}
-	it.Release()
-
-	p2p.Send(peer.app, GetNodeDataMsg, hashes)
-	msg, err := peer.app.ReadMsg()
-	if err != nil {
-		t.Fatalf("failed to read node data response: %v", err)
-	}
-	if msg.Code != NodeDataMsg {
-		t.Fatalf("response packet code mismatch: have %x, want %x", msg.Code, NodeDataMsg)
-	}
-	var data [][]byte
-	if err := msg.Decode(&data); err != nil {
-		t.Fatalf("failed to decode response node data: %v", err)
-	}
-	// Verify that all hashes correspond to the requested data, and reconstruct a state tree
-	for i, want := range hashes {
-		if hash := crypto.Keccak256Hash(data[i]); hash != want {
-			t.Errorf("data hash mismatch: have %x, want %x", hash, want)
-		}
-	}
-	statedb := ethdb.NewMemoryDatabase()
-	for i := 0; i < len(data); i++ {
-		statedb.Put(hashes[i].Bytes(), data[i])
-	}
-	accounts := []common.Address{testAddr, acc1Addr, acc2Addr}
-	for i := uint64(0); i <= backend.chain.CurrentBlock().NumberU64(); i++ {
-		trie, _ := state.New(backend.chain.GetBlockByNumber(i).Root(), state.New(statedb), nil)
-
-		for j, acc := range accounts {
-			state, _ := backend.chain.State()
-			bw := state.GetBalance(acc)
-			bh := trie.GetBalance(acc)
-
-			if (bw != nil && bh == nil) || (bw == nil && bh != nil) {
-				t.Errorf("test %d, account %d: balance mismatch: have %v, want %v", i, j, bh, bw)
-			}
-			if bw != nil && bh != nil && bw.Cmp(bw) != 0 {
-				t.Errorf("test %d, account %d: balance mismatch: have %v, want %v", i, j, bh, bw)
-			}
-		}
-	}
-}
-
 // Tests that the transaction receipts can be retrieved based on hashes.
 func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
@@ -459,13 +361,13 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		switch i {
 		case 0:
 			// In block 1, the test bank sends account #1 some ether.
-			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, big.NewInt(10000), params.TxGas, nil, nil), signer, testKey)
+			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), signer, testKey)
 			block.AddTx(tx)
 		case 1:
 			// In block 2, the test bank sends some more ether to account #1.
 			// acc1Addr passes it on to account #2.
-			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, testKey)
-			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, big.NewInt(1000), params.TxGas, nil, nil), signer, acc1Key)
+			tx1, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
+			tx2, _ := types.SignTx(types.NewTransaction(block.TxNonce(acc1Addr), acc2Addr, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, acc1Key)
 			block.AddTx(tx1)
 			block.AddTx(tx2)
 		case 2:
