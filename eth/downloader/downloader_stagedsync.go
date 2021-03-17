@@ -57,6 +57,8 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		if hashCount < len(hashes) {
 			copy(hashes[hashCount][:], v)
 			hashCount++
+		} else {
+			return false, nil
 		}
 		return true, nil
 
@@ -76,7 +78,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			return false, err1
 		}
 		headers[common.BytesToHash(k[8:])] = header
-		return hashCount < len(hashes), nil
+		return currentNumber>binary.BigEndian.Uint64(k[:8]), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("%s: walking over headers: %w", logPrefix, err)

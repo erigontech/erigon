@@ -71,86 +71,42 @@ var headerPrefixToSeparateBuckets = Migration{
 			}()
 			goto LoadStep
 		}
-		db.Walk(dbutils.HeaderPrefixOld, []byte{}, 0, func(k, v []byte) (bool, error) {
+
+		canonicalCollector = etl.NewCriticalCollector(tmpdir+"canonical", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		tdCollector = etl.NewCriticalCollector(tmpdir+"td", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		headersCollector = etl.NewCriticalCollector(tmpdir+"headers", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		defer func() {
+			// don't clean if error or panic happened
+			if err != nil {
+				return
+			}
+			if rec := recover(); rec != nil {
+				panic(rec)
+			}
+			canonicalCollector.Close(logPrefix)
+			tdCollector.Close(logPrefix)
+			headersCollector.Close(logPrefix)
+		}()
+
+
+		err = db.Walk(dbutils.HeaderPrefixOld, []byte{}, 0, func(k, v []byte) (bool, error) {
 			var err error
 			switch {
 			case IsHeaderKey(k):
-
+				err = headersCollector.Collect(k,v)
 			case IsHeaderTDKey(k):
 				err = canonicalCollector.Collect(bytes.TrimSuffix(k, HeaderTDSuffix),v)
 			case IsHeaderHashKey(k):
-				err = canonicalCollector.Collect(k,v)
-			case CheckCanonicalKey(k):
-				err = canonicalCollector.Collect(k,v)
+				err = canonicalCollector.Collect(bytes.TrimSuffix(k, HeaderHashSuffix),v)
+			default:
+				return false, fmt.Errorf("incorrect header prefix key: %v", common.Bytes2Hex(k))
 			}
 			if err!=nil {
 				return false, err
 			}
 			return true,  nil
 		})
-
-		if err := etl.Transform(
-			"canonical headers",
-			db,
-			dbutils.HeaderPrefixOld,
-			dbutils.HeaderCanonicalBucket,
-			tmpdir,
-			func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-				if dbutils.CheckCanonicalKey(k) {
-					return next(k, k, v)
-				}
-				return nil
-			},
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: CommitProgress},
-		); err != nil {
-			return err
-		}
-
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.HeadersBucket); err != nil {
-			return err
-		}
-
-		if err := etl.Transform(
-			"headers",
-			db,
-			dbutils.HeaderPrefixOld,
-			dbutils.HeadersBucket,
-			tmpdir,
-			func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-				if dbutils.CheckCanonicalKey(k) {
-					return next(k, k, v)
-				}
-				return nil
-			},
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: CommitProgress},
-		); err != nil {
-			return err
-		}
-
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.HeaderTDBucket); err != nil {
-			return err
-		}
-		if err := etl.Transform(
-			"headers td",
-			db,
-			dbutils.HeaderPrefixOld,
-			dbutils.HeaderTDBucket,
-			tmpdir,
-			func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-				if dbutils.CheckCanonicalKey(k) {
-					return next(k, k, v)
-				}
-				return nil
-			},
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: CommitProgress},
-		); err != nil {
-			return err
-		}
-
-		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.CurrentStateBucketOld1); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.HeaderPrefixOld); err != nil {
 			return err
 		}
 
