@@ -26,7 +26,7 @@ type ChainEventNotifier interface {
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
 	d            DownloaderGlue
-	chainConfig  *params.ChainConfig
+	ChainConfig  *params.ChainConfig
 	chainContext *core.TinyChainContext
 	vmConfig     *vm.Config
 	DB           ethdb.Database
@@ -50,6 +50,7 @@ type StageParameters struct {
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
+	InitialCycle          bool
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -162,7 +163,7 @@ func DefaultStages() StageBuilders {
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.ChainConfig, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -178,7 +179,7 @@ func DefaultStages() StageBuilders {
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.chainContext, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -294,14 +295,14 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.batchSize,

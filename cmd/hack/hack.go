@@ -1645,6 +1645,43 @@ func mint(chaindata string, block uint64) error {
 	return nil
 }
 
+func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+
+	fmt.Fprintf(w, "package headerdownload\n\n")
+	fmt.Fprintf(w, "var %sPreverifiedHashes = []string{\n", name)
+
+	b := uint64(0)
+	for b <= blockTotal {
+		hash, err := rawdb.ReadCanonicalHash(db, b)
+		if err != nil {
+			return err
+		}
+
+		if hash == (common.Hash{}) {
+			break
+		}
+
+		fmt.Fprintf(w, "	\"%x\",\n", hash)
+		b += blockStep
+	}
+	b -= blockStep
+	fmt.Fprintf(w, "}\n")
+	fmt.Fprintf(w, "const %sPreverifiedHeight uint64 = %d\n", name, b)
+	fmt.Printf("Last block is %d\n", b)
+	return nil
+}
+
 func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2042,6 +2079,11 @@ func main() {
 	}
 	if *action == "extractHeaders" {
 		if err := extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractHashes" {
+		if err := extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

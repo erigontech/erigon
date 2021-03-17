@@ -305,13 +305,13 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 // a batch of new headers.
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, snapID uint64) error {
 	if len(parents) > 0 {
-		fmt.Println("in Clique.verifyByRequest", header.Number.Uint64(), len(parents), parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64())
+		debugLog("in Clique.verifyByRequest", header.Number.Uint64(), len(parents), parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64())
 	} else {
-		fmt.Println("in Clique.verifyByRequest", header.Number.Uint64(), len(parents))
+		debugLog("in Clique.verifyByRequest", header.Number.Uint64(), len(parents))
 	}
 	t := time.Now()
 	defer func() {
-		fmt.Println("in Clique.verifyByRequest-Done", header.Number.Uint64(), time.Since(t))
+		debugLog("in Clique.verifyByRequest-Done", header.Number.Uint64(), time.Since(t))
 	}()
 
 	if header.Number == nil {
@@ -381,10 +381,10 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return err
 	}
 
-	fmt.Println("applyAndStoreSnapshot-3-START", snap.Number)
+	debugLog("applyAndStoreSnapshot-3-START", snap.Number)
 	err = c.applyAndStoreSnapshot(snap, snapID, true, header)
 	if err != nil {
-		fmt.Println("applyAndStoreSnapshot-3-END", snap.Number)
+		debugLog("applyAndStoreSnapshot-3-END", snap.Number)
 	}
 	return err
 }
@@ -553,7 +553,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, snapID uint64, check bool
 
 	if hash != (common.Hash{}) && check {
 		s, ok := c.getSnapshot(num, &hash, snapID)
-		fmt.Println("findSnapshot-applyAndStoreSnapshot", snapID, snap.Number, parentsToString(headers), ok, debug.Callers(3))
+		debugLog("findSnapshot-applyAndStoreSnapshot", snapID, snap.Number, len(headers), ok, debug.Callers(3))
 		if ok {
 			*snap = *s
 			return nil
@@ -561,20 +561,20 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, snapID uint64, check bool
 	}
 
 	t := time.Now()
-	fmt.Println("findSnapshot-applyAndStoreSnapshot-1", snapID, snap.Number, parentsToString(headers))
+	debugLog("findSnapshot-applyAndStoreSnapshot-1", snapID, snap.Number, len(headers))
 	if len(headers) > 0 && headers[len(headers)-1].Number.Uint64() > snap.Number {
 		if err := snap.apply(c.recoverSig, snapID, headers...); err != nil {
 			return err
 		}
 	}
-	fmt.Println("applyAndStoreSnapshot-1", snapID, snap.Number, parentsToString(headers), time.Since(t), debug.Callers(3))
+	debugLog("applyAndStoreSnapshot-1", snapID, snap.Number, len(headers), time.Since(t), debug.Callers(3))
 	t = time.Now()
 
 	c.recentsAdd(snap.Number, snap.Hash, snap)
-	fmt.Println("applyAndStoreSnapshot-2", snapID, snap.Number, parentsToString(headers), time.Since(t))
+	debugLog("applyAndStoreSnapshot-2", snapID, snap.Number, len(headers), time.Since(t))
 	t = time.Now()
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-	fmt.Println("applyAndStoreSnapshot-3", snapID, snap.Number, time.Since(t))
+	debugLog("applyAndStoreSnapshot-3", snapID, snap.Number, time.Since(t))
 	t = time.Now()
 
 	// If we've generated a new checkpoint snapshot, save to disk
@@ -585,7 +585,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, snapID uint64, check bool
 		log.Trace("Stored a snapshot to disk", "snapID", snapID, "number", snap.Number, "hash", snap.Hash)
 	}
 
-	fmt.Println("applyAndStoreSnapshot-4", snapID, snap.Number, time.Since(t))
+	debugLog("applyAndStoreSnapshot-4", snapID, snap.Number, time.Since(t))
 
 	return nil
 }
@@ -608,7 +608,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.HashCache() != header.ParentHash {
-		fmt.Println("clique.verifyCascadingFields-1 consensus.ErrUnknownAncestor")
+		debugLog("clique.verifyCascadingFields-1 consensus.ErrUnknownAncestor")
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -669,9 +669,9 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 				snap = newSnapshot(c.config, c.snapStorage, number, checkpointHash, signers)
 
-				fmt.Println("applyAndStoreSnapshot-1-START", snap.Number)
+				debugLog("applyAndStoreSnapshot-1-START", snap.Number)
 				if err := c.applyAndStoreSnapshot(snap, snapID, true); err != nil {
-					fmt.Println("applyAndStoreSnapshot-1-END", snap.Number)
+					debugLog("applyAndStoreSnapshot-1-END", snap.Number)
 					return nil, err
 				}
 
@@ -685,7 +685,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
 			if header.HashCache() != hash || header.Number.Uint64() != number {
-				fmt.Println("snapshot-1 consensus.ErrUnknownAncestor")
+				debugLog("snapshot-1 consensus.ErrUnknownAncestor")
 				return nil, consensus.ErrUnknownAncestor
 			}
 			parents = parents[:len(parents)-1]
@@ -693,7 +693,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			// No explicit parents (or no more left), reach out to the database
 			header = chain.GetHeader(hash, number)
 			if header == nil {
-				fmt.Println("snapshot-2 consensus.ErrUnknownAncestor")
+				debugLog("snapshot-2 consensus.ErrUnknownAncestor")
 				return nil, consensus.ErrUnknownAncestor
 			}
 		}
@@ -706,10 +706,10 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	fmt.Println("applyAndStoreSnapshot-2-START", snap.Number)
+	debugLog("applyAndStoreSnapshot-2-START", snap.Number)
 	err := c.applyAndStoreSnapshot(snap, snapID, true, headers...)
 	if err != nil {
-		fmt.Println("applyAndStoreSnapshot-2-END", snap.Number)
+		debugLog("applyAndStoreSnapshot-2-END", snap.Number)
 		return nil, err
 	}
 
@@ -841,7 +841,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
-		fmt.Println("Prepare error ErrUnknownAncestor", number)
+		debugLog("Prepare error ErrUnknownAncestor", number)
 		return consensus.ErrUnknownAncestor
 	}
 	header.Time = parent.Time + c.config.Period
@@ -1054,17 +1054,17 @@ func (c *Clique) PrepareHeaders(_ []*types.Header) {
 func (c *Clique) checkSnapshot(num uint64, hash *common.Hash, snapID uint64) bool {
 	t := time.Now()
 	defer func() {
-		fmt.Println("checkSnapshot", num, time.Since(t))
+		debugLog("checkSnapshot", num, time.Since(t))
 	}()
 
 	ok, _ := hasSnapshot(c.db, num)
 	if !ok {
 		return false
 	} else {
-		fmt.Println("0000000000000000000000000000000000000000000000000000")
+		debugLog("0000000000000000000000000000000000000000000000000000")
 	}
 
-	fmt.Println("findSnapshot-checkSnapshot")
+	debugLog("findSnapshot-checkSnapshot")
 	if ok := c.findSnapshot(num, hash, snapID); !ok {
 		return c.lookupSnapshot(num)
 	}
@@ -1080,32 +1080,32 @@ func (c *Clique) findSnapshot(num uint64, hash *common.Hash, snapID uint64) bool
 		err      error
 	)
 
-	fmt.Println("findSnapshot-0", snapID, num, ok)
+	debugLog("findSnapshot-0", snapID, num, ok)
 	if h, ok = c.snapshotBlocks.Get(num); ok {
 		snapHash, ok = h.(common.Hash)
-		fmt.Println("findSnapshot-1", snapID, num, ok)
+		debugLog("findSnapshot-1", snapID, num, ok)
 		if ok {
 			if hash != nil && *hash != snapHash {
 				ok = false
 			} else {
 				// If an in-memory snapshot was found, use that
 				ok = c.recentsHas(snapHash)
-				fmt.Println("findSnapshot-2", snapID, num, ok)
+				debugLog("findSnapshot-2", snapID, num, ok)
 			}
 		}
 	}
-	fmt.Println("findSnapshot-3", snapID, num, ok)
+	debugLog("findSnapshot-3", snapID, num, ok)
 
 	if !ok && hash != nil {
 		// If an on-disk checkpoint snapshot can be found, use that
 		ok, err = hasSnapshotData(c.db, num, *hash)
-		fmt.Println("findSnapshot-4", num, ok)
+		debugLog("findSnapshot-4", num, ok)
 		if err != nil {
-			log.Error("while getting a snapshot", "snapID", snapID, "block", num, "snapHash", *hash, "err", err)
+			debugLog("findSnapshot. while getting a snapshot", "snapID", snapID, "block", num, "snapHash", *hash, "err", err)
 			ok = false
 		}
 	}
-	fmt.Println("findSnapshot-5", snapID, num, ok)
+	debugLog("findSnapshot-5", snapID, num, ok)
 	return ok
 }
 
@@ -1118,32 +1118,32 @@ func (c *Clique) getSnapshot(num uint64, hash *common.Hash, snapID uint64) (*Sna
 		err      error
 	)
 
-	fmt.Println("findSnapshot-0", snapID, num, ok)
+	debugLog("findSnapshot-0", snapID, num, ok)
 	if h, ok = c.snapshotBlocks.Get(num); ok {
 		snapHash, ok = h.(common.Hash)
-		fmt.Println("findSnapshot-1", snapID, num, ok)
+		debugLog("findSnapshot-1", snapID, num, ok)
 		if ok {
 			if hash != nil && *hash != snapHash {
 				ok = false
 			} else {
 				// If an in-memory snapshot was found, use that
 				s, ok = c.recentsGet(snapHash)
-				fmt.Println("findSnapshot-2", snapID, num, ok)
+				debugLog("findSnapshot-2", snapID, num, ok)
 			}
 		}
 	}
-	fmt.Println("findSnapshot-3", snapID, num, ok)
+	debugLog("findSnapshot-3", snapID, num, ok)
 
 	if !ok && hash != nil {
 		// If an on-disk checkpoint snapshot can be found, use that
 		s, err = loadSnapshot(c.db, num, *hash)
-		fmt.Println("findSnapshot-4", num, ok)
+		debugLog("findSnapshot-4", num, ok)
 		if err != nil {
-			log.Error("while getting a snapshot", "snapID", snapID, "block", num, "snapHash", *hash, "err", err)
+			debugLog("getSnapshot. while getting a snapshot", "snapID", snapID, "block", num, "snapHash", *hash, "err", err)
 			ok = false
 		}
 	}
-	fmt.Println("findSnapshot-5", snapID, num, ok)
+	debugLog("findSnapshot-5", snapID, num, ok)
 	return s, ok
 }
 
@@ -1161,7 +1161,7 @@ func (c *Clique) lookupSnapshot(num uint64) bool {
 
 		k, _, err := cur.Seek(prefix)
 		if err != nil {
-			fmt.Println("lookupSnapshot-err-1", err, num)
+			debugLog("lookupSnapshot-err-1", err, num)
 			return err
 		}
 
@@ -1169,11 +1169,11 @@ func (c *Clique) lookupSnapshot(num uint64) bool {
 
 		return nil
 	}); err != nil {
-		log.Error("while getting a snapshot", "block", num, "err", err)
+		debugLog("lookupSnapshot. while getting a snapshot", "block", num, "err", err)
 		return false
 	}
 
-	fmt.Println("seek", n)
+	debugLog("seek", n)
 
 	return ok
 }

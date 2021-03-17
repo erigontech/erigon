@@ -104,7 +104,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 						// todo send first out of given range request immediately
 						err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParentsSlice)
 						if errors.Is(err, errNotAllParents) {
-							fmt.Println("verifyByRequest errNotAllParents", req.ID, header.Number.Uint64(), len(knownParentsSlice), parentsToValidate)
+							log.Debug(fmt.Sprint("verifyByRequest errNotAllParents", req.ID, header.Number.Uint64(), len(knownParentsSlice), parentsToValidate))
 							c.addVerifyHeaderRequest(req.ID, header, req.Seal[i], req.Deadline, knownParentsSlice, parentsToValidate)
 						}
 					}
@@ -115,7 +115,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 						continue
 					}
 
-					fmt.Println("NEEDED", ancestorsReq.ID, ancestorsReq.Number, ancestorsReq.HighestBlockNumber, ancestorsReq.HighestHash.String(), time.Since(tn))
+					log.Debug(fmt.Sprint("NEEDED", ancestorsReq.ID, ancestorsReq.Number, ancestorsReq.HighestBlockNumber, ancestorsReq.HighestHash.String(), time.Since(tn)))
 
 					c.API.HeadersRequests <- ancestorsReq
 
@@ -127,9 +127,9 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 				case parentResp := <-c.API.HeaderResponses:
 					if len(parentResp.Headers) > 0 {
-						fmt.Println("PARENT-FROM-CLIENT", parentResp.ID, parentResp.Number, parentResp.Headers[0].Number.Uint64())
+						log.Debug(fmt.Sprint("PARENT-FROM-CLIENT", parentResp.ID, parentResp.Number, parentResp.Headers[0].Number.Uint64()))
 					} else {
-						fmt.Println("PARENT-FROM-CLIENT", parentResp.ID, parentResp.Number, parentResp.Err)
+						log.Debug(fmt.Sprint("PARENT-FROM-CLIENT", parentResp.ID, parentResp.Number, parentResp.Err))
 					}
 					if parentResp.Err != nil {
 						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
@@ -280,7 +280,7 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 			continue
 		}
 
-		fmt.Println("VerifyRequestsCommonAncestor-XXX-0", reqID, num, len(req.KnownParents))
+		log.Debug(fmt.Sprint("VerifyRequestsCommonAncestor-XXX-0", reqID, num, len(req.KnownParents)))
 
 		appendAncestors(req, headers, knownByRequests)
 
@@ -290,7 +290,7 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 	if len(nums) == 1 {
 		req, _ := reqHeaders.Get(nums[0])
 
-		fmt.Println("VerifyRequestsCommonAncestor-XXX-1", reqID, req.Header.Number.Uint64(), req.KnownParents[0].Number.Uint64(), len(req.KnownParents))
+		log.Debug(fmt.Sprint("VerifyRequestsCommonAncestor-XXX-1", reqID, req.Header.Number.Uint64(), req.KnownParents[0].Number.Uint64(), len(req.KnownParents)))
 
 		_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
 	} else {
@@ -322,17 +322,6 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 						continue
 					}
 
-					knownStr := "known: "
-					for _, k := range req.KnownParents {
-						knownStr += fmt.Sprintf("%d ", k.Number.Uint64())
-					}
-
-					fmt.Printf("VerifyRequestsCommonAncestor-XXX-3 id=%d num=%d knownFrom=%d knownTo=%d known=%d: %q\n",
-						reqID,
-						req.Header.Number.Uint64(),
-						req.KnownParents[0].Number.Uint64(), req.KnownParents[len(req.KnownParents)-1].Number.Uint64(),
-						len(req.KnownParents),
-						knownStr)
 					_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
 				}
 			}()
@@ -347,13 +336,13 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 		return errNotAllParents
 	}
 
-	fmt.Println("verify", reqID, header.Number.Uint64(), len(knownParents))
+	log.Debug(fmt.Sprint("verify", reqID, header.Number.Uint64(), len(knownParents)))
 	t := time.Now()
 	err := c.Server.Verify(c.API.Chain, header, knownParents, false, seal)
 	if err == nil {
 		c.API.CacheHeader(header)
 	}
-	fmt.Println("in verifyByRequest-1", reqID, header.Number.Uint64(), time.Since(t))
+	log.Debug(fmt.Sprint("in verifyByRequest-1", reqID, header.Number.Uint64(), time.Since(t)))
 
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.HashCache(), err}
 
@@ -426,7 +415,7 @@ func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, s
 	for _, p := range knownParentsSlice {
 		knownStr += fmt.Sprintf("%d ", p.Number.Uint64())
 	}
-	fmt.Println(knownStr)
+	log.Debug(knownStr)
 
 	blocks.Add(header.Number.Uint64(), toVerifyRequest(reqID, header, seal, deadline, knownParentsSlice, parentsToValidate))
 }
@@ -483,11 +472,11 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 	from := reqHeaders[0].Number.Uint64()
 	to := reqHeaders[len(reqHeaders)-1].Number.Uint64()
 
-	fmt.Println("FROM", from, "TO", to)
+	log.Debug(fmt.Sprint("FROM", from, "TO", to))
 
 	headerIdx := int(headerNumber - from)
 	if parentsToValidate < headerIdx {
-		fmt.Println("c.innerValidate <-", reqID, header.Number, reqHeaders[headerIdx].Number.Uint64(), parentsToValidate, headerIdx, from)
+		log.Debug(fmt.Sprint("c.innerValidate <-", reqID, header.Number, reqHeaders[headerIdx].Number.Uint64(), parentsToValidate, headerIdx, from))
 		c.innerValidate <- &validateHeaderRequest{reqID, header, seal, reqHeaders[headerIdx-parentsToValidate : headerIdx]}
 		return nil, 0, nil
 	}

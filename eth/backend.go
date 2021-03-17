@@ -298,7 +298,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		consensusConfig = &config.Ethash
 	}
 
-	eth.engine = CreateConsensusEngine(stack, chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, chainDb)
+	eth.engine = CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, chainDb)
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
 
@@ -526,7 +526,7 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
 	var eng consensus.Engine
 	// Otherwise assume proof-of-work
 

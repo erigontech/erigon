@@ -16,6 +16,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -38,97 +39,13 @@ const (
 	estHeaderRlpSize  = 500             // Approximate size of an RLP encoded block header
 )
 
-type chainReader struct {
-	config *params.ChainConfig
-}
-
-func (cr chainReader) Config() *params.ChainConfig                             { return cr.config }
-func (cr chainReader) CurrentHeader() *types.Header                            { panic("") }
-func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header { panic("") }
-func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           { panic("") }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
-
-//nolint:interfacer
-func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
-	lock.Lock()
-	defer lock.Unlock()
-	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
-	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
-	if len(invalidAnchors) > 0 {
-		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
-			log.Error("Invalidation of anchor failed", "error", err1)
-		}
-		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
-	}
-	foundTip, end, penalty := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
-	if penalty != headerdownload.NoPenalty {
-		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
-		return
-	}
-	if end == 0 {
-		//log.Info("Duplicate segment")
-		return
-	}
-	currentTime := uint64(time.Now().Unix())
-	var hardCoded bool
-	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
-		hardCoded = hardCoded1
-	} else {
-		//log.Error("VerifySeals", "error", err1)
-		return
-	}
-	if err1 := hd.FlushBuffer(); err1 != nil {
-		log.Error("Could not flush the buffer, will discard the data", "error", err1)
-		return
-	}
-	// There are 4 cases
-	if foundAnchor {
-		if foundTip {
-			// Connect
-			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
-				log.Error("Connect failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Connected", "start", start, "end", end)
-			}
-		} else {
-			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
-				log.Error("ExtendDown failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Down", "start", start, "end", end)
-			}
-		}
-	} else if foundTip {
-		if end > 0 {
-			// ExtendUp
-			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
-				log.Error("ExtendUp failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Up", "start", start, "end", end)
-			}
-		}
-	} else {
-		// NewAnchor
-		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
-			log.Error("NewAnchor failed", "error", err1)
-		} else {
-			hd.AddSegmentToBuffer(segment, start, end)
-			//log.Info("NewAnchor", "start", start, "end", end)
-		}
-	}
-	//log.Info(hd.AnchorState())
-}
-
 func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddr)
 	// CREATING GRPC CLIENT CONNECTION
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Timeout: 10 * time.Minute,
 		}),
@@ -144,7 +61,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 }
 
 // Download creates and starts standalone downloader
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database, timeout, window int) error {
+func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, window int, chain string) error {
 	ctx := rootContext()
 
 	sentryClient, err := grpcSentryClient(ctx, sentryAddr)
@@ -152,11 +69,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		return err
 	}
 
-	var bufferSize datasize.ByteSize
-	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
-	}
-	controlServer, err1 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
+	controlServer, err1 := NewControlServer(db, sentryClient, window, chain)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
@@ -200,6 +113,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 				}
 			}
 			cancelFn()
+			// Wait before trying to reconnect to prevent log flooding
+			time.Sleep(2 * time.Second)
 		}
 	}()
 	go func() {
@@ -225,6 +140,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 				}
 			}
 			cancelFn()
+			// Wait before trying to reconnect to prevent log flooding
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
@@ -233,7 +150,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		db,
 		controlServer.hd,
 		controlServer.bd,
-		controlServer.sendRequests,
+		controlServer.chainConfig,
+		controlServer.sendHeaderRequest,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
@@ -247,27 +165,22 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout, window int) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string) error {
 	ctx := rootContext()
 
 	sentryServer := &SentryServerImpl{
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
 	}
-	var err error
-	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
-	if err != nil {
-		return err
-	}
 	sentryClient := &SentryClientDirect{}
 	sentryClient.SetServer(sentryServer)
-	var bufferSize datasize.ByteSize
-	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+	controlServer, err := NewControlServer(db, sentryClient, window, chain)
+	if err != nil {
+		return fmt.Errorf("create core P2P server: %w", err)
 	}
-	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
-	if err2 != nil {
-		return fmt.Errorf("create core P2P server: %w", err2)
+	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, controlServer.genesisHash, natSetting, port, staticPeers, discovery, netRestrict)
+	if err != nil {
+		return err
 	}
 	statusMsg := &proto_sentry.StatusData{
 		NetworkId:       controlServer.networkId,
@@ -278,17 +191,19 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 			Forks:   controlServer.forks,
 		},
 	}
-	//nolint:govet
-	callCtx, _ := context.WithCancel(ctx)
+	callCtx, cancelFn := context.WithCancel(ctx)
 	if _, err = sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
+		cancelFn()
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
-	//nolint:govet
-	callCtx, _ = context.WithCancel(ctx)
+	cancelFn()
+	callCtx, cancelFn = context.WithCancel(ctx)
 	receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err2 != nil {
+		cancelFn()
 		return fmt.Errorf("receive messages failed: %w", err2)
 	}
+	cancelFn()
 	go func() {
 		inreq, err := receiveClient.Recv()
 		for ; err == nil; inreq, err = receiveClient.Recv() {
@@ -300,12 +215,13 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 			log.Error("Receive loop terminated", "error", err)
 		}
 	}()
-	//nolint:govet
-	callCtx, _ = context.WithCancel(ctx)
+	callCtx, cancelFn = context.WithCancel(ctx)
 	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err3 != nil {
+		cancelFn()
 		return fmt.Errorf("receive upload messages failed: %w", err3)
 	}
+	cancelFn()
 	go func() {
 		inreq, err := receiveUploadClient.Recv()
 		for ; err == nil; inreq, err = receiveUploadClient.Recv() {
@@ -323,7 +239,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		db,
 		controlServer.hd,
 		controlServer.bd,
-		controlServer.sendRequests,
+		controlServer.chainConfig,
+		controlServer.sendHeaderRequest,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
@@ -353,52 +270,58 @@ type ControlServerImpl struct {
 	db                   ethdb.Database
 }
 
-func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
-	//config := eth.DefaultConfig.Ethash
-	engine := ethash.New(ethash.Config{
+func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
+	ethashConfig := &ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
 		DatasetDir:       "ethash",
 		DatasetsInMem:    1,
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
-	}, nil, false)
-	cr := chainReader{config: params.MainnetChainConfig}
-	calcDiffFunc := func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
-		return engine.CalcDifficulty(cr, childTimestamp, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash)
 	}
-	verifySealFunc := func(header *types.Header) error {
-		return engine.VerifySeal(cr, header)
+	var chainConfig *params.ChainConfig
+	var err error
+	var genesis *core.Genesis
+	var genesisHash common.Hash
+	var networkID uint64
+	switch chain {
+	case "mainnet":
+		networkID = 1
+		genesis = core.DefaultGenesisBlock()
+		genesisHash = params.MainnetGenesisHash
+	case "ropsten":
+		networkID = 3
+		genesis = core.DefaultRopstenGenesisBlock()
+		genesisHash = params.RopstenGenesisHash
+	case "goerli":
+		networkID = 5
+		genesis = core.DefaultGoerliGenesisBlock()
+		genesisHash = params.GoerliGenesisHash
+	default:
+		return nil, fmt.Errorf("chain %s is not known", chain)
 	}
+	if chainConfig, _, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
+		return nil, fmt.Errorf("setup genesis block: %w", err)
+	}
+	engine := eth.CreateConsensusEngine(chainConfig, ethashConfig, nil, false, db)
 	hd := headerdownload.NewHeaderDownload(
-		common.Hash{}, /* initialHash */
-		filesDir,
-		bufferSize, /* bufferLimit */
-		16*1024,    /* tipLimit */
-		1024,       /* initPowDepth */
-		calcDiffFunc,
-		verifySealFunc,
-		3600, /* newAnchor future limit */
-		3600, /* newAnchor past limit */
+		512,       /* anchorLimit */
+		1024*1024, /* tipLimit */
+		engine,
 	)
-	err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
-	if err != nil {
-		log.Error("Recovery from DB failed", "error", err)
+	if err = hd.RecoverFromDb(db); err != nil {
+		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	hardTips := headerdownload.InitHardCodedTips("mainnet")
-	if err = hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil {
-		log.Error("Recovery from file failed, will start from scratch", "error", err)
-	}
+	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chain)
 
-	hd.SetHardCodedTips(hardTips)
-	log.Info(hd.AnchorState())
+	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
-	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
+	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
-	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
+	cs.genesisHash = genesisHash
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
-	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
+	cs.networkId = networkID
 	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
 	return cs, err
 }
@@ -431,7 +354,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_se
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
-		if !cs.hd.HasTip(announce.Hash) {
+		if !cs.hd.HasLink(announce.Hash) {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
 				Amount:  1,
@@ -490,7 +413,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
-				processSegment(&cs.lock, cs.hd, segment)
+				cs.hd.ProcessSegment(segment, false /* newBlock */)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -541,7 +464,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
+			cs.hd.ProcessSegment(segments[0], true /* newBlock */) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -824,34 +747,44 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 	}
 }
 
-func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
-	for _, req := range reqs {
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
-			Amount:  uint64(req.Length),
-			Reverse: true,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: req.Hash},
-		})
-		if err != nil {
-			log.Error("Could not encode header request", "err", err)
-			continue
-		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.Number,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GetBlockHeaders,
-				Data: bytes,
-			},
-		}
-		//nolint:govet
-		callCtx, _ := context.WithCancel(ctx)
-		_, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send header request", "err", err1)
-			continue
-		}
+func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
+	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+	reqData := &eth.GetBlockHeadersData{
+		Amount:  req.Length,
+		Reverse: req.Reverse,
+		Skip:    req.Skip,
+		Origin:  eth.HashOrNumber{Hash: req.Hash},
 	}
+	if req.Hash == (common.Hash{}) {
+		reqData.Origin.Number = req.Number
+	}
+	bytes, err := rlp.EncodeToBytes(reqData)
+	if err != nil {
+		log.Error("Could not encode header request", "err", err)
+		return nil
+	}
+	minBlock := req.Number
+	if !req.Reverse {
+		minBlock = req.Number + req.Length*req.Skip
+	}
+	outreq := proto_sentry.SendMessageByMinBlockRequest{
+		MinBlock: minBlock,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_GetBlockHeaders,
+			Data: bytes,
+		},
+	}
+	//nolint:govet
+	callCtx, _ := context.WithCancel(ctx)
+	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
+	if err1 != nil {
+		log.Error("Could not send header request", "err", err1)
+		return nil
+	}
+	if sentPeers == nil || len(sentPeers.Peers) == 0 {
+		return nil
+	}
+	return sentPeers.Peers[0]
 }
 
 func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {

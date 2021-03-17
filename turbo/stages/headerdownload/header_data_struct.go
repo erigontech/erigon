@@ -1,94 +1,117 @@
 package headerdownload
 
 import (
-	"container/list"
+	"container/heap"
 	"fmt"
-	"io"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/petar/GoLLRB/llrb"
 )
 
-// AnchorTipItem is element of the priority queue of tips belonging to an anchor
-// This queue is prioritised by block heights, lowest block height being first out
-type AnchorTipItem struct {
-	hash   common.Hash
-	height uint64
-	hard   bool // Whether the tip is hard coded
+// Link is a chain link that can be connect to other chain links
+// For a given link, parent link can be found by hd.links[link.header.ParentHash], and child links by link.next (there may be more than one child in case of forks)
+// Links encapsule block headers
+// Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still
+// present to allow potential reorgs
+type Link struct {
+	blockHeight uint64
+	header      *types.Header
+	hash        common.Hash // Hash of the header
+	next        []*Link     // Allows iteration over links in ascending block height order
+	persisted   bool        // Whether this link comes from the database record
+	preverified bool        // Ancestor of pre-verified header
+	idx         int         // Index in the heap
 }
 
-type AnchorTipQueue []AnchorTipItem
+// LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
+// In other instances, it is used to limit number of links of corresponding type (persistent and non-persistent) in memory
+type LinkQueue []*Link
 
-func (atq AnchorTipQueue) Len() int {
-	return len(atq)
+// Len (part of heap.Interface) returns the current size of the link queue
+func (lq LinkQueue) Len() int {
+	return len(lq)
 }
 
-func (atq AnchorTipQueue) Less(i, j int) bool {
-	if atq[i].hard == atq[j].hard {
-		return atq[i].height < atq[j].height
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// insert headers in the ascending order of their block heights.
+func (lq LinkQueue) Less(i, j int) bool {
+	if (*lq[i]).persisted {
+		return (*lq[i]).blockHeight < (*lq[j]).blockHeight
 	}
-	return !atq[i].hard
+	return (*lq[i]).blockHeight > (*lq[j]).blockHeight
 }
 
-func (atq AnchorTipQueue) Swap(i, j int) {
-	atq[i], atq[j] = atq[j], atq[i]
+// Swap (part of heap.Interface) moves two links in the queue into each other's places. Note that each link has idx attribute that is getting adjusted during
+// the swap. The idx attribute allows the removal of links from the middle of the queue (in case if links are getting invalidated due to
+// failed verification of unavailability of parent headers)
+func (lq LinkQueue) Swap(i, j int) {
+	lq[i].idx = j
+	lq[j].idx = i
+	lq[i], lq[j] = lq[j], lq[i]
 }
 
-func (atq *AnchorTipQueue) Push(x interface{}) {
+// Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
+func (lq *LinkQueue) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	*atq = append(*atq, x.(AnchorTipItem))
+	l := x.(*Link)
+	l.idx = len(*lq)
+	*lq = append(*lq, l)
 }
 
-func (atq *AnchorTipQueue) Pop() interface{} {
-	old := *atq
+// Pop (part of heap.Interface) removes the first link from the queue
+func (lq *LinkQueue) Pop() interface{} {
+	old := *lq
 	n := len(old)
 	x := old[n-1]
-	*atq = old[0 : n-1]
+	*lq = old[0 : n-1]
 	return x
 }
 
 type Anchor struct {
-	hardCoded    bool // Whether this anchor originated from a hard-coded header
-	tipQueue     *AnchorTipQueue
-	difficulty   uint256.Int
-	parentHash   common.Hash
-	hash         common.Hash
-	blockHeight  uint64
-	timestamp    uint64
-	maxTipHeight uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
-	anchorID     int    // Unique ID of this anchor to be able to find it in the balanced tree
+	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
+	blockHeight uint64
+	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
+	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+	links       []*Link // Links attached immediately to this anchor
 }
 
-// For placing anchors into the sorting tree
-func (a *Anchor) Less(bi llrb.Item) bool {
-	b := bi.(*Anchor)
-	if a.tipStretch() == b.tipStretch() {
-		return a.anchorID < b.anchorID
+type AnchorQueue []*Anchor
+
+func (aq AnchorQueue) Len() int {
+	return len(aq)
+}
+
+func (aq AnchorQueue) Less(i, j int) bool {
+	if (*aq[i]).timestamp == (*&aq[j]).timestamp {
+		// When timestamps are the same, we prioritise low block height anchors
+		return (*aq[i]).blockHeight < (*aq[j]).blockHeight
 	}
-	return a.tipStretch() > b.tipStretch()
+	return (*aq[i]).timestamp < (*aq[j]).timestamp
 }
 
-func (a *Anchor) tipStretch() uint64 {
-	if a.tipQueue.Len() == 0 {
-		return 0
-	}
-	return a.maxTipHeight - (*a.tipQueue)[0].height
+func (aq AnchorQueue) Swap(i, j int) {
+	aq[i], aq[j] = aq[j], aq[i]
 }
 
-type Tip struct {
-	anchor               *Anchor
-	cumulativeDifficulty uint256.Int
-	timestamp            uint64
-	difficulty           uint256.Int
-	blockHeight          uint64
-	uncleHash            common.Hash
+func (aq *AnchorQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*aq = append(*aq, x.(*Anchor))
+}
+
+func (aq *AnchorQueue) Pop() interface{} {
+	old := *aq
+	n := len(old)
+	x := old[n-1]
+	*aq = old[0 : n-1]
+	return x
 }
 
 // First item in ChainSegment is the anchor
@@ -122,116 +145,42 @@ type PeerPenalty struct {
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	Hash   common.Hash
-	Number uint64
-	Length int
+	Hash    common.Hash
+	Number  uint64
+	Length  uint64
+	Skip    uint64
+	Reverse bool
 }
 
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
-type HeaderBuffer struct {
-	buffer       []byte
-	heights      []uint64
-	startOffsets []int
-	endOffsets   []int
-	idx, pos     int
-}
-
-func (hb *HeaderBuffer) AddHeader(headerRaw []byte, height uint64) {
-	hb.startOffsets = append(hb.startOffsets, len(hb.buffer))
-	hb.buffer = append(hb.buffer, headerRaw...)
-	hb.heights = append(hb.heights, height)
-	hb.endOffsets = append(hb.endOffsets, len(hb.buffer))
-}
-
-func (hb *HeaderBuffer) Len() int {
-	return len(hb.heights)
-}
-
-func (hb *HeaderBuffer) Less(i, j int) bool {
-	return hb.heights[i] < hb.heights[j]
-}
-
-func (hb *HeaderBuffer) Swap(i, j int) {
-	hb.heights[i], hb.heights[j] = hb.heights[j], hb.heights[i]
-	hb.startOffsets[i], hb.startOffsets[j] = hb.startOffsets[j], hb.startOffsets[i]
-	hb.endOffsets[i], hb.endOffsets[j] = hb.endOffsets[j], hb.endOffsets[i]
-}
-
-func (hb *HeaderBuffer) Flush(w io.Writer) error {
-	for i, startOffset := range hb.startOffsets {
-		endOffset := hb.endOffsets[i]
-		if _, err := w.Write(hb.buffer[startOffset:endOffset]); err != nil {
-			return err
-		}
-	}
-	hb.Clear()
-	return nil
-}
-
-func (hb *HeaderBuffer) Read(p []byte) (int, error) {
-	if hb.idx >= len(hb.startOffsets) {
-		return 0, io.EOF
-	}
-	var n int
-	for hb.idx < len(hb.startOffsets) && hb.endOffsets[hb.idx]-hb.startOffsets[hb.idx]-hb.pos <= len(p)-n {
-		copy(p[n:], hb.buffer[hb.startOffsets[hb.idx]+hb.pos:hb.endOffsets[hb.idx]])
-		n += hb.endOffsets[hb.idx] - hb.startOffsets[hb.idx] - hb.pos
-		hb.idx++
-		hb.pos = 0
-	}
-	if hb.idx < len(hb.startOffsets) {
-		copy(p[n:], hb.buffer[hb.startOffsets[hb.idx]+hb.pos:hb.endOffsets[hb.idx]])
-		hb.pos += len(p) - n
-		n = len(p)
-	}
-	return n, nil
-}
-
-func (hb *HeaderBuffer) Clear() {
-	hb.buffer = hb.buffer[:0]
-	hb.heights = hb.heights[:0]
-	hb.startOffsets = hb.startOffsets[:0]
-	hb.endOffsets = hb.endOffsets[:0]
-	hb.idx = 0
-	hb.pos = 0
-}
-
-func (hb *HeaderBuffer) IsEmpty() bool {
-	return len(hb.buffer) == 0
-}
-
 type HeaderDownload struct {
 	lock                   sync.RWMutex
-	buffer                 *HeaderBuffer
-	anotherBuffer          *HeaderBuffer
 	bufferLimit            int
 	filesDir               string
 	files                  []string
 	badHeaders             map[common.Hash]struct{}
-	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
-	nextAnchorID           int
-	hardTips               map[common.Hash]HeaderRecord // Set of hashes for hard-coded tips
-	maxHardTipHeight       uint64
-	tips                   map[common.Hash]*Tip // Tips by tip hash
-	tipCount               int                  // Total number of tips associated to all anchors
-	tipLimit               int                  // Maximum allowed number of tips
-	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
+	anchors                map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
+	preverifiedHashes      map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
+	preverifiedHeight      uint64                   // Block height corresponding to the last preverified hash
+	links                  map[common.Hash]*Link    // Links by header hash
+	linkLimit              int                      // Maximum allowed number of links
+	persistedLinkLimit     int                      // Maximum allowed number of persisted links
+	anchorLimit            int                      // Maximum allowed number of anchors
 	highestTotalDifficulty uint256.Int
-	requestQueue           *list.List
-	calcDifficultyFunc     CalcDifficultyFunc
-	verifySealFunc         VerifySealFunc
-	RequestQueueTimer      *time.Timer
+	engine                 consensus.Engine
+	headerReader           consensus.ChainHeaderReader
 	highestInDb            uint64 // Height of the highest block header in the database
 	initialHash            common.Hash
 	stageReady             bool
 	stageReadyCh           chan struct{}
 	stageHeight            uint64
-	headersAdded           int
+	topSeenHeight          uint64
+	insertList             []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	persistedLinkQueue     *LinkQueue   // Priority queue of persisted links used to limit their number
+	linkQueue              *LinkQueue   // Priority queue of non-persisted links used to limit their number
+	anchorQueue            *AnchorQueue // Priority queue of anchors used to sequence the header requests
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -240,73 +189,28 @@ type HeaderRecord struct {
 	Header *types.Header
 }
 
-type TipQueueItem struct {
-	tip     *Tip
-	tipHash common.Hash
-}
-
-type RequestQueueItem struct {
-	anchorParent common.Hash
-	waitUntil    uint64
-}
-
-type RequestQueue []RequestQueueItem
-
-func (rq RequestQueue) Len() int {
-	return len(rq)
-}
-
-func (rq RequestQueue) Less(i, j int) bool {
-	return rq[i].waitUntil < rq[j].waitUntil
-}
-
-func (rq RequestQueue) Swap(i, j int) {
-	rq[i], rq[j] = rq[j], rq[i]
-}
-
-func (rq *RequestQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*rq = append(*rq, x.(RequestQueueItem))
-}
-
-func (rq *RequestQueue) Pop() interface{} {
-	old := *rq
-	n := len(old)
-	x := old[n-1]
-	*rq = old[0 : n-1]
-	return x
-}
-
 func NewHeaderDownload(
-	initialHash common.Hash,
-	filesDir string,
-	bufferLimit, tipLimit, initPowDepth int,
-	calcDifficultyFunc CalcDifficultyFunc,
-	verifySealFunc VerifySealFunc,
-	newAnchorFutureLimit, newAnchorPastLimit uint64,
+	anchorLimit int,
+	linkLimit int,
+	engine consensus.Engine,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
-		initialHash:          initialHash,
-		filesDir:             filesDir,
-		buffer:               &HeaderBuffer{},
-		anotherBuffer:        &HeaderBuffer{},
-		bufferLimit:          bufferLimit,
-		badHeaders:           make(map[common.Hash]struct{}),
-		anchors:              make(map[common.Hash][]*Anchor),
-		tipLimit:             tipLimit,
-		initPowDepth:         initPowDepth,
-		requestQueue:         list.New(),
-		anchorTree:           llrb.New(),
-		calcDifficultyFunc:   calcDifficultyFunc,
-		verifySealFunc:       verifySealFunc,
-		newAnchorFutureLimit: newAnchorFutureLimit,
-		newAnchorPastLimit:   newAnchorPastLimit,
-		hardTips:             make(map[common.Hash]HeaderRecord),
-		tips:                 make(map[common.Hash]*Tip),
-		stageReadyCh:         make(chan struct{}),
-		RequestQueueTimer:    time.NewTimer(time.Hour),
+		badHeaders:         make(map[common.Hash]struct{}),
+		anchors:            make(map[common.Hash]*Anchor),
+		persistedLinkLimit: linkLimit / 2,
+		linkLimit:          linkLimit / 2,
+		anchorLimit:        anchorLimit,
+		engine:             engine,
+		preverifiedHashes:  make(map[common.Hash]struct{}),
+		links:              make(map[common.Hash]*Link),
+		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
+		persistedLinkQueue: &LinkQueue{},
+		linkQueue:          &LinkQueue{},
+		anchorQueue:        &AnchorQueue{},
 	}
+	heap.Init(hd.persistedLinkQueue)
+	heap.Init(hd.linkQueue)
+	heap.Init(hd.anchorQueue)
 	return hd
 }
 
@@ -340,31 +244,24 @@ func (pp PeerPenalty) String() string {
 // HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
-	logPrefix          string
-	tx                 ethdb.DbWithPendingMutations
-	batch              ethdb.DbWithPendingMutations
-	prevHash           common.Hash // Hash of previously seen header - to filter out potential duplicates
-	prevHeight         uint64
-	newCanonical       bool
-	unwindPoint        uint64
-	canonicalBacktrack map[common.Hash]common.Hash
-	parentDiffs        map[common.Hash]*big.Int
-	childDiffs         map[common.Hash]*big.Int
-	highest            uint64
-	localTd            *big.Int
-	headerProgress     uint64
+	logPrefix      string
+	batch          ethdb.DbWithPendingMutations
+	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
+	prevHeight     uint64
+	newCanonical   bool
+	unwindPoint    uint64
+	highest        uint64
+	highestHash    common.Hash
+	localTd        *big.Int
+	headerProgress uint64
 }
 
-func NewHeaderInserter(logPrefix string, tx, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
-		logPrefix:          logPrefix,
-		tx:                 tx,
-		batch:              batch,
-		localTd:            localTd,
-		headerProgress:     headerProgress,
-		unwindPoint:        headerProgress,
-		canonicalBacktrack: make(map[common.Hash]common.Hash),
-		parentDiffs:        make(map[common.Hash]*big.Int),
-		childDiffs:         make(map[common.Hash]*big.Int),
+		logPrefix:      logPrefix,
+		batch:          batch,
+		localTd:        localTd,
+		headerProgress: headerProgress,
+		unwindPoint:    headerProgress,
 	}
 }

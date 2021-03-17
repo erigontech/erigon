@@ -575,6 +575,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			nil,
+			false,
 		)
 		if err != nil {
 			return err

@@ -72,7 +72,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.ChainConfig, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -88,7 +88,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.chainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.chainContext, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -237,14 +237,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.batchSize,
@@ -340,6 +340,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		nil,
 		nil,
 		nil,
+		false,
 	)
 	if err1 != nil {
 		return err1
@@ -428,9 +429,9 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		nil,
+		false,
 	)
 	if err2 != nil {
-		panic(err2)
 		return false, err2
 	}
 

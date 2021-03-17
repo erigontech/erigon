@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
@@ -28,41 +28,26 @@ func StageLoop(
 	db ethdb.Database,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
-	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
+	chainConfig *params.ChainConfig,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *big.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
-	if _, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */); err != nil {
-		return fmt.Errorf("setup genesis block: %w", err)
-	}
 	sync := stagedsync.New(
 		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
+	initialCycle := true
 	for {
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		var ready bool
-		var height uint64
-		// Keep requesting more headers until there is a heaviest chain
-		for ready, height = hd.Ready(); !ready; ready, height = hd.Ready() {
-			reqs, timer := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-			headerReqSend(ctx, reqs)
-			select {
-			case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
-				return nil
-			case <-timer.C: // When it is time to check on previously sent requests
-			case <-wakeUpChan: // When new message comes from the sentry
-			case <-hd.StageReadyChannel(): // When heaviest chain is ready
-			case <-logEvery.C:
-				logProgress(hd)
-			}
-		}
+		// Estimate the current top height seen from the peer
+		height := hd.TopSeenHeight()
 
 		origin, err := stages.GetStageProgress(db, stages.Headers)
 		if err != nil {
@@ -92,7 +77,7 @@ func StageLoop(
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		//cc.SetEngine(d.blockchain.Engine())
-		st, err1 := sync.Prepare(nil, nil /* chainConfig */, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil)
+		st, err1 := sync.Prepare(nil, chainConfig, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil, initialCycle)
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
@@ -154,27 +139,14 @@ func StageLoop(
 				}
 			}
 		}
+		initialCycle = false
 	}
-}
-
-// logProgress prints out progress of downloading headers, which happens before every cycle of the staged sync
-func logProgress(hd *headerdownload.HeaderDownload) {
-	files, bufferSize, headersAdded := hd.Progress()
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Downloading block headers",
-		"files flushed", files,
-		"buffer size", common.StorageSize(bufferSize),
-		"headers", headersAdded,
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
 }
 
 func ReplacementStages(ctx context.Context,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
-	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *big.Int),
@@ -189,7 +161,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)

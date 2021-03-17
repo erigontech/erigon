@@ -73,12 +73,14 @@ func BodiesForward(
 	var headHash common.Hash
 	var headSet bool
 	for !stopped {
-		if penalties {
-			penaltyPeers := bd.GetPenaltyPeers()
-			for _, penaltyPeer := range penaltyPeers {
-				penalise(ctx, penaltyPeer)
+		/*
+			if penalties {
+				penaltyPeers := bd.GetPenaltyPeers()
+				for _, penaltyPeer := range penaltyPeers {
+					penalise(ctx, penaltyPeer)
+				}
 			}
-		}
+		*/
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
