@@ -296,12 +296,7 @@ type Stat struct {
 func (env *Env) Stat() (*Stat, error) {
 	var _stat C.MDBX_stat
 	var ret C.int
-	if err := env.View(func(txn *Txn) error {
-		ret = C.mdbx_env_stat_ex(env._env, txn._txn, &_stat, C.size_t(unsafe.Sizeof(_stat)))
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+	ret = C.mdbx_env_stat_ex(env._env, nil, &_stat, C.size_t(unsafe.Sizeof(_stat)))
 	if ret != success {
 		return nil, operrno("mdbx_env_stat_ex", ret)
 	}
@@ -319,8 +314,15 @@ func (env *Env) Stat() (*Stat, error) {
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
-	MapSize                        int64 // Size of the data memory map
-	LastPNO                        int64 // ID of the last used page
+	MapSize int64 // Size of the data memory map
+	LastPNO int64 // ID of the last used page
+	Geo     struct {
+		Lower   uint64
+		Upper   uint64
+		Current uint64
+		Shrink  uint64
+		Grow    uint64
+	}
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -349,7 +351,20 @@ func (env *Env) Info() (*EnvInfo, error) {
 		return nil, operrno("mdbx_env_info", ret)
 	}
 	info := EnvInfo{
-		MapSize:        int64(_info.mi_mapsize),
+		MapSize: int64(_info.mi_mapsize),
+		Geo: struct {
+			Lower   uint64
+			Upper   uint64
+			Current uint64
+			Shrink  uint64
+			Grow    uint64
+		}{
+			Lower:   uint64(_info.mi_geo.lower),
+			Upper:   uint64(_info.mi_geo.upper),
+			Current: uint64(_info.mi_geo.current),
+			Shrink:  uint64(_info.mi_geo.shrink),
+			Grow:    uint64(_info.mi_geo.grow),
+		},
 		LastPNO:        int64(_info.mi_last_pgno),
 		LastTxnID:      int64(_info.mi_recent_txnid),
 		MaxReaders:     uint(_info.mi_maxreaders),

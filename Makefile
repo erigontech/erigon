@@ -49,7 +49,7 @@ rpctest:
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/stats ./cmd/state
+	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
@@ -85,6 +85,7 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 mdbx:
@@ -93,7 +94,6 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
-        && echo '#define MDBX_ENABLE_MADVISE 0' >> config.h \
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \

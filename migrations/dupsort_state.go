@@ -287,3 +287,45 @@ var splitIHBucket = Migration{
 		return nil
 	},
 }
+
+// see https://github.com/ledgerwatch/turbo-geth/pull/1535
+var deleteExtensionHashesFromTrieBucket = Migration{
+	Name: "delete_extension_hashes_from_trie",
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) error {
+		logPrefix := "db_migration: delete_extension_hashes_from_trie"
+
+		const loadStep = "load"
+		if err := stagedsync.ResetIH(db); err != nil {
+			return err
+		}
+		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
+			return err
+		}
+
+		to, err := stages.GetStageProgress(db, stages.Execution)
+		if err != nil {
+			return err
+		}
+		hash, err := rawdb.ReadCanonicalHash(db, to)
+		if err != nil {
+			return err
+		}
+		syncHeadHeader := rawdb.ReadHeader(db, hash, to)
+		if syncHeadHeader == nil {
+			if err := CommitProgress(db, nil, true); err != nil {
+				return err
+			}
+			return nil
+		}
+		expectedRootHash := syncHeadHeader.Root
+
+		if err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {
+			return err
+		}
+		if err := CommitProgress(db, nil, true); err != nil {
+			return err
+		}
+
+		return nil
+	},
+}

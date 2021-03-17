@@ -9,7 +9,8 @@ services:
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/turbogeth:/root/.local/share/turbogeth
     ports:
-      - 30303:30303
+      - 30303:30303/tcp
+      - 30303:30303/udp
 
   prometheus:
     image: prom/prometheus:v2.25.0

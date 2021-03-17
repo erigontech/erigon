@@ -61,7 +61,7 @@ func TestV2HashBuilding(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	for i, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -74,7 +74,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -89,7 +89,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, _, _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -129,7 +129,7 @@ func TestV2Resolution(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	for _, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -142,7 +142,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, hasBranch, hasHash, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -153,7 +153,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})
@@ -177,7 +177,7 @@ func TestV2Resolution(t *testing.T) {
 // For storage items, we will be using the keys which are concatenation of the contract address hash,
 // incarnation encoding, and the storage location hash.
 // If we just allow it to be processed natually, then at the end of the processing of all storage
-// items, we would have entension node which hasBranch off at some point, but includes incarnation encoding
+// items, we would have entension node which hasTree off at some point, but includes incarnation encoding
 // in it, which we do not want. To cut it off, we will use the "trick". When we give the last
 // storage item to the GenStructStep, instead of setting `succ` to the empty slice, indicating that
 // nothing follows, we will set `succ` to a key which is the concatenation of the address hash,
@@ -208,7 +208,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	hb := NewHashBuilder(true)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -221,7 +221,7 @@ func TestEmbeddedStorage(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -234,7 +234,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	cutoff := 2 * common.HashLength
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -280,7 +280,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	hb := NewHashBuilder(true)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -293,7 +293,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -306,7 +306,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	cutoff := 2 * (common.HashLength + common.IncarnationLength)
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -338,11 +338,11 @@ func TestAccountsOnly(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	var err error
 	i := 0
-	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if hasHash == 0 && hasBranch == 0 {
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
 			return nil
 		}
 		i++
@@ -350,22 +350,22 @@ func TestAccountsOnly(t *testing.T) {
 		case 1:
 			require.Equal(t, common.FromHex("0100000002"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000000000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("01000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000000100)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
 			require.Equal(t, common.FromHex("01"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b001)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b001)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
 			require.Equal(t, common.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		}
 
@@ -383,7 +383,7 @@ func TestAccountsOnly(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -393,7 +393,7 @@ func TestAccountsOnly(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 4, i)
@@ -401,30 +401,30 @@ func TestAccountsOnly(t *testing.T) {
 
 func TestBranchesOnly(t *testing.T) {
 	keys := []struct {
-		k         []byte
-		hasBranch bool
+		k       []byte
+		hasTree bool
 	}{
-		{k: common.FromHex("0100000002000a03"), hasBranch: false},
-		{k: common.FromHex("0100000002000a04"), hasBranch: true},
-		{k: common.FromHex("01000000020b"), hasBranch: false},
-		{k: common.FromHex("010000000900000103"), hasBranch: false},
-		//{k: common.FromHex("010000000900000104"), hasBranch: false},
-		//{k: common.FromHex("010000000900000203"), hasBranch: false},
-		//{k: common.FromHex("010000000900000204"), hasBranch: false},
-		{k: common.FromHex("010000000901"), hasBranch: false},
-		{k: common.FromHex("010000000a"), hasBranch: false},
-		{k: common.FromHex("0101"), hasBranch: false},
-		{k: common.FromHex("010200000a"), hasBranch: false},
-		{k: common.FromHex("010200000b"), hasBranch: false},
-		{k: common.FromHex("0201"), hasBranch: false},
+		{k: common.FromHex("0100000002000a03"), hasTree: false},
+		{k: common.FromHex("0100000002000a04"), hasTree: true},
+		{k: common.FromHex("01000000020b"), hasTree: false},
+		{k: common.FromHex("010000000900000103"), hasTree: false},
+		//{k: common.FromHex("010000000900000104"), hasTree: false},
+		//{k: common.FromHex("010000000900000203"), hasTree: false},
+		//{k: common.FromHex("010000000900000204"), hasTree: false},
+		{k: common.FromHex("010000000901"), hasTree: false},
+		{k: common.FromHex("010000000a"), hasTree: false},
+		{k: common.FromHex("0101"), hasTree: false},
+		{k: common.FromHex("010200000a"), hasTree: false},
+		{k: common.FromHex("010200000b"), hasTree: false},
+		{k: common.FromHex("0201"), hasTree: false},
 	}
 	hb := NewHashBuilder(false)
 	var succ, curr bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	var err error
 	i := 0
-	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if hasHash == 0 && hasBranch == 0 {
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
 			return nil
 		}
 		i++
@@ -432,37 +432,37 @@ func TestBranchesOnly(t *testing.T) {
 		case 1:
 			require.Equal(t, common.FromHex("0100000002000a"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("0100000002"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000000000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
 			require.Equal(t, common.FromHex("0100000009"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
 			require.Equal(t, common.FromHex("01000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000000100)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b01000000100)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b01000000100)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
 			require.Equal(t, common.FromHex("01020000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b110000000000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 6:
 			require.Equal(t, common.FromHex("01"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b101)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b101)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 7:
 			require.Equal(t, common.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		}
 
@@ -475,7 +475,7 @@ func TestBranchesOnly(t *testing.T) {
 		succ.Reset()
 		succ.Write(key.k)
 		if curr.Len() > 0 {
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, key.hasBranch}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, key.hasTree}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -485,7 +485,7 @@ func TestBranchesOnly(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, false}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, false}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 7, i)
@@ -519,11 +519,11 @@ func TestStorageOnly(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, hasHash, hasBranch []uint16
+	var groups, hasHash, hasTree []uint16
 	var err error
 	i := 0
-	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if hasHash == 0 && hasBranch == 0 {
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
 			return nil
 		}
 		i++
@@ -531,17 +531,17 @@ func TestStorageOnly(t *testing.T) {
 		case 1:
 			require.Equal(t, common.FromHex("05000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
 			require.Equal(t, common.FromHex("05000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
 			require.Equal(t, common.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
 			require.NoError(t, fmt.Errorf("not expected"))
@@ -563,7 +563,7 @@ func TestStorageOnly(t *testing.T) {
 			succ.WriteByte(16)
 		}
 		if curr.Len() > 0 {
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -574,7 +574,7 @@ func TestStorageOnly(t *testing.T) {
 	succ.Reset()
 
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 2, i)
@@ -583,25 +583,25 @@ func TestStorageOnly(t *testing.T) {
 func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 	trace := false
 	keys := []struct {
-		k         []byte
-		hasBranch bool
+		k       []byte
+		hasTree bool
 	}{
 		{
-			k:         common.FromHex("500020"),
-			hasBranch: true,
+			k:       common.FromHex("500020"),
+			hasTree: true,
 		},
 		{
-			k:         common.FromHex("500021"),
-			hasBranch: false,
+			k:       common.FromHex("500021"),
+			hasTree: false,
 		},
 		{
-			k:         common.FromHex("500027"),
-			hasBranch: false,
+			k:       common.FromHex("500027"),
+			hasTree: false,
 		},
 	}
 	var i int
-	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if hasHash == 0 && hasBranch == 0 {
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
 			return nil
 		}
 		i++
@@ -610,12 +610,12 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 			require.Equal(t, common.FromHex("0500000002"), keyHex)
 			//require.Equal(t, fmt.Sprintf("%b", uint16(0b10000011)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000011)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		}
 
@@ -623,8 +623,8 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 	}
 	hb := NewHashBuilder(false)
 	var curr, succ bytes.Buffer
-	var currHasBranch, succHasBranch bool
-	var groups, hasBranch, hasHash []uint16
+	var currhasTree, succhasTree bool
+	var groups, hasTree, hasHash []uint16
 	var err error
 
 	for _, key := range keys {
@@ -635,11 +635,11 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 			succ.WriteByte(b / 16)
 			succ.WriteByte(b % 16)
 		}
-		currHasBranch = succHasBranch
-		succHasBranch = key.hasBranch
+		currhasTree = succhasTree
+		succhasTree = key.hasTree
 		if curr.Len() > 0 {
-			v := &GenStructStepHashData{common.Hash{}, currHasBranch}
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, v, groups, hasBranch, hasHash, trace)
+			v := &GenStructStepHashData{common.Hash{}, currhasTree}
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, v, groups, hasTree, hasHash, trace)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -648,10 +648,10 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	currHasBranch = succHasBranch
-	v := &GenStructStepHashData{common.Hash{}, currHasBranch}
+	currhasTree = succhasTree
+	v := &GenStructStepHashData{common.Hash{}, currhasTree}
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, v, groups, hasBranch, hasHash, trace); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, v, groups, hasTree, hasHash, trace); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 2, i)
@@ -694,7 +694,7 @@ func Test2(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, hasBranch, hasHash []uint16
+	var groups, hasTree, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -708,11 +708,11 @@ func Test2(t *testing.T) {
 		//succ.WriteByte(16)
 		if curr.Len() > 0 {
 			fmt.Printf("send: %x\n", succ.Bytes())
-			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false },
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false },
 				curr.Bytes(), succ.Bytes(), hb,
-				func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+				func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 					return nil
-				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, hasBranch, hasHash, false)
+				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -722,9 +722,9 @@ func Test2(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		return nil
-	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
+	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 }

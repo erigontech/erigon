@@ -1,7 +1,7 @@
 ChangeLog
 ---------
 
-## v0.9.4 (in development) scheduled at 2021-02-23
+## v0.9.4 (in development) scheduled at 2021-03-18
 
 TODO:
 
@@ -13,7 +13,8 @@ TODO:
 
 Acknowledgements:
 
- - [Alex Sharov](https://github.com/AskAlexSharov) for [mdbx-go](https://github.com/torquem-ch/mdbx-go).
+ - [Alex Sharov](https://github.com/AskAlexSharov) for [mdbx-go](https://github.com/torquem-ch/mdbx-go) and for bug reporting.
+ - [Artem Vorotnikov](https://github.com/vorot93) for bug reporting.
 
 New features:
 
@@ -22,10 +23,19 @@ New features:
    The `MDBX_DISABLE_PAGECHECKS=1` provides a performance boost of about 10% in CRUD scenarios,
    and conjointly with the `MDBX_ENV_CHECKPID=0` and `MDBX_TXN_CHECKOWNER=0` options can yield
    up to 30% more performance compared to LMDB.
+ - Using float point (exponential quantized) representation for internal 16-bit values
+   of grow step and shrink threshold when huge ones (https://github.com/erthink/libmdbx/issues/166).
+   To minimize the impact on compatibility, only the odd values inside the upper half
+   of the range (i.e. 32769..65533) are used for the new representation.
+ - Added the `mdbx_drop` similar to LMDB command-line tool to purge or delete (sub)database(s).
 
 Fixes:
 
  - Fixed performance regression due non-optimal C11 atomics usage (https://github.com/erthink/libmdbx/issues/160).
+ - Fixed "reincarnation" of subDB after it deletion (https://github.com/erthink/libmdbx/issues/168).
+ - Fixed (disallowing) implicit subDB deletion via operations on `@MAIN`'s DBI-handle.
+ - Fixed a crash of `mdbx_env_info_ex()` in case of a call for a non-open environment (https://github.com/erthink/libmdbx/issues/171).
+ - Fixed the selecting/adjustment values inside `mdbx_env_set_geometry()` for implicit out-of-range cases (https://github.com/erthink/libmdbx/issues/170).
 
 
 ## v0.9.3 at 2021-02-02

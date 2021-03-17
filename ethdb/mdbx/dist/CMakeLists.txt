@@ -648,7 +648,7 @@ if(MDBX_BUILD_TOOLS)
     set(WINGETOPT_SRC "")
   endif()
 
-  foreach(TOOL mdbx_chk mdbx_copy mdbx_stat mdbx_dump mdbx_load)
+  foreach(TOOL mdbx_chk mdbx_copy mdbx_stat mdbx_dump mdbx_load mdbx_drop)
     add_executable(${TOOL} mdbx.h ${MDBX_SOURCE_DIR}/${TOOL}.c ${WINGETOPT_SRC})
     if(MDBX_C_STANDARD)
       set_target_properties(${TOOL} PROPERTIES
@@ -704,6 +704,7 @@ if(MDBX_BUILD_TOOLS)
     mdbx_copy
     mdbx_dump
     mdbx_load
+    mdbx_drop
     RUNTIME
     DESTINATION ${MDBX_TOOLS_INSTALL_DESTINATION}
     COMPONENT runtime)
@@ -718,6 +719,7 @@ if(MDBX_BUILD_TOOLS)
       "${MDBX_SOURCE_DIR}/man1/mdbx_copy.1"
       "${MDBX_SOURCE_DIR}/man1/mdbx_dump.1"
       "${MDBX_SOURCE_DIR}/man1/mdbx_load.1"
+      "${MDBX_SOURCE_DIR}/man1/mdbx_drop.1"
       DESTINATION ${MDBX_MAN_INSTALL_DESTINATION}
       COMPONENT doc)
   endif()

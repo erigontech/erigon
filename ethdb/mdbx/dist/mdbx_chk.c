@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 805ffcdd6ce23af0d86f2adcb01310876c664de8d4eb656b56e22de897ebda21_v0_9_3_12_g7bbad06e
+#define MDBX_BUILD_SOURCERY f8467b2f2f730d8c516231ac1a197fafb5f8b8a6758e5c978d7e6b38f4b39fb7_v0_9_3_40_g4b8b7d5a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1617,14 +1617,6 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
 
-/** Controls use of POSIX madvise() hints and friends. */
-#ifndef MDBX_ENABLE_MADVISE
-#define MDBX_ENABLE_MADVISE 1
-#endif
-#if !(MDBX_ENABLE_MADVISE == 0 || MDBX_ENABLE_MADVISE == 1)
-#error MDBX_ENABLE_MADVISE must be defined as 0 or 1
-#endif /* MDBX_ENABLE_MADVISE */
-
 /** Disable some checks to reduce an overhead and detection probability of
  * database corruption to a values closer to the LMDB. */
 #ifndef MDBX_DISABLE_PAGECHECKS
@@ -1958,15 +1950,17 @@ typedef struct MDBX_db {
 } MDBX_db;
 
 /* database size-related parameters */
-typedef struct mdbx_geo_t {
-  uint16_t grow;   /* datafile growth step in pages */
-  uint16_t shrink; /* datafile shrink threshold in pages */
-  pgno_t lower;    /* minimal size of datafile in pages */
-  pgno_t upper;    /* maximal size of datafile in pages */
-  pgno_t now;      /* current size of datafile in pages */
-  pgno_t next;     /* first unused page in the datafile,
-                    * but actually the file may be shorter. */
-} mdbx_geo_t;
+typedef struct MDBX_geo {
+  uint16_t grow_pv;   /* datafile growth step as a 16-bit packed (exponential
+                           quantized) value */
+  uint16_t shrink_pv; /* datafile shrink threshold as a 16-bit packed
+                           (exponential quantized) value */
+  pgno_t lower;       /* minimal size of datafile in pages */
+  pgno_t upper;       /* maximal size of datafile in pages */
+  pgno_t now;         /* current size of datafile in pages */
+  pgno_t next;        /* first unused page in the datafile,
+                         but actually the file may be shorter. */
+} MDBX_geo;
 
 /* Meta page content.
  * A meta page is the start point for accessing a database snapshot.
@@ -1985,7 +1979,7 @@ typedef struct MDBX_meta {
   uint8_t mm_extra_pagehdr; /* extra bytes in the page header,
                              * zero (nothing) for now */
 
-  mdbx_geo_t mm_geo; /* database size-related parameters */
+  MDBX_geo mm_geo; /* database size-related parameters */
 
   MDBX_db mm_dbs[CORE_DBS]; /* first is free space, 2nd is main db */
                             /* The size of pages used in this DB */
@@ -2389,7 +2383,7 @@ struct MDBX_txn {
   MDBX_txn *mt_parent; /* parent of a nested txn */
   /* Nested txn under this txn, set together with flag MDBX_TXN_HAS_CHILD */
   MDBX_txn *mt_child;
-  mdbx_geo_t mt_geo;
+  MDBX_geo mt_geo;
   /* next unallocated page */
 #define mt_next_pgno mt_geo.next
   /* corresponding to the current size of datafile */
@@ -2922,7 +2916,7 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
 
 /* Default size of memory map.
  * This is certainly too small for any actual applications. Apps should
- * always set  the size explicitly using mdbx_env_set_mapsize(). */
+ * always set the size explicitly using mdbx_env_set_geometry(). */
 #define DEFAULT_MAPSIZE MEGABYTE
 
 /* Number of slots in the reader table.
@@ -4644,8 +4638,8 @@ int main(int argc, char *argv[]) {
           if (all_leaf) {
             print(", leaf %" PRIu64, all_leaf);
             if (verbose > 2 &&
-                (dbi->pages.leaf_dupfixed | dbi->pages.subleaf_dupsort |
-                 dbi->pages.subleaf_dupsort))
+                (dbi->pages.subleaf_dupsort | dbi->pages.leaf_dupfixed |
+                 dbi->pages.subleaf_dupfixed))
               print(" (usual %" PRIu64 ", sub-dupsort %" PRIu64
                     ", dupfixed %" PRIu64 ", sub-dupfixed %" PRIu64 ")",
                     dbi->pages.leaf, dbi->pages.subleaf_dupsort,

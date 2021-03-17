@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 			db = ethdb.NewObjectDatabase(openKV(path, false))
 		}
 	}
+	metrics.AddCallback(db.KV().CollectMetrics)
 	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
 		panic(err)
 	}
@@ -81,5 +83,7 @@ func openKV(path string, exclusive bool) ethdb.KV {
 	if freelistReuse > 0 {
 		opts = opts.MaxFreelistReuse(uint(freelistReuse))
 	}
-	return opts.MustOpen()
+	kv := opts.MustOpen()
+	metrics.AddCallback(kv.CollectMetrics)
+	return kv
 }

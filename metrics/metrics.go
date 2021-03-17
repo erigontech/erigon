@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -22,6 +23,25 @@ import (
 // This global kill-switch helps quantify the observer effect and makes
 // for less cluttered pprof profiles.
 var Enabled = false
+
+// callbacks - storing list of callbacks as type []func()
+// use metrics.AddCallback to add your function to metrics collection loop (to avoid multiple goroutines collecting metrics)
+var callbacks atomic.Value
+
+func init() {
+	callbacks.Store([]func(){})
+}
+func AddCallback(collect func()) {
+	list := callbacks.Load().([]func())
+	list = append(list, collect)
+	callbacks.Store(list)
+}
+
+func getCallbacks() []func() {
+	return callbacks.Load().([]func())
+}
+
+// Calling Load method
 
 // EnabledExpensive is a soft-flag meant for external packages to check if costly
 // metrics gathering is allowed or not. The goal is to separate standard metrics
@@ -67,11 +87,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 	// Create the various data collectors
 	cpuStats := make([]*CPUStats, 2)
-	memstats := make([]*runtime.MemStats, 2)
+	//memstats := make([]*runtime.MemStats, 2)
 	diskstats := make([]*DiskStats, 2)
-	for i := 0; i < len(memstats); i++ {
+	for i := 0; i < len(cpuStats); i++ {
 		cpuStats[i] = new(CPUStats)
-		memstats[i] = new(runtime.MemStats)
+		//memstats[i] = new(runtime.MemStats)
 		diskstats[i] = new(DiskStats)
 	}
 	// Define the various metrics to collect
@@ -81,11 +101,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
 		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
 
-		memPauses = GetOrRegisterMeter("system/memory/pauses", DefaultRegistry)
-		memAllocs = GetOrRegisterMeter("system/memory/allocs", DefaultRegistry)
-		memFrees  = GetOrRegisterMeter("system/memory/frees", DefaultRegistry)
-		memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
-		memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
+		// disabled because of performance impact and because this info exists in logs
+		//memPauses = GetOrRegisterMeter("system/memory/pauses", DefaultRegistry)
+		//memAllocs = GetOrRegisterMeter("system/memory/allocs", DefaultRegistry)
+		//memFrees  = GetOrRegisterMeter("system/memory/frees", DefaultRegistry)
+		//memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
+		//memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
 
 		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
 		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
@@ -127,6 +148,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 	// Iterate loading the different stats and updating the meters
 	for i := 1; ; i++ {
+		time.Sleep(refresh)
 		location1 := i % 2
 		location2 := (i - 1) % 2
 
@@ -186,13 +208,13 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
 
-		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
-		memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
-		memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
-		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
-		memUsed.Update(int64(memstats[location1].Alloc))
-
+		//runtime.ReadMemStats(memstats[location1])
+		//memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
+		//memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
+		//memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
+		//memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
+		//memUsed.Update(int64(memstats[location1].Alloc))
+		//
 		if io, _ := p.IOCounters(); io != nil {
 			diskstats[location1].ReadBytes = int64(io.ReadBytes)
 			diskstats[location1].WriteBytes = int64(io.WriteBytes)
@@ -203,6 +225,8 @@ func CollectProcessMetrics(refresh time.Duration) {
 		n, _ := runtime.ThreadCreateProfile(nil)
 		goThreads.Update(int64(n))
 
-		time.Sleep(refresh)
+		for _, cb := range getCallbacks() {
+			cb()
+		}
 	}
 }
