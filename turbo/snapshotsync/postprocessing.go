@@ -165,7 +165,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		}
 		log.Info("Generate TD index & canonical")
 		err = etl.Transform("Torrent post-processing 2", db, dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+			return next(k, common.CopyBytes(k[:8]), common.CopyBytes(k[8:]))
 		}, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: ctx.Done(),
 			OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
