@@ -43,16 +43,15 @@ func Fuzz(input []byte) int {
 
 	var i int
 	{
-			if _, _, _, err := rlp.Split(input); err != nil {
-				panic(err)
-			}
+		if _, _, _, err := rlp.Split(input); err != nil {
+			panic(err)
 		}
 	}
+
 	{
-			if elems, _, err := rlp.SplitList(input); err == nil {
-				if _, err = rlp.CountValues(elems); err != nil {
-					panic(err)
-				}
+		if elems, _, err := rlp.SplitList(input); err == nil {
+			if _, err = rlp.CountValues(elems); err != nil {
+				panic(err)
 			}
 		}
 	}
