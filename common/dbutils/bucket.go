@@ -147,12 +147,12 @@ var (
 	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefixOld    = "h"         // block_num_u64 + hash -> header
-	HeaderNumberBucket = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
+	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	HeaderCanonicalBucket       = "canonical_headers" // block_num_u64 -> header hash
-	HeadersBucket       = "headers"         		  // block_num_u64 + hash -> header
-	HeaderTDBucket       = "header_to_td"   		  // block_num_u64 + hash + headerTDSuffix -> td
+	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
+	HeadersBucket         = "headers"           // block_num_u64 + hash -> header
+	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash + headerTDSuffix -> td
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
@@ -295,8 +295,6 @@ var Buckets = []string{
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,
-
-
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

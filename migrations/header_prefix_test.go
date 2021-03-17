@@ -15,16 +15,16 @@ import (
 )
 
 func TestHeaderPrefix(t *testing.T) {
-	require:=require.New(t)
+	require := require.New(t)
 	db := ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		err :=  tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
-		if err!=nil {
+		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
+		if err != nil {
 			return err
 		}
-		c:=tx.Cursor(dbutils.HeaderPrefixOld)
-		for i:=uint64(0); i<10; i++ {
+		c := tx.Cursor(dbutils.HeaderPrefixOld)
+		for i := uint64(0); i < 10; i++ {
 			//header
 			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
 			require.NoError(err)
@@ -38,14 +38,12 @@ func TestHeaderPrefix(t *testing.T) {
 	})
 	require.NoError(err)
 
-
-
 	migrator := NewMigrator()
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
 	err = migrator.Apply(db, os.TempDir())
 	require.NoError(err)
 
-	num:=0
+	num := 0
 	err = db.Walk(dbutils.HeaderCanonicalBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		require.Len(k, 8)
 		bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
@@ -55,26 +53,25 @@ func TestHeaderPrefix(t *testing.T) {
 	require.NoError(err)
 	require.Equal(num, 10)
 
-	num=0
+	num = 0
 	err = db.Walk(dbutils.HeaderTDBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		require.Len(k, 40)
-		bytes.Equal(v,[]byte{uint8(binary.BigEndian.Uint64(k))})
+		bytes.Equal(v, []byte{uint8(binary.BigEndian.Uint64(k))})
 		num++
 		return true, nil
 	})
 	require.NoError(err)
 	require.Equal(num, 10)
 
-	num=0
+	num = 0
 	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		require.Len(k, 40)
-		bytes.Equal(v,[]byte("header "+ strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
+		bytes.Equal(v, []byte("header "+strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
 		num++
 		return true, nil
 	})
 	require.NoError(err)
-	require.Equal(num,10)
-
+	require.Equal(num, 10)
 
 }
 

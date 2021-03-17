@@ -14,7 +14,7 @@ var (
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
-			dbutils.HeadersBucket:              dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket:             dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_state: {
