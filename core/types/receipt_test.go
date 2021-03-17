@@ -194,7 +194,7 @@ func TestDeriveFields(t *testing.T) {
 	hash := common.BytesToHash([]byte{0x03, 0x14})
 
 	clearComputedFieldsOnReceipts(t, receipts)
-	if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
+	if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
 		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct
