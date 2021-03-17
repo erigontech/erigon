@@ -1,20 +1,84 @@
 package migrations
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"math/big"
+	"os"
+	"strconv"
 	"testing"
 )
 
-func TestHeaderTypeDetection(t *testing.T) {
+func TestHeaderPrefix(t *testing.T) {
+	require:=require.New(t)
+	db := ethdb.NewMemDatabase()
 
+	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		err :=  tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
+		if err!=nil {
+			return err
+		}
+		c:=tx.Cursor(dbutils.HeaderPrefixOld)
+		for i:=uint64(0); i<10; i++ {
+			//header
+			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
+			require.NoError(err)
+			//canonical
+			err = c.Put(HeaderHashKey(i), common.Hash{uint8(i)}.Bytes())
+			require.NoError(err)
+			err = c.Put(append(dbutils.HeaderKey(i, common.Hash{uint8(i)}), HeaderTDSuffix...), []byte{uint8(i)})
+			require.NoError(err)
+		}
+		return nil
+	})
+	require.NoError(err)
+
+
+
+	migrator := NewMigrator()
+	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
+	err = migrator.Apply(db, os.TempDir())
+	require.NoError(err)
+
+	num:=0
+	err = db.Walk(dbutils.HeaderCanonicalBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		require.Len(k, 8)
+		bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
+		num++
+		return true, nil
+	})
+	require.NoError(err)
+	require.Equal(num, 10)
+
+	num=0
+	err = db.Walk(dbutils.HeaderTDBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		require.Len(k, 40)
+		bytes.Equal(v,[]byte{uint8(binary.BigEndian.Uint64(k))})
+		num++
+		return true, nil
+	})
+	require.NoError(err)
+	require.Equal(num, 10)
+
+	num=0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		require.Len(k, 40)
+		bytes.Equal(v,[]byte("header "+ strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
+		num++
+		return true, nil
+	})
+	require.NoError(err)
+	require.Equal(num,10)
+
+
+}
+
+func TestHeaderTypeDetection(t *testing.T) {
 	// good input
 	headerHashKey := common.Hex2Bytes("00000000000000006e")
 	assert.False(t, IsHeaderKey(headerHashKey))
@@ -46,66 +110,4 @@ func TestHeaderTypeDetection(t *testing.T) {
 	assert.False(t, IsHeaderKey(notRelatedInput))
 	assert.False(t, IsHeaderTDKey(notRelatedInput))
 	assert.False(t, IsHeaderHashKey(notRelatedInput))
-
-}
-func TestHeaderPrefix(t *testing.T) {
-	require:=require.New(t)
-	db := ethdb.NewMemDatabase()
-
-	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
-	})
-	require.NoError(err)
-
-	headers:=[]*types.Header{
-		{
-			Number: big.NewInt(1),
-		},
-		{
-			Number: big.NewInt(2),
-		},
-	}
-	headers[1].ParentHash = headers[0].Hash()
-
-	for i:=range headers {
-		rawdb.WriteHeader(context.Background(), db, headers[i])
-		err = rawdb.WriteCanonicalHash(db, headers[i].Hash(), headers[i].Number.Uint64())
-	}
-
-
-	require.NoError(err)
-
-	migrator := NewMigrator()
-	migrator.Migrations = []Migration{dupSortHashState}
-	err = migrator.Apply(db, "")
-	require.NoError(err)
-
-	// test high-level data access didn't change
-	i := 0
-	err = db.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-		i++
-		return true, nil
-	})
-	require.NoError(err)
-	require.Equal(1, i)
-
-	v, err := db.Get(dbutils.HashedStorageBucket, []byte(storageKey))
-	require.NoError(err)
-	require.Equal([]byte{2}, v)
-
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	require.NoError(err)
-	defer tx.Rollback()
-
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
-	// test low-level data layout
-	require.NoError(err)
-
-	keyLen := common.HashLength + common.IncarnationLength
-	k, v, err := c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])
-	require.NoError(err)
-	require.Equal([]byte(storageKey)[:keyLen], k)
-	require.Equal([]byte(storageKey)[keyLen:], v[:common.HashLength])
-	require.Equal([]byte{2}, v[common.HashLength:])
-
 }

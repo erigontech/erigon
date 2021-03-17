@@ -95,7 +95,7 @@ var headerPrefixToSeparateBuckets = Migration{
 			case IsHeaderKey(k):
 				err = headersCollector.Collect(k,v)
 			case IsHeaderTDKey(k):
-				err = canonicalCollector.Collect(bytes.TrimSuffix(k, HeaderTDSuffix),v)
+				err = tdCollector.Collect(bytes.TrimSuffix(k, HeaderTDSuffix),v)
 			case IsHeaderHashKey(k):
 				err = canonicalCollector.Collect(bytes.TrimSuffix(k, HeaderHashSuffix),v)
 			default:
