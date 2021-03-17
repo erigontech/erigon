@@ -1012,18 +1012,9 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	var account *accounts.Account
 	account, err = tds.readAccountDataByHash(addrHash)
-	if err != nil && err != ethdb.ErrKeyNotFound {
+	if err != nil {
 		return nil, err
 	}
-	var a accounts.Account
-	if ok, err := rawdb.PlainReadAccount(tds.db, address, &a); err != nil {
-		return nil, err
-	} else if !ok {
-		return nil, nil
-	}
-
-	account = &a
-
 	if tds.resolveReads {
 		tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		if account != nil {
