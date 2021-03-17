@@ -22,11 +22,11 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/ewasm/go-ethereum/core/state"
+	"github.com/ewasm/go-ethereum/trie"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -62,7 +62,7 @@ func newTestBackend(blocks int) *testBackend {
 // wraps it into a mock backend.
 func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
-	db := rawdb.NewMemoryDatabase()
+	db := ethdb.NewMemoryDatabase()
 	(&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
@@ -90,8 +90,9 @@ func (b *testBackend) close() {
 	b.chain.Stop()
 }
 
-func (b *testBackend) Chain() *core.BlockChain { return b.chain }
-func (b *testBackend) TxPool() TxPool          { return b.txpool }
+func (b *testBackend) Chain() *core.BlockChain     { return b.chain }
+func (b *testBackend) StateBloom() *trie.SyncBloom { return nil }
+func (b *testBackend) TxPool() TxPool              { return b.txpool }
 
 func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
@@ -112,8 +113,6 @@ func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
-	t.Parallel()
-
 	backend := newTestBackend(maxHeadersServe + 15)
 	defer backend.close()
 
@@ -275,8 +274,6 @@ func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
-	t.Parallel()
-
 	backend := newTestBackend(maxBodiesServe + 15)
 	defer backend.close()
 
@@ -353,8 +350,6 @@ func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 func TestGetNodeData65(t *testing.T) { testGetNodeData(t, 65) }
 
 func testGetNodeData(t *testing.T, protocol uint) {
-	t.Parallel()
-
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -426,7 +421,7 @@ func testGetNodeData(t *testing.T, protocol uint) {
 			t.Errorf("data hash mismatch: have %x, want %x", hash, want)
 		}
 	}
-	statedb := rawdb.NewMemoryDatabase()
+	statedb := ethdb.NewMemoryDatabase()
 	for i := 0; i < len(data); i++ {
 		statedb.Put(hashes[i].Bytes(), data[i])
 	}
@@ -454,8 +449,6 @@ func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
 
 func testGetBlockReceipts(t *testing.T, protocol uint) {
-	t.Parallel()
-
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
