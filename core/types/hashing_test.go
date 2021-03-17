@@ -45,12 +45,12 @@ func TestDeriveSha(t *testing.T) {
 		Transactions{},
 		genTransactions(1),
 		genTransactions(2),
-		genTransactions(4),
-		genTransactions(10),
-		genTransactions(100),
-		genTransactions(1000),
-		genTransactions(10000),
-		genTransactions(100000),
+		//genTransactions(4),
+		//genTransactions(10),
+		//genTransactions(100),
+		//genTransactions(1000),
+		//genTransactions(10000),
+		//genTransactions(100000),
 	}
 
 	for _, test := range tests {
@@ -83,6 +83,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
+		fmt.Printf("%x - %x\n", keybuf.Bytes(), valbuf.Bytes())
 		trie.Update(keybuf.Bytes(), valbuf.Bytes())
 	}
 	return trie.Hash()
