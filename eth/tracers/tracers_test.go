@@ -17,6 +17,7 @@
 package tracers
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
@@ -38,6 +39,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/tests"
+
+	"github.com/holiman/uint256"
 )
 
 // To generate a new callTracer test, copy paste the makeTest method below into
@@ -122,7 +125,7 @@ type callTracerTest struct {
 
 func TestPrestateTracerCreate2(t *testing.T) {
 	unsignedTx := types.NewTransaction(1, common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		new(big.Int), 5000000, big.NewInt(1), []byte{})
+		uint256.NewInt(), 5000000, uint256.NewInt().SetUint64(1), []byte{})
 
 	privateKeyECDSA, err := ecdsa.GenerateKey(crypto.S256(), rand.Reader)
 	if err != nil {
@@ -142,6 +145,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    gas (assuming no mem expansion): 32006
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
+	ctx := context.TODO()
 	origin, _ := signer.Sender(tx)
 	txContext := vm.TxContext{
 		Origin:   origin,
@@ -170,7 +174,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	_, statedb := tests.MakePreState(ethdb.NewMemoryDatabase(), alloc, false)
+	statedb, _, _ := tests.MakePreState(ctx, ethdb.NewMemoryDatabase(), alloc, context.BlockNumber.Uint64())
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer", txContext)
@@ -184,7 +188,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.Gas()))
-	if _, err = st.TransitionDb(); err != nil {
+	if _, err = st.TransitionDb(false, false); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
 	// Retrieve the trace result and compare against the etalon
@@ -204,6 +208,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracer(t *testing.T) {
+	ctx := context.TODO()
+
 	files, err := ioutil.ReadDir("testdata")
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
@@ -234,7 +240,7 @@ func TestCallTracer(t *testing.T) {
 			origin, _ := signer.Sender(tx)
 			txContext := vm.TxContext{
 				Origin:   origin,
-				GasPrice: tx.GasPrice(),
+				GasPrice: big.NewInt(int64(tx.GasPrice().Uint64())),
 			}
 			context := vm.BlockContext{
 				CanTransfer: core.CanTransfer,
@@ -245,7 +251,7 @@ func TestCallTracer(t *testing.T) {
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
-			_, statedb := tests.MakePreState(ethdb.NewMemoryDatabase(), test.Genesis.Alloc, false)
+			statedb, _, _ := tests.MakePreState(ctx, ethdb.NewMemoryDatabase(), test.Genesis.Alloc, uint64(test.Context.Number))
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer", txContext)
@@ -259,7 +265,7 @@ func TestCallTracer(t *testing.T) {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.Gas()))
-			if _, err = st.TransitionDb(); err != nil {
+			if _, err = st.TransitionDb(false, false); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
 			// Retrieve the trace result and compare against the etalon
