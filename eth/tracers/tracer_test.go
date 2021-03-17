@@ -68,9 +68,13 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())))
+	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64()))); err != nil {
+		return nil, err
+	}
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	tracer.CaptureEnd(0, ret, startGas-contract.Gas, 1, err)
+	if err1 := tracer.CaptureEnd(0, ret, startGas-contract.Gas, 1, err); err1 != nil {
+		return nil, err1
+	}
 	if err != nil {
 		return nil, err
 	}

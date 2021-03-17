@@ -44,6 +44,7 @@ func (f *fuzzer) read(size int) []byte {
 
 func (f *fuzzer) readSlice(min, max int) []byte {
 	var a uint16
+	//nolint:errcheck
 	binary.Read(f.input, binary.LittleEndian, &a)
 	size := min + int(a)%(max-min)
 	out := make([]byte, size)

@@ -353,9 +353,13 @@ func (s Transactions) Len() int { return len(s) }
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	tx := s[i]
 	if tx.Type() == LegacyTxType {
-		rlp.Encode(w, tx.inner)
+		if err := rlp.Encode(w, tx.inner); err != nil {
+			panic(err)
+		}
 	} else {
-		tx.encodeTyped(w)
+		if err := tx.encodeTyped(w); err != nil {
+			panic(err)
+		}
 	}
 }
 

@@ -339,10 +339,15 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
-		rlp.Encode(w, data)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
 	case AccessListTxType:
+		//nolint::errcheck
 		w.WriteByte(AccessListTxType)
-		rlp.Encode(w, data)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
 	default:
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash

@@ -250,7 +250,9 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			headers = append(headers, backend.chain.GetBlockByHash(hash).Header())
 		}
 		// Send the hash request and verify the response
-		p2p.Send(peer.app, GetBlockHeadersMsg, tt.query)
+		if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
+			t.Fatal(err)
+		}
 		if err := p2p.ExpectMsg(peer.app, BlockHeadersMsg, headers); err != nil {
 			t.Errorf("test %d: headers mismatch: %v", i, err)
 		}
@@ -259,7 +261,9 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			if origin := backend.chain.GetBlockByNumber(tt.query.Origin.Number); origin != nil {
 				tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
 
-				p2p.Send(peer.app, GetBlockHeadersMsg, tt.query)
+				if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
+					t.Fatal(err)
+				}
 				if err := p2p.ExpectMsg(peer.app, BlockHeadersMsg, headers); err != nil {
 					t.Errorf("test %d: headers mismatch: %v", i, err)
 				}
@@ -337,7 +341,9 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 			}
 		}
 		// Send the hash request and verify the response
-		p2p.Send(peer.app, GetBlockBodiesMsg, hashes)
+		if err := p2p.Send(peer.app, GetBlockBodiesMsg, hashes); err != nil {
+			t.Fatal(err)
+		}
 		if err := p2p.ExpectMsg(peer.app, BlockBodiesMsg, bodies); err != nil {
 			t.Errorf("test %d: bodies mismatch: %v", i, err)
 		}

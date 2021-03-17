@@ -164,8 +164,8 @@ func (hc *HeaderChain) writeHeaders(headers []*types.Header) (result *headerWrit
 		// If the header is already known, skip it, otherwise store
 		if !hc.HasHeader(hash, number) {
 			// Irrelevant of the canonical status, write the TD and header to the database.
+			//nolit:errcheck
 			rawdb.WriteTd(batch, hash, number, newTD)
-
 			rawdb.WriteHeader(context.Background(), batch, header)
 			inserted = append(inserted, numberHash{number, hash})
 			if firstInserted < 0 {
@@ -221,6 +221,7 @@ func (hc *HeaderChain) writeHeaders(headers []*types.Header) (result *headerWrit
 				if hash == (common.Hash{}) {
 					break
 				}
+				//nolit:errcheck
 				rawdb.DeleteCanonicalHash(markerBatch, i)
 			}
 			// Overwrite any stale canonical number assignments, going
@@ -255,13 +256,17 @@ func (hc *HeaderChain) writeHeaders(headers []*types.Header) (result *headerWrit
 			for i := 0; i < firstInserted; i++ {
 				hash := headers[i].Hash()
 				num := headers[i].Number.Uint64()
+				//nolit:errcheck
 				rawdb.WriteCanonicalHash(markerBatch, hash, num)
+				//nolit:errcheck
 				rawdb.WriteHeadHeaderHash(markerBatch, hash)
 			}
 		}
 		// Extend the canonical chain with the new headers
 		for _, hn := range inserted {
+			//nolit:errcheck
 			rawdb.WriteCanonicalHash(markerBatch, hn.hash, hn.number)
+			//nolit:errcheck
 			rawdb.WriteHeadHeaderHash(markerBatch, hn.hash)
 		}
 		if err := markerBatch.CommitAndBegin(context.Background()); err != nil {

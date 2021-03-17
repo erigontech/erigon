@@ -129,12 +129,14 @@ func (c *Conn) readAndServe66(chain *Chain, timeout time.Duration) (uint64, Mess
 	start := time.Now()
 	for time.Since(start) < timeout {
 		timeout := time.Now().Add(10 * time.Second)
+		//nolint:errcheck
 		c.SetReadDeadline(timeout)
 
 		reqID, msg := c.read66()
 
 		switch msg := msg.(type) {
 		case *Ping:
+			//nolint:errcheck
 			c.Write(&Pong{})
 		case *GetBlockHeaders:
 			headers, err := chain.GetHeaders(*msg)
@@ -196,9 +198,11 @@ func (s *Suite) waitAnnounce66(t *utesting.T, conn *Conn, blockAnnouncement *New
 // waitForBlock66 waits for confirmation from the client that it has
 // imported the given block.
 func (c *Conn) waitForBlock66(block *types.Block) error {
+	//nolint:errcheck
 	defer c.SetReadDeadline(time.Time{})
 
 	timeout := time.Now().Add(20 * time.Second)
+	//nolint:errcheck
 	c.SetReadDeadline(timeout)
 	for {
 		req := eth.GetBlockHeadersPacket66{

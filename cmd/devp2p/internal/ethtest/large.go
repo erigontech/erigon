@@ -28,6 +28,7 @@ import (
 // largeNumber returns a very large big.Int.
 func largeNumber(megabytes int) *uint256.Int {
 	buf := make([]byte, megabytes*1024*1024)
+	//nolint:errcheck
 	rand.Read(buf)
 	bigint := new(uint256.Int)
 	bigint.SetBytes(buf)
@@ -37,6 +38,7 @@ func largeNumber(megabytes int) *uint256.Int {
 // largeBuffer returns a very large buffer.
 func largeBuffer(megabytes int) []byte {
 	buf := make([]byte, megabytes*1024*1024)
+	//nolint:errcheck
 	rand.Read(buf)
 	return buf
 }
@@ -44,6 +46,7 @@ func largeBuffer(megabytes int) []byte {
 // largeString returns a very large string.
 func largeString(megabytes int) string {
 	buf := make([]byte, megabytes*1024*1024)
+	//nolint:errcheck
 	rand.Read(buf)
 	return hexutil.Encode(buf)
 }
@@ -55,6 +58,7 @@ func largeBlock() *types.Block {
 // Returns a random hash
 func randHash() common.Hash {
 	var h common.Hash
+	//nolint:errcheck
 	rand.Read(h[:])
 	return h
 }

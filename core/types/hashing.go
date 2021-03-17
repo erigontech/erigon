@@ -182,8 +182,12 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	sha := hasherPool.Get().(crypto.KeccakState)
 	defer hasherPool.Put(sha)
 	sha.Reset()
+	//nolint:errcheck
 	sha.Write([]byte{prefix})
-	rlp.Encode(sha, x)
+	if err := rlp.Encode(sha, x); err != nil {
+		panic(err)
+	}
+	//nolit::errcheck
 	sha.Read(h[:])
 	return h
 }

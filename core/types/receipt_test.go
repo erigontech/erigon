@@ -266,7 +266,9 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 	}
 	{
 		var bundle []*Receipt
-		rlp.DecodeBytes(payload, &bundle)
+		if err := rlp.DecodeBytes(payload, &bundle); err != nil {
+			t.Fatal(err)
+		}
 		check(bundle)
 	}
 	{

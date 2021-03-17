@@ -959,7 +959,9 @@ func (pool *TxPool) removeTxLocked(hash common.Hash, outofbound bool) {
 			// Postpone any invalidated transactions
 			for _, tx := range invalids {
 				// Internal shuffle shouldn't touch the lookup set.
-				pool.enqueueTx(tx.Hash(), tx, false, false)
+				if _, err := pool.enqueueTx(tx.Hash(), tx, false, false); err != nil {
+					log.Error("enqueueTx", "error", err)
+				}
 			}
 			// Update the account nonce if needed
 			pool.pendingNonces.setIfLower(addr, tx.Nonce())
@@ -1371,7 +1373,9 @@ func (pool *TxPool) demoteUnexecutables() {
 			log.Trace("Demoting pending transaction", "hash", hash)
 
 			// Internal shuffle shouldn't touch the lookup set.
-			pool.enqueueTx(hash, tx, false, false)
+			if _, err := pool.enqueueTx(hash, tx, false, false); err != nil {
+				log.Error("enqueueTx", "error", err)
+			}
 		}
 		pendingGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
 		if pool.locals.contains(addr) {
@@ -1385,7 +1389,9 @@ func (pool *TxPool) demoteUnexecutables() {
 				log.Error("Demoting invalidated transaction", "hash", hash)
 
 				// Internal shuffle shouldn't touch the lookup set.
-				pool.enqueueTx(hash, tx, false, false)
+				if _, err := pool.enqueueTx(hash, tx, false, false); err != nil {
+					log.Error("enqueueTx", "error", err)
+				}
 			}
 			pendingGauge.Dec(int64(len(gapped)))
 			// This might happen in a reorg, so log it to the metering
