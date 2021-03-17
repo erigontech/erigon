@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func addTestAccount(db *ethdb.ObjectDatabase, hash common.Hash, balance uint64) error {
+func addTestAccount(db ethdb.Putter, hash common.Hash, balance uint64) error {
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(balance)
 	encoded := make([]byte, acc.EncodingLengthForStorage())
