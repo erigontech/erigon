@@ -1174,6 +1174,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 //
 // Note, local transactions are never allowed to be dropped.
 func TestTransactionPoolRepricing(t *testing.T) {
+	t.Skip("deadlock")
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
