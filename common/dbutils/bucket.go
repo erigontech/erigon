@@ -376,6 +376,7 @@ var BucketsConfigs = BucketsCfg{
 		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
 	},
+	InvalidBlock: {},
 }
 
 func sortBuckets() {
