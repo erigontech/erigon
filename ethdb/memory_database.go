@@ -32,6 +32,9 @@ func NewMemDatabase() *ObjectDatabase {
 	case "mdbx": //nolint:goconst
 		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
 	default:
-		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
+		// mdbx is too slow for our tests currently, so we keep
+		// lmdb as our in-mem db
+		// with mdbx tests time out, especially ./tests package
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}
 }
