@@ -374,7 +374,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	} else {
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
-	number := new(big.Int).Add(parent.Number(), common.Big1)
 
 	return &types.Header{
 		Root:       common.Hash{},
@@ -388,8 +387,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parent.UncleHash(),
 		),
 
-		GasLimit: CalcGasLimit(parent, 100*params.TxGas, 1000*params.TxGasContractCreation),
-		Number:   number,
+		GasLimit: CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
+		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
 }
