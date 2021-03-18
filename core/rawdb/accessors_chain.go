@@ -803,7 +803,7 @@ func WriteBadBlock(db ethdb.Database, block *types.Block) {
 	}
 	var badBlocks badBlockList
 	if len(blob) > 0 {
-		if err := rlp.DecodeBytes(blob, &badBlocks); err != nil {
+		if err = rlp.DecodeBytes(blob, &badBlocks); err != nil {
 			log.Crit("Failed to decode old bad blocks", "error", err)
 		}
 	}

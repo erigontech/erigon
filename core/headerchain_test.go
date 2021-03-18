@@ -65,7 +65,7 @@ func testInsert(t *testing.T, hc *HeaderChain, chain []*types.Header, wantStatus
 		t.Errorf("wrong write status from InsertHeaderChain: got %v, want %v", status, wantStatus)
 	}
 	// Always verify that the header chain is unbroken
-	if err := verifyUnbrokenCanonchain(hc); err != nil {
+	if err = verifyUnbrokenCanonchain(hc); err != nil {
 		t.Fatal(err)
 	}
 	if !errors.Is(err, wantErr) {

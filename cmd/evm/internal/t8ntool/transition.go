@@ -197,7 +197,7 @@ func Main(ctx *cli.Context) error {
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
-		if err := decoder.Decode(&txsWithKeys); err != nil {
+		if err = decoder.Decode(&txsWithKeys); err != nil {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
 	} else {
@@ -213,9 +213,9 @@ func Main(ctx *cli.Context) error {
 	// Iterate over all the tests, run them and aggregate the results
 
 	// Run the test and aggregate the result
-	_, result, err := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
-	if err != nil {
-		return err
+	_, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
+	if err1 != nil {
+		return err1
 	}
 	body, _ := rlp.EncodeToBytes(txs)
 	// Dump the excution result

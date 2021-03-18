@@ -171,6 +171,7 @@ func (s *Suite) testAnnounce66(t *utesting.T, sendConn, receiveConn *Conn, block
 }
 
 func (s *Suite) waitAnnounce66(t *utesting.T, conn *Conn, blockAnnouncement *NewBlock) {
+	//nolint:govet
 	timeout := 20 * time.Second
 	_, msg := conn.readAndServe66(s.chain, timeout)
 	switch msg := msg.(type) {

@@ -260,6 +260,7 @@ func (s *Suite) TestMaliciousHandshake_66(t *utesting.T) {
 			t.Fatalf("could not write to connection: %v", err)
 		}
 		// check that the peer disconnected
+		//nolint:govet
 		timeout := 20 * time.Second
 		// Discard one hello
 		for i := 0; i < 2; i++ {

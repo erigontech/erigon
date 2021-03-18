@@ -283,10 +283,11 @@ func (s *Suite) TestMaliciousHandshake(t *utesting.T) {
 	for i, handshake := range handshakes {
 		t.Logf("Testing malicious handshake %v\n", i)
 		// Init the handshake
-		if err := conn.Write(handshake); err != nil {
+		if err = conn.Write(handshake); err != nil {
 			t.Fatalf("could not write to connection: %v", err)
 		}
 		// check that the peer disconnected
+		//nolint:govet
 		timeout := 20 * time.Second
 		// Discard one hello
 		for i := 0; i < 2; i++ {
