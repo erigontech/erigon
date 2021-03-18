@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package types;
 
+option go_package = "./types;types";
+
 message H128 {
   uint64 hi = 1;
   uint64 lo = 2;

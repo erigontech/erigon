@@ -68,6 +68,7 @@ message StatusData {
   types.H256 total_difficulty = 2;
   types.H256 best_hash = 3;
   Forks fork_data = 4;
+  uint64 max_block = 5;
 }
 
 service Sentry {
