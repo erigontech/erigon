@@ -68,7 +68,7 @@ func (st *stagedSyncTester) newPeer(id string, version int, chain *testChain) er
 
 	peer := &stagedSyncTesterPeer{st: st, id: id, chain: chain}
 	st.peers[id] = peer
-	return st.downloader.RegisterPeer(id, version, peer)
+	return st.downloader.RegisterPeer(id, uint(version), peer)
 }
 
 func (st *stagedSyncTester) SetHead(_ uint64) error {

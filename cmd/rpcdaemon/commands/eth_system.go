@@ -7,8 +7,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -75,7 +76,7 @@ func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
-	oracle := gasprice.NewOracle(api, eth.DefaultFullGPOConfig)
+	oracle := gasprice.NewOracle(api, ethconfig.Defaults.GPO)
 	price, err := oracle.SuggestPrice(ctx)
 	return (*hexutil.Big)(price), err
 }

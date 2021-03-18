@@ -102,19 +102,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	return c.isCode(udest), true
 }
 
-func (c *Contract) validJumpSubdest(udest uint64) bool {
-	// PC cannot go beyond len(code) and certainly can't be bigger than 63 bits.
-	// Don't bother checking for BEGINSUB in that case.
-	if int64(udest) < 0 || udest >= uint64(len(c.Code)) {
-		return false
-	}
-	// Only BEGINSUBs allowed for destinations
-	if OpCode(c.Code[udest]) != BEGINSUB {
-		return false
-	}
-	return c.isCode(udest)
-}
-
 func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
 	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
 }

@@ -444,10 +444,13 @@ func (s *Service) login(conn *connWrapper) error {
 	// Construct and send the login authentication
 	infos := s.server.NodeInfo()
 
-	var network, protocol string
+	var protocols []string
+	for _, proto := range s.server.Protocols {
+		protocols = append(protocols, fmt.Sprintf("%s/%d", proto.Name, proto.Version))
+	}
+	var network string
 	if info := infos.Protocols["eth"]; info != nil {
-		network = fmt.Sprintf("%d", info.(*eth.NodeInfo).Network)
-		protocol = fmt.Sprintf("eth/%d", eth.ProtocolVersions[0])
+		network = fmt.Sprintf("%d", info.(*ethproto.NodeInfo).Network)
 	}
 	auth := &authMsg{
 		ID: s.node,
@@ -456,7 +459,7 @@ func (s *Service) login(conn *connWrapper) error {
 			Node:     infos.Name,
 			Port:     infos.Ports.Listener,
 			Network:  network,
-			Protocol: protocol,
+			Protocol: strings.Join(protocols, ", "),
 			API:      "No",
 			Os:       runtime.GOOS,
 			OsVer:    runtime.GOARCH,

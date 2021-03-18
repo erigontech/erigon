@@ -110,7 +110,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		txIndex     = 0
 	)
 	gaspool.AddGas(pre.Env.GasLimit)
-	vmContext := vm.Context{
+	vmContext := vm.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Coinbase:    pre.Env.Coinbase,
@@ -119,7 +119,6 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		Difficulty:  pre.Env.Difficulty,
 		GasLimit:    pre.Env.GasLimit,
 		GetHash:     getHash,
-		// GasPrice and Origin needs to be set per transaction
 	}
 	// If DAO is supported/enabled, we need to handle it here. In geth 'proper', it's
 	// done in StateProcessor.Process(block, ...), right before transactions are applied.
@@ -145,21 +144,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		vmConfig.Tracer = tracer
 		vmConfig.Debug = (tracer != nil)
 		ibs.Prepare(tx.Hash(), blockHash, txIndex)
-		vmContext.GasPrice = msg.GasPrice().ToBig()
-		vmContext.Origin = msg.From()
-
-		evm := vm.NewEVM(vmContext, ibs, chainConfig, vmConfig)
-		if chainConfig.IsYoloV2(vmContext.BlockNumber) {
-			ibs.AddAddressToAccessList(msg.From())
-			if dst := msg.To(); dst != nil {
-				ibs.AddAddressToAccessList(*dst)
-				// If it's a create-tx, the destination will be added inside evm.create
-			}
-			for _, addr := range evm.ActivePrecompiles() {
-				ibs.AddAddressToAccessList(addr)
-			}
-		}
+		txContext := core.NewEVMTxContext(msg)
 		snapshot := ibs.Snapshot()
+		evm := vm.NewEVM(vmContext, txContext, ibs, chainConfig, vmConfig)
+
 		// (ret []byte, usedGas uint64, failed bool, err error)
 		msgResult, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
@@ -173,28 +161,39 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 			return nil, nil, NewError(ErrorMissingBlockhash, hashError)
 		}
 		gasUsed += msgResult.UsedGas
-		// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
+
+		// Receipt:
 		{
 			if chainConfig.IsByzantium(vmContext.BlockNumber) {
 				tds.StartNewBuffer()
 			}
 
-			receipt := types.NewReceipt(msgResult.Failed(), gasUsed)
+			// Create a new receipt for the transaction, storing the intermediate root and
+			// gas used by the tx.
+			receipt := &types.Receipt{Type: tx.Type(), CumulativeGasUsed: gasUsed}
+			if msgResult.Failed() {
+				receipt.Status = types.ReceiptStatusFailed
+			} else {
+				receipt.Status = types.ReceiptStatusSuccessful
+			}
 			receipt.TxHash = tx.Hash()
 			receipt.GasUsed = msgResult.UsedGas
-			// if the transaction created a contract, store the creation address in the receipt.
+
+			// If the transaction created a contract, store the creation address in the receipt.
 			if msg.To() == nil {
-				receipt.ContractAddress = crypto.CreateAddress(evm.Context.Origin, tx.Nonce())
+				receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.Nonce())
 			}
+
 			// Set the receipt logs and create a bloom for filtering
 			receipt.Logs = ibs.GetLogs(tx.Hash())
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			// These three are non-consensus fields
+			// These three are non-consensus fields:
 			//receipt.BlockHash
-			//receipt.BlockNumber =
+			//receipt.BlockNumber
 			receipt.TransactionIndex = uint(txIndex)
 			receipts = append(receipts, receipt)
 		}
+
 		txIndex++
 	}
 	// Add mining reward?

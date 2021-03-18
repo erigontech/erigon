@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -43,6 +44,18 @@ var (
 	// two chains have diverged in the past at some point (possibly at genesis).
 	ErrLocalIncompatibleOrStale = errors.New("local incompatible or needs update")
 )
+
+// Blockchain defines all necessary method to build a forkID.
+type Blockchain interface {
+	// Config retrieves the chain's fork configuration.
+	Config() *params.ChainConfig
+
+	// Genesis retrieves the chain's genesis block.
+	Genesis() *types.Block
+
+	// CurrentHeader retrieves the current head header of the canonical chain.
+	CurrentHeader() *types.Header
+}
 
 // ID is a fork identifier as defined by EIP-2124.
 type ID struct {
@@ -72,6 +85,15 @@ func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
+// NewIDWithChain calculates the Ethereum fork ID from an existing chain instance.
+func NewIDWithChain(chain Blockchain) ID {
+	return NewID(
+		chain.Config(),
+		chain.Genesis().Hash(),
+		chain.CurrentHeader().Number.Uint64(),
+	)
+}
+
 func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
@@ -85,7 +107,17 @@ func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
 
 // NewFilter creates a filter that returns if a fork ID should be rejected or not
 // based on the local chain's status.
-func NewFilter(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
+func NewFilter(chain Blockchain) Filter {
+	return NewFilterAutofork(
+		chain.Config(),
+		chain.Genesis().Hash(),
+		chain.CurrentHeader().Number.Uint64(),
+	)
+}
+
+// NewFilterAutofork creates a filter that returns if a fork ID should be rejected or notI
+// based on the local chain's status.
+func NewFilterAutofork(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
 	forks := GatherForks(config)
 	return newFilter(
 		forks,

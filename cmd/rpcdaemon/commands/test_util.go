@@ -40,6 +40,7 @@ func createTestDb() (ethdb.Database, error) {
 				address2: {Balance: big.NewInt(300000000000000000)},
 			},
 		}
+		chainId = big.NewInt(1337)
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
@@ -53,9 +54,9 @@ func createTestDb() (ethdb.Database, error) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-	transactOpts2 := bind.NewKeyedTransactor(key2)
+	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainId)
+	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainId)
+	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 
 	var tokenContract *contracts.Token
