@@ -343,7 +343,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 			panic(err)
 		}
 	case AccessListTxType:
-		//nolint::errcheck
+		//nolint:errcheck
 		w.WriteByte(AccessListTxType)
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)

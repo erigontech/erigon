@@ -477,7 +477,7 @@ func (p *Peer) RequestBodies(hashes []common.Hash) error {
 	p.Log().Debug("Fetching batch of block bodies", "count", len(hashes))
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetBlockBodiesMsg, &GetBlockBodiesPacket66{
-			RequestId:            rand.Uint64(),
+			RequestId:            rand.Uint64(), //nolint:gosec
 			GetBlockBodiesPacket: hashes,
 		})
 	}
@@ -490,7 +490,7 @@ func (p *Peer) RequestNodeData(hashes []common.Hash) error {
 	p.Log().Debug("Fetching batch of state data", "count", len(hashes))
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetNodeDataMsg, &GetNodeDataPacket66{
-			RequestId:         rand.Uint64(),
+			RequestId:         rand.Uint64(), //nolint:gosec
 			GetNodeDataPacket: hashes,
 		})
 	}
@@ -502,7 +502,7 @@ func (p *Peer) RequestReceipts(hashes []common.Hash) error {
 	p.Log().Debug("Fetching batch of receipts", "count", len(hashes))
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetReceiptsMsg, &GetReceiptsPacket66{
-			RequestId:         rand.Uint64(),
+			RequestId:         rand.Uint64(), //nolint:gosec
 			GetReceiptsPacket: hashes,
 		})
 	}
@@ -514,7 +514,7 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 	p.Log().Debug("Fetching batch of transactions", "count", len(hashes))
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetPooledTransactionsMsg, &GetPooledTransactionsPacket66{
-			RequestId:                   rand.Uint64(),
+			RequestId:                   rand.Uint64(), //nolint:gosec
 			GetPooledTransactionsPacket: hashes,
 		})
 	}
