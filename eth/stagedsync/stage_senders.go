@@ -207,8 +207,8 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
 				break
 			}
-			if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
-				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainID(), signer.ChainID())
+			if tx.Protected() && tx.ChainId().Cmp(signer.ChainID()) != 0 {
+				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainId(), signer.ChainID())
 				break
 			}
 			copy(job.senders[i*common.AddressLength:], from[:])

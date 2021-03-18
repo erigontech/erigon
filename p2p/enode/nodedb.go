@@ -21,12 +21,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"net"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -60,6 +62,10 @@ const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 9
+)
+
+var (
+	errInvalidIP = errors.New("invalid IP")
 )
 
 var zeroIP = make(net.IP, 16)
@@ -171,7 +177,7 @@ func splitNodeItemKey(key []byte) (id ID, ip net.IP, field string) {
 	}
 	key = key[len(dbDiscoverRoot)+1:]
 	// Split out the IP.
-	ip = net.IP(key[:16])
+	ip = key[:16]
 	if ip4 := ip.To4(); ip4 != nil {
 		ip = ip4
 	}
@@ -424,16 +430,25 @@ func (db *DB) expireNodes() {
 // LastPingReceived retrieves the time of the last ping packet received from
 // a remote node.
 func (db *DB) LastPingReceived(id ID, ip net.IP) time.Time {
+	if ip = ip.To16(); ip == nil {
+		return time.Time{}
+	}
 	return time.Unix(db.fetchInt64(nodeItemKey(id, ip, dbNodePing)), 0)
 }
 
 // UpdateLastPingReceived updates the last time we tried contacting a remote node.
 func (db *DB) UpdateLastPingReceived(id ID, ip net.IP, instance time.Time) error {
+	if ip = ip.To16(); ip == nil {
+		return errInvalidIP
+	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodePing), instance.Unix())
 }
 
 // LastPongReceived retrieves the time of the last successful pong from remote node.
 func (db *DB) LastPongReceived(id ID, ip net.IP) time.Time {
+	if ip = ip.To16(); ip == nil {
+		return time.Time{}
+	}
 	// Launch expirer
 	db.ensureExpirer()
 	return time.Unix(db.fetchInt64(nodeItemKey(id, ip, dbNodePong)), 0)
@@ -441,26 +456,41 @@ func (db *DB) LastPongReceived(id ID, ip net.IP) time.Time {
 
 // UpdateLastPongReceived updates the last pong time of a node.
 func (db *DB) UpdateLastPongReceived(id ID, ip net.IP, instance time.Time) error {
+	if ip = ip.To16(); ip == nil {
+		return errInvalidIP
+	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodePong), instance.Unix())
 }
 
 // FindFails retrieves the number of findnode failures since bonding.
 func (db *DB) FindFails(id ID, ip net.IP) int {
+	if ip = ip.To16(); ip == nil {
+		return 0
+	}
 	return int(db.fetchInt64(nodeItemKey(id, ip, dbNodeFindFails)))
 }
 
 // UpdateFindFails updates the number of findnode failures since bonding.
 func (db *DB) UpdateFindFails(id ID, ip net.IP, fails int) error {
+	if ip = ip.To16(); ip == nil {
+		return errInvalidIP
+	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodeFindFails), int64(fails))
 }
 
 // FindFailsV5 retrieves the discv5 findnode failure counter.
 func (db *DB) FindFailsV5(id ID, ip net.IP) int {
+	if ip = ip.To16(); ip == nil {
+		return 0
+	}
 	return int(db.fetchInt64(v5Key(id, ip, dbNodeFindFails)))
 }
 
 // UpdateFindFailsV5 stores the discv5 findnode failure counter.
 func (db *DB) UpdateFindFailsV5(id ID, ip net.IP, fails int) error {
+	if ip = ip.To16(); ip == nil {
+		return errInvalidIP
+	}
 	return db.storeInt64(v5Key(id, ip, dbNodeFindFails), int64(fails))
 }
 

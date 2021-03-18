@@ -30,11 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-)
-
-var (
-	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
 )
 
 type DbCopier interface {
@@ -201,40 +196,11 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	return key, value, nil
 }
 
-// GetIndexChunk returns proper index chunk or return error if index is not created.
-// key must contain inverted block number in the end
-func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
-	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
-		c := tx.Cursor(bucket)
-		k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, dbutils.CompositeKeyWithoutIncarnation(key)) {
-			return ErrKeyNotFound
-		}
-		dat = make([]byte, len(v))
-		copy(dat, v)
-		return nil
-	})
-	if dat == nil {
-		return nil, ErrKeyNotFound
-	}
-	return dat, err
-}
-
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	err := db.kv.View(context.Background(), func(tx Tx) error {
 		return Walk(tx.Cursor(bucket), startkey, fixedbits, walker)
 	})
 	return err
-}
-
-func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	return db.kv.View(context.Background(), func(tx Tx) error {
-		return MultiWalk(tx.Cursor(bucket), startkeys, fixedbits, walker)
-	})
 }
 
 // Delete deletes the key from the queue and database

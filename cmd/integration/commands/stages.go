@@ -453,11 +453,6 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 func stageHashState(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	_, bc, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -559,11 +554,6 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 func stageHistory(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	_, bc, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -605,12 +595,6 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 
 func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	_, bc, _, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 

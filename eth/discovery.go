@@ -19,7 +19,6 @@ package eth
 import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -64,11 +63,12 @@ func (eth *Ethereum) currentEthEntry() *ethEntry {
 		eth.blockchain.CurrentHeader().Number.Uint64())}
 }
 
-// setupDiscovery creates the node discovery source for the eth protocol.
-func (eth *Ethereum) setupDiscovery(cfg *p2p.Config) (enode.Iterator, error) {
-	if cfg.NoDiscovery || len(eth.config.DiscoveryURLs) == 0 {
+// setupDiscovery creates the node discovery source for the `eth` and `snap`
+// protocols.
+func setupDiscovery(urls []string) (enode.Iterator, error) {
+	if len(urls) == 0 {
 		return nil, nil
 	}
 	client := dnsdisc.NewClient(dnsdisc.Config{})
-	return client.NewIterator(eth.config.DiscoveryURLs...)
+	return client.NewIterator(urls...)
 }

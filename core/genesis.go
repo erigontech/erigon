@@ -156,6 +156,10 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+	return SetupGenesisBlockWithOverride(db, genesis, nil, history, overwrite)
+}
+
+func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideBerlin *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, ErrGenesisNoConfig
@@ -178,7 +182,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 		}
 		return genesis.Config, block.Hash(), stateDB1, nil
 	}
-
 	// Check whether the genesis block is already written.
 	if genesis != nil {
 		block, stateDB1, _, err := genesis.ToBlock(nil, history)
@@ -190,9 +193,11 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
 		}
 	}
-
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
+	if overrideBerlin != nil {
+		newcfg.BerlinBlock = overrideBerlin
+	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}
@@ -214,7 +219,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if genesis == nil && stored != params.MainnetGenesisHash {
 		return storedcfg, stored, stateDB, nil
 	}
-
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
@@ -244,8 +248,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.YoloV2GenesisHash:
-		return params.YoloV2ChainConfig
+	case ghash == params.YoloV3GenesisHash:
+		return params.YoloV3ChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -467,15 +471,15 @@ func DefaultGoerliGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultYoloV2GenesisBlock() *Genesis {
-	// TODO: Update with yolov2 values + regenerate alloc data
+func DefaultYoloV3GenesisBlock() *Genesis {
+	// Full genesis: https://gist.github.com/holiman/c6ed9269dce28304ad176314caa75e97
 	return &Genesis{
-		Config:     params.YoloV2ChainConfig,
-		Timestamp:  0x5f91b932,
-		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000008a37866fd3627c9205a37c8685666f32ec07bb1b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Config:     params.YoloV3ChainConfig,
+		Timestamp:  0x6027dd2e,
+		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001041afbcb359d5a8dc58c15b2ff51354ff8a217d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x47b760,
 		Difficulty: big.NewInt(1),
-		Alloc:      decodePrealloc(yoloV1AllocData),
+		Alloc:      decodePrealloc(yoloV3AllocData),
 	}
 }
 

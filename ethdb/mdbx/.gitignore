@@ -11,3 +11,4 @@ mdbx_copy
 mdbx_dump
 mdbx_load
 mdbx_stat
+mdbx_drop

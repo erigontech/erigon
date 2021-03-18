@@ -308,13 +308,3 @@ func truncateBitmaps(tx ethdb.Database, bucket string, inMem map[string]struct{}
 
 	return nil
 }
-
-func SendBitmapsByChunks(k []byte, m *roaring.Bitmap, buf *bytes.Buffer, next etl.LoadNextFunc) error {
-	return bitmapdb.WalkChunkWithKeys(k, m, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
-		buf.Reset()
-		if _, err := chunk.WriteTo(buf); err != nil {
-			return err
-		}
-		return next(k, chunkKey, buf.Bytes())
-	})
-}

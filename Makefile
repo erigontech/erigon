@@ -20,7 +20,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack tester rpctest state pics rpcdaemon integration db-tools
+all: tg hack rpctest state pics rpcdaemon integration db-tools
 
 docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
@@ -43,18 +43,13 @@ hack:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
-tester:
-	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tester\" to launch tester."
-
 rpctest:
 	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/stats ./cmd/state
+	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
@@ -90,6 +85,7 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 mdbx:
@@ -98,7 +94,6 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
-        && echo '#define MDBX_ENABLE_MADVISE 0' >> config.h \
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
@@ -168,7 +163,6 @@ devtools:
 
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./cmd/tester/contracts/
 	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
 grpc:
@@ -187,10 +181,6 @@ grpc:
 	PATH=$(GOBIN):$(PATH) go generate ./cmd/headers
 	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
 	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotsync
-
-
-simulator-genesis:
-	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
 
 prometheus:
 	docker-compose up prometheus grafana

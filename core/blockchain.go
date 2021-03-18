@@ -53,28 +53,28 @@ var (
 	headHeaderGauge    = metrics.NewRegisteredGauge("chain/head/header", nil)
 	headFastBlockGauge = metrics.NewRegisteredGauge("chain/head/receipt", nil)
 
-	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
-	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
-	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
-	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
-
-	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
-	storageHashTimer   = metrics.NewRegisteredTimer("chain/storage/hashes", nil)
-	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
-	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
-
-	blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
-	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
+	//accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
+	//accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
+	//accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
+	//accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
+	//
+	//storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
+	//storageHashTimer   = metrics.NewRegisteredTimer("chain/storage/hashes", nil)
+	//storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
+	//storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
+	//
+	//blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
+	//blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockExecutionNumber = metrics.NewRegisteredGauge("chain/execution/number", nil)
-	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	//blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter      = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
 	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
 
-	blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
+	//blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
 	blockPrefetchInterruptMeter = metrics.NewRegisteredMeter("chain/prefetch/interrupts", nil)
 
 	errInsertionInterrupted = errors.New("insertion is interrupted")
@@ -87,7 +87,6 @@ const (
 	receiptsCacheLimit  = 32
 	maxFutureBlocks     = 256
 	maxTimeFutureBlocks = 30
-	badBlockLimit       = 10
 	TriesInMemory       = 128
 
 	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
@@ -202,7 +201,6 @@ type BlockChain struct {
 	processor  Processor  // Block transaction processor interface
 	vmConfig   vm.Config
 
-	badBlocks           *lru.Cache                     // Bad block cache
 	shouldPreserve      func(*types.Block) bool        // Function used to determine whether should preserve the given block.
 	TerminateInsert     func(common.Hash, uint64) bool // Testing hook used to terminate ancient receipt chain insertion.
 	highestKnownBlock   uint64
@@ -229,7 +227,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
-	badBlocks, _ := lru.New(badBlockLimit)
 
 	bc := &BlockChain{
 		chainConfig:         chainConfig,
@@ -242,7 +239,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		futureBlocks:        futureBlocks,
 		engine:              engine,
 		vmConfig:            vmConfig,
-		badBlocks:           badBlocks,
 		enableTxLookupIndex: true,
 		enableReceipts:      false,
 		enablePreimages:     true,
@@ -1182,12 +1178,6 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			return NonStatTy, err
 		}
 	}
-	// Write the positional metadata for transaction/receipt lookups and preimages
-
-	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
-		rawdb.WritePreimages(bc.db, stateDb.Preimages())
-	}
-
 	status = CanonStatTy
 
 	// Set new head.
@@ -1834,26 +1824,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	return nil
 }
 
-// BadBlocks returns a list of the last 'bad blocks' that the client has seen on the network
-func (bc *BlockChain) BadBlocks() []*types.Block {
-	blocks := make([]*types.Block, 0, bc.badBlocks.Len())
-	for _, hash := range bc.badBlocks.Keys() {
-		if blk, exist := bc.badBlocks.Peek(hash); exist {
-			block := blk.(*types.Block)
-			blocks = append(blocks, block)
-		}
-	}
-	return blocks
-}
-
-// addBadBlock adds a bad block to the bad-block LRU cache
-func (bc *BlockChain) addBadBlock(block *types.Block) {
-	bc.badBlocks.Add(block.Hash(), block)
-}
-
 // reportBlock logs a bad block error.
 func (bc *BlockChain) ReportBlock(block *types.Block, receipts types.Receipts, err error) {
-	bc.addBadBlock(block)
+	rawdb.WriteBadBlock(bc.db, block)
 
 	var receiptString string
 	for i, receipt := range receipts {
@@ -1900,7 +1873,6 @@ func (bc *BlockChain) HeaderChain() *HeaderChain {
 // of the header retrieval mechanisms already need to verify nonces, as well as
 // because nonces can be verified sparsely, not needing to check each.
 func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
-	start := time.Now()
 	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
 		return i, err
 	}
@@ -1914,12 +1886,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	}
 	defer bc.doneJob()
 
-	whFunc := func(header *types.Header) error {
-		_, err := bc.hc.WriteHeader(context.Background(), header)
-		return err
-	}
-	n, err := bc.hc.InsertHeaderChain(chain, whFunc, start)
-	return n, err
+	return 0, nil
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The
