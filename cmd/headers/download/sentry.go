@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"os/signal"
@@ -20,12 +19,14 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
+	proto_types "github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -183,12 +184,12 @@ func runPeer(
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
 	// Convert proto status data into the one required by devp2p
-	genesisHash := common.BytesToHash(protoStatusData.ForkData.Genesis)
+	genesisHash := gointerfaces.ConvertH256ToHash(protoStatusData.ForkData.Genesis)
 	statusData := &eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       protoStatusData.NetworkId,
-		TD:              new(big.Int).SetBytes(protoStatusData.TotalDifficulty),
-		Head:            common.BytesToHash(protoStatusData.BestHash),
+		TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
+		Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash),
 	}
@@ -484,14 +485,15 @@ type SentryServerImpl struct {
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
-	ss.peerRwMap.Delete(string(req.PeerId))
-	ss.peerTimeMap.Delete(string(req.PeerId))
-	ss.peerHeightMap.Delete(string(req.PeerId))
+	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
+	ss.peerRwMap.Delete(strId)
+	ss.peerTimeMap.Delete(strId)
+	ss.peerHeightMap.Delete(strId)
 	return &empty.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*empty.Empty, error) {
-	peerID := string(req.PeerId)
+	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	x, _ := ss.peerHeightMap.Load(peerID)
 	highestBlock, _ := x.(uint64)
 	if req.MinBlock > highestBlock {
@@ -551,11 +553,11 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
-	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
-	peerID := string(inreq.PeerId)
+	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	rwRaw, ok := ss.peerRwMap.Load(peerID)
 	if !ok {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", inreq.PeerId)
@@ -578,7 +580,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
-	return &proto_sentry.SentPeers{Peers: [][]byte{inreq.PeerId}}, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
@@ -595,7 +597,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		genesisHash := common.BytesToHash(statusData.ForkData.Genesis)
+		genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
 		if err != nil {
 			return &empty.Empty{}, err
@@ -637,7 +639,7 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	ss.recreateReceive()
 	for streamMsg := range ss.receiveCh {
 		outreq := proto_sentry.InboundMessage{
-			PeerId: []byte(streamMsg.peerID),
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 			Id:     streamMsg.msgId,
 			Data:   streamMsg.b,
 		}
@@ -674,7 +676,7 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 	ss.recreateReceiveUpload()
 	for streamMsg := range ss.receiveUploadCh {
 		outreq := proto_sentry.InboundMessage{
-			PeerId: []byte(streamMsg.peerID),
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 			Id:     streamMsg.msgId,
 			Data:   streamMsg.b,
 		}

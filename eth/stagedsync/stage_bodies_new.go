@@ -3,10 +3,10 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"runtime"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -23,7 +23,7 @@ func BodiesForward(
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *big.Int),
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	wakeUpChan chan struct{}, timeout int) error {
 	var tx ethdb.DbWithPendingMutations
 	var err error
@@ -161,7 +161,9 @@ func BodiesForward(
 	}
 	if headSet {
 		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
-			updateHead(ctx, bodyProgress, headHash, headTd)
+			headTd256 := new(uint256.Int)
+			headTd256.SetFromBig(headTd)
+			updateHead(ctx, bodyProgress, headHash, headTd256)
 		} else {
 			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
 		}

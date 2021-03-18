@@ -648,7 +648,7 @@ func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
 	if err != nil {
 		return common.Hash{}.Bytes(), err
 	}
-	return gointerfaces.ConvertH256toHash(res.Hash).Bytes(), nil
+	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
 }
 
 func (back *RemoteBackend) Etherbase() (common.Address, error) {
@@ -657,7 +657,7 @@ func (back *RemoteBackend) Etherbase() (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	return common.BytesToAddress(res.Hash), nil
+	return gointerfaces.ConvertH160toAddress(res.Address), nil
 }
 
 func (back *RemoteBackend) NetVersion() (uint64, error) {

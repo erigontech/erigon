@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -26,7 +27,7 @@ func NewEthBackendServer(eth core.Backend, events *Events) *EthBackendServer {
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
 	signedTx := new(types.Transaction)
-	out := &remote.AddReply{Hash: common.Hash{}.Bytes()}
+	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
 
 	if err := rlp.DecodeBytes(in.Signedtx, signedTx); err != nil {
 		return out, err
@@ -36,19 +37,19 @@ func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote
 		return out, err
 	}
 
-	out.Hash = signedTx.Hash().Bytes()
+	out.Hash = gointerfaces.ConvertHashToH256(signedTx.Hash())
 	return out, nil
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
-	out := &remote.EtherbaseReply{Hash: common.Hash{}.Bytes()}
+	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 
 	base, err := s.eth.Etherbase()
 	if err != nil {
 		return out, err
 	}
 
-	out.Hash = base.Hash().Bytes()
+	out.Address = gointerfaces.ConvertAddressToH160(base)
 	return out, nil
 }
 

@@ -3,9 +3,9 @@ package stages
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -32,7 +32,7 @@ func StageLoop(
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(context.Context, uint64, common.Hash, *big.Int),
+	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
@@ -149,7 +149,7 @@ func ReplacementStages(ctx context.Context,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(context.Context, uint64, common.Hash, *big.Int),
+	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) stagedsync.StageBuilders {
