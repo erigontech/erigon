@@ -55,16 +55,6 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Frontier`, "No receipt validation before Byzantium")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Homestead`, "No receipt validation before Byzantium")
 
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost32.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeNoQuadraticCost31.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost64_2.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost63.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost64.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost33.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost32_zeroSize.json`, "Needs to be fixed for TG")
-	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost65.json`, "Needs to be fixed for TG")
-
-	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp5.json`, "Needs to be fixed for TG")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false)); err != nil {
 			t.Errorf("test without snapshotter failed: %v", err)
