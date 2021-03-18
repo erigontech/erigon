@@ -414,7 +414,7 @@ func (p *Peer) RequestOneHeader(hash common.Hash) error {
 	}
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersPacket66{
-			RequestId:             rand.Uint64(),
+			RequestId:             rand.Uint64(), //nolint:gosec
 			GetBlockHeadersPacket: &query,
 		})
 	}
@@ -433,7 +433,7 @@ func (p *Peer) RequestHeadersByHash(origin common.Hash, amount int, skip int, re
 	}
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersPacket66{
-			RequestId:             rand.Uint64(),
+			RequestId:             rand.Uint64(), //nolint:gosec
 			GetBlockHeadersPacket: &query,
 		})
 	}
@@ -452,7 +452,7 @@ func (p *Peer) RequestHeadersByNumber(origin uint64, amount int, skip int, rever
 	}
 	if p.Version() >= ETH66 {
 		return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersPacket66{
-			RequestId:             rand.Uint64(),
+			RequestId:             rand.Uint64(), //nolint:gosec
 			GetBlockHeadersPacket: &query,
 		})
 	}

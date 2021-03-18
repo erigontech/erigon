@@ -320,7 +320,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
 	location := path.Join(baseDir, filename)
-	if err = ioutil.WriteFile(location, b, 0644); err != nil {
+	if err = ioutil.WriteFile(location, b, 0644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	log.Info("Wrote file", "file", location)

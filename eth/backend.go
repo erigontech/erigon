@@ -454,7 +454,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-		eth.snapDialCandidates, err = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
+		eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	}
 
 	if config.SyncMode != downloader.StagedSync {

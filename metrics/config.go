@@ -17,7 +17,7 @@
 package metrics
 
 // Config contains the configuration for the metric collection.
-type Config struct {
+type Config struct { //nolint:maligned
 	Enabled          bool   `toml:",omitempty"`
 	EnabledExpensive bool   `toml:",omitempty"`
 	HTTP             string `toml:",omitempty"`

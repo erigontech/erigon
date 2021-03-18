@@ -62,7 +62,7 @@ func testInsert(t *testing.T, hc *HeaderChain, chain []*types.Header, wantStatus
 
 	status, err := hc.InsertHeaderChain(chain, time.Now()) //nolint:staticcheck
 	if status != wantStatus {
-		t.Errorf("wrong write status from InsertHeaderChain: got %v, want %v", status, wantStatus)
+		t.Errorf("wrong write status from InsertHeaderChain: got %v, want %v, err=%v", status, wantStatus, err)
 	}
 	// Always verify that the header chain is unbroken
 	if err = verifyUnbrokenCanonchain(hc); err != nil {

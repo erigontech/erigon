@@ -156,7 +156,7 @@ func (ps *peerSet) peerWithHighestNumber() *eth.Peer {
 }
 
 // peerWithHighestTD is an alias to the highest number for testing and rebase simplicity
-func (ps *peerSet) peerWithHighestTD() *eth.Peer {
+func (ps *peerSet) peerWithHighestTD() *eth.Peer { //nolint:unused
 	return ps.peerWithHighestNumber()
 }
 

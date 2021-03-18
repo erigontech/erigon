@@ -26,12 +26,12 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
-	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/time/rate"
 )
 
@@ -301,7 +301,7 @@ func (it *randomIterator) pickTree() *clientTree {
 		switch {
 		case canSync:
 			// Pick a random tree.
-			return trees[rand.Intn(len(trees))]
+			return trees[rand.Intn(len(trees))] //nolint:gosec
 		case len(trees) > 0:
 			// No sync action can be performed on any tree right now. The only meaningful
 			// thing to do is waiting for any root record to get updated.
