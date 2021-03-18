@@ -154,7 +154,7 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
 
-func answerGetBlockBodiesQuery(backend Backend, query GetBlockBodiesPacket, peer *Peer) []rlp.RawValue {
+func answerGetBlockBodiesQuery(backend Backend, query GetBlockBodiesPacket, peer *Peer) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var (
 		bytes  int
@@ -217,7 +217,7 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
 
-func answerGetReceiptsQuery(backend Backend, query GetReceiptsPacket, peer *Peer) []rlp.RawValue {
+func answerGetReceiptsQuery(backend Backend, query GetReceiptsPacket, peer *Peer) []rlp.RawValue { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -395,7 +395,7 @@ func handleGetPooledTransactions66(backend Backend, msg Decoder, peer *Peer) err
 	return peer.ReplyPooledTransactionsRLP(query.RequestId, hashes, txs)
 }
 
-func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsPacket, peer *Peer) ([]common.Hash, []rlp.RawValue) {
+func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsPacket, peer *Peer) ([]common.Hash, []rlp.RawValue) { //nolint:unparam
 	// Gather transactions until the fetch or network limits is reached
 	var (
 		bytes  int

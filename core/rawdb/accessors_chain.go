@@ -787,7 +787,7 @@ func ReadAllBadBlocks(db ethdb.Database) []*types.Block {
 	if err := rlp.DecodeBytes(blob, &badBlocks); err != nil {
 		return nil
 	}
-	var blocks []*types.Block
+	var blocks []*types.Block //nolint:prealloc
 	for _, bad := range badBlocks {
 		blocks = append(blocks, types.NewBlockWithHeader(bad.Header).WithBody(bad.Body.Transactions, bad.Body.Uncles))
 	}

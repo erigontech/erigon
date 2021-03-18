@@ -37,10 +37,6 @@ var (
 	// errPeerNotRegistered is returned if a peer is attempted to be removed from
 	// a peer set, but no peer with the given id exists.
 	errPeerNotRegistered = errors.New("peer not registered")
-
-	// errSnapWithoutEth is returned if a peer attempts to connect only on the
-	// snap protocol without advertizing the eth main protocol.
-	errSnapWithoutEth = errors.New("peer connected on snap without compatible eth support")
 )
 
 // peerSet represents the collection of active peers currently participating in

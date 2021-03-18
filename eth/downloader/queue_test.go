@@ -115,9 +115,9 @@ func dummyPeer(id string) *peerConnection {
 }
 
 func TestBasics(t *testing.T) {
-	emptyChain := getEmptyChain() //nolint:govet
-	numOfBlocks := len(emptyChain.blocks)
-	numOfReceipts := len(emptyChain.blocks) / 2
+	emptyCh := getEmptyChain()
+	numOfBlocks := len(emptyCh.blocks)
+	numOfReceipts := len(emptyCh.blocks) / 2
 
 	q := newQueue(10, 10)
 	if !q.Idle() {

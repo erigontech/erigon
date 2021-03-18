@@ -998,9 +998,10 @@ func testShiftedHeaderAttack(t *testing.T, protocol uint, mode SyncMode) {
 // for various failure scenarios. Afterwards a full sync is attempted to make
 // sure no state was corrupted.
 // no fast sync for TurboGeth
-//func TestInvalidHeaderRollback63Fast(t *testing.T) { testInvalidHeaderRollback(t, 63, FastSync) }
-//func TestInvalidHeaderRollback64Fast(t *testing.T) { testInvalidHeaderRollback(t, 64, FastSync) }
-//func TestInvalidHeaderRollback65Fast(t *testing.T) { testInvalidHeaderRollback(t, 65, FastSync) }
+/*
+func TestInvalidHeaderRollback63Fast(t *testing.T) { testInvalidHeaderRollback(t, 63, FastSync) }
+func TestInvalidHeaderRollback64Fast(t *testing.T) { testInvalidHeaderRollback(t, 64, FastSync) }
+func TestInvalidHeaderRollback65Fast(t *testing.T) { testInvalidHeaderRollback(t, 65, FastSync) }
 
 func testInvalidHeaderRollback(t *testing.T, protocol uint, mode SyncMode) {
 	t.Skip("deadlock")
@@ -1087,6 +1088,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol uint, mode SyncMode) {
 	}
 	tester.terminate()
 }
+*/
 
 // Tests that a peer advertising a high TD doesn't get to stall the downloader
 // afterwards by not sending any useful hashes.

@@ -57,7 +57,7 @@ const (
 )
 
 // max is a helper function which returns the larger of the two given integers.
-func max(a, b int) int {
+func max(a, b int) int { //nolint:unparam
 	if a > b {
 		return a
 	}

@@ -26,7 +26,7 @@ import (
 )
 
 // largeNumber returns a very large big.Int.
-func largeNumber(megabytes int) *uint256.Int {
+func largeNumber(megabytes int) *uint256.Int { //nolint:unparam
 	buf := make([]byte, megabytes*1024*1024)
 	//nolint:errcheck
 	rand.Read(buf)
@@ -36,7 +36,7 @@ func largeNumber(megabytes int) *uint256.Int {
 }
 
 // largeBuffer returns a very large buffer.
-func largeBuffer(megabytes int) []byte {
+func largeBuffer(megabytes int) []byte { //nolint:unparam
 	buf := make([]byte, megabytes*1024*1024)
 	//nolint:errcheck
 	rand.Read(buf)
@@ -44,7 +44,7 @@ func largeBuffer(megabytes int) []byte {
 }
 
 // largeString returns a very large string.
-func largeString(megabytes int) string {
+func largeString(megabytes int) string { //nolint:unparam
 	buf := make([]byte, megabytes*1024*1024)
 	//nolint:errcheck
 	rand.Read(buf)

@@ -446,8 +446,8 @@ func TestAddress_Format(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.out != tt.want {
-				t.Errorf("%s does not render as expected:\n got %s\nwant %s", tt.name, tt.out, tt.want)
+			if tt.out != tt.want { //nolint:scopelint
+				t.Errorf("%s does not render as expected:\n got %s\nwant %s", tt.name, tt.out, tt.want) //nolint:scopelint
 			}
 		})
 	}
@@ -531,8 +531,8 @@ func TestHash_Format(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.out != tt.want {
-				t.Errorf("%s does not render as expected:\n got %s\nwant %s", tt.name, tt.out, tt.want)
+			if tt.out != tt.want { //nolint:scopelint
+				t.Errorf("%s does not render as expected:\n got %s\nwant %s", tt.name, tt.out, tt.want) //nolint:scopelint
 			}
 		})
 	}

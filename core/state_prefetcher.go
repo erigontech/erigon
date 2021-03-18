@@ -75,7 +75,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, ibs *state.IntraBlockStat
 // precacheTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. The goal is not to execute
 // the transaction successfully, rather to warm up touched data slots.
-func precacheTransaction(msg types.Message, config *params.ChainConfig, gaspool *GasPool, ibs vm.IntraBlockState, header *types.Header, evm *vm.EVM) error {
+func precacheTransaction(msg types.Message, config *params.ChainConfig, gaspool *GasPool, ibs vm.IntraBlockState, header *types.Header, evm *vm.EVM) error { //nolint:unparam
 	// Update the evm with the new transaction context.
 	evm.Reset(NewEVMTxContext(msg), ibs)
 	// Add addresses to access list if applicable

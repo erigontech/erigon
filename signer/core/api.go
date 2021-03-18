@@ -357,7 +357,7 @@ func (api *SignerAPI) derivationLoop(events chan accounts.WalletEvent) {
 				// Derive first N accounts, hardcoded for now
 				for i := 0; i < limit; i++ {
 					path := next()
-					if acc, err := event.Wallet.Derive(path, true); err != nil {
+					if acc, err := event.Wallet.Derive(path, true); err != nil { //nolint:scopelint
 						log.Warn("Account derivation failed", "error", err)
 					} else {
 						log.Info("Derived account", "address", acc.Address, "path", path)

@@ -196,7 +196,7 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 
 // handleBlockBroadcast is invoked from a peer's message handler when it transmits a
 // block broadcast for the local node to process.
-func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td *big.Int) error {
+func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td *big.Int) error { //nolint:unparam
 	// Schedule the block for import
 	if err := h.blockFetcher.Enqueue(peer.ID(), block); err != nil {
 		log.Error("blockFetcher.Enqueue", "error", err)
