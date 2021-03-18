@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -33,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -169,8 +169,12 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	chainNoFork.InsertChain(context.TODO(), blocksNoFork[:1])
-	chainProFork.InsertChain(context.TODO(), blocksProFork[:1])
+	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[:1], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[:1], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -200,8 +204,12 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	chainNoFork.InsertChain(context.TODO(), blocksNoFork[1:2])
-	chainProFork.InsertChain(context.TODO(), blocksProFork[1:2])
+	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[1:2], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[1:2], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -263,6 +271,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	defer src.Close()
 	defer sink.Close()
 
+	//nolint:errcheck
 	go handler.handler.runEthPeer(sink, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(handler.handler), peer)
 	})
@@ -325,6 +334,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	defer src.Close()
 	defer sink.Close()
 
+	//nolint:errcheck
 	go handler.handler.runEthPeer(src, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(handler.handler), peer)
 	})
@@ -349,6 +359,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	bcastSub := backend.txBroadcasts.Subscribe(bcasts)
 	defer bcastSub.Unsubscribe()
 
+	//nolint:errcheck
 	go eth.Handle(backend, sink)
 
 	// Make sure we get all the transactions on the correct channels
@@ -425,9 +436,11 @@ func testTransactionPropagation(t *testing.T, protocol uint) {
 		defer sourcePeer.Close()
 		defer sinkPeer.Close()
 
+		//nolint:errcheck
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
+		//nolint:errcheck
 		go sink.handler.runEthPeer(sinkPeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(sink.handler), peer)
 		})
@@ -536,6 +549,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	defer local.Close()
 	defer remote.Close()
 
+	//nolint:errcheck
 	go handler.handler.runEthPeer(local, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(handler.handler), peer)
 	})
@@ -626,12 +640,14 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		defer sourcePeer.Close()
 		defer sinkPeer.Close()
 
+		//nolint:errcheck
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
 		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewIDWithChain(source.chain), forkid.NewFilter(source.chain)); err != nil {
 			t.Fatalf("failed to run protocol handshake")
 		}
+		//nolint:errcheck
 		go eth.Handle(sink, sinkPeer)
 	}
 	// Subscribe to all the transaction pools
@@ -694,6 +710,7 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	defer src.Close()
 	defer sink.Close()
 
+	//nolint:errcheck
 	go source.handler.runEthPeer(src, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(source.handler), peer)
 	})
@@ -713,6 +730,7 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	sub := backend.blockBroadcasts.Subscribe(blocks)
 	defer sub.Unsubscribe()
 
+	//nolint:errcheck
 	go eth.Handle(backend, sink)
 
 	// Create various combinations of malformed blocks

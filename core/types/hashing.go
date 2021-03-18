@@ -187,7 +187,7 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	if err := rlp.Encode(sha, x); err != nil {
 		panic(err)
 	}
-	//nolint::errcheck
+	//nolint:errcheck
 	sha.Read(h[:])
 	return h
 }
