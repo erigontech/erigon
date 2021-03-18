@@ -198,7 +198,7 @@ func Main(ctx *cli.Context) error {
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
 		if err := decoder.Decode(&txsWithKeys); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("Failed unmarshaling txs-file: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
 		}
 	} else {
 		txsWithKeys = inputData.Txs
@@ -207,7 +207,7 @@ func Main(ctx *cli.Context) error {
 	signer := types.MakeSigner(chainConfig, big.NewInt(int64(prestate.Env.Number)))
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, signer); err != nil {
-		return NewError(ErrorJson, fmt.Errorf("Failed signing transactions: %v", err))
+		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
 	}
 
 	// Iterate over all the tests, run them and aggregate the results
@@ -244,10 +244,10 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 	if key.Key != nil {
 		k := key.Key.Hex()[2:]
-		if ecdsaKey, err := crypto.HexToECDSA(k); err != nil {
-			return err
-		} else {
+		if ecdsaKey, err := crypto.HexToECDSA(k); err == nil {
 			t.key = ecdsaKey
+		} else {
+			return err
 		}
 	}
 	// Now, read the transaction itself

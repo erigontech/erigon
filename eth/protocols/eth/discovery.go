@@ -58,7 +58,7 @@ func StartENRUpdater(chain *core.BlockChain, ln *enode.LocalNode) {
 }
 
 // currentENREntry constructs an `eth` ENR entry based on the current state of the chain.
-func currentENREntry(chain *core.BlockChain) *enrEntry {
+func currentENREntry(chain forkid.Blockchain) *enrEntry {
 	return &enrEntry{
 		ForkID: forkid.NewID(chain.Config(), chain.Genesis().Hash(), chain.CurrentHeader().Number.Uint64()),
 	}

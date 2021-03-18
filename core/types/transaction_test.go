@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -459,7 +460,7 @@ func encodeDecodeJSON(tx *Transaction) (*Transaction, error) {
 	return parsedTx, nil
 }
 
-func encodeDecodeBinary(tx *Transaction) (*Transaction, error) {
+func encodeDecodeBinary(tx encoding.BinaryMarshaler) (*Transaction, error) {
 	data, err := tx.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("rlp encoding failed: %v", err)
@@ -481,7 +482,7 @@ func assertEqual(orig *Transaction, cpy *Transaction) error {
 	}
 	if orig.AccessList() != nil {
 		if !reflect.DeepEqual(orig.AccessList(), cpy.AccessList()) {
-			return fmt.Errorf("access list wrong!")
+			return fmt.Errorf("access list wrong")
 		}
 		if orig.ChainId().Cmp(cpy.ChainId()) != 0 {
 			return fmt.Errorf("invalid chain id, want %d, got %d", orig.ChainId(), cpy.ChainId())

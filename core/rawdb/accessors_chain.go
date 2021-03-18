@@ -831,6 +831,7 @@ func WriteBadBlock(db ethdb.Database, block *types.Block) {
 }
 
 // DeleteBadBlocks deletes all the bad blocks from the database
+//nolint:interfacer
 func DeleteBadBlocks(db ethdb.Database) {
 	if err := db.Delete(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock), nil); err != nil {
 		log.Crit("Failed to delete bad blocks", "err", err)

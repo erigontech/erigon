@@ -59,9 +59,11 @@ func testFastSyncDisabling(t *testing.T, protocol uint) {
 	defer emptyPeer.Close()
 	defer fullPeer.Close()
 
+	//nolint:errcheck
 	go empty.handler.runEthPeer(emptyPeer, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(empty.handler), peer)
 	})
+	//nolint:errcheck
 	go full.handler.runEthPeer(fullPeer, func(peer *eth.Peer) error {
 		return eth.Handle((*ethHandler)(full.handler), peer)
 	})

@@ -1705,7 +1705,7 @@ func (t *txLookup) RemoteToLocals(locals *accountSet) int {
 		if locals.containsTx(tx) {
 			t.locals[hash] = tx
 			delete(t.remotes, hash)
-			migrated += 1
+			migrated++
 		}
 	}
 	return migrated
