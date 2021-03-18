@@ -35,7 +35,7 @@ type testPeer struct {
 }
 
 // newTestPeer creates a new peer registered at the given data backend.
-func newTestPeer(name string, version uint, backend Backend) (*testPeer, <-chan error) {
+func newTestPeer(name string, version uint, backend Backend) (*testPeer, <-chan error) { //nolint:unparam
 	// Create a message pipe to communicate through
 	app, net := p2p.MsgPipe()
 

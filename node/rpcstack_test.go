@@ -226,7 +226,7 @@ func Test_checkPath(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix))
+			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix)) //nolint:scopelint
 		})
 	}
 }
