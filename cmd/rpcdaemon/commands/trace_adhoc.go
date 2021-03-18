@@ -124,7 +124,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 		input = args.Data
 	}
 
-	msg := types.NewMessage(addr, args.To, 0 /* nonce */, value, gas, gasPrice, input, false /* checkNonce */)
+	msg := types.NewMessage(addr, args.To, 0 /* nonce */, value, gas, gasPrice, input, types.AccessList{}, false /* checkNonce */)
 	return msg
 }
 
@@ -260,11 +260,11 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	return nil
 }
 
-func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, retst *stack.ReturnStack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
 	return nil
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rst *stack.ReturnStack, contract *vm.Contract, opDepth int, err error) error {
+func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
 	//fmt.Printf("CaptureFault depth %d\n", opDepth)
 	return nil
 }
@@ -504,9 +504,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
 
-	evmCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 
-	evm := vm.NewEVM(evmCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -651,11 +651,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
-		evmCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		evm := vm.NewEVM(evmCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult

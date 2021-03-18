@@ -169,6 +169,8 @@ func TestEmptyAccountRange(t *testing.T) {
 }
 
 func TestStorageRangeAt(t *testing.T) {
+	t.Parallel()
+
 	// Create a state where account 0x010000... has a few storage entries.
 	db := ethdb.NewMemDatabase()
 	defer db.Close()

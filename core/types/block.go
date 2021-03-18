@@ -23,15 +23,12 @@ import (
 	"io"
 	"math/big"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -130,22 +127,6 @@ func (h *Header) SanityCheck() error {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
 	}
 	return nil
-}
-
-// hasherPool holds LegacyKeccak hashers.
-var hasherPool = sync.Pool{
-	New: func() interface{} {
-		return sha3.NewLegacyKeccak256()
-	},
-}
-
-func rlpHash(x interface{}) (h common.Hash) {
-	sha := hasherPool.Get().(crypto.KeccakState)
-	defer hasherPool.Put(sha)
-	sha.Reset()
-	rlp.Encode(sha, x) //nolint:errcheck
-	sha.Read(h[:])     //nolint:errcheck
-	return h
 }
 
 // EmptyBody returns true if there is no additional 'body' to complete the header

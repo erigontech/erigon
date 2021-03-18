@@ -26,6 +26,7 @@ var (
 	Num1  = uint256.NewInt().SetUint64(1)
 	Num2  = uint256.NewInt().SetUint64(2)
 	Num8  = uint256.NewInt().SetUint64(8)
+	Num27 = uint256.NewInt().SetUint64(27)
 	Num32 = uint256.NewInt().SetUint64(32)
 	Num35 = uint256.NewInt().SetUint64(35)
 )

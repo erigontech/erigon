@@ -30,7 +30,7 @@ func getReceipts(ctx context.Context, tx ethdb.Database, chainConfig *params.Cha
 
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
-	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), hash, 0)
+	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 
 	var signer types.Signer = types.FrontierSigner{}
 	if txn.Protected() {
-		signer = types.NewEIP155Signer(txn.ChainID().ToBig())
+		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
 	}
 	from, _ := types.Sender(signer, txn)
 

@@ -207,18 +207,11 @@ func NewDatabase(diskdb ethdb.Database) *Database {
 	return NewDatabaseWithCache(diskdb, 0, "")
 }
 
-// NewDatabaseWithCache creates a new trie database to store ephemeral trie content
+// NewDatabaseWithConfig creates a new trie database to store ephemeral trie content
 // before its written out to disk or garbage collected. It also acts as a read cache
 // for nodes loaded from disk.
 func NewDatabaseWithCache(diskdb ethdb.Database, cache int, journal string) *Database {
 	var cleans *fastcache.Cache
-	if cache > 0 {
-		if journal == "" {
-			cleans = fastcache.New(cache * 1024 * 1024)
-		} else {
-			cleans = fastcache.LoadFromFileOrNew(journal, cache*1024*1024)
-		}
-	}
 	return &Database{
 		diskdb: diskdb,
 		cleans: cleans,
@@ -249,6 +242,11 @@ func (db *Database) InsertBlob(hash common.Hash, blob []byte) {
 //
 // Note, this method assumes that the database's lock is held!
 func (db *Database) insertPreimage(hash common.Hash, preimage []byte) {
+	// Short circuit if preimage collection is disabled
+	if db.preimages == nil {
+		return
+	}
+	// Track the preimage if a yet unknown one
 	if _, ok := db.preimages[hash]; ok {
 		return
 	}

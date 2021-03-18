@@ -19,8 +19,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -367,9 +368,9 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	calcDiffFunc := func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		return engine.CalcDifficulty(cr, childTimestamp, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash)
 	}
-	verifySealFunc := func(header *types.Header) error {
-		return engine.VerifySeal(cr, header)
-	}
+	//verifySealFunc := func(header *types.Header) error {
+	//	return engine.VerifySeal(cr, header)
+	//}
 	hd := headerdownload.NewHeaderDownload(
 		common.Hash{}, /* initialHash */
 		filesDir,
@@ -377,7 +378,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		16*1024,    /* tipLimit */
 		1024,       /* initPowDepth */
 		calcDiffFunc,
-		verifySealFunc,
+		nil,
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
@@ -398,7 +399,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
-	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
+	cs.networkId = ethconfig.Defaults.NetworkID // Hard-coded, needs to be parametrized
 	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
 	return cs, err
 }
@@ -426,14 +427,14 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
-	var request eth.NewBlockHashesData
+	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
 		if !cs.hd.HasTip(announce.Hash) {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
 				Amount:  1,
 				Reverse: false,
 				Skip:    0,
@@ -535,7 +536,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 		return fmt.Errorf("decode NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
-	var request eth.NewBlockData
+	var request eth.NewBlockPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
@@ -625,7 +626,7 @@ func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, m
 	return hash, number
 }
 
-func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersData) ([]*types.Header, error) {
+func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -710,7 +711,7 @@ func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersData) ([]*types.H
 }
 
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
-	var query eth.GetBlockHeadersData
+	var query eth.GetBlockHeadersPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v", err)
 	}
@@ -755,7 +756,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		if err := msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
 			break
 		} else if err != nil {
-			return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg: %v", err)
+			return fmt.Errorf("decode hash for GetBlockBodiesMsg: %v", err)
 		}
 		if hashesStr.Len() > 0 {
 			hashesStr.WriteString(",")
@@ -827,7 +828,7 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
 	for _, req := range reqs {
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
 			Amount:  uint64(req.Length),
 			Reverse: true,
 			Skip:    0,
