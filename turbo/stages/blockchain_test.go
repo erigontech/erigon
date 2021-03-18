@@ -3467,8 +3467,8 @@ func TestEIP2718Transition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
-	if n, err := chain.InsertChain(context.TODO(), blocks); err != nil {
-		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	block := chain.GetBlockByNumber(1)
