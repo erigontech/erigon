@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"math/big"
 	"reflect"
@@ -35,7 +36,7 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	input := []byte{0x80}
 	var r Receipt
 	err := rlp.DecodeBytes(input, &r)
-	if err != errEmptyTypedReceipt {
+	if !errors.Is(err, errEmptyTypedReceipt) {
 		t.Fatal("wrong error:", err)
 	}
 }

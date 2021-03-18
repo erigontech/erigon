@@ -191,9 +191,9 @@ func Main(ctx *cli.Context) error {
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {
-		inFile, err := os.Open(txStr)
-		if err != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err))
+		inFile, err1 := os.Open(txStr)
+		if err1 != nil {
+			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)

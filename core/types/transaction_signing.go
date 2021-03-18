@@ -32,13 +32,6 @@ import (
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
-// sigCache is used to cache the derived sender and contains
-// the signer used to derive it.
-type sigCache struct {
-	signer Signer
-	from   common.Address
-}
-
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 	var signer Signer
