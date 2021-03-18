@@ -221,7 +221,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	case remote.Op_LAST:
 		k, v, err = c.Last()
 	case remote.Op_LAST_DUP:
-		v, err = c.(ethdb.CursorDupSort).LastDup(in.K)
+		v, err = c.(ethdb.CursorDupSort).LastDup()
 	case remote.Op_NEXT:
 		k, v, err = c.Next()
 	case remote.Op_NEXT_DUP:

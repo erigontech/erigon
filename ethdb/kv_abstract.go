@@ -187,7 +187,7 @@ type CursorDupSort interface {
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
-	LastDup(k []byte) ([]byte, error)   // LastDup - position at last data item of current key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error)  // CountDuplicates - number of duplicates for the current key
 	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all of the data items for the current key

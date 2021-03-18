@@ -843,8 +843,8 @@ func (c *LmdbCursor) firstDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, lmdb.FirstDup)
 	return v, err
 }
-func (c *LmdbCursor) lastDup(k []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, nil, lmdb.LastDup)
+func (c *LmdbCursor) lastDup() ([]byte, error) {
+	_, v, err := c.c.Get(nil, nil, lmdb.LastDup)
 	return v, err
 }
 
@@ -1534,14 +1534,14 @@ func (c *LmdbDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *LmdbDupSortCursor) LastDup(k []byte) ([]byte, error) {
+func (c *LmdbDupSortCursor) LastDup() ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
 	}
 
-	v, err := c.lastDup(k)
+	v, err := c.lastDup()
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil

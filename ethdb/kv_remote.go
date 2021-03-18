@@ -468,8 +468,8 @@ func (c *remoteCursor) firstDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remoteCursor) lastDup(k []byte) ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP, K: k}); err != nil {
+func (c *remoteCursor) lastDup() ([]byte, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -635,11 +635,11 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
 	}
 	return c.prevNoDup()
 }
-func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error) {
+func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
-	return c.lastDup(k)
+	return c.lastDup()
 }
 
 func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {

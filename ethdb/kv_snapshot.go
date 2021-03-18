@@ -595,7 +595,7 @@ func (c *snCursor2Dup) NextNoDup() ([]byte, []byte, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) LastDup(k []byte) ([]byte, error) {
+func (c *snCursor2Dup) LastDup() ([]byte, error) {
 	panic("implement me")
 }
 

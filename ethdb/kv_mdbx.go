@@ -1595,7 +1595,7 @@ func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *MdbxDupSortCursor) LastDup(k []byte) ([]byte, error) {
+func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return nil, err
