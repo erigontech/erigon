@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 )
 
 type DBServer struct {
