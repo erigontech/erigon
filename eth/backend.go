@@ -382,7 +382,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.UnwindOrder{}, stagedsync.OptionalParameters{})
+	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -445,6 +445,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Checkpoint: checkpoint,
 
 		Whitelist: config.Whitelist,
+		Mining:    &config.Miner,
 	}); err != nil {
 		return nil, err
 	}
@@ -454,7 +455,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 	eth.handler.SetStagedSync(stagedSync)
-	eth.handler.SetMiningStage(mining)
+	eth.handler.SetMining(mining)
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO

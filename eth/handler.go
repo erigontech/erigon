@@ -88,6 +88,7 @@ type handlerConfig struct {
 	EventMux   *event.TypeMux            // Legacy event mux, deprecate for `feed`
 	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
 	Whitelist  map[uint64]common.Hash    // Hard coded whitelist for sync challenged
+	Mining     *params.MiningConfig
 }
 
 type handler struct {
@@ -131,7 +132,6 @@ type handler struct {
 	batchSize     datasize.ByteSize
 	stagedSync    *stagedsync.StagedSync
 	mining        *stagedsync.StagedSync
-	miningConfig  *miner.Config
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -168,7 +168,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Chain, nil, h.removePeer, sm)
+	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Mining, config.Chain, nil, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
 	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
@@ -215,6 +215,13 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	h.stagedSync = stagedSync
 	if h.downloader != nil {
 		h.downloader.SetStagedSync(stagedSync)
+	}
+}
+
+func (h *handler) SetMining(mining *stagedsync.StagedSync) {
+	h.mining = mining
+	if h.downloader != nil {
+		h.downloader.SetMining(mining)
 	}
 }
 

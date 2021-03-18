@@ -287,6 +287,11 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	d.stagedSync = stagedSync
 }
 
+// SetStagedSync sets the staged sync instance (by protocol manager)
+func (d *Downloader) SetMining(mining *stagedsync.StagedSync) {
+	d.mining = mining
+}
+
 // DataDir sets the directory where download is allowed to create temporary files
 func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
