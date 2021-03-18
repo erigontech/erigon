@@ -316,7 +316,9 @@ func (h *handler) removePeer(id string) {
 	// Remove the `eth` peer if it exists
 	logger.Debug("Removing Ethereum peer")
 
+	//nolint:errcheck
 	h.downloader.UnregisterPeer(id)
+	//nolint:errcheck
 	h.txFetcher.Drop(id)
 
 	if err := h.peers.unregisterPeer(id); err != nil {

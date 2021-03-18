@@ -18,6 +18,7 @@ package eth
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -79,7 +80,11 @@ func testHandshake(t *testing.T, protocol uint) {
 		defer peer.Close()
 
 		// Send the junk test with one peer, check the handshake failure
-		go p2p.Send(app, test.code, test.data)
+		go func() {
+			if err := p2p.Send(app, test.code, test.data); err != nil {
+				fmt.Printf("Could not send: %v\n", err)
+			}
+		}()
 
 		err := peer.Handshake(1, td, head.Hash(), genesis.Hash(), forkID, forkid.NewFilter(backend.chain))
 		if err == nil {

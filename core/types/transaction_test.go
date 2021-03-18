@@ -441,7 +441,9 @@ func TestTransactionCoding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertEqual(parsedTx, tx)
+		if err = assertEqual(parsedTx, tx); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

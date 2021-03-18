@@ -409,7 +409,9 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		receipts = append(receipts, backend.chain.GetReceiptsByHash(block.Hash()))
 	}
 	// Send the hash request and verify the response
-	p2p.Send(peer.app, GetReceiptsMsg, hashes)
+	if err := p2p.Send(peer.app, GetReceiptsMsg, hashes); err != nil {
+		t.Fatal(err)
+	}
 	if err := p2p.ExpectMsg(peer.app, ReceiptsMsg, receipts); err != nil {
 		t.Errorf("receipts mismatch: %v", err)
 	}

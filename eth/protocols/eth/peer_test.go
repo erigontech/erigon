@@ -41,6 +41,7 @@ func newTestPeer(name string, version uint, backend Backend) (*testPeer, <-chan 
 
 	// Start the peer on a new thread
 	var id enode.ID
+	//nolint:errcheck
 	rand.Read(id[:])
 
 	peer := NewPeer(version, p2p.NewPeer(id, name, nil), net, backend.TxPool())
