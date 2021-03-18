@@ -115,7 +115,7 @@ func dummyPeer(id string) *peerConnection {
 }
 
 func TestBasics(t *testing.T) {
-	emptyChain := getEmptyChain() //nolint:shadow
+	emptyChain := getEmptyChain() //nolint:govet
 	numOfBlocks := len(emptyChain.blocks)
 	numOfReceipts := len(emptyChain.blocks) / 2
 
