@@ -33,42 +33,42 @@ type txJSON struct {
 }
 
 // MarshalJSON marshals as JSON with a hash.
-func (t *Transaction) MarshalJSON() ([]byte, error) {
+func (tx *Transaction) MarshalJSON() ([]byte, error) {
 	var enc txJSON
 	// These are set for all tx types.
-	enc.Hash = t.Hash()
-	enc.Type = hexutil.Uint64(t.Type())
+	enc.Hash = tx.Hash()
+	enc.Type = hexutil.Uint64(tx.Type())
 
 	// Other fields are set conditionally depending on tx type.
-	switch tx := t.inner.(type) {
+	switch txInner := tx.inner.(type) {
 	case *LegacyTx:
-		enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-		enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-		enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
-		enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-		enc.Data = (*hexutil.Bytes)(&tx.Data)
-		enc.To = t.To()
-		enc.V = (*hexutil.Big)(tx.V.ToBig())
-		enc.R = (*hexutil.Big)(tx.R.ToBig())
-		enc.S = (*hexutil.Big)(tx.S.ToBig())
+		enc.Nonce = (*hexutil.Uint64)(&txInner.Nonce)
+		enc.Gas = (*hexutil.Uint64)(&txInner.Gas)
+		enc.GasPrice = (*hexutil.Big)(txInner.GasPrice.ToBig())
+		enc.Value = (*hexutil.Big)(txInner.Value.ToBig())
+		enc.Data = (*hexutil.Bytes)(&txInner.Data)
+		enc.To = tx.To()
+		enc.V = (*hexutil.Big)(txInner.V.ToBig())
+		enc.R = (*hexutil.Big)(txInner.R.ToBig())
+		enc.S = (*hexutil.Big)(txInner.S.ToBig())
 	case *AccessListTx:
-		enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
-		enc.AccessList = &tx.AccessList
-		enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-		enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-		enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
-		enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-		enc.Data = (*hexutil.Bytes)(&tx.Data)
-		enc.To = t.To()
-		enc.V = (*hexutil.Big)(tx.V.ToBig())
-		enc.R = (*hexutil.Big)(tx.R.ToBig())
-		enc.S = (*hexutil.Big)(tx.S.ToBig())
+		enc.ChainID = (*hexutil.Big)(txInner.ChainID.ToBig())
+		enc.AccessList = &txInner.AccessList
+		enc.Nonce = (*hexutil.Uint64)(&txInner.Nonce)
+		enc.Gas = (*hexutil.Uint64)(&txInner.Gas)
+		enc.GasPrice = (*hexutil.Big)(txInner.GasPrice.ToBig())
+		enc.Value = (*hexutil.Big)(txInner.Value.ToBig())
+		enc.Data = (*hexutil.Bytes)(&txInner.Data)
+		enc.To = tx.To()
+		enc.V = (*hexutil.Big)(txInner.V.ToBig())
+		enc.R = (*hexutil.Big)(txInner.R.ToBig())
+		enc.S = (*hexutil.Big)(txInner.S.ToBig())
 	}
 	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
-func (t *Transaction) UnmarshalJSON(input []byte) error {
+func (tx *Transaction) UnmarshalJSON(input []byte) error {
 	var dec txJSON
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
@@ -215,7 +215,7 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now set the inner transaction.
-	t.setDecoded(inner, 0)
+	tx.setDecoded(inner, 0)
 
 	// TODO: check hash here?
 	return nil

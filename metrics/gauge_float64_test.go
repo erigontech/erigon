@@ -13,7 +13,7 @@ func BenchmarkGuageFloat64(b *testing.B) {
 func TestGaugeFloat64(t *testing.T) {
 	g := NewGaugeFloat64()
 	g.Update(47.0)
-	if v := g.Value(); 47.0 != v {
+	if v := g.Value(); 47.0 != v { //nolint:stylecheck
 		t.Errorf("g.Value(): 47.0 != %v\n", v)
 	}
 }
@@ -23,7 +23,8 @@ func TestGaugeFloat64Snapshot(t *testing.T) {
 	g.Update(47.0)
 	snapshot := g.Snapshot()
 	g.Update(float64(0))
-	if v := snapshot.Value(); 47.0 != v {
+	if v := snapshot.Value(); 47.0 != v { //nolint:stylecheck
+
 		t.Errorf("g.Value(): 47.0 != %v\n", v)
 	}
 }
@@ -32,7 +33,8 @@ func TestGetOrRegisterGaugeFloat64(t *testing.T) {
 	r := NewRegistry()
 	NewRegisteredGaugeFloat64("foo", r).Update(47.0)
 	t.Logf("registry: %v", r)
-	if g := GetOrRegisterGaugeFloat64("foo", r); 47.0 != g.Value() {
+	if g := GetOrRegisterGaugeFloat64("foo", r); 47.0 != g.Value() { //nolint:stylecheck
+
 		t.Fatal(g)
 	}
 }

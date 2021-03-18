@@ -564,9 +564,9 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 			if data, ok := jst.ctx["input"].([]byte); ok {
 				input = data
 			}
-			intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
-			if err != nil {
-				return err
+			intrinsicGas, err1 := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+			if err1 != nil {
+				return err1
 			}
 			jst.ctx["intrinsicGas"] = intrinsicGas
 			jst.inited = true

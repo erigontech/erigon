@@ -59,9 +59,9 @@ func (b *Long) UnmarshalGraphQL(input interface{}) error {
 		//	*b = Long(value)
 		//	return err
 		//} else {
-		value, err := strconv.ParseInt(input, 10, 64)
+		value, err1 := strconv.ParseInt(input, 10, 64)
 		*b = Long(value)
-		return err
+		return err1
 		//}
 	case int32:
 		*b = Long(input)

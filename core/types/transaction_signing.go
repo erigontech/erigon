@@ -335,7 +335,7 @@ func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 // homestead rules.
 type HomesteadSigner struct{ FrontierSigner }
 
-func (s HomesteadSigner) ChainID() *uint256.Int {
+func (hs HomesteadSigner) ChainID() *uint256.Int {
 	return nil
 }
 
