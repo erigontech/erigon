@@ -39,7 +39,7 @@ func verifyUnbrokenCanonchain(hc *HeaderChain) error {
 			return err
 		}
 		if exp := h.Hash(); canonHash != exp {
-			return fmt.Errorf("Canon hash chain broken, block %d got %x, expected %x",
+			return fmt.Errorf("canon hash chain broken, block %d got %x, expected %x",
 				h.Number, canonHash[:8], exp[:8])
 		}
 		// Verify that we have the TD
@@ -47,7 +47,7 @@ func verifyUnbrokenCanonchain(hc *HeaderChain) error {
 			if errTd != nil {
 				return errTd
 			}
-			return fmt.Errorf("Canon TD missing at block %d", h.Number)
+			return fmt.Errorf("canon TD missing at block %d", h.Number)
 		}
 		if h.Number.Uint64() == 0 {
 			break

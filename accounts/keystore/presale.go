@@ -25,9 +25,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/google/uuid"
 	"golang.org/x/crypto/pbkdf2"
 )
 

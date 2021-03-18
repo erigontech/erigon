@@ -280,7 +280,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 			// This transaction needs to be signed
 			signed, err := types.SignTx(tx, signer, key)
 			if err != nil {
-				return nil, NewError(ErrorJson, fmt.Errorf("Tx %d: failed to sign tx: %v", i, err))
+				return nil, NewError(ErrorJson, fmt.Errorf("tx %d: failed to sign tx: %v", i, err))
 			}
 			signedTxs = append(signedTxs, signed)
 		} else {
