@@ -61,8 +61,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	}
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
-			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -87,7 +86,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		if len(header) == 0 {
 			return fmt.Errorf("empty header: %v", i)
 		}
-		tuples = append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
+		tuples = append(tuples, []byte(dbutils.HeadersBucket), dbutils.HeaderKey(i, hash), header)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)
 			_, err = snDB.MultiPut(tuples...)

@@ -25,7 +25,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			if innerErr != nil {
 				panic(innerErr)
 			}
-			innerErr = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			innerErr = tx.Cursor(dbutils.HeadersBucket).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if innerErr != nil {
 				panic(innerErr)
 			}
@@ -55,7 +55,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snKV := ethdb.NewLMDB().Path(snPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 
-	snKV = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeaderPrefix}, snKV).DB(db).MustOpen()
+	snKV = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).MustOpen()
 	err = GenerateHeaderIndexes(context.Background(), ethdb.NewObjectDatabase(snKV))
 	if err != nil {
 		t.Fatal(err)

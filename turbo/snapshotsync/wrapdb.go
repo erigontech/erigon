@@ -14,7 +14,7 @@ var (
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
-			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket:             dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_state: {
@@ -55,7 +55,7 @@ func WrapBySnapshotsFromDir(kv ethdb.KV, snapshotDir string, mode SnapshotMode) 
 			log.Error("Can't open headers snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			snkv.SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.HeadersSnapshotInfoBucket}, snapshotKV)
+			snkv.SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeadersSnapshotInfoBucket}, snapshotKV)
 		}
 	}
 	if mode.State {
