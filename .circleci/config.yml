@@ -2,7 +2,7 @@ version: 2.1
 jobs:
   build:
     docker:
-      - image: circleci/golang:1.15
+      - image: circleci/golang:1.16
     resource_class: medium
 
     working_directory: /go/src/github.com/ledgerwatch/turbo-geth
