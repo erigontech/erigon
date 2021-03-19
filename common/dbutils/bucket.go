@@ -110,7 +110,7 @@ hasHash - mark prefixes which hashes are saved in current trie_account record (a
         v                    v                              v                         v                  v
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
 | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-| 0x0B0000...      |    | has no record in     |     | 0x0B02...     |        | 0x0B0301...   |  | 0x0B0304...   |
+| 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
 | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
                            |                |
