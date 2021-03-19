@@ -76,7 +76,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 }
 
 func TestVerifyHeadersClique(t *testing.T) {
-	headerRecs := decodeHeaders(verifyHardCodedHeadersEthash)
+	headerRecs := decodeHeaders(verifyHardCodedHeadersClique)
 	headers := toHeaders(headerRecs)
 
 	db := ethdb.NewMemDatabase()
