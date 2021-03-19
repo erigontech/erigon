@@ -147,10 +147,12 @@ var (
 	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefix       = "h"         // block_num_u64 + hash -> header
-	HeaderTDSuffix     = []byte("t") // block_num_u64 + hash + headerTDSuffix -> td
-	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
-	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
+	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
+
+	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
+	HeadersBucket         = "headers"           // block_num_u64 + hash -> header
+	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash + headerTDSuffix -> td
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
@@ -254,8 +256,7 @@ var Buckets = []string{
 	CodeBucket,
 	ContractCodeBucket,
 	DatabaseVerisionKey,
-	HeaderPrefix,
-	HeaderNumberPrefix,
+	HeaderNumberBucket,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
 	TxLookupPrefix,
@@ -294,6 +295,10 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
+
+	HeaderCanonicalBucket,
+	HeadersBucket,
+	HeaderTDBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -303,6 +308,7 @@ var DeprecatedBuckets = []string{
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
+	HeaderPrefixOld,
 }
 
 type CustomComparator string
