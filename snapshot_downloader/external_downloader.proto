@@ -2,10 +2,9 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-option go_package = "./;snapshotsync";
+option go_package = "./snapshotsync;snapshotsync";
 
 package snapshotsync;
-
 
 enum SnapshotType {
   headers = 0;

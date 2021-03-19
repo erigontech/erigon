@@ -22,7 +22,7 @@ message AddReply { types.H256 hash = 1; }
 
 message EtherbaseRequest {}
 
-message EtherbaseReply { types.H256 hash = 1; }
+message EtherbaseReply { types.H160 address = 1; }
 
 message NetVersionRequest {}
 
