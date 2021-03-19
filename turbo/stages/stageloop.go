@@ -42,7 +42,8 @@ func StageLoop(
 		stagedsync.OptionalParameters{},
 	)
 	initialCycle := true
-	for {
+	stopped := false
+	for !stopped {
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
@@ -140,7 +141,12 @@ func StageLoop(
 			}
 		}
 		initialCycle = false
+		select {
+		case <-ctx.Done():
+			stopped = true
+		}
 	}
+	return nil
 }
 
 func ReplacementStages(ctx context.Context,

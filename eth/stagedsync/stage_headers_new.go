@@ -177,6 +177,9 @@ func HeadersForward(
 }
 
 func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+	if height == 0 {
+		return nil
+	}
 	ancestorHash := hash
 	ancestorHeight := height
 	var ch common.Hash
