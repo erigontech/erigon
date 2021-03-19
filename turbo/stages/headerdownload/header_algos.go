@@ -521,7 +521,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	if length > 192 {
 		length = 192
 	}
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: uint64(length), Skip: stride, Reverse: false}
+	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
 func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {

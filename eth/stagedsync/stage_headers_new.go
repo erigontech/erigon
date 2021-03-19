@@ -159,10 +159,7 @@ func HeadersForward(
 		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), batch); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
-		if !stopped {
-			// Do not switch to the next stage if the headers stage was interrupted
-			s.Done()
-		}
+		s.Done()
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
@@ -173,6 +170,9 @@ func HeadersForward(
 		}
 	}
 	log.Info("Processed", "highest", headerInserter.GetHighest())
+	if stopped {
+		return fmt.Errorf("Interrupted")
+	}
 	return nil
 }
 
