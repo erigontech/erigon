@@ -542,7 +542,11 @@ func setupFlags(t T, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= LifoReclaim
+	err = env.SetGeometry(-1, -1, 10*1024*1024, -1, -1, 4096)
+	if err != nil {
+		t.Fatalf("setmaxdbs: %v", err)
+	}
+	flags |= Durable
 	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)

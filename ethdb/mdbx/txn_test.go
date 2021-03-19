@@ -1082,9 +1082,30 @@ func BenchmarkTxn_commit(b *testing.B) {
 	defer os.RemoveAll(path)
 	defer env.Close()
 
+	var db DBI
+	err = env.Update(func(txn *Txn) (err error) {
+		db, err = txn.OpenDBISimple("testdb", Create)
+		if err != nil {
+			return err
+		}
+		return err
+	})
+	if err != nil {
+		b.Errorf("%s", err)
+		return
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := env.Update(func(txn *Txn) error { return nil })
+		err := env.Update(func(txn *Txn) error {
+			var k [8]byte
+			binary.BigEndian.PutUint64(k[:], uint64(i))
+			err = txn.Put(db, k[:], k[:], 0)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
 		if err != nil {
 			b.Error(err)
 			return
