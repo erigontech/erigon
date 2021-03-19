@@ -55,11 +55,11 @@ func TestTrieOfAccountsLayout(t *testing.T) {
 
 	hasState1, hasTree1, hasHash1, _, _ := trie.UnmarshalTrieNode(account_trie[string(common.FromHex("0B"))])
 	assert.Equal(t, uint16(0b1011), hasState1)
-	assert.Equal(t, uint16(1), hasTree1)
+	assert.Equal(t, uint16(0b0001), hasTree1)
 	assert.Equal(t, uint16(0b1001), hasHash1)
 
 	hasState2, hasTree2, hasHash2, _, _ := trie.UnmarshalTrieNode(account_trie[string(common.FromHex("0B00"))])
 	assert.Equal(t, uint16(0b10001), hasState2)
-	assert.Equal(t, uint16(0), hasTree2)
+	assert.Equal(t, uint16(0b00000), hasTree2)
 	assert.Equal(t, uint16(0b10000), hasHash2)
 }
