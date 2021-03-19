@@ -129,7 +129,7 @@ func makeP2PServer(
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
 			Name:           eth.ProtocolName,
-			Version:        eth.ProtocolVersions[0],
+			Version:        eth.ProtocolVersions[1],
 			Length:         17,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
@@ -143,8 +143,8 @@ func makeP2PServer(
 					peerRwMap,
 					peer,
 					rw,
-					eth.ProtocolVersions[0], // version == eth65
-					eth.ProtocolVersions[1], // minVersion == eth64
+					eth.ProtocolVersions[1], // version == eth65
+					eth.ProtocolVersions[2], // minVersion == eth64
 					ss,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
