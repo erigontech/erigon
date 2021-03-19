@@ -151,8 +151,8 @@ var (
 	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
 
 	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
-	HeadersBucket         = "headers"           // block_num_u64 + hash -> header
-	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash + headerTDSuffix -> td
+	HeadersBucket         = "headers"           // block_num_u64 + hash -> header (RLP)
+	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash -> td (RLP)
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
