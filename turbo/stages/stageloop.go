@@ -144,6 +144,7 @@ func StageLoop(
 		select {
 		case <-ctx.Done():
 			stopped = true
+		default:
 		}
 	}
 	return nil
