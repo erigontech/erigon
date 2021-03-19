@@ -730,7 +730,7 @@ func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 			return nil, err
 		}
 		defer c.Close()
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil
@@ -762,7 +762,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 			return false, err
 		}
 		defer c.Close()
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return false, nil
@@ -879,21 +879,23 @@ func (c *MdbxCursor) putNoDupData(k, v []byte) error          { return c.c.Put(k
 func (c *MdbxCursor) append(k, v []byte) error                { return c.c.Put(k, v, mdbx.Append) }
 func (c *MdbxCursor) appendDup(k, v []byte) error             { return c.c.Put(k, v, mdbx.AppendDup) }
 func (c *MdbxCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
-func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, v, mdbx.GetBoth)
+func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
+	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
+	return v, err
 }
 func (c *MdbxCursor) setRange(k []byte) ([]byte, []byte, error) {
 	return c.c.Get(k, nil, mdbx.SetRange)
 }
-func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, v, mdbx.GetBothRange)
+func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
+	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
+	return v, err
 }
 func (c *MdbxCursor) firstDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
 	return v, err
 }
-func (c *MdbxCursor) lastDup(k []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, nil, mdbx.LastDup)
+func (c *MdbxCursor) lastDup() ([]byte, error) {
+	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
 }
 
@@ -1035,7 +1037,7 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	}
 
 	if seek2 != nil && bytes.Equal(seek1, k) {
-		k, v, err = c.getBothRange(seek1, seek2)
+		v, err = c.getBothRange(seek1, seek2)
 		if err != nil && mdbx.IsNotFound(err) {
 			k, v, err = c.next()
 			if err != nil {
@@ -1161,7 +1163,7 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 	}
 
 	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		_, _, err := c.getBoth(k, v)
+		_, err := c.getBoth(k, v)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil
@@ -1215,7 +1217,7 @@ func (c *MdbxCursor) deleteDupSort(key []byte) error {
 	}
 
 	if len(key) == from {
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil { // if key not found, or found another one - then nothing to delete
 			if mdbx.IsNotFound(err) {
 				return nil
@@ -1299,7 +1301,7 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 
 	value = append(key[to:], value...)
 	key = key[:to]
-	_, v, err := c.getBothRange(key, value[:from-to])
+	v, err := c.getBothRange(key, value[:from-to])
 	if err != nil { // if key not found, or found another one - then just insert
 		if mdbx.IsNotFound(err) {
 			return c.put(key, value)
@@ -1349,7 +1351,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		k, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1359,7 +1361,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		if !bytes.Equal(key[to:], v[:from-to]) {
 			return nil, nil, nil
 		}
-		return k, v[from-to:], nil
+		return key[:to], v[from-to:], nil
 	}
 
 	k, v, err := c.set(key)
@@ -1467,7 +1469,7 @@ func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
 		}
 	}
 
-	_, _, err := c.getBoth(k1, k2)
+	_, err := c.getBoth(k1, k2)
 	if err != nil { // if key not found, or found another one - then nothing to delete
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -1484,31 +1486,31 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 		}
 	}
 
-	k, v, err := c.getBoth(key, value)
+	v, err := c.getBoth(key, value)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("in SeekBothExact: %w", err)
 	}
-	return k, v, nil
+	return key, v, nil
 }
 
-func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
+			return nil, err
 		}
 	}
 
-	k, v, err := c.getBothRange(key, value)
+	v, err := c.getBothRange(key, value)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
+			return nil, nil
 		}
-		return []byte{}, nil, fmt.Errorf("in SeekBothRange: %w", err)
+		return nil, fmt.Errorf("in SeekBothRange: %w", err)
 	}
-	return k, v, nil
+	return v, nil
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
@@ -1598,14 +1600,14 @@ func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *MdbxDupSortCursor) LastDup(k []byte) ([]byte, error) {
+func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
 	}
 
-	v, err := c.lastDup(k)
+	v, err := c.lastDup()
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil

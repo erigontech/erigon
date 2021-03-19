@@ -438,15 +438,15 @@ func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
 	pair, err := c.stream.Recv()
 	if err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
-	return pair.K, pair.V, nil
+	return pair.V, nil
 }
 func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
@@ -468,8 +468,8 @@ func (c *remoteCursor) firstDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remoteCursor) lastDup(k []byte) ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP, K: k}); err != nil {
+func (c *remoteCursor) lastDup() ([]byte, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -592,9 +592,9 @@ func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, 
 	return c.seekBothExact(key, value)
 }
 
-func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
 	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
 	return c.getBothRange(key, value)
 }
@@ -635,11 +635,11 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
 	}
 	return c.prevNoDup()
 }
-func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error) {
+func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
-	return c.lastDup(k)
+	return c.lastDup()
 }
 
 func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
