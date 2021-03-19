@@ -2,6 +2,21 @@
 
 This process is a collection of data structures and algorithms to perform the task of obtaining a consistent and verified header chain from peers over the network.
 
+## Two phases of header downloading
+
+There are two phases of header downloading. In the first phase, the headers that are known in advance (also known as "hard-coded" headers) are downloaded.
+To initiate the first phase, we use a pre-generated list of hard-coded headers, one header for every 100'000-th block, for example. The total number
+of such selected headers is relatively small even for the mainnet (120 headers for 12 million blocks), but big enough to take advantage of multiple
+peers able to deliver the intermediate headers. This pre-generated list of headers is embedded into the source code of turbo-geth and is updated for
+every release. Since the headers downloaded in the first phase have been seen before, no PoW or PoA verification
+if performed on them, they are assumed correct as long as they are part of the correct chain of hashes (which is assumed to be impossible to forge
+due to second preimage resistant of hash functions used for producing header hashes).
+In the second phase, headers that are not previously seen are downloaded. Because they are not seen before PoW or PoA verification needs to be
+performed on them. The most efficient way to perform such verification is to verify the headers in the ascending order of their block heights.
+This is especially true for Clique POA, for which the verification of a header may rely on up to 30'000 previous headers, and out-of-order verification
+is thus much harder to organised than for EtHash PoW (where only the parent header is required for verification).
+
+
 ## Data structures
 
 All data structures, except for the files, are kept in operating memory (RAM), and do not survive an interruption, a crash, or a powerdown. Therefore,

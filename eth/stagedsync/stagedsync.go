@@ -64,6 +64,7 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
+	initialCycle bool,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -82,7 +83,7 @@ func (stagedSync *StagedSync) Prepare(
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                     d,
-			chainConfig:           chainConfig,
+			ChainConfig:           chainConfig,
 			chainContext:          chainContext,
 			vmConfig:              vmConfig,
 			DB:                    db,
@@ -102,6 +103,7 @@ func (stagedSync *StagedSync) Prepare(
 			stateWriterBuilder:    writerBuilder,
 			notifier:              stagedSync.Notifier,
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
+			InitialCycle:          initialCycle,
 		},
 	)
 	state := NewState(stages)

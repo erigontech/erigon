@@ -285,7 +285,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:        chainDb.(ethdb.HasKV).KV(),
 		eventMux:       stack.EventMux(),
 		accountManager: stack.AccountManager(),
-		engine:         ethconfig.CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		engine:         ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:      config.NetworkID,
 		etherbase:      config.Miner.Etherbase,
 		bloomRequests:  make(chan chan *bloombits.Retrieval),

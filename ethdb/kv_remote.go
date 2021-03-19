@@ -16,7 +16,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -647,7 +648,7 @@ func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
 	if err != nil {
 		return common.Hash{}.Bytes(), err
 	}
-	return res.Hash, nil
+	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
 }
 
 func (back *RemoteBackend) Etherbase() (common.Address, error) {
@@ -656,7 +657,7 @@ func (back *RemoteBackend) Etherbase() (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	return common.BytesToAddress(res.Hash), nil
+	return gointerfaces.ConvertH160toAddress(res.Address), nil
 }
 
 func (back *RemoteBackend) NetVersion() (uint64, error) {

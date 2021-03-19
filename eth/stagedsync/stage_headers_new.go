@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 
@@ -13,11 +12,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
 // HeadersForward progresses Headers stage in the forward direction
-func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
+func HeadersForward(
+	s *StageState,
+	u Unwinder,
+	ctx context.Context,
+	db ethdb.Database,
+	hd *headerdownload.HeaderDownload,
+	chainConfig *params.ChainConfig,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	initialCycle bool,
+	wakeUpChan chan struct{},
+) error {
 	var headerProgress uint64
 	var err error
 	var tx ethdb.DbWithPendingMutations
@@ -42,8 +52,9 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	if err1 != nil {
 		return err1
 	}
+	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if hash == (common.Hash{}) {
-		if err = fixCanonicalChain(logPrefix, headerProgress, tx); err != nil {
+		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
 		}
 		if !useExternalTx {
@@ -55,28 +66,53 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 		return nil
 	}
 
-	files, buffer := hd.PrepareStageData()
-	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
-		s.Done()
-		return nil
-	}
-
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var logBlock uint64
 
-	headHash := rawdb.ReadHeadHeaderHash(tx)
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	localTd, err1 := rawdb.ReadTd(tx, headHash, *headNumber)
+	localTd, err1 := rawdb.ReadTd(tx, headHash, headerProgress)
 	if err1 != nil {
 		return err1
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, tx, batch, localTd, headerProgress)
-	if err1 = headerdownload.ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
-		if err = headerInserter.FeedHeader(header, blockHeight); err != nil {
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
+	hd.SetHeaderReader(&chainReader{config: chainConfig, batch: batch})
+
+	var req *headerdownload.HeaderRequest
+	var peer []byte
+	stopped := false
+	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	prevProgress := headerProgress
+	for !stopped {
+		currentTime := uint64(time.Now().Unix())
+		req = hd.RequestMoreHeaders(currentTime)
+		if req != nil {
+			peer = headerReqSend(ctx, req)
+			if peer != nil {
+				hd.SentRequest(req, currentTime, 5 /* timeout */)
+				//log.Info("Sent request", "height", req.Number)
+			}
+		}
+		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
+		for req != nil && peer != nil && maxRequests > 0 {
+			req = hd.RequestMoreHeaders(currentTime)
+			if req != nil {
+				peer = headerReqSend(ctx, req)
+				if peer != nil {
+					hd.SentRequest(req, currentTime, 5 /*timeout */)
+					//log.Info("Sent request", "height", req.Number)
+				}
+			}
+			maxRequests--
+		}
+		// Send skeleton request if required
+		req = hd.RequestSkeleton()
+		if req != nil {
+			peer = headerReqSend(ctx, req)
+		}
+		// Load headers into the database
+		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= batch.IdealBatchSize() {
@@ -89,14 +125,28 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 				}
 			}
 		}
-		select {
-		default:
-		case <-logEvery.C:
-			logBlock = logProgressHeaders(logPrefix, logBlock, blockHeight, batch)
+		timer.Stop()
+		if !initialCycle && headerInserter.AnythingDone() {
+			// if this is not an initial cycle, we need to react quickly when new headers are coming in
+			break
 		}
-		return nil
-	}); err1 != nil {
-		return err1
+		timer = time.NewTimer(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			stopped = true
+		case <-logEvery.C:
+			progress := hd.Progress()
+			logProgressHeaders(logPrefix, prevProgress, progress, batch)
+			prevProgress = progress
+		case <-timer.C:
+			log.Debug("RequestQueueTime (header) ticked")
+		case <-wakeUpChan:
+			log.Debug("headerLoop woken up by the incoming request")
+		}
+		if initialCycle && hd.InSync() {
+			fmt.Printf("Top seen height: %d\n", hd.TopSeenHeight())
+			break
+		}
 	}
 	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
 		return err
@@ -106,10 +156,12 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
-		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), batch); err != nil {
+		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), batch); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
-		s.Done()
+		if !stopped {
+			s.Done()
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
@@ -120,16 +172,17 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 		}
 	}
 	log.Info("Processed", "highest", headerInserter.GetHighest())
-	for _, file := range files {
-		if err := os.Remove(file); err != nil {
-			log.Error("Could not remove", "file", file, "error", err)
-		}
+	if stopped {
+		return fmt.Errorf("interrupted")
 	}
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMutations) error {
-	ancestorHash := rawdb.ReadHeadHeaderHash(tx)
+func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+	if height == 0 {
+		return nil
+	}
+	ancestorHash := hash
 	ancestorHeight := height
 	var ch common.Hash
 	var err error
@@ -138,6 +191,9 @@ func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMu
 			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
+		if ancestor == nil {
+			fmt.Printf("ancestor nil for %d %x\n", ancestorHeight, ancestorHash)
+		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
@@ -197,3 +253,18 @@ func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPe
 
 	return now
 }
+
+type chainReader struct {
+	config *params.ChainConfig
+	batch  ethdb.DbWithPendingMutations
+}
+
+func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
+func (cr chainReader) CurrentHeader() *types.Header { panic("") }
+func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return rawdb.ReadHeader(cr.batch, hash, number)
+}
+func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+	return rawdb.ReadHeaderByNumber(cr.batch, number)
+}
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }
