@@ -492,7 +492,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest 
 				return nil
 			}
 		}
-		// Anchor disappered or unavailble, pop from the queue and move on
+		// Anchor disappeared or unavailble, pop from the queue and move on
 		heap.Remove(hd.anchorQueue, 0)
 	}
 	return nil
