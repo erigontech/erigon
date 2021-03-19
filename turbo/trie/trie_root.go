@@ -261,7 +261,8 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 				if storageTrie.skipState {
 					goto SkipStorage
 				}
-				for kS, vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = ss.NextDup() {
+
+				for vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
@@ -1736,7 +1737,8 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 					goto SkipStorage
 				}
 				i4++
-				for kS, vS, err3 := storages.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = storages.NextDup() {
+
+				for vS, err3 := storages.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = storages.NextDup() {
 					if err3 != nil {
 						return false, err3
 					}

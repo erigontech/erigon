@@ -146,11 +146,11 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				c.c = tx.Cursor(c.bucket)
 				switch casted := c.c.(type) {
 				case ethdb.CursorDupSort:
-					k, _, err := casted.SeekBothRange(c.k, c.v)
+					v, err := casted.SeekBothRange(c.k, c.v)
 					if err != nil {
 						return fmt.Errorf("server-side error: %w", err)
 					}
-					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+					if v == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
 						_, _, err = casted.Next()
 						if err != nil {
 							return fmt.Errorf("server-side error: %w", err)
@@ -215,7 +215,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	case remote.Op_SEEK:
 		k, v, err = c.Seek(in.K)
 	case remote.Op_SEEK_BOTH:
-		k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
+		v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
 	case remote.Op_CURRENT:
 		k, v, err = c.Current()
 	case remote.Op_LAST:

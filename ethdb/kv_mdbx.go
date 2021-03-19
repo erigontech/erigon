@@ -1491,21 +1491,21 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 	return key, v, nil
 }
 
-func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
+			return nil, err
 		}
 	}
 
 	v, err := c.getBothRange(key, value)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
+			return nil, nil
 		}
-		return []byte{}, nil, fmt.Errorf("in SeekBothRange: %w", err)
+		return nil, fmt.Errorf("in SeekBothRange: %w", err)
 	}
-	return key, v, nil
+	return v, nil
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {

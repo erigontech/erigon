@@ -63,12 +63,10 @@ func doSearch2(
 	binary.BigEndian.PutUint64(seek, blockNumber)
 	copy(seek[8:], addrBytesToFind)
 	binary.BigEndian.PutUint64(seek[8+keyPrefixLen:], incarnation)
-	k, v, err := c.SeekBothRange(seek, keyBytesToFind)
+	k := seek
+	v, err := c.SeekBothRange(seek, keyBytesToFind)
 	if err != nil {
 		return nil, err
-	}
-	if k == nil {
-		return nil, ErrNotFound
 	}
 	if !bytes.HasPrefix(v, keyBytesToFind) {
 		return nil, ErrNotFound

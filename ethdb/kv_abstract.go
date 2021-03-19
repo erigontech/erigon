@@ -183,7 +183,7 @@ type CursorDupSort interface {
 	// SeekBothExact -
 	// second parameter can be nil only if searched key has no duplicates, or return error
 	SeekBothExact(key, value []byte) ([]byte, []byte, error)
-	SeekBothRange(key, value []byte) ([]byte, []byte, error)
+	SeekBothRange(key, value []byte) ([]byte, error)
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key

@@ -561,26 +561,22 @@ func (c *snCursor2Dup) SeekBothExact(key, value []byte) ([]byte, []byte, error) 
 
 }
 
-func (c *snCursor2Dup) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
-	dbKey, dbVal, err := c.dbCursorDup.SeekBothRange(key, value)
+func (c *snCursor2Dup) SeekBothRange(key, value []byte) ([]byte, error) {
+	dbVal, err := c.dbCursorDup.SeekBothRange(key, value)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	snDBKey, snDBVal, err := c.sndbCursorDup.SeekBothRange(key, value)
+	snDBVal, err := c.sndbCursorDup.SeekBothRange(key, value)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	//todo Is it correct comparison
-	cmp, br := common.KeyCmp(dbKey, snDBKey)
-	if br {
-		return nil, nil, nil
+	if dbVal == nil {
+		c.saveCurrent(key)
+		return dbVal, nil
 	}
-	if cmp >= 0 {
-		c.saveCurrent(dbKey)
-		return dbKey, dbVal, nil
-	}
-	return snDBKey, snDBVal, nil
+
+	return snDBVal, nil
 }
 
 func (c *snCursor2Dup) FirstDup() ([]byte, error) {
