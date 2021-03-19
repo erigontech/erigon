@@ -10,12 +10,10 @@ import (
 
 func findInAccountChangeSet(c ethdb.CursorDupSort, blockNumber uint64, key []byte, keyLen int) ([]byte, error) {
 	fromDBFormat := FromDBFormat(keyLen)
-	k, v, err := c.SeekBothRange(dbutils.EncodeBlockNumber(blockNumber), key)
+	k := dbutils.EncodeBlockNumber(blockNumber)
+	v, err := c.SeekBothRange(k, key)
 	if err != nil {
 		return nil, err
-	}
-	if k == nil {
-		return nil, nil
 	}
 	_, k, v = fromDBFormat(k, v)
 	if !bytes.HasPrefix(k, key) {
