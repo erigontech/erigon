@@ -1675,7 +1675,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 		b += blockStep
 	}
 	b -= blockStep
-	fmt.Fprintf(w, "}\n")
+	fmt.Fprintf(w, "}\n\n")
 	fmt.Fprintf(w, "const %sPreverifiedHeight uint64 = %d\n", name, b)
 	fmt.Printf("Last block is %d\n", b)
 	return nil
