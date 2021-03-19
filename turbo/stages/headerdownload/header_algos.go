@@ -169,14 +169,11 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 		prevLink := attachmentLink
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
-				prevLink.next = append(prevLink.next, link)
-				prevLink = link
-				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-					hd.markPreverified(link)
-				}
-			} else {
-				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+			link := hd.addHeaderAsLink(header, false /* persisted */)
+			prevLink.next = append(prevLink.next, link)
+			prevLink = link
+			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+				hd.markPreverified(link)
 			}
 		}
 	} else {
@@ -228,20 +225,17 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 		var prevLink *Link
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if link, err := hd.addHeaderAsLink(header, false /* pesisted */); err == nil {
-				if prevLink == nil {
-					newAnchor.links = append(newAnchor.links, link)
-				} else {
-					prevLink.next = append(prevLink.next, link)
-				}
-				prevLink = link
-				if !anchorPreverified {
-					if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-						hd.markPreverified(link)
-					}
-				}
+			link := hd.addHeaderAsLink(header, false /* pesisted */)
+			if prevLink == nil {
+				newAnchor.links = append(newAnchor.links, link)
 			} else {
-				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+				prevLink.next = append(prevLink.next, link)
+			}
+			prevLink = link
+			if !anchorPreverified {
+				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+					hd.markPreverified(link)
+				}
 			}
 		}
 		prevLink.next = anchor.links
@@ -285,16 +279,13 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
-			prevLink.next = append(prevLink.next, link)
-			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-					hd.markPreverified(link)
-				}
+		link := hd.addHeaderAsLink(header, false /* persisted */)
+		prevLink.next = append(prevLink.next, link)
+		prevLink = link
+		if !anchorPreverified {
+			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+				hd.markPreverified(link)
 			}
-		} else {
-			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
 	prevLink.next = anchor.links
@@ -330,18 +321,15 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	var prevLink *Link
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if link, err1 := hd.addHeaderAsLink(header, false /* persisted */); err1 == nil {
-			if prevLink == nil {
-				anchor.links = append(anchor.links, link)
-			} else {
-				prevLink.next = append(prevLink.next, link)
-			}
-			prevLink = link
-			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-				hd.markPreverified(link)
-			}
+		link := hd.addHeaderAsLink(header, false /* persisted */)
+		if prevLink == nil {
+			anchor.links = append(anchor.links, link)
 		} else {
-			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err1)
+			prevLink.next = append(prevLink.next, link)
+		}
+		prevLink = link
+		if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+			hd.markPreverified(link)
 		}
 	}
 	return nil
@@ -461,9 +449,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			if _, err1 := hd.addHeaderAsLink(&h, true /* persisted */); err1 != nil {
-				return err1
-			}
+			hd.addHeaderAsLink(&h, true /* persisted */)
 		}
 		return nil
 	})
@@ -596,7 +582,7 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) (*Link, error) {
+func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) *Link {
 	height := header.Number.Uint64()
 	linkHash := header.Hash()
 	link := &Link{
@@ -611,7 +597,7 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	} else {
 		heap.Push(hd.linkQueue, link)
 	}
-	return link, nil
+	return link
 }
 
 func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) error {
