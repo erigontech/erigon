@@ -171,7 +171,7 @@ func HeadersForward(
 	}
 	log.Info("Processed", "highest", headerInserter.GetHighest())
 	if stopped {
-		return fmt.Errorf("Interrupted")
+		return fmt.Errorf("interrupted")
 	}
 	return nil
 }
