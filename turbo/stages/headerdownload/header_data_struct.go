@@ -89,7 +89,7 @@ func (aq AnchorQueue) Len() int {
 }
 
 func (aq AnchorQueue) Less(i, j int) bool {
-	if (*aq[i]).timestamp == (*&aq[j]).timestamp {
+	if (*aq[i]).timestamp == (*aq[j]).timestamp {
 		// When timestamps are the same, we prioritise low block height anchors
 		return (*aq[i]).blockHeight < (*aq[j]).blockHeight
 	}
