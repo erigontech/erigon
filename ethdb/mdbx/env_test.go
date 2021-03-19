@@ -142,7 +142,7 @@ func TestEnv_Flags(t *testing.T) {
 		t.Errorf("NoTLS is not set")
 	}
 	if flags&SafeNoSync != 0 {
-		t.Errorf("NoSync is set")
+		t.Errorf("UtterlyNoSync is set")
 	}
 
 	err = env.SetFlags(SafeNoSync)
@@ -155,7 +155,7 @@ func TestEnv_Flags(t *testing.T) {
 		t.Error(err)
 	}
 	if flags&SafeNoSync == 0 {
-		t.Error("NoSync is not set")
+		t.Error("UtterlyNoSync is not set")
 	}
 
 	err = env.UnsetFlags(SafeNoSync)
@@ -168,7 +168,7 @@ func TestEnv_Flags(t *testing.T) {
 		t.Error(err)
 	}
 	if flags&SafeNoSync != 0 {
-		t.Error("NoSync is set")
+		t.Error("UtterlyNoSync is set")
 	}
 }
 
@@ -546,7 +546,7 @@ func setupFlags(t T, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= Durable
+	flags |= UtterlyNoSync | NoMetaSync
 	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)
