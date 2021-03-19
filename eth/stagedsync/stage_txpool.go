@@ -57,14 +57,9 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
-	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
-		}
-
-		// Skip non relevant records
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
 		}
 
 		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
@@ -135,14 +130,9 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
 
-	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
-		}
-
-		// Skip non relevant records
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 

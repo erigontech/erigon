@@ -74,6 +74,7 @@ var migrations = []Migration{
 	splitHashStateBucket,
 	splitIHBucket,
 	deleteExtensionHashesFromTrieBucket,
+	headerPrefixToSeparateBuckets,
 }
 
 type Migration struct {

@@ -436,14 +436,11 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeadersBucket)
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
-			}
-			if len(k) != 40 {
-				continue
 			}
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
@@ -673,7 +670,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	if err = rawdb.WriteTd(hi.batch, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = hi.batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = hi.batch.Put(dbutils.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash

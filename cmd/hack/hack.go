@@ -1574,16 +1574,13 @@ func mint(chaindata string, block uint64) error {
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	canonical := make(map[common.Hash]struct{})
 	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeaderCanonicalBucket)
 		// This is a mapping of contractAddress + incarnation => CodeHash
 		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			// Skip non relevant records
-			if !dbutils.CheckCanonicalKey(k) {
-				continue
-			}
 			canonical[common.BytesToHash(v)] = struct{}{}
 			if len(canonical)%100_000 == 0 {
 				log.Info("Read canonical hashes", "count", len(canonical))

@@ -3,13 +3,14 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
-	"os"
-	"time"
 )
 
 func init() {

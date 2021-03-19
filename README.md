@@ -8,6 +8,7 @@ Table of contents
 <!--ts-->
    * [System Requirements](#system-requirements)
    * [Usage](#usage)
+   * [Windows](#windows)
    * [Key features](#key-features)
    * [Getting in touch](#getting-in-touch)
    * [Team](#team)
@@ -30,9 +31,9 @@ The current version is currently based on Go-Ethereum 1.9.24
 System Requirements
 ===================
 
-Recommend 2Tb drive: 1Tb state, 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). 
+Recommend 2Tb storage space on a single partition: 1Tb state, 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). 
 
-RAM: 16GB, 64-bit architecture, (Golang version >= 1.16](https://golang.org/doc/install)
+RAM: 16GB, 64-bit architecture, (Golang version >= 1.15.6](https://golang.org/doc/install)
 
 <code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
@@ -45,7 +46,29 @@ Usage
 > ./build/bin/tg
 ```
 
-On Windows please use Docker: see [docker-compose.yml](./docker-compose.yml)
+Windows
+=======
+
+Windows users may run turbo-geth in 3 possible ways:
+
+* Build tg binaries natively for Windows : while this method is possible we still lack a fully automated build process thus, at the moment, is not to be preferred. Besides there's also a caveat which might cause your experience with TG as native on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the option `--lmdb.mapSize`
+
+* Use Docker :  see [docker-compose.yml](./docker-compose.yml)
+
+* Use WSL (Windows Subsystem for Linux) : You can easily install WSL following [this quickstart guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10). Is also suggested the reading of [interoperability amongst Windows and Linux](https://docs.microsoft.com/en-us/windows/wsl/interop) work. Once your WSL environment is ready with your preferred Kernel distribution (for this document we assume you've choosen Ubuntu) proceed to install (in the linux subsystem) the required components:
+
+```sh
+> sudo apt install build-essential git golang golang-go
+```
+
+Once this last step is completed you can run tg as if you were on Linux as described the [Usage](#usage) section.
+
+**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have TG store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as 
+
+```sh
+> ./tg --datadir /mnt/d/[<optional-subfolder>/]
+```
+
 
 Key features
 ============ 

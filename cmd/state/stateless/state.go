@@ -491,11 +491,8 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	var blockNum uint64 = 0
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeadersBucket)
 		if err := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-			if len(k) != 40 {
-				return true, nil
-			}
 			header := new(types.Header)
 			if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
 				return false, err
