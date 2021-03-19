@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"testing"
@@ -12,13 +13,40 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+// HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
+type HeaderRecord struct {
+	Raw    []byte
+	Header *types.Header
+}
+
+func decodeHeaders(encodings []string) map[common.Hash]HeaderRecord {
+	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+
+	for _, encoding := range encodings {
+		b, err := base64.RawStdEncoding.DecodeString(encoding)
+		if err != nil {
+			log.Error("Parsing hard coded header", "error", err)
+		} else {
+			var h types.Header
+			if err := rlp.DecodeBytes(b, &h); err != nil {
+				log.Error("Parsing hard coded header", "error", err)
+			} else {
+				hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+			}
+		}
+	}
+
+	return hardTips
+}
+
 func TestVerifyHeadersEthash(t *testing.T) {
-	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersEthash)
-	headers := toHeaders(hardTips)
+	headerRecs := decodeHeaders(verifyHardCodedHeadersEthash)
+	headers := toHeaders(headerRecs)
 
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -48,8 +76,8 @@ func TestVerifyHeadersEthash(t *testing.T) {
 }
 
 func TestVerifyHeadersClique(t *testing.T) {
-	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique)
-	headers := toHeaders(hardTips)
+	headerRecs := decodeHeaders(verifyHardCodedHeadersEthash)
+	headers := toHeaders(headerRecs)
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -70,7 +98,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 	fmt.Println("finished in", time.Since(tn))
 }
 
-func toHeaders(tips map[common.Hash]headerdownload.HeaderRecord) []*types.Header {
+func toHeaders(tips map[common.Hash]HeaderRecord) []*types.Header {
 	headers := make([]*types.Header, 0, len(tips))
 	for _, record := range tips {
 		headers = append(headers, record.Header)
