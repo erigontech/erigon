@@ -25,7 +25,6 @@ linters:
     - nakedret
     - prealloc
     - gosec
-    - depguard
     - misspell
 
 linters-settings:
