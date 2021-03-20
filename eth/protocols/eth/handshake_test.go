@@ -42,7 +42,7 @@ func testHandshake(t *testing.T, protocol uint) {
 		genesis = backend.chain.Genesis()
 		head    = backend.chain.CurrentBlock()
 		td      = backend.chain.GetTd(head.Hash(), head.NumberU64())
-		forkID  = forkid.NewID(backend.chain.Config(), backend.chain.Genesis().Hash(), backend.chain.CurrentHeader().Number.Uint64())
+		forkID  = forkid.NewID(backend.chain.Config(), backend.chain.Genesis().Hash(), backend.headBlock.NumberU64())
 	)
 	tests := []struct {
 		code uint64
@@ -86,7 +86,7 @@ func testHandshake(t *testing.T, protocol uint) {
 			}
 		}()
 
-		err := peer.Handshake(1, td, head.Hash(), genesis.Hash(), forkID, forkid.NewFilter(backend.chain))
+		err := peer.Handshake(1, td, head.Hash(), genesis.Hash(), forkID, forkid.NewFilterAutofork(backend.chain.Config(), backend.chain.Genesis().Hash(), backend.headBlock.NumberU64()))
 		if err == nil {
 			t.Errorf("test %d: protocol returned nil error, want %q", i, test.want)
 		} else if !errors.Is(err, test.want) {
