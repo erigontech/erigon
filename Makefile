@@ -111,7 +111,7 @@ test-mdbx: mdbx
 
 lint: lintci
 
-lintci:
+lintci: mdbx
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \

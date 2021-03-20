@@ -20,7 +20,7 @@ linters:
     - scopelint
     - nakedret
     - prealloc
-#    - deadcode
+    - deadcode
     - gosimple
 
 linters-settings:
