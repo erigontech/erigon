@@ -275,7 +275,7 @@ func ReadBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.RawValu
 	return bodyRlp
 }
 
-func ReadStorageBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.RawValue {
+func ReadStorageBodyRLP(db ethdb.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -283,7 +283,7 @@ func ReadStorageBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.
 	return bodyRlp
 }
 
-func ReadTransactions(db ethdb.Database, baseTxId uint64, amount uint32) ([]*types.Transaction, error) {
+func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]*types.Transaction, error) {
 	if amount == 0 {
 		return []*types.Transaction{}, nil
 	}
@@ -346,7 +346,7 @@ func HasBody(db databaseReader, hash common.Hash, number uint64) bool {
 }
 
 // ReadBody retrieves the block body corresponding to the hash.
-func ReadBody(db ethdb.Database, hash common.Hash, number uint64) *types.Body {
+func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -660,7 +660,7 @@ func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
 //
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(db ethdb.Database, hash common.Hash, number uint64) *types.Block {
+func ReadBlock(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil
@@ -672,7 +672,7 @@ func ReadBlock(db ethdb.Database, hash common.Hash, number uint64) *types.Block 
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithSenders(db ethdb.Database, hash common.Hash, number uint64) (*types.Block, error) {
+func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, error) {
 	block := ReadBlock(db, hash, number)
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
@@ -887,7 +887,7 @@ func ReadBlockByNumber(db ethdb.Database, number uint64) (*types.Block, error) {
 	return ReadBlock(db, hash, number), nil
 }
 
-func ReadBlockByNumberWithSenders(db ethdb.Database, number uint64) (*types.Block, error) {
+func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)

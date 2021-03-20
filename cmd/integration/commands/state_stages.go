@@ -254,7 +254,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		if err2 != nil {
 			panic(err2)
 		}
-		stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil, nil, nil)
 		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 		_ = stateStages.SetCurrentStage(stages.Execution)
 
@@ -349,7 +348,7 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func miningTransactions(tx ethdb.Database, blockNum uint64) map[common.Address]types.Transactions {
+func miningTransactions(tx ethdb.Getter, blockNum uint64) map[common.Address]types.Transactions {
 	nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		panic(err)
