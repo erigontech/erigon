@@ -21,7 +21,13 @@ linters:
     - nakedret
     - prealloc
     - deadcode
+    - unused
     - gosimple
+    - ineffassign
+    - gosec
+    - depguard
+    - typecheck
+    - misspell
 
 linters-settings:
   govet:
@@ -36,6 +42,7 @@ linters-settings:
 issues:
   exclude:
     - composites
+    - G108  # gosec: Profiling endpoint is automatically exposed on /debug/pprof
   exclude-rules:
     - linters:
         - golint
@@ -46,3 +53,9 @@ issues:
     - linters:
         - stylecheck
       text: "(should be|should have name of the form)"
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - gosec
+        - unused
+        - deadcode
