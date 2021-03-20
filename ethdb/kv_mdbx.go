@@ -2,7 +2,6 @@
 
 package ethdb
 
-import "C"
 import (
 	"bytes"
 	"context"
