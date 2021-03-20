@@ -1097,9 +1097,9 @@ func BenchmarkTxn_commit(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := env.Update(func(txn *Txn) error {
-			var k [8]byte
-			binary.BigEndian.PutUint64(k[:], uint64(i))
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], uint64(i))
+		err = env.Update(func(txn *Txn) error {
 			err = txn.Put(db, k[:], k[:], 0)
 			if err != nil {
 				return err

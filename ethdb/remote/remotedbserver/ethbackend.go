@@ -20,16 +20,12 @@ import (
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth    core.Backend
+	eth    core.EthBackend
 	events *Events
 	ethash *ethash.API
 }
 
-func NewEthBackendServer(eth core.Backend, events *Events) *EthBackendServer {
-	var ethashApi *ethash.API
-	if casted, ok := eth.Engine().(*ethash.Ethash); !ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
+func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API) *EthBackendServer {
 	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi}
 }
 
@@ -126,7 +122,7 @@ func (s *EthBackendServer) SubmitWork(_ context.Context, req *remote.SubmitWorkR
 	}
 	var nonce types.BlockNonce
 	copy(nonce[:], req.BlockNonce)
-	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.Hash), common.BytesToHash(req.Digest))
+	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.PowHash), common.BytesToHash(req.Digest))
 	return &remote.SubmitWorkReply{Ok: ok}, nil
 }
 

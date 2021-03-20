@@ -72,12 +72,13 @@ type EthAPI interface {
 	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
 
 	// Mining related (see ./eth_mining.go)
-	Coinbase(_ context.Context) (common.Address, error)
-	Hashrate(_ context.Context) (uint64, error)
-	Mining(_ context.Context) (bool, error)
-	GetWork(_ context.Context) ([4]string, error)
-	SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
-	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
+	Coinbase(ctx context.Context) (common.Address, error)
+	Hashrate(ctx context.Context) (uint64, error)
+	Mining(ctx context.Context) (bool, error)
+	GetWork(ctx context.Context) ([4]string, error)
+	SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error)
+	SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error)
+	GetHashrate(ctx context.Context) (uint64, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
 	GetCompilers(_ context.Context) ([]string, error)
@@ -128,7 +129,7 @@ func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConf
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend   ethdb.Backend
+	ethBackend   core.ApiBackend
 	db           ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
@@ -136,7 +137,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.Database, eth ethdb.Backend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
+func NewEthAPI(db ethdb.Database, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,

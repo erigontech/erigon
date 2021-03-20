@@ -596,7 +596,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			fetchers,
 			txPool,
 			poolStart,
-			nil,
 			false,
 			nil,
 		)
@@ -689,7 +688,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			fetchers,
 			txPool,
 			poolStart,
-			nil,
+			false,
 			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, false, nil, nil),
 		); err != nil {
 			return err

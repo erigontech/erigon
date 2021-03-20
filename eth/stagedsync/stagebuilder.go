@@ -46,7 +46,6 @@ type StageParameters struct {
 	headersFetchers       []func() error
 	txPool                *core.TxPool
 	poolStart             func() error
-	changeSetHook         ChangeSetHook
 	prefetchedBlocks      *PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
@@ -211,7 +210,6 @@ func DefaultStages() StageBuilders {
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
 								BatchSize:             world.BatchSize,
-								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -222,7 +220,6 @@ func DefaultStages() StageBuilders {
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
 							BatchSize:             world.BatchSize,
-							ChangeSetHook:         world.changeSetHook,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
 							SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -417,7 +414,7 @@ func MiningStages() StageBuilders {
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningCreateBlockStage(s, world.TX,
 							world.mining.block,
-							world.chainConfig,
+							world.ChainConfig,
 							world.chainContext.Engine(),
 							world.mining.ExtraData,
 							world.mining.GasFloor,
@@ -439,7 +436,7 @@ func MiningStages() StageBuilders {
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningExecStage(s, world.TX,
 							world.mining.block,
-							world.chainConfig,
+							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
 							world.txPool,
@@ -489,7 +486,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinishStage(s, world.TX, world.mining.block, world.mining.mux, world.chainContext.Engine(), world.chainConfig, world.QuitCh)
+						return SpawnMiningFinishStage(s, world.TX, world.mining.block, world.mining.mux, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

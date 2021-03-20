@@ -674,7 +674,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, hook, false, nil)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, false, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -683,7 +683,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.MiningStages(),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, nil, false, miningParams)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, false, miningParams)
 	if err != nil {
 		panic(err)
 	}

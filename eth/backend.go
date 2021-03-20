@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -384,6 +385,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
+	var ethashApi *ethash.API
+	if casted, ok := eth.Engine().(*ethash.Ethash); !ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
 			// load peer cert/key, ca cert
@@ -416,12 +421,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
 			if err != nil {
 				return nil, err
 			}

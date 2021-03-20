@@ -1,14 +1,15 @@
 package filters
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -20,7 +21,7 @@ type Filters struct {
 	headsSubs map[string]chan *types.Header
 }
 
-func New(ethBackend ethdb.Backend) *Filters {
+func New(ethBackend core.ApiBackend) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
 	ff := &Filters{headsSubs: make(map[string]chan *types.Header)}
@@ -28,7 +29,7 @@ func New(ethBackend ethdb.Backend) *Filters {
 	go func() {
 		var err error
 		for i := 0; i < 10; i++ {
-			err = ethBackend.Subscribe(ff.OnNewEvent)
+			err = ethBackend.Subscribe(context.Background(), ff.OnNewEvent)
 			if err != nil {
 				log.Warn("rpc filters: error subscribing to events", "err", err)
 				time.Sleep(time.Second)

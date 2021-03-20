@@ -71,7 +71,7 @@ message GetWorkReply {
 
 message SubmitWorkRequest {
   bytes blockNonce = 1;
-  bytes hash  = 2;
+  bytes powHash   = 2;
   bytes digest = 3;
 }
 

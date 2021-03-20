@@ -78,12 +78,9 @@ func StageLoop(
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		//cc.SetEngine(d.blockchain.Engine())
-		st, err1 := sync.Prepare(nil, chainConfig, nil, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil)
+		st, err1 := sync.Prepare(nil, chainConfig, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil)
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
-		}
-		if err != nil {
-			return err
 		}
 
 		// begin tx at stage right after head/body download Or at first unwind stage

@@ -63,7 +63,6 @@ func (stagedSync *StagedSync) Prepare(
 	headersFetchers []func() error,
 	txPool *core.TxPool,
 	poolStart func() error,
-	changeSetHook ChangeSetHook,
 	initialCycle bool,
 	miningConfig *MiningStagesParameters,
 ) (*State, error) {
@@ -96,7 +95,6 @@ func (stagedSync *StagedSync) Prepare(
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,
 			poolStart:             poolStart,
-			changeSetHook:         changeSetHook,
 			cache:                 cache,
 			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,

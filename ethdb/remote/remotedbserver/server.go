@@ -10,6 +10,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
@@ -28,7 +29,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -37,7 +38,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, rateLimit uint32, cre
 
 	kv2Srv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events)
+	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
