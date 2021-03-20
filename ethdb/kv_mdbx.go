@@ -108,29 +108,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
-		if opts.mapSize == 0 {
-			if opts.inMem {
-				opts.mapSize = 64 * datasize.MB
-			} else {
-				opts.mapSize = LMDBDefaultMapSize
-			}
-		}
-
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
-			return nil, err
-		}
-
-		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
-			return nil, err
-		}
-
-		if opts.maxFreelistReuse == 0 {
-			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-		}
-
-		if err = os.MkdirAll(opts.path, 0744); err != nil {
-			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+	if opts.mapSize == 0 {
+		if opts.inMem {
+			opts.mapSize = 64 * datasize.MB
+		} else {
+			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
 
@@ -139,6 +121,24 @@ func (opts MdbxOpts) Open() (KV, error) {
 		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync | mdbx.WriteMap
 		opts.dirtyListMaxPages = 8 * 1024
+	}
+
+	if opts.maxFreelistReuse == 0 {
+		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+	}
+
+	if opts.flags&mdbx.Accede == 0 {
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			return nil, err
+		}
+
+		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
+			return nil, err
+		}
+
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	err = env.Open(opts.path, flags, 0664)
