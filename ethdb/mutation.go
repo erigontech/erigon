@@ -107,10 +107,6 @@ func (m *mutation) Last(table string) ([]byte, []byte, error) {
 	return m.db.Last(table)
 }
 
-func (m *mutation) Reserve(table string, key []byte, i int) ([]byte, error) {
-	return m.db.(DbWithPendingMutations).Reserve(table, key, i)
-}
-
 func (m *mutation) hasMem(table string, key []byte) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -138,8 +138,6 @@ type DbWithPendingMutations interface {
 	CommitAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
-
-	Reserve(bucket string, key []byte, i int) ([]byte, error)
 }
 
 type HasKV interface {

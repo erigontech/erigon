@@ -113,8 +113,6 @@ type Tx interface {
 	BucketSize(name string) (uint64, error)
 
 	Comparator(bucket string) dbutils.CmpFunc
-	Cmp(bucket string, a, b []byte) int
-	DCmp(bucket string, a, b []byte) int
 
 	// Allows to create a linear sequence of unique positive integers for each table.
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
@@ -165,12 +163,6 @@ type Cursor interface {
 	// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 	// this operation.
 	DeleteCurrent() error
-
-	// PutNoOverwrite(key, value []byte) error
-	Reserve(k []byte, n int) ([]byte, error)
-
-	// PutCurrent - replace the item at the current cursor position.
-	PutCurrent(key, value []byte) error
 
 	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 

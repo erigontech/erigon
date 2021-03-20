@@ -426,16 +426,6 @@ func (tx *lmdbTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator(tx.tx, lmdb.DBI(b.DBI), b)
 }
 
-// Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *lmdbTx) Cmp(bucket string, a, b []byte) int {
-	return tx.tx.Cmp(lmdb.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
-// DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *lmdbTx) DCmp(bucket string, a, b []byte) int {
-	return tx.tx.DCmp(lmdb.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
 // All buckets stored as keys of un-named bucket
 func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
@@ -811,25 +801,24 @@ func (tx *lmdbTx) CHandle() unsafe.Pointer {
 }
 
 // methods here help to see better pprof picture
-func (c *LmdbCursor) set(k []byte) ([]byte, []byte, error)    { return c.c.Get(k, nil, lmdb.Set) }
-func (c *LmdbCursor) getCurrent() ([]byte, []byte, error)     { return c.c.Get(nil, nil, lmdb.GetCurrent) }
-func (c *LmdbCursor) first() ([]byte, []byte, error)          { return c.c.Get(nil, nil, lmdb.First) }
-func (c *LmdbCursor) next() ([]byte, []byte, error)           { return c.c.Get(nil, nil, lmdb.Next) }
-func (c *LmdbCursor) nextDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.NextDup) }
-func (c *LmdbCursor) nextNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, lmdb.NextNoDup) }
-func (c *LmdbCursor) prev() ([]byte, []byte, error)           { return c.c.Get(nil, nil, lmdb.Prev) }
-func (c *LmdbCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.PrevDup) }
-func (c *LmdbCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, lmdb.PrevNoDup) }
-func (c *LmdbCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, lmdb.Last) }
-func (c *LmdbCursor) delCurrent() error                       { return c.c.Del(lmdb.Current) }
-func (c *LmdbCursor) delNoDupData() error                     { return c.c.Del(lmdb.NoDupData) }
-func (c *LmdbCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
-func (c *LmdbCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, lmdb.Current) }
-func (c *LmdbCursor) putNoOverwrite(k, v []byte) error        { return c.c.Put(k, v, lmdb.NoOverwrite) }
-func (c *LmdbCursor) putNoDupData(k, v []byte) error          { return c.c.Put(k, v, lmdb.NoDupData) }
-func (c *LmdbCursor) append(k, v []byte) error                { return c.c.Put(k, v, lmdb.Append) }
-func (c *LmdbCursor) appendDup(k, v []byte) error             { return c.c.Put(k, v, lmdb.AppendDup) }
-func (c *LmdbCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
+func (c *LmdbCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, lmdb.Set) }
+func (c *LmdbCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, lmdb.GetCurrent) }
+func (c *LmdbCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, lmdb.First) }
+func (c *LmdbCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.Next) }
+func (c *LmdbCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, lmdb.NextDup) }
+func (c *LmdbCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, lmdb.NextNoDup) }
+func (c *LmdbCursor) prev() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.Prev) }
+func (c *LmdbCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, lmdb.PrevDup) }
+func (c *LmdbCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, lmdb.PrevNoDup) }
+func (c *LmdbCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.Last) }
+func (c *LmdbCursor) delCurrent() error                    { return c.c.Del(lmdb.Current) }
+func (c *LmdbCursor) delNoDupData() error                  { return c.c.Del(lmdb.NoDupData) }
+func (c *LmdbCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
+func (c *LmdbCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, lmdb.Current) }
+func (c *LmdbCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, lmdb.NoOverwrite) }
+func (c *LmdbCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, lmdb.NoDupData) }
+func (c *LmdbCursor) append(k, v []byte) error             { return c.c.Put(k, v, lmdb.Append) }
+func (c *LmdbCursor) appendDup(k, v []byte) error          { return c.c.Put(k, v, lmdb.AppendDup) }
 func (c *LmdbCursor) getBoth(k, v []byte) ([]byte, []byte, error) {
 	return c.c.Get(k, v, lmdb.GetBoth)
 }
@@ -1149,16 +1138,6 @@ func (c *LmdbCursor) DeleteCurrent() error {
 	return c.delCurrent()
 }
 
-func (c *LmdbCursor) Reserve(k []byte, n int) ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-
-	return c.reserve(k, n)
-}
-
 func (c *LmdbCursor) deleteDupSort(key []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
@@ -1272,25 +1251,6 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, value)
 }
 
-func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		value = append(key[b.DupToLen:], value...)
-		key = key[:b.DupToLen]
-	}
-
-	return c.putCurrent(key, value)
-}
-
 func (c *LmdbCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
@@ -1384,16 +1344,6 @@ func (c *LmdbDupSortCursor) initCursor() error {
 	}
 
 	return c.LmdbCursor.initCursor()
-}
-
-// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
-//	The key parameter must still be provided, and must match it.
-//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
-//	sort into the same place. This is intended to be used when the
-//	new data is the same size as the old. Otherwise it will simply
-//	perform a delete of the old record followed by an insert.
-func (c *LmdbDupSortCursor) PutCurrent(k, v []byte) error {
-	panic("method is too dangerous, read docs")
 }
 
 // DeleteExact - does delete

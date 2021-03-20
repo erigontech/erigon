@@ -272,14 +272,6 @@ func (s *sn2TX) Comparator(bucket string) dbutils.CmpFunc {
 	return s.dbTX.Comparator(bucket)
 }
 
-func (s *sn2TX) Cmp(bucket string, a, b []byte) int {
-	panic("implement me")
-}
-
-func (s *sn2TX) DCmp(bucket string, a, b []byte) int {
-	panic("implement me")
-}
-
 func (s *sn2TX) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
@@ -523,14 +515,6 @@ func (s *snCursor2) DeleteCurrent() error {
 	panic("implement me")
 }
 
-func (s *snCursor2) Reserve(k []byte, n int) ([]byte, error) {
-	panic("implement me")
-}
-
-func (s *snCursor2) PutCurrent(key, value []byte) error {
-	panic("implement me")
-}
-
 func (s *snCursor2) Count() (uint64, error) {
 	panic("implement me")
 }
@@ -699,14 +683,6 @@ func GenStateData(data []KvData) (KV, error) {
 //}
 //
 //func (c *cursorSnapshotDupsort) DeleteCurrent() error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Reserve(k []byte, n int) ([]byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) PutCurrent(key, value []byte) error {
 //	panic("implement me")
 //}
 //

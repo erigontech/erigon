@@ -421,16 +421,6 @@ func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
 }
 
-// Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *MdbxTx) Cmp(bucket string, a, b []byte) int {
-	return tx.tx.Cmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
-// DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
-	return tx.tx.DCmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
 // All buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string
@@ -860,25 +850,24 @@ func (tx *MdbxTx) CHandle() unsafe.Pointer {
 }
 
 // methods here help to see better pprof picture
-func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error)    { return c.c.Get(k, nil, mdbx.Set) }
-func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) first() ([]byte, []byte, error)          { return c.c.Get(nil, nil, mdbx.First) }
-func (c *MdbxCursor) next() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Next) }
-func (c *MdbxCursor) nextDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.NextDup) }
-func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.NextNoDup) }
-func (c *MdbxCursor) prev() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Prev) }
-func (c *MdbxCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.PrevDup) }
-func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
-func (c *MdbxCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(mdbx.Current) }
-func (c *MdbxCursor) delNoDupData() error                     { return c.c.Del(mdbx.NoDupData) }
-func (c *MdbxCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, mdbx.Current) }
-func (c *MdbxCursor) putNoOverwrite(k, v []byte) error        { return c.c.Put(k, v, mdbx.NoOverwrite) }
-func (c *MdbxCursor) putNoDupData(k, v []byte) error          { return c.c.Put(k, v, mdbx.NoDupData) }
-func (c *MdbxCursor) append(k, v []byte) error                { return c.c.Put(k, v, mdbx.Append) }
-func (c *MdbxCursor) appendDup(k, v []byte) error             { return c.c.Put(k, v, mdbx.AppendDup) }
-func (c *MdbxCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
+func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
+func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
+func (c *MdbxCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, mdbx.First) }
+func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
+func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
+func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
+func (c *MdbxCursor) prev() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Prev) }
+func (c *MdbxCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.PrevDup) }
+func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
+func (c *MdbxCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Last) }
+func (c *MdbxCursor) delCurrent() error                    { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) delNoDupData() error                  { return c.c.Del(mdbx.NoDupData) }
+func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
+func (c *MdbxCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, mdbx.Current) }
+func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
+func (c *MdbxCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, mdbx.NoDupData) }
+func (c *MdbxCursor) append(k, v []byte) error             { return c.c.Put(k, v, mdbx.Append) }
+func (c *MdbxCursor) appendDup(k, v []byte) error          { return c.c.Put(k, v, mdbx.AppendDup) }
 func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
@@ -1199,16 +1188,6 @@ func (c *MdbxCursor) DeleteCurrent() error {
 	return c.delCurrent()
 }
 
-func (c *MdbxCursor) Reserve(k []byte, n int) ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-
-	return c.reserve(k, n)
-}
-
 func (c *MdbxCursor) deleteDupSort(key []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
@@ -1322,25 +1301,6 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, value)
 }
 
-func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("mdbx doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		value = append(key[b.DupToLen:], value...)
-		key = key[:b.DupToLen]
-	}
-
-	return c.putCurrent(key, value)
-}
-
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
@@ -1444,16 +1404,6 @@ func (c *MdbxDupSortCursor) initCursor() error {
 	}
 
 	return c.MdbxCursor.initCursor()
-}
-
-// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
-//	The key parameter must still be provided, and must match it.
-//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
-//	sort into the same place. This is intended to be used when the
-//	new data is the same size as the old. Otherwise it will simply
-//	perform a delete of the old record followed by an insert.
-func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
-	panic("method is too dangerous, read docs")
 }
 
 // DeleteExact - does delete
