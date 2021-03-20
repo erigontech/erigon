@@ -11,6 +11,7 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -59,7 +60,7 @@ func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest
 }
 
 func (c *eTHBACKENDClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_ETHBACKEND_serviceDesc.Streams[0], "/remote.ETHBACKEND/Subscribe", opts...)
+	stream, err := c.cc.NewStream(ctx, &ETHBACKEND_ServiceDesc.Streams[0], "/remote.ETHBACKEND/Subscribe", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ type UnsafeETHBACKENDServer interface {
 }
 
 func RegisterETHBACKENDServer(s grpc.ServiceRegistrar, srv ETHBACKENDServer) {
-	s.RegisterService(&_ETHBACKEND_serviceDesc, srv)
+	s.RegisterService(&ETHBACKEND_ServiceDesc, srv)
 }
 
 func _ETHBACKEND_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -205,7 +206,10 @@ func (x *eTHBACKENDSubscribeServer) Send(m *SubscribeReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-var _ETHBACKEND_serviceDesc = grpc.ServiceDesc{
+// ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.ETHBACKEND",
 	HandlerType: (*ETHBACKENDServer)(nil),
 	Methods: []grpc.MethodDesc{

@@ -11,6 +11,7 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
 // DBClient is the client API for DB service.
@@ -76,7 +77,7 @@ type UnsafeDBServer interface {
 }
 
 func RegisterDBServer(s grpc.ServiceRegistrar, srv DBServer) {
-	s.RegisterService(&_DB_serviceDesc, srv)
+	s.RegisterService(&DB_ServiceDesc, srv)
 }
 
 func _DB_Size_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -115,7 +116,10 @@ func _DB_BucketSize_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
-var _DB_serviceDesc = grpc.ServiceDesc{
+// DB_ServiceDesc is the grpc.ServiceDesc for DB service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var DB_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.DB",
 	HandlerType: (*DBServer)(nil),
 	Methods: []grpc.MethodDesc{
