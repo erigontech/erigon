@@ -28,7 +28,7 @@ var gasLimitsCmd = &cobra.Command{
 			}
 		}).MustOpen()
 
-		remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open("", "", "")
+		remoteDB, err := ethdb.NewRemote().Path(privateApiAddr).Open("", "", "")
 		if err != nil {
 			return err
 		}

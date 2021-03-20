@@ -18,7 +18,6 @@ func HeaderKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-
 // blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
 func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
