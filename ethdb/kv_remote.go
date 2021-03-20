@@ -14,9 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
@@ -88,14 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-type RemoteBackend struct {
-	opts             remoteOpts
-	remoteEthBackend remote.ETHBACKENDClient
-	conn             *grpc.ClientConn
-	log              log.Logger
-}
-
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -111,19 +102,19 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 			creds, err = credentials.NewClientTLSFromFile(certFile, "")
 
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		} else {
 			// load peer cert/key, ca cert
 			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
 				log.Error("load peer cert/key error:%v", err)
-				return nil, nil, err
+				return nil, err
 			}
 			caCert, err := ioutil.ReadFile(caCert)
 			if err != nil {
 				log.Error("read ca cert file error:%v", err)
-				return nil, nil, err
+				return nil, err
 			}
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
@@ -150,7 +141,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 
 	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	db := &RemoteKV{
@@ -166,22 +157,15 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 		db.buckets[name] = cfg
 	}
 
-	eth := &RemoteBackend{
-		opts:             opts,
-		remoteEthBackend: remote.NewETHBACKENDClient(conn),
-		conn:             conn,
-		log:              log.New("remote_db", opts.DialAddress),
-	}
-
-	return db, eth, nil
+	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() (KV, Backend) {
-	db, txPool, err := opts.Open("", "", "")
+func (opts remoteOpts) MustOpen() KV {
+	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
 	}
-	return db, txPool
+	return db
 }
 
 func NewRemote() remoteOpts {
@@ -190,6 +174,10 @@ func NewRemote() remoteOpts {
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
+}
+
+func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
+	return db.conn
 }
 
 // Close
@@ -641,50 +629,4 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 		return nil, err
 	}
 	return c.lastDup()
-}
-
-func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
-	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
-	if err != nil {
-		return common.Hash{}.Bytes(), err
-	}
-	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
-}
-
-func (back *RemoteBackend) Etherbase() (common.Address, error) {
-	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	return gointerfaces.ConvertH160toAddress(res.Address), nil
-}
-
-func (back *RemoteBackend) NetVersion() (uint64, error) {
-	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
-	if err != nil {
-		return 0, err
-	}
-
-	return res.Id, nil
-}
-
-func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) error {
-	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), &remote.SubscribeRequest{})
-	if err != nil {
-		return err
-	}
-	for {
-		event, err := subscription.Recv()
-		if err == io.EOF {
-			log.Info("rpcdaemon: the subscription channel was closed")
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		onNewEvent(event)
-	}
-	return nil
 }

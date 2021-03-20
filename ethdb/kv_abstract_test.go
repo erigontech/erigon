@@ -142,7 +142,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
+	rdb := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -110,13 +111,14 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 		}
 	}
 	if cfg.PrivateApiAddr != "" {
-		var remoteDb ethdb.KV
-		remoteDb, ethBackend, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		var remoteKv ethdb.KV
+		remoteKv, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
+			return nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
+		core.NewRemoteBackend(remoteKv)
 		if db == nil {
-			db = remoteDb
+			db = remoteKv
 		}
 	} else {
 		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
