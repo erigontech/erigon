@@ -251,7 +251,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			panic(err2)
 		}
 		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
-		_ = stateStages.SetCurrentStage(stages.Execution)
 
 		if miningConfig.Enabled {
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
@@ -289,13 +288,13 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		stateStages.MockExecFunc(stages.IntermediateHashes, execTrieFunc)
+		_ = stateStages.SetCurrentStage(stages.Execution)
 		if err := stateStages.Run(db, tx); err != nil {
 			return err
 		}
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
-
 		if miningConfig.Enabled {
 			if stateHash != minedBlock.Header().Hash() {
 				panic(fmt.Errorf("state hash: %x, mined hash: %x", stateHash, minedBlock.Header().Hash()))
