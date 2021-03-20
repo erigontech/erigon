@@ -66,11 +66,6 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	return m.cursor(bucket).Put(key, value)
 }
 
-func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
-	m.len += uint64(len(key) + i)
-	return m.cursor(bucket).Reserve(key, i)
-}
-
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
 	return m.cursor(bucket).Append(key, value)

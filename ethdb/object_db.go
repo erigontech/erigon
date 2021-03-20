@@ -368,10 +368,6 @@ func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
 }
 
-func (db *ObjectDatabase) Reserve(bucket string, key []byte, i int) ([]byte, error) {
-	panic("supported only by TxDb")
-}
-
 // Type which expecting sequence of triplets: dbi, key, value, ....
 // It sorts entries by dbi name, then inside dbi clusters sort by keys
 type MultiPutTuples [][]byte

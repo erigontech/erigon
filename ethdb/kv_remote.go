@@ -228,8 +228,6 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 }
 
 func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
-func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
-func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
 func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
 
 func (tx *remoteTx) Sequence(bucket string, amount uint64) (uint64, error) {
@@ -319,12 +317,10 @@ func (c *remoteCursor) initCursor() error {
 
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
-func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
 func (c *remoteCursor) Delete(k, v []byte) error                      { panic("not supported") }
 func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
-func (c *remoteCursor) Reserve(k []byte, n int) ([]byte, error)       { panic("not supported") }
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
