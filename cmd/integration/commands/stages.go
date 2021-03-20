@@ -682,7 +682,7 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (*core.TinyChainContext, *co
 	return cc, bc, txPool, st, stMining, cache
 }
 
-func progress(tx ethdb.Database, stage stages.SyncStage) uint64 {
+func progress(tx ethdb.Getter, stage stages.SyncStage) uint64 {
 	res, err := stages.GetStageProgress(tx, stage)
 	if err != nil {
 		panic(err)
