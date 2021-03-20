@@ -83,16 +83,14 @@ func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
 	return ID{Hash: checksumToBytes(hash), Next: 0}
 }
 
-// NewFilterAutofork creates a filter that returns if a fork ID should be rejected or notI
+// NewFilter creates a filter that returns if a fork ID should be rejected or notI
 // based on the local chain's status.
-func NewFilterAutofork(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
+func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint64) Filter {
 	forks := GatherForks(config)
 	return newFilter(
 		forks,
 		genesis,
-		func() uint64 {
-			return head
-		},
+		head,
 	)
 }
 

@@ -159,7 +159,7 @@ func (r *eofSignal) Read(buf []byte) (int, error) {
 // implement MsgReadWriter.
 func MsgPipe() (*MsgPipeRW, *MsgPipeRW) {
 	var (
-		c1, c2  = make(chan Msg), make(chan Msg)
+		c1, c2  = make(chan Msg, 1), make(chan Msg, 1)
 		closing = make(chan struct{})
 		closed  = new(int32)
 		rw1     = &MsgPipeRW{c1, c2, closing, closed}

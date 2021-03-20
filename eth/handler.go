@@ -18,6 +18,7 @@ package eth
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -137,17 +139,25 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:  config.Network,
-		forkFilter: forkid.NewFilterAutofork(config.Chain.Config(), config.Chain.Genesis().Hash(), config.Chain.CurrentHeader().Number.Uint64()),
-		eventMux:   config.EventMux,
-		database:   config.Database,
-		txpool:     config.TxPool,
-		chain:      config.Chain,
-		peers:      newPeerSet(),
-		whitelist:  config.Whitelist,
-		txsyncCh:   make(chan *txsync),
-		quitSync:   make(chan struct{}),
+		networkID: config.Network,
+		eventMux:  config.EventMux,
+		database:  config.Database,
+		txpool:    config.TxPool,
+		chain:     config.Chain,
+		peers:     newPeerSet(),
+		whitelist: config.Whitelist,
+		txsyncCh:  make(chan *txsync),
+		quitSync:  make(chan struct{}),
 	}
+	if headHeight, err := stages.GetStageProgress(config.Database, stages.Finish); err == nil {
+		h.currentHeight = headHeight
+	} else {
+		return nil, fmt.Errorf("could not get Finish stage progress: %v", err)
+	}
+	heighter := func() uint64 {
+		return atomic.LoadUint64(&h.currentHeight)
+	}
+	h.forkFilter = forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), heighter)
 	// If we have trusted checkpoints, enforce them on the chain
 	if config.Checkpoint != nil {
 		h.checkpointNumber = (config.Checkpoint.SectionIndex+1)*params.CHTFrequency - 1
@@ -167,9 +177,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
 		return h.chain.Engine().VerifyHeader(h.chain, header, true)
-	}
-	heighter := func() uint64 {
-		return atomic.LoadUint64(&h.currentHeight)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		if err == nil {
@@ -231,7 +238,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		number  = head.Number.Uint64()
 		td      = h.chain.GetTd(hash, number)
 	)
-	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
+	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), atomic.LoadUint64(&h.currentHeight))
 	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
