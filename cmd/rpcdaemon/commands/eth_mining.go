@@ -31,9 +31,15 @@ func (api *APIImpl) Mining(_ context.Context) (bool, error) {
 	return false, nil
 }
 
-// GetWork implements eth_getWork. Returns the hash of the current block, the seedHash, and the boundary condition to be met ('target').
-func (api *APIImpl) GetWork(_ context.Context) ([]interface{}, error) {
-	var stub []interface{}
+// GetWork returns a work package for external miner.
+//
+// The work package consists of 3 strings:
+//   result[0] - 32 bytes hex encoded current block header pow-hash
+//   result[1] - 32 bytes hex encoded seed hash used for DAG
+//   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+//   result[3] - hex encoded block number
+func (api *APIImpl) GetWork(_ context.Context) ([4]string, error) {
+	var stub [4]string
 	return stub, fmt.Errorf(NotImplemented, "eth_getWork")
 }
 

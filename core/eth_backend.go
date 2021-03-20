@@ -21,6 +21,8 @@ type Backend interface {
 	TxPool() *TxPool
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+
+	GetWork() ([4]string, error)
 }
 
 func NewEthBackend(eth Backend) *EthBackend {
@@ -97,4 +99,8 @@ func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) er
 		onNewEvent(event)
 	}
 	return nil
+}
+
+func (back *RemoteBackend) GetWork() ([4]string, error) {
+	return [4]string{}, nil
 }

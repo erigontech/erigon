@@ -11,7 +11,6 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
-// Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -22,6 +21,7 @@ type ETHBACKENDClient interface {
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error)
+	GetWork(ctx context.Context, in *GetWorkRequest, opts ...grpc.CallOption) (*GetWorkReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -60,7 +60,7 @@ func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest
 }
 
 func (c *eTHBACKENDClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ETHBACKEND_ServiceDesc.Streams[0], "/remote.ETHBACKEND/Subscribe", opts...)
+	stream, err := c.cc.NewStream(ctx, &_ETHBACKEND_serviceDesc.Streams[0], "/remote.ETHBACKEND/Subscribe", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +91,15 @@ func (x *eTHBACKENDSubscribeClient) Recv() (*SubscribeReply, error) {
 	return m, nil
 }
 
+func (c *eTHBACKENDClient) GetWork(ctx context.Context, in *GetWorkRequest, opts ...grpc.CallOption) (*GetWorkReply, error) {
+	out := new(GetWorkReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/GetWork", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
@@ -99,6 +108,7 @@ type ETHBACKENDServer interface {
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
 	Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error
+	GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -118,6 +128,9 @@ func (UnimplementedETHBACKENDServer) NetVersion(context.Context, *NetVersionRequ
 func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error {
 	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
 }
+func (UnimplementedETHBACKENDServer) GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWork not implemented")
+}
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
 // UnsafeETHBACKENDServer may be embedded to opt out of forward compatibility for this service.
@@ -128,7 +141,7 @@ type UnsafeETHBACKENDServer interface {
 }
 
 func RegisterETHBACKENDServer(s grpc.ServiceRegistrar, srv ETHBACKENDServer) {
-	s.RegisterService(&ETHBACKEND_ServiceDesc, srv)
+	s.RegisterService(&_ETHBACKEND_serviceDesc, srv)
 }
 
 func _ETHBACKEND_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -206,10 +219,25 @@ func (x *eTHBACKENDSubscribeServer) Send(m *SubscribeReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-// ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
+func _ETHBACKEND_GetWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWorkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).GetWork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/GetWork",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).GetWork(ctx, req.(*GetWorkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+var _ETHBACKEND_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.ETHBACKEND",
 	HandlerType: (*ETHBACKENDServer)(nil),
 	Methods: []grpc.MethodDesc{
@@ -224,6 +252,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NetVersion",
 			Handler:    _ETHBACKEND_NetVersion_Handler,
+		},
+		{
+			MethodName: "GetWork",
+			Handler:    _ETHBACKEND_GetWork_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

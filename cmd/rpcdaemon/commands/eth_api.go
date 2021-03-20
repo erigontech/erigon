@@ -75,7 +75,7 @@ type EthAPI interface {
 	Coinbase(_ context.Context) (common.Address, error)
 	Hashrate(_ context.Context) (uint64, error)
 	Mining(_ context.Context) (bool, error)
-	GetWork(_ context.Context) ([]interface{}, error)
+	GetWork(_ context.Context) ([4]string, error)
 	SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
 

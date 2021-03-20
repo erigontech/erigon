@@ -14,6 +14,7 @@ service ETHBACKEND {
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
+  rpc GetWork(GetWorkRequest) returns (GetWorkReply);
 }
 
 message TxRequest { bytes signedtx = 1; }
@@ -33,4 +34,14 @@ message SubscribeRequest {}
 message SubscribeReply {
   uint64 type = 1; // type (only header at that moment)
   bytes data = 2;  //  serialized data
+}
+
+
+message GetWorkRequest {}
+
+message GetWorkReply {
+  string headerHash = 1; // 32 bytes hex encoded current block header pow-hash
+  string seedHash = 2; // 32 bytes hex encoded seed hash used for DAG
+  string target = 3;  // 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+  string blockNumber = 4; // hex encoded block number
 }
