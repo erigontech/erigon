@@ -672,6 +672,16 @@ func ReadBlock(db ethdb.Database, hash common.Hash, number uint64) *types.Block 
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
+func ReadBlockWithSenders(db ethdb.Database, hash common.Hash, number uint64) (*types.Block, error) {
+	block := ReadBlock(db, hash, number)
+	senders, err := ReadSenders(db, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	block.Body().SendersToTxs(senders)
+	return block, nil
+}
+
 // WriteBlock serializes a block into the database, header and body separately.
 func WriteBlock(ctx context.Context, db ethdb.Database, block *types.Block) error {
 	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
@@ -875,6 +885,18 @@ func ReadBlockByNumber(db ethdb.Database, number uint64) (*types.Block, error) {
 	}
 
 	return ReadBlock(db, hash, number), nil
+}
+
+func ReadBlockByNumberWithSenders(db ethdb.Database, number uint64) (*types.Block, error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+
+	return ReadBlockWithSenders(db, hash, number)
 }
 
 func ReadBlockByHash(db ethdb.Database, hash common.Hash) (*types.Block, error) {

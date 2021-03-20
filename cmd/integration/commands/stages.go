@@ -645,6 +645,51 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
+func newSync2(db ethdb.Database, tx ethdb.Database) (*core.TinyChainContext, *core.BlockChain, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync, *shards.StateCache) {
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
+
+	chainConfig, bc, err := newBlockChain(db, sm)
+	if err != nil {
+		panic(err)
+	}
+
+	txPool := core.NewTxPool(core.TxPoolConfig{}, chainConfig, db, core.NewTxSenderCacher(runtime.NumCPU()))
+
+	cc := &core.TinyChainContext{}
+	cc.SetDB(tx)
+	cc.SetEngine(ethash.NewFaker())
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
+	st := stagedsync.New(
+		stagedsync.DefaultStages(),
+		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
+	)
+	stMining := stagedsync.New(
+		stagedsync.MiningStages(),
+		stagedsync.MiningUnwindOrder(),
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
+	)
+	return cc, bc, txPool, st, stMining, cache
+}
+
+func progress(tx ethdb.Database, stage stages.SyncStage) uint64 {
+	res, err := stages.GetStageProgress(tx, stage)
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
 //nolint:unparam
 func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (*core.TinyChainContext, *core.BlockChain, *core.TxPool, *stagedsync.State, *stagedsync.State, *shards.StateCache, progressFunc) {
 	sm, err := ethdb.GetStorageModeFromDB(db)

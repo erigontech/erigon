@@ -77,7 +77,6 @@ func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	return unmarshalData(v)
 }
 
-// SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
 	return db.Put(dbutils.SyncStageProgress, stage, marshalData(progress))
 }
