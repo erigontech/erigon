@@ -440,7 +440,8 @@ func MiningStages() StageBuilders {
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.mining.localTxs, world.mining.localTxs,
+							world.mining.localTxs,
+							world.mining.remoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)

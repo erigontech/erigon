@@ -553,7 +553,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 func stageHistory(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, bc, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, _, st, _, _ := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -562,23 +562,21 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 		}
 		return nil
 	}
-	execStage := progress(stages.Execution)
-	stageAcc := progress(stages.AccountHistoryIndex)
-	stageStorage := progress(stages.StorageHistoryIndex)
-	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	execStage := progress(db, stages.Execution)
+	stageStorage := stage(st, db, stages.StorageHistoryIndex)
+	stageAcc := stage(st, db, stages.AccountHistoryIndex)
+	log.Info("Stage exec", "progress", execStage)
 	log.Info("Stage acc history", "progress", stageAcc.BlockNumber)
 	log.Info("Stage storage history", "progress", stageStorage.BlockNumber)
 	ch := ctx.Done()
 
 	if unwind > 0 { //nolint:staticcheck
 		u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
-		s := progress(stages.StorageHistoryIndex)
-		if err := stagedsync.UnwindStorageHistoryIndex(u, s, db, ch); err != nil {
+		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, db, ch); err != nil {
 			return err
 		}
 		u = &stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
-		s = progress(stages.AccountHistoryIndex)
-		if err := stagedsync.UnwindAccountHistoryIndex(u, s, db, ch); err != nil {
+		if err := stagedsync.UnwindAccountHistoryIndex(u, stageAcc, db, ch); err != nil {
 			return err
 		}
 		return nil
@@ -645,16 +643,14 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync2(db ethdb.Database, tx ethdb.Database) (*core.TinyChainContext, *core.BlockChain, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync, *shards.StateCache) {
+func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, *core.TinyChainContext, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync, *shards.StateCache) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
 	}
 
-	chainConfig, bc, err := newBlockChain(db, sm)
-	if err != nil {
-		panic(err)
-	}
+	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
+	chainConfig := params.MainnetChainConfig
 
 	txPool := core.NewTxPool(core.TxPoolConfig{}, chainConfig, db, core.NewTxSenderCacher(runtime.NumCPU()))
 
@@ -679,11 +675,19 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (*core.TinyChainContext, *co
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	)
-	return cc, bc, txPool, st, stMining, cache
+	return sm, cc, chainConfig, vmConfig, txPool, st, stMining, cache
 }
 
 func progress(tx ethdb.Getter, stage stages.SyncStage) uint64 {
 	res, err := stages.GetStageProgress(tx, stage)
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
+func stage(st *stagedsync.State, db ethdb.Getter, stage stages.SyncStage) *stagedsync.StageState {
+	res, err := st.StageState(stage, db)
 	if err != nil {
 		panic(err)
 	}

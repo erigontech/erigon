@@ -128,16 +128,11 @@ func init() {
 
 func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx context.Context) error {
 	tmpDir := path.Join(datadir, etl.TmpDirName)
+	must(clearUnwindStack(db, ctx))
+	quit := ctx.Done()
+
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
-	sm, err1 := ethdb.GetStorageModeFromDB(db)
-	if err1 != nil {
-		panic(err1)
-	}
-	must(clearUnwindStack(db, ctx))
-
-	quit := ctx.Done()
 
 	expectedAccountChanges := make(map[uint64]*changeset.ChangeSet)
 	expectedStorageChanges := make(map[uint64]*changeset.ChangeSet)
@@ -160,8 +155,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, txPool, st, mining, cache := newSync2(db, tx)
-	defer bc.Stop()
+	sm, cc, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
 	mux := new(event.TypeMux)
 	minedBlockSub := mux.Subscribe(core.NewMinedBlockEvent{})
 
@@ -169,7 +163,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 			if err := stagedsync.SpawnExecuteBlocksStage(
 				s, tx,
-				bc.Config(), cc, bc.GetVMConfig(),
+				chainConfig, cc, vmConfig,
 				quit,
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
@@ -188,9 +182,11 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	execTrieFunc := func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		var err error
 		stateHash, err = stagedsync.SpawnIntermediateHashesStage(s, tx, true /* checkRoot */, cache, "", quit)
+		fmt.Printf("got: %x\n", stateHash)
 		return err
 	}
 
+	var err1 error
 	tx, err1 = tx.Begin(ctx, ethdb.RW)
 	if err1 != nil {
 		return err1
@@ -250,7 +246,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 		}
 
-		stateStages, err2 := st.Prepare(nil, bc.Config(), cc, bc.GetVMConfig(), db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
+		stateStages, err2 := st.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
 		if err2 != nil {
 			panic(err2)
 		}
@@ -258,7 +254,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		_ = stateStages.SetCurrentStage(stages.Execution)
 
 		if miningConfig.Enabled {
-			miningStages, err := mining.Prepare(nil, bc.Config(), cc, bc.GetVMConfig(), db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
+			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
 				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil, miningTransactions(tx, execToBlock), nil),
 			)
 			if err != nil {
