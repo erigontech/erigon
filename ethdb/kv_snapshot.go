@@ -272,7 +272,7 @@ func (s *sn2TX) Comparator(bucket string) dbutils.CmpFunc {
 	return s.dbTX.Comparator(bucket)
 }
 
-func (s *sn2TX) MakeSequence(bucket string, amount uint64) (uint64, error) {
+func (s *sn2TX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 

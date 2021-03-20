@@ -67,7 +67,7 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	return i.(*MutationItem).value, true
 }
 
-func (m *mutation) MakeSequence(bucket string, amount uint64) (res uint64, err error) {
+func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))

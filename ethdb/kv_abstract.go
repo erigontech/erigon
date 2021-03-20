@@ -119,7 +119,7 @@ type Tx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	ReadSequence(bucket string) (uint64, error)
-	MakeSequence(bucket string, amount uint64) (uint64, error)
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }

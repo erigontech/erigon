@@ -770,7 +770,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	}
 }
 
-func (tx *MdbxTx) MakeSequence(bucket string, amount uint64) (uint64, error) {
+func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	c := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))

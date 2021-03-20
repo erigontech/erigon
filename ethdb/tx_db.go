@@ -57,8 +57,8 @@ func (m *TxDb) cursor(bucket string) Cursor {
 	return c
 }
 
-func (m *TxDb) MakeSequence(bucket string, amount uint64) (res uint64, err error) {
-	return m.tx.MakeSequence(bucket, amount)
+func (m *TxDb) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
+	return m.tx.IncrementSequence(bucket, amount)
 }
 
 func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
