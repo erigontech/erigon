@@ -137,7 +137,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	var flags = opts.flags
 	if opts.inMem {
 		flags ^= mdbx.Durable
-		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync | mdbx.WriteMap
 		opts.dirtyListMaxPages = 8 * 1024
 	}
 
