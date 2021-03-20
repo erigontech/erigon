@@ -21,7 +21,27 @@ type ETHBACKENDClient interface {
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error)
+	// GetWork returns a work package for external miner.
+	//
+	// The work package consists of 3 strings:
+	//   result[0] - 32 bytes hex encoded current block header pow-hash
+	//   result[1] - 32 bytes hex encoded seed hash used for DAG
+	//   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+	//   result[3] - hex encoded block number
 	GetWork(ctx context.Context, in *GetWorkRequest, opts ...grpc.CallOption) (*GetWorkReply, error)
+	// SubmitWork can be used by external miner to submit their POW solution.
+	// It returns an indication if the work was accepted.
+	// Note either an invalid solution, a stale work a non-existent work will return false.
+	SubmitWork(ctx context.Context, in *SubmitWorkRequest, opts ...grpc.CallOption) (*SubmitWorkReply, error)
+	// SubmitHashRate can be used for remote miners to submit their hash rate.
+	// This enables the node to report the combined hash rate of all miners
+	// which submit work through this node.
+	//
+	// It accepts the miner hash rate and an identifier which must be unique
+	// between nodes.
+	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
+	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
+	GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -100,6 +120,33 @@ func (c *eTHBACKENDClient) GetWork(ctx context.Context, in *GetWorkRequest, opts
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) SubmitWork(ctx context.Context, in *SubmitWorkRequest, opts ...grpc.CallOption) (*SubmitWorkReply, error) {
+	out := new(SubmitWorkReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/SubmitWork", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error) {
+	out := new(SubmitHashRateReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/SubmitHashRate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error) {
+	out := new(GetHashRateReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/GetHashRate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
@@ -108,7 +155,27 @@ type ETHBACKENDServer interface {
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
 	Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error
+	// GetWork returns a work package for external miner.
+	//
+	// The work package consists of 3 strings:
+	//   result[0] - 32 bytes hex encoded current block header pow-hash
+	//   result[1] - 32 bytes hex encoded seed hash used for DAG
+	//   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+	//   result[3] - hex encoded block number
 	GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error)
+	// SubmitWork can be used by external miner to submit their POW solution.
+	// It returns an indication if the work was accepted.
+	// Note either an invalid solution, a stale work a non-existent work will return false.
+	SubmitWork(context.Context, *SubmitWorkRequest) (*SubmitWorkReply, error)
+	// SubmitHashRate can be used for remote miners to submit their hash rate.
+	// This enables the node to report the combined hash rate of all miners
+	// which submit work through this node.
+	//
+	// It accepts the miner hash rate and an identifier which must be unique
+	// between nodes.
+	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
+	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
+	GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -130,6 +197,15 @@ func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, ETHBACKEND_Sub
 }
 func (UnimplementedETHBACKENDServer) GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWork not implemented")
+}
+func (UnimplementedETHBACKENDServer) SubmitWork(context.Context, *SubmitWorkRequest) (*SubmitWorkReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SubmitWork not implemented")
+}
+func (UnimplementedETHBACKENDServer) SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SubmitHashRate not implemented")
+}
+func (UnimplementedETHBACKENDServer) GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetHashRate not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -237,6 +313,60 @@ func _ETHBACKEND_GetWork_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_SubmitWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitWorkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).SubmitWork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/SubmitWork",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).SubmitWork(ctx, req.(*SubmitWorkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_SubmitHashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitHashRateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).SubmitHashRate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/SubmitHashRate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).SubmitHashRate(ctx, req.(*SubmitHashRateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_GetHashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetHashRateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).GetHashRate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/GetHashRate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).GetHashRate(ctx, req.(*GetHashRateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _ETHBACKEND_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.ETHBACKEND",
 	HandlerType: (*ETHBACKENDServer)(nil),
@@ -256,6 +386,18 @@ var _ETHBACKEND_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWork",
 			Handler:    _ETHBACKEND_GetWork_Handler,
+		},
+		{
+			MethodName: "SubmitWork",
+			Handler:    _ETHBACKEND_SubmitWork_Handler,
+		},
+		{
+			MethodName: "SubmitHashRate",
+			Handler:    _ETHBACKEND_SubmitHashRate_Handler,
+		},
+		{
+			MethodName: "GetHashRate",
+			Handler:    _ETHBACKEND_GetHashRate_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

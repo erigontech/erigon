@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
@@ -22,7 +23,7 @@ type Backend interface {
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 
-	GetWork() ([4]string, error)
+	Engine() consensus.Engine
 }
 
 func NewEthBackend(eth Backend) *EthBackend {

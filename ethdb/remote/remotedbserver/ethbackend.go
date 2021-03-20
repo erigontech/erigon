@@ -3,9 +3,12 @@ package remotedbserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
@@ -19,10 +22,15 @@ type EthBackendServer struct {
 
 	eth    core.Backend
 	events *Events
+	ethash *ethash.API
 }
 
 func NewEthBackendServer(eth core.Backend, events *Events) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events}
+	var ethashApi *ethash.API
+	if casted, ok := eth.Engine().(*ethash.Ethash); !ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
+	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi}
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
@@ -99,4 +107,40 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	wg.Wait()
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
+}
+
+func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*remote.GetWorkReply, error) {
+	if s.ethash == nil {
+		return nil, errors.New("not supported, consensus engine is not ethash")
+	}
+	res, err := s.ethash.GetWork()
+	if err != nil {
+		return nil, err
+	}
+	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, err
+}
+
+func (s *EthBackendServer) SubmitWork(_ context.Context, req *remote.SubmitWorkRequest) (*remote.SubmitWorkReply, error) {
+	if s.ethash == nil {
+		return nil, errors.New("not supported, consensus engine is not ethash")
+	}
+	var nonce types.BlockNonce
+	copy(nonce[:], req.BlockNonce)
+	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.Hash), common.BytesToHash(req.Digest))
+	return &remote.SubmitWorkReply{Ok: ok}, nil
+}
+
+func (s *EthBackendServer) SetHashRate(_ context.Context, req *remote.SubmitHashRateRequest) (*remote.SubmitHashRateReply, error) {
+	if s.ethash == nil {
+		return nil, errors.New("not supported, consensus engine is not ethash")
+	}
+	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), common.BytesToHash(req.Id))
+	return &remote.SubmitHashRateReply{Ok: ok}, nil
+}
+
+func (s *EthBackendServer) GetHashRate(_ context.Context, req *remote.GetHashRateRequest) (*remote.GetHashRateReply, error) {
+	if s.ethash == nil {
+		return nil, errors.New("not supported, consensus engine is not ethash")
+	}
+	return &remote.GetHashRateReply{HashRate: s.ethash.GetHashrate()}, nil
 }
