@@ -100,7 +100,7 @@ mdbx:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: mdbx
-	$(GOTEST)
+	TEST_DB=mdbx $(GOTEST)
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
