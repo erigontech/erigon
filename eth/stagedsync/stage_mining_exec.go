@@ -19,7 +19,7 @@ import (
 //TODO:
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txPool *core.TxPool, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs map[common.Address]types.Transactions, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
@@ -177,27 +177,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		return nil
 	}
 
-	// Fill the block with all available pending transactions.
-	pending, err := txPool.Pending()
-	if err != nil {
-		return fmt.Errorf("failed to fetch pending transactions: %w", err)
-	}
-
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
-	if len(pending) == 0 && !noempty {
+	if len(localTxs) == 0 && len(remoteTxs) == 0 && !noempty {
 		s.Done()
 		return nil
-	}
-
-	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
-	for _, account := range txPool.Locals() {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
-		}
 	}
 
 	if len(localTxs) > 0 {
@@ -215,10 +200,10 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 
 	engine.Finalize(chainConfig, current.header, ibs, current.txs, current.uncles)
 	ctx := chainConfig.WithEIPsFlags(context.Background(), current.header.Number)
-	if err = ibs.FinalizeTx(ctx, stateWriter); err != nil {
+	if err := ibs.FinalizeTx(ctx, stateWriter); err != nil {
 		return err
 	}
-	if err = stateWriter.WriteChangeSets(); err != nil {
+	if err := stateWriter.WriteChangeSets(); err != nil {
 		return fmt.Errorf("[%s]: writing changesets for block %d failed: %v", logPrefix, current.header.Number.Uint64(), err)
 	}
 

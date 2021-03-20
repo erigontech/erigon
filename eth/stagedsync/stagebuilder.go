@@ -66,6 +66,7 @@ type MiningStagesParameters struct {
 	// non-stop and no real transaction will be included.
 	noempty                   bool
 	localUncles, remoteUncles map[common.Hash]*types.Block
+	localTxs, remoteTxs       map[common.Address]types.Transactions
 
 	mux *event.TypeMux // Event multiplexer to announce sync operation events
 
@@ -73,8 +74,8 @@ type MiningStagesParameters struct {
 	block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block, localTxs, remoteTxs map[common.Address]types.Transactions) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, localTxs: localTxs, remoteTxs: remoteTxs, block: &miningBlock{}}
 
 }
 
@@ -439,7 +440,7 @@ func MiningStages() StageBuilders {
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.txPool,
+							world.mining.localTxs, world.mining.localTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)
