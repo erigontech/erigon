@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -274,10 +275,13 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a source handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(handler.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
@@ -335,10 +339,13 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a source handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(handler.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -549,10 +556,13 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	// Run the handshake locally to avoid spinning up a remote handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := remote.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(handler.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// Connect a new peer and check that we receive the checkpoint challenge
@@ -618,8 +628,12 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 	// Interconnect all the sink handlers with the source handler
 	var (
 		genesis = source.chain.Genesis()
-		td      = source.chain.GetTd(genesis.Hash(), genesis.NumberU64())
+		head    = source.headBlock
 	)
+	td, err := rawdb.ReadTd(source.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, sink := range sinks {
 		sink := sink // Closure for gorotuine below
 
@@ -636,7 +650,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
-		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewIDWithChain(source.chain), forkid.NewFilter(source.chain)); err != nil {
+		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(source.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
 			t.Fatalf("failed to run protocol handshake")
 		}
 		//nolint:errcheck
@@ -711,9 +725,13 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a sink handler
 	var (
 		genesis = source.chain.Genesis()
-		td      = source.chain.GetTd(genesis.Hash(), genesis.NumberU64())
+		head    = source.headBlock
 	)
-	if err := sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewIDWithChain(source.chain), forkid.NewFilter(source.chain)); err != nil {
+	td, err := rawdb.ReadTd(source.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(source.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -726,9 +744,6 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 
 	//nolint:errcheck
 	go eth.Handle(backend, sink)
-
-	// Create various combinations of malformed blocks
-	head := source.chain.CurrentBlock()
 
 	malformedUncles := head.Header()
 	malformedUncles.UncleHash[0]++

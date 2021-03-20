@@ -17,9 +17,12 @@
 package eth
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -38,28 +41,16 @@ func (e enrEntry) ENRKey() string {
 
 // StartENRUpdater starts the `eth` ENR updater loop, which listens for chain
 // head events and updates the requested node record whenever a fork is passed.
-func StartENRUpdater(chain *core.BlockChain, ln *enode.LocalNode) {
-	var newHead = make(chan core.ChainHeadEvent, 10)
-	sub := chain.SubscribeChainHeadEvent(newHead)
-
-	go func() {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case <-newHead:
-				ln.Set(currentENREntry(chain))
-			case <-sub.Err():
-				// Would be nice to sync with Stop, but there is no
-				// good way to do that.
-				return
-			}
-		}
-	}()
+func StartENRUpdater(chainConfig *params.ChainConfig, genesisHash common.Hash, events *remotedbserver.Events, ln *enode.LocalNode) {
+	events.AddHeaderSubscription(func(h *types.Header) error {
+		ln.Set(currentENREntry(chainConfig, genesisHash, h.Number.Uint64()))
+		return nil
+	})
 }
 
 // currentENREntry constructs an `eth` ENR entry based on the current state of the chain.
-func currentENREntry(chain forkid.Blockchain) *enrEntry {
+func currentENREntry(chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) *enrEntry {
 	return &enrEntry{
-		ForkID: forkid.NewID(chain.Config(), chain.Genesis().Hash(), chain.CurrentHeader().Number.Uint64()),
+		ForkID: forkid.NewID(chainConfig, genesisHash, headHeight),
 	}
 }

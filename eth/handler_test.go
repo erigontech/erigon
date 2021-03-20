@@ -116,10 +116,11 @@ func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subs
 // preinitialized with some sane testing defaults and the transaction pool mocked
 // out.
 type testHandler struct {
-	db      ethdb.Database
-	chain   *core.BlockChain
-	txpool  *testTxPool
-	handler *handler
+	db        ethdb.Database
+	chain     *core.BlockChain
+	txpool    *testTxPool
+	handler   *handler
+	headBlock *types.Block
 }
 
 // newTestHandler creates a new handler for testing purposes with no blocks.
@@ -139,9 +140,13 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 
 	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 
-	bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, nil, false)
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
-		panic(err)
+	headBlock := genesis
+	if blocks > 0 {
+		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, nil, false)
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
+			panic(err)
+		}
+		headBlock = bs[len(bs)-1]
 	}
 	txpool := newTestTxPool()
 
@@ -156,10 +161,11 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	handler.Start(1000)
 
 	return &testHandler{
-		db:      db,
-		chain:   chain,
-		txpool:  txpool,
-		handler: handler,
+		db:        db,
+		chain:     chain,
+		txpool:    txpool,
+		handler:   handler,
+		headBlock: headBlock,
 	}
 }
 
