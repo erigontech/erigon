@@ -272,7 +272,11 @@ func (s *sn2TX) Comparator(bucket string) dbutils.CmpFunc {
 	return s.dbTX.Comparator(bucket)
 }
 
-func (s *sn2TX) Sequence(bucket string, amount uint64) (uint64, error) {
+func (s *sn2TX) MakeSequence(bucket string, amount uint64) (uint64, error) {
+	panic("implement me")
+}
+
+func (s *sn2TX) ReadSequence(bucket string) (uint64, error) {
 	panic("implement me")
 }
 
