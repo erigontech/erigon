@@ -4,26 +4,27 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"os"
+	"strconv"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"os"
-	"strconv"
-	"testing"
 )
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
 	db := ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
 		if err != nil {
 			return err
 		}
-		c := tx.Cursor(dbutils.HeaderPrefixOld)
+		c := tx.RwCursor(dbutils.HeaderPrefixOld)
 		for i := uint64(0); i < 10; i++ {
 			//header
 			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))

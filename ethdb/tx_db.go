@@ -58,7 +58,7 @@ func (m *TxDb) cursor(bucket string) Cursor {
 }
 
 func (m *TxDb) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
-	return m.tx.IncrementSequence(bucket, amount)
+	return m.tx.(RwTx).IncrementSequence(bucket, amount)
 }
 
 func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
@@ -67,22 +67,22 @@ func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).Put(key, value)
+	return m.cursor(bucket).(RwCursor).Put(key, value)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).Append(key, value)
+	return m.cursor(bucket).(RwCursor).Append(key, value)
 }
 
 func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).(CursorDupSort).AppendDup(key, value)
+	return m.cursor(bucket).(RwCursorDupSort).AppendDup(key, value)
 }
 
 func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	m.len += uint64(len(k))
-	return m.cursor(bucket).Delete(k, v)
+	return m.cursor(bucket).(RwCursor).Delete(k, v)
 }
 
 func (m *TxDb) NewBatch() DbWithPendingMutations {
@@ -93,7 +93,15 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 }
 
 func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
-	tx, err := m.db.(HasKV).KV().Begin(ctx, flags)
+	kv := m.db.(HasKV).KV()
+
+	var tx Tx
+	var err error
+	if flags&RO != 0 {
+		tx, err = kv.Begin(ctx)
+	} else {
+		tx, err = kv.BeginRw(ctx)
+	}
 	if err != nil {
 		return err
 	}
@@ -146,10 +154,10 @@ func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
 }
 
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
-	return 0, MultiPut(m.tx, tuples...)
+	return 0, MultiPut(m.tx.(RwTx), tuples...)
 }
 
-func MultiPut(tx Tx, tuples ...[]byte) error {
+func MultiPut(tx RwTx, tuples ...[]byte) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -160,7 +168,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 		}
 		bucketName := string(tuples[bucketStart])
-		c := tx.Cursor(bucketName)
+		c := tx.RwCursor(bucketName)
 
 		// move cursor to a first element in batch
 		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)

@@ -27,7 +27,7 @@ func TestSequence(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, ethdb.RW)
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
@@ -87,12 +87,12 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, ethdb.RW)
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c := tx.Cursor(bucket1)
-		c1 := tx.Cursor(bucket2)
+		c := tx.RwCursor(bucket1)
+		c1 := tx.RwCursor(bucket2)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
