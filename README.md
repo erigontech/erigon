@@ -145,6 +145,7 @@ it can run from a snapshot of a database for read-only calls.
 <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 **For local DB**
+
 This is only possible if RPC daemon runs on the same computer as turbo-geth. This mode of operation uses shared memory access to the database of turbo-geth, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
 > make rpcdaemon
@@ -152,7 +153,9 @@ This is only possible if RPC daemon runs on the same computer as turbo-geth. Thi
 ```
 
 In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
+
 **For remote DB**
+
 This works regardless of whether RPC daemon is on the same computer with turbo-geth, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run turbo-geth in one terminal window
 
 ```
@@ -165,6 +168,7 @@ Run RPC daemon
 ```
 
 **For dual mode**
+
 If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
