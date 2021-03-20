@@ -4,29 +4,28 @@ run:
 linters:
   disable-all: true
   enable:
-    - govet
+    - deadcode
     - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - structcheck
+    - typecheck
+    - unused
+    - varcheck
     - goconst
     - gofmt
     - golint
     - interfacer
-    - structcheck
     - stylecheck
-    - staticcheck
     - goerr113
     - unconvert
-    - unparam
-    - varcheck
     - scopelint
     - nakedret
     - prealloc
-    - deadcode
-    - unused
-    - gosimple
-    - ineffassign
     - gosec
     - depguard
-    - typecheck
     - misspell
 
 linters-settings:
