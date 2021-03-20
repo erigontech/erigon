@@ -4,15 +4,33 @@ run:
 linters:
   disable-all: true
   enable:
+    - deadcode
     - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - structcheck
+    - typecheck
+    - unused
+    - varcheck
     - goconst
     - gofmt
     - golint
     - interfacer
+    - stylecheck
+    - goerr113
+    - unconvert
+    - scopelint
+    - nakedret
+    - prealloc
+    - gosec
+    - misspell
 
 linters-settings:
-  golint:
-    min-confidence: 0
+  govet:
+    check-shadowing: true
+    enable-all: true
   goconst:
     min-len: 2
     min-occurrences: 2
@@ -20,7 +38,22 @@ linters-settings:
     auto-fix: false
 
 issues:
+  exclude:
+    - composites
+    - G108  # gosec: Profiling endpoint is automatically exposed on /debug/pprof
   exclude-rules:
     - linters:
         - golint
       text: "should be"
+    - linters:
+        - goerr113
+      text: "do not define dynamic errors"
+    - linters:
+        - stylecheck
+      text: "(should be|should have name of the form)"
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - gosec
+        - unused
+        - deadcode
