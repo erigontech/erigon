@@ -22,7 +22,7 @@ After building, run this command to start the daemon locally:
 ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net,web3
 ```
 
-Runing RPC daemon locally (with `--chaindata` option) can only be used when turbo-geth node is not running. This mode is mostly convenient for debugging purposes, because we know that the database does not change as we are sending requests to the RPC daemon.
+This mode is mostly convenient for debugging purposes, because we know that the database does not change as we are sending requests to the RPC daemon.
 
 Note that we've also specified which RPC commands to enable in the above command.
 
@@ -45,6 +45,10 @@ The daemon should respond with something like:
 ```[bash]
 INFO [date-time] HTTP endpoint opened url=localhost:8545...
 ```
+
+### Running in dual mode
+
+If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 ## Testing
 
@@ -143,9 +147,10 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | debug_getModifiedAccountsByHash         | Yes     |                                            |
 | debug_storageRangeAt                    | Yes     |                                            |
 | debug_traceTransaction                  | Yes     |                                            |
+| debug_traceCall                         | Yes     |                                            |
 |                                         |         |                                            |
-| trace_call                              | -       | not yet implemented (come help!)           |
-| trace_callMany                          | -       | not yet implemented (come help!)           |
+| trace_call                              | Yes     |                                            |
+| trace_callMany                          | Yes     |                                            |
 | trace_rawTransaction                    | -       | not yet implemented (come help!)           |
 | trace_replayBlockTransactions           | -       | not yet implemented (come help!)           |
 | trace_replayTransaction                 | -       | not yet implemented (come help!)           |

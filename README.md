@@ -41,10 +41,23 @@ Usage
 =====
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git && cd turbo-geth
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
+> cd turbo-geth
 > make tg
 > ./build/bin/tg
 ```
+
+Usage for testnets
+==================
+If you would like to give turbo-geth a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
+```sh
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
+> cd turbo-geth
+> make tg
+> ./build/bin/tg --datadir goerli --goerli
+```
+
+Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory.
 
 Windows
 =======
@@ -133,13 +146,17 @@ it can run from a snapshot of a database for read-only calls.
 
 **For local DB**
 
+This is only possible if RPC daemon runs on the same computer as turbo-geth. This mode of operation uses shared memory access to the database of turbo-geth, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
 > make rpcdaemon
 > ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
 ```
+
+In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
+
 **For remote DB**
 
-Run turbo-geth in one terminal window
+This works regardless of whether RPC daemon is on the same computer with turbo-geth, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run turbo-geth in one terminal window
 
 ```
 > ./build/bin/tg --private.api.addr=localhost:9090
@@ -147,8 +164,12 @@ Run turbo-geth in one terminal window
 
 Run RPC daemon
 ```
-> ./build/bin/rpcdaemon --private.api.addr=localhost:9090
+> ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
+
+**For dual mode**
+
+If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 

@@ -729,7 +729,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 	}
 }
 
-func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
+func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	c := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
@@ -742,16 +742,28 @@ func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
 		currentV = binary.BigEndian.Uint64(v)
 	}
 
-	if amount == 0 {
-		return currentV, nil
-	}
-
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
 	err = c.Put([]byte(bucket), newVBytes)
 	if err != nil {
 		return 0, err
 	}
+	return currentV, nil
+}
+
+func (tx *lmdbTx) ReadSequence(bucket string) (uint64, error) {
+	c := tx.Cursor(dbutils.Sequence)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !lmdb.IsNotFound(err) {
+		return 0, err
+	}
+
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
 	return currentV, nil
 }
 

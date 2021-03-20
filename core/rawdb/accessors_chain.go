@@ -386,7 +386,7 @@ func ReadSenders(db databaseReader, hash common.Hash, number uint64) ([]common.A
 func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.Body) error {
 	// Pre-processing
 	body.SendersFromTxs()
-	baseTxId, err := db.Sequence(dbutils.EthTx, uint64(len(body.Transactions)))
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
 	}

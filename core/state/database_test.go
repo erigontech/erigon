@@ -903,12 +903,15 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	engine := ethash.NewFaker()
 
+	var err error
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, gspec.Config.ChainID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
-	var err error
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
@@ -950,6 +953,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var key0 common.Hash
 	var check0 uint256.Int
 	st.GetState(contractAddress, &key0, &check0)
+	fmt.Printf("c:%t,%x\n", check0.IsZero(), check0.Bytes())
 	if !check0.IsZero() {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
 	}

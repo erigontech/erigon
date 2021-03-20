@@ -282,7 +282,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 		t.Fatal(err)
 	}
 	if err = src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilterAutofork(handler.chain.Config(), genesis.Hash(), head.NumberU64())); err != nil {
-		t.Fatalf("failed to run protocol handshake")
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
 	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
