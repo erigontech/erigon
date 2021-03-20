@@ -4,15 +4,29 @@ run:
 linters:
   disable-all: true
   enable:
+    - govet
     - errcheck
     - goconst
     - gofmt
     - golint
     - interfacer
+    - structcheck
+    - stylecheck
+    - staticcheck
+    - goerr113
+    - unconvert
+    - unparam
+    - varcheck
+    - scopelint
+    - nakedret
+    - prealloc
+    - deadcode
+    - gosimple
 
 linters-settings:
-  golint:
-    min-confidence: 0
+  govet:
+    check-shadowing: true
+    enable-all: true
   goconst:
     min-len: 2
     min-occurrences: 2
@@ -20,7 +34,15 @@ linters-settings:
     auto-fix: false
 
 issues:
+  exclude:
+    - composites
   exclude-rules:
     - linters:
         - golint
       text: "should be"
+    - linters:
+        - goerr113
+      text: "do not define dynamic errors"
+    - linters:
+        - stylecheck
+      text: "(should be|should have name of the form)"

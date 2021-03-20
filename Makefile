@@ -111,7 +111,7 @@ test-mdbx: mdbx
 
 lint: lintci
 
-lintci: mdbx
+lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
@@ -123,16 +123,6 @@ lintci: mdbx
 	    --new-from-rev=$(LATEST_COMMIT) \
 		--build-tags="mdbx" \
 	    --config ./.golangci/step2.yml
-
-	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step3.yml
-
-	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step4.yml
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
