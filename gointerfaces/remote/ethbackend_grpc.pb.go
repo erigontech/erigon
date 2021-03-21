@@ -3,10 +3,12 @@
 package remote
 
 import (
-	context "context"
-	grpc "google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	status "google.golang.org/grpc/status"
+	"context"
+	"fmt"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -297,6 +299,7 @@ func (x *eTHBACKENDSubscribeServer) Send(m *SubscribeReply) error {
 }
 
 func _ETHBACKEND_GetWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	fmt.Printf("0: getWork call\n")
 	in := new(GetWorkRequest)
 	if err := dec(in); err != nil {
 		return nil, err
