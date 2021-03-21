@@ -386,7 +386,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
-	if casted, ok := eth.Engine().(*ethash.Ethash); !ok {
+	if casted, ok := eth.Engine().(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	if stack.Config().PrivateApiAddr != "" {
