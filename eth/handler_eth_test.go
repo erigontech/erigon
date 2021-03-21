@@ -567,7 +567,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 		t.Fatal(err)
 	}
 	if err := remote.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
-		t.Fatalf("failed to run protocol handshake")
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Connect a new peer and check that we receive the checkpoint challenge
 	if checkpoint {
