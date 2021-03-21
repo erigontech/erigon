@@ -661,10 +661,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 		// heuristic - run mining only if we are on top of chain
 		canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
+		fmt.Printf("mining can start: %s, %t\n", time.Since(syncCycleStart), canRunMiningCycle)
+
 		if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
 			return nil
 		}
-
 		if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
 			return err
 		}
