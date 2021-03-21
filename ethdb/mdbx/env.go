@@ -540,10 +540,7 @@ func (env *Env) SetMaxDBs(size int) error {
 // methods, which assist in management of Txn objects and provide OS thread
 // locking required for write transactions.
 //
-// A finalizer detects unreachable, live transactions and logs thems to
-// standard error.  The transactions are aborted, but their presence should be
-// interpreted as an application error which should be patched so transactions
-// are terminated explicitly.  Unterminated transactions can adversly effect
+// Unterminated transactions can adversly effect
 // database performance and cause the database to grow until the map is full.
 //
 // See mdbx_txn_begin.
