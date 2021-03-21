@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestTxn_ID(t *testing.T) {
@@ -100,7 +99,6 @@ func TestTxn_ID(t *testing.T) {
 }
 
 func TestTxn_errLogf(t *testing.T) {
-	t.Skip("to investigate")
 	env := setup(t)
 	defer clean(env, t)
 
@@ -113,37 +111,6 @@ func TestTxn_errLogf(t *testing.T) {
 	} else {
 		defer txn.Abort()
 		txn.errf("this is just a test")
-	}
-}
-
-func TestTxn_finalizer(t *testing.T) {
-	env := setup(t)
-	defer clean(env, t)
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	called := make(chan struct{})
-	func() {
-		txn, err := env.BeginTxn(nil, 0)
-		if err != nil {
-			t.Error(err)
-		} else {
-			txn.errLogf = func(string, ...interface{}) {
-				close(called)
-			}
-		}
-	}()
-
-	// make sure that finalizer has a chance to get called.  it seems like this
-	// may not be consistent across versions of go.
-	runtime.GC()
-	runtime.Gosched()
-
-	select {
-	case <-called:
-	case <-time.After(time.Second):
-		t.Errorf("error logging function was not called")
 	}
 }
 

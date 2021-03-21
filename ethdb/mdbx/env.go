@@ -548,11 +548,7 @@ func (env *Env) SetMaxDBs(size int) error {
 //
 // See mdbx_txn_begin.
 func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
-	txn, err := beginTxn(env, parent, flags)
-	if txn != nil {
-		runtime.SetFinalizer(txn, func(v interface{}) { v.(*Txn).finalize() })
-	}
-	return txn, err
+	return beginTxn(env, parent, flags)
 }
 
 // RunTxn creates a new Txn and calls fn with it as an argument.  Run commits
