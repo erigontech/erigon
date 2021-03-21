@@ -123,3 +123,17 @@ Content-Type: application/json
   ],
   "id": 537758
 }
+
+###
+
+#POST 192.168.255.138:8545
+POST localhost:8545
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getWork",
+  "params": [],
+  "id": 537758
+}
+
