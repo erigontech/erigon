@@ -63,7 +63,7 @@ type SnapshotKV2 struct {
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	snTX, err := s.Begin(ctx, RO)
+	snTX, err := s.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -71,8 +71,8 @@ func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
 	return f(snTX)
 }
 
-func (s *SnapshotKV2) Update(ctx context.Context, f func(tx Tx) error) error {
-	tx, err := s.Begin(ctx, RW)
+func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
+	tx, err := s.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,8 +96,20 @@ func (s *SnapshotKV2) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV2) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx, flags)
+func (s *SnapshotKV2) Begin(ctx context.Context) (Tx, error) {
+	dbTx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &sn2TX{
+		dbTX:      dbTx,
+		snapshots: s.snapshots,
+		snTX:      map[string]Tx{},
+	}, nil
+}
+
+func (s *SnapshotKV2) BeginRw(ctx context.Context) (RwTx, error) {
+	dbTx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +168,10 @@ func (s *sn2TX) Cursor(bucket string) Cursor {
 	}
 }
 
+func (s *sn2TX) RwCursor(bucket string) RwCursor {
+	return s.Cursor(bucket).(RwCursor)
+}
+
 func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
@@ -175,6 +191,10 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 		dbc,
 		sncbc,
 	}
+}
+
+func (s *sn2TX) RwCursorDupSort(bucket string) RwCursorDupSort {
+	return s.CursorDupSort(bucket).(RwCursorDupSort)
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
@@ -212,7 +232,7 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	var err error
-	tx, err = sn.snapshot.Begin(context.TODO(), RO)
+	tx, err = sn.snapshot.Begin(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -504,15 +524,15 @@ func (s *snCursor2) Current() ([]byte, []byte, error) {
 }
 
 func (s *snCursor2) Put(k, v []byte) error {
-	return s.dbCursor.Put(k, v)
+	return s.dbCursor.(RwCursor).Put(k, v)
 }
 
 func (s *snCursor2) Append(k []byte, v []byte) error {
-	return s.dbCursor.Append(k, v)
+	return s.dbCursor.(RwCursor).Append(k, v)
 }
 
 func (s *snCursor2) Delete(k, v []byte) error {
-	return s.dbCursor.Put(k, DeletedValue)
+	return s.dbCursor.(RwCursor).Put(k, DeletedValue)
 }
 
 func (s *snCursor2) DeleteCurrent() error {
@@ -626,8 +646,8 @@ func GenStateData(data []KvData) (KV, error) {
 		}
 	}).InMem().MustOpen()
 
-	err := snapshot.Update(context.Background(), func(tx Tx) error {
-		c := tx.Cursor(dbutils.PlainStateBucket)
+	err := snapshot.Update(context.Background(), func(tx RwTx) error {
+		c := tx.RwCursor(dbutils.PlainStateBucket)
 		for i := range data {
 			innerErr := c.Put(data[i].K, data[i].V)
 			if innerErr != nil {

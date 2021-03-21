@@ -88,31 +88,31 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Put(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Put(key, value)
 	})
 	return err
 }
 
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Append(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Append(key, value)
 	})
 	return err
 }
 
 // AppendDup appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.CursorDupSort(bucket).AppendDup(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursorDupSort(bucket).AppendDup(key, value)
 	})
 	return err
 }
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
 		return MultiPut(tx, tuples...)
 	})
 	if err != nil {
@@ -143,7 +143,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 }
 
 func (db *ObjectDatabase) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
-	err = db.kv.Update(context.Background(), func(tx Tx) error {
+	err = db.kv.Update(context.Background(), func(tx RwTx) error {
 		res, err = tx.IncrementSequence(bucket, amount)
 		return err
 	})
@@ -206,8 +206,8 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 // Delete deletes the key from the queue and database
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Delete(k, v)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Delete(k, v)
 	})
 	return err
 }
@@ -230,7 +230,7 @@ func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
 			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
@@ -251,7 +251,7 @@ func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		log.Info("Dropping bucket", "name", name)
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
 			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
@@ -313,8 +313,8 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
 		for _, name := range dbutils.Buckets {
 			name := name
-			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
-				newBucketToWrite := writeTx.Cursor(name)
+			if err := mem.kv.Update(context.Background(), func(writeTx RwTx) error {
+				newBucketToWrite := writeTx.RwCursor(name)
 				defer newBucketToWrite.Close()
 				readC := readTx.Cursor(name)
 				defer readC.Close()

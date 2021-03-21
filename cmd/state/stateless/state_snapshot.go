@@ -123,9 +123,9 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 //nolint
 func loadCodes(db ethdb.KV, codeDb ethdb.Database) error {
 	var account accounts.Account
-	err := db.Update(context.Background(), func(tx ethdb.Tx) error {
+	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c := tx.Cursor(dbutils.HashedAccountsBucket)
-		cb := tx.Cursor(dbutils.CodeBucket)
+		cb := tx.RwCursor(dbutils.CodeBucket)
 
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {

@@ -203,7 +203,7 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 
 func (db *RemoteKV) CollectMetrics() {}
 
-func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -213,8 +213,12 @@ func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
 }
 
+func (db *RemoteKV) BeginRw(ctx context.Context) (RwTx, error) {
+	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
+}
+
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx, RO)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -223,7 +227,7 @@ func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 

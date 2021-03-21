@@ -19,18 +19,18 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	snVK := ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
-	err := snVK.Update(context.Background(), func(tx ethdb.Tx) error {
+	err := snVK.Update(context.Background(), func(tx ethdb.RwTx) error {
 		for _, header := range headers {
 			headerBytes, innerErr := rlp.EncodeToBytes(header)
 			if innerErr != nil {
 				panic(innerErr)
 			}
-			innerErr = tx.Cursor(dbutils.HeadersBucket).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			innerErr = tx.RwCursor(dbutils.HeadersBucket).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if innerErr != nil {
 				panic(innerErr)
 			}
 		}
-		c := tx.Cursor(dbutils.HeadersSnapshotInfoBucket)
+		c := tx.RwCursor(dbutils.HeadersSnapshotInfoBucket)
 		innerErr := c.Put([]byte(dbutils.SnapshotHeadersHeadHash), headers[len(headers)-1].Hash().Bytes())
 		if innerErr != nil {
 			return innerErr

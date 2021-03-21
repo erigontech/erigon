@@ -108,7 +108,7 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-func commit(k []byte, tx ethdb.Tx, data interface{}) {
+func commit(k []byte, tx ethdb.RwTx, data interface{}) {
 	//defer func(t time.Time) { fmt.Println("Commit:", time.Since(t)) }(time.Now())
 	var buf bytes.Buffer
 
@@ -116,7 +116,7 @@ func commit(k []byte, tx ethdb.Tx, data interface{}) {
 	defer cbor.Return(encoder)
 
 	encoder.MustEncode(data)
-	if err := tx.Cursor(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
+	if err := tx.RwCursor(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
 		panic(err)
 	}
 }
@@ -171,7 +171,7 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
-	tx, err2 := r.remoteDB.Begin(ctx, ethdb.RO)
+	tx, err2 := r.remoteDB.Begin(ctx)
 	if err2 != nil {
 		panic(err2)
 	}
@@ -308,7 +308,7 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
-	tx, err2 := r.remoteDB.Begin(context.Background(), ethdb.RO)
+	tx, err2 := r.remoteDB.Begin(context.Background())
 	if err2 != nil {
 		panic(err2)
 	}
@@ -432,9 +432,9 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 	var ProgressKey = []byte("gas_limit")
 
 	var err error
-	var localTx ethdb.Tx
+	var localTx ethdb.RwTx
 
-	if localTx, err = localDB.Begin(ctx, ethdb.RW); err != nil {
+	if localTx, err = localDB.BeginRw(ctx); err != nil {
 		panic(err)
 	}
 
@@ -442,18 +442,18 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 		remoteDB:         remoteDB,
 		HeaderPrefixKey1: []byte{},
 		HeaderPrefixKey2: []byte{},
-		mainHashes:       typedcursor.NewUint64(localTx.Cursor(MainHashesBucket)),
+		mainHashes:       typedcursor.NewUint64(localTx.RwCursor(MainHashesBucket)),
 	}
 	rep.commit = func(ctx context.Context) {
 		commit(ProgressKey, localTx, rep)
 		if err = localTx.Commit(ctx); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDB.Begin(ctx, ethdb.RW); err != nil {
+		if localTx, err = localDB.BeginRw(ctx); err != nil {
 			panic(err)
 		}
 
-		rep.mainHashes = typedcursor.NewUint64(localTx.Cursor(MainHashesBucket))
+		rep.mainHashes = typedcursor.NewUint64(localTx.RwCursor(MainHashesBucket))
 	}
 
 	rep.rollback = func(ctx context.Context) {
