@@ -52,6 +52,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -110,7 +111,10 @@ type Ethereum struct {
 
 	torrentClient *bittorrent.Client
 
-	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	lock        sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	events      *remotedbserver.Events
+	chainConfig *params.ChainConfig
+	genesisHash common.Hash
 }
 
 // New creates a new Ethereum object (including the
@@ -291,6 +295,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		bloomRequests:  make(chan chan *bloombits.Retrieval),
 		p2pServer:      stack.Server(),
 		torrentClient:  torrentClient,
+		chainConfig:    chainConfig,
+		genesisHash:    genesisHash,
 	}
 	eth.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -364,14 +370,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	stagedSync := config.StagedSync
 
 	// setting notifier to support streaming events to rpc daemon
-	remoteEvents := remotedbserver.NewEvents()
+	eth.events = remotedbserver.NewEvents()
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
-			stagedSync.Notifier = remoteEvents
+			stagedSync.Notifier = eth.events
 		}
 	}
 
@@ -407,12 +413,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, &creds, eth.events)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, nil, eth.events)
 			if err != nil {
 				return nil, err
 			}
@@ -768,14 +774,15 @@ func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
-	protos := eth.MakeProtocols((*ethHandler)(s.handler), s.networkID, s.ethDialCandidates)
+	headHeight, _ := stages.GetStageProgress(s.chainDb, stages.Finish)
+	protos := eth.MakeProtocols((*ethHandler)(s.handler), s.networkID, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	return protos
 }
 
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	eth.StartENRUpdater(s.blockchain, s.p2pServer.LocalNode())
+	eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers

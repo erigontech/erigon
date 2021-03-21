@@ -18,6 +18,7 @@ package eth
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sync"
@@ -28,11 +29,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -137,22 +140,25 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:  config.Network,
-		forkFilter: forkid.NewFilterAutofork(config.Chain.Config(), config.Chain.Genesis().Hash(), config.Chain.CurrentHeader().Number.Uint64()),
-		eventMux:   config.EventMux,
-		database:   config.Database,
-		txpool:     config.TxPool,
-		chain:      config.Chain,
-		peers:      newPeerSet(),
-		whitelist:  config.Whitelist,
-		txsyncCh:   make(chan *txsync),
-		quitSync:   make(chan struct{}),
+		networkID: config.Network,
+		eventMux:  config.EventMux,
+		database:  config.Database,
+		txpool:    config.TxPool,
+		chain:     config.Chain,
+		peers:     newPeerSet(),
+		whitelist: config.Whitelist,
+		txsyncCh:  make(chan *txsync),
+		quitSync:  make(chan struct{}),
 	}
-	// If we have trusted checkpoints, enforce them on the chain
-	if config.Checkpoint != nil {
-		h.checkpointNumber = (config.Checkpoint.SectionIndex+1)*params.CHTFrequency - 1
-		h.checkpointHash = config.Checkpoint.SectionHead
+	if headHeight, err := stages.GetStageProgress(config.Database, stages.Finish); err == nil {
+		h.currentHeight = headHeight
+	} else {
+		return nil, fmt.Errorf("could not get Finish stage progress: %v", err)
 	}
+	heighter := func() uint64 {
+		return atomic.LoadUint64(&h.currentHeight)
+	}
+	h.forkFilter = forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), heighter)
 	// Construct the downloader (long sync) and its backing state bloom if fast
 	// sync is requested. The downloader is responsible for deallocating the state
 	// bloom when it's done.
@@ -167,9 +173,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
 		return h.chain.Engine().VerifyHeader(h.chain, header, true)
-	}
-	heighter := func() uint64 {
-		return atomic.LoadUint64(&h.currentHeight)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		if err == nil {
@@ -217,7 +220,7 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 // various subsistems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// TODO(karalabe): Not sure why this is needed
-	if !h.chainSync.handlePeerEvent(peer) {
+	if !h.chainSync.handlePeerEvent() {
 		return p2p.DiscQuitting
 	}
 	h.peerWG.Add(1)
@@ -226,12 +229,17 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Execute the Ethereum handshake
 	var (
 		genesis = h.chain.Genesis()
-		head    = h.chain.CurrentHeader()
-		hash    = head.Hash()
-		number  = head.Number.Uint64()
-		td      = h.chain.GetTd(hash, number)
+		number  = atomic.LoadUint64(&h.currentHeight)
 	)
-	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
+	hash, err := rawdb.ReadCanonicalHash(h.database, number)
+	if err != nil {
+		return fmt.Errorf("reading canonical hash for %d: %v", number, err)
+	}
+	td, err1 := rawdb.ReadTd(h.database, hash, number)
+	if err1 != nil {
+		return fmt.Errorf("reading td for %d %x: %v", number, hash, err1)
+	}
+	forkID := forkid.NewID(h.chain.Config(), genesis.Hash(), number)
 	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
@@ -261,7 +269,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		peer.Log().Error("Failed to register peer in eth syncer", "err", err)
 		return err
 	}
-	h.chainSync.handlePeerEvent(peer)
+	h.chainSync.handlePeerEvent()
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.

@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -116,7 +117,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			Chain:      chainNoFork,
 			TxPool:     newTestTxPool(),
 			Network:    1,
-			Sync:       downloader.FullSync,
+			Sync:       downloader.StagedSync,
 			BloomCache: 1,
 		})
 		ethProFork, _ = newHandler(&handlerConfig{
@@ -124,7 +125,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			Chain:      chainProFork,
 			TxPool:     newTestTxPool(),
 			Network:    1,
-			Sync:       downloader.FullSync,
+			Sync:       downloader.StagedSync,
 			BloomCache: 1,
 		})
 	)
@@ -170,9 +171,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
+	atomic.StoreUint64(&ethNoFork.currentHeight, 1)
 	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
+	atomic.StoreUint64(&ethProFork.currentHeight, 1)
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -205,9 +208,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[1:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
+	atomic.StoreUint64(&ethNoFork.currentHeight, 2)
 	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[1:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
+	atomic.StoreUint64(&ethProFork.currentHeight, 2)
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	defer p2pNoFork.Close()
@@ -274,11 +279,14 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a source handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
-		t.Fatalf("failed to run protocol handshake: %s", err)
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
 	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
@@ -335,11 +343,14 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a source handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
-		t.Fatalf("failed to run protocol handshake")
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// After the handshake completes, the source handler should stream the sink
 	// the transactions, subscribe to all inbound network events
@@ -473,6 +484,7 @@ func testTransactionPropagation(t *testing.T, protocol uint) {
 // challenge to validate each other's chains. Hash mismatches, or missing ones
 // during a fast sync should lead to the peer getting dropped.
 func TestCheckpointChallenge(t *testing.T) {
+	t.Skip("Not relevant for Turbo-Geth")
 	tests := []struct {
 		syncmode   downloader.SyncMode
 		checkpoint bool
@@ -549,11 +561,14 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	// Run the handshake locally to avoid spinning up a remote handler
 	var (
 		genesis = handler.chain.Genesis()
-		head    = handler.chain.CurrentBlock()
-		td      = handler.chain.GetTd(head.Hash(), head.NumberU64())
+		head    = handler.headBlock
 	)
-	if err := remote.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
-		t.Fatalf("failed to run protocol handshake")
+	td, err := rawdb.ReadTd(handler.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Connect a new peer and check that we receive the checkpoint challenge
 	if checkpoint {
@@ -618,8 +633,12 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 	// Interconnect all the sink handlers with the source handler
 	var (
 		genesis = source.chain.Genesis()
-		td      = source.chain.GetTd(genesis.Hash(), genesis.NumberU64())
+		head    = source.headBlock
 	)
+	td, err := rawdb.ReadTd(source.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, sink := range sinks {
 		sink := sink // Closure for gorotuine below
 
@@ -636,7 +655,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
-		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewIDWithChain(source.chain), forkid.NewFilter(source.chain)); err != nil {
+		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 			t.Fatalf("failed to run protocol handshake")
 		}
 		//nolint:errcheck
@@ -711,9 +730,13 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	// Run the handshake locally to avoid spinning up a sink handler
 	var (
 		genesis = source.chain.Genesis()
-		td      = source.chain.GetTd(genesis.Hash(), genesis.NumberU64())
+		head    = source.headBlock
 	)
-	if err := sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewIDWithChain(source.chain), forkid.NewFilter(source.chain)); err != nil {
+	td, err := rawdb.ReadTd(source.db, head.Hash(), head.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.chain.Config(), genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.chain.Config(), genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -726,9 +749,6 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 
 	//nolint:errcheck
 	go eth.Handle(backend, sink)
-
-	// Create various combinations of malformed blocks
-	head := source.chain.CurrentBlock()
 
 	malformedUncles := head.Header()
 	malformedUncles.UncleHash[0]++

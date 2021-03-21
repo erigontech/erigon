@@ -153,6 +153,8 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 								}
 							}
 							c.Close()
+						*/
+						/*
 							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
 							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 								if err != nil {

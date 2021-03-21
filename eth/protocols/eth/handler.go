@@ -92,7 +92,7 @@ type TxPool interface {
 }
 
 // MakeProtocols constructs the P2P protocol definitions for `eth`.
-func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator) []p2p.Protocol {
+func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator, chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) []p2p.Protocol {
 	protocols := make([]p2p.Protocol, len(ProtocolVersions))
 	for i, version := range ProtocolVersions {
 		version := version // Closure
@@ -115,7 +115,7 @@ func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator) []p2
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
 			},
-			Attributes:     []enr.Entry{currentENREntry(backend.Chain())},
+			Attributes:     []enr.Entry{currentENREntry(chainConfig, genesisHash, headHeight)},
 			DialCandidates: dnsdisc,
 		}
 	}

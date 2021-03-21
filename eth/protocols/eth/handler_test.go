@@ -48,9 +48,10 @@ var (
 // purpose is to allow testing the request/reply workflows and wire serialization
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
-	db     ethdb.Database
-	txpool *core.TxPool
-	chain  *core.BlockChain
+	db        ethdb.Database
+	txpool    *core.TxPool
+	chain     *core.BlockChain
+	headBlock *types.Block
 }
 
 // newTestBackend creates an empty chain and wraps it into a mock backend.
@@ -68,9 +69,13 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}).MustCommit(db)
 
-	bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
-		panic(err)
+	headBlock := genesis
+	if blocks > 0 {
+		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
+			panic(err)
+		}
+		headBlock = bs[len(bs)-1]
 	}
 	txconfig := core.DefaultTxPoolConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
@@ -78,9 +83,10 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	txCacher := core.NewTxSenderCacher(1)
 	return &testBackend{
-		db:     db,
-		txpool: core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
-		chain:  chain,
+		db:        db,
+		txpool:    core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
+		chain:     chain,
+		headBlock: headBlock,
 	}
 }
 
