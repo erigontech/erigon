@@ -7,7 +7,6 @@ package mdbx
 */
 import "C"
 import (
-	"runtime"
 	"unsafe"
 )
 
@@ -106,7 +105,6 @@ func (c *Cursor) close() bool {
 // See mdb_cursor_close.
 func (c *Cursor) Close() {
 	if c.close() {
-		runtime.SetFinalizer(c, nil)
 	}
 }
 
