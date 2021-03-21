@@ -665,6 +665,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
 			return nil
 		}
+		fmt.Printf("mining gogo\n")
 		if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
 			return err
 		}
@@ -686,6 +687,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				localTxs[account] = txs
 			}
 		}
+		fmt.Printf("mining prepare\n")
 
 		if d.miningState, err = d.mining.Prepare(
 			d,
@@ -708,11 +710,12 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		); err != nil {
 			return err
 		}
+		fmt.Printf("mining run\n")
 		if err = d.miningState.Run(tx, tx); err != nil {
 			return err
 		}
+		fmt.Printf("mining after run\n")
 		tx.Rollback()
-		d.blockchain.Engine()
 		return nil
 	}
 
