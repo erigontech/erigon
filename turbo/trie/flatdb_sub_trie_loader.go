@@ -596,7 +596,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	}
 	if fstl.tx == nil {
 		var err error
-		fstl.tx, err = fstl.kv.Begin(context.Background(), ethdb.RO)
+		fstl.tx, err = fstl.kv.Begin(context.Background())
 		if err != nil {
 			return SubTries{}, err
 		}

@@ -224,9 +224,9 @@ func (m *mutation) RollbackAndBegin(ctx context.Context) error {
 	return nil
 }
 
-func (m *mutation) doCommit(tx Tx) error {
+func (m *mutation) doCommit(tx RwTx) error {
 	var prevTable string
-	var c Cursor
+	var c RwCursor
 	var innerErr error
 	var isEndOfBucket bool
 	logEvery := time.NewTicker(30 * time.Second)
@@ -240,7 +240,7 @@ func (m *mutation) doCommit(tx Tx) error {
 			if c != nil {
 				c.Close()
 			}
-			c = tx.Cursor(mi.table)
+			c = tx.RwCursor(mi.table)
 			prevTable = mi.table
 			firstKey, _, err := c.Seek(mi.key)
 			if err != nil {
@@ -288,11 +288,11 @@ func (m *mutation) Commit() (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if tx, ok := m.db.(HasTx); ok {
-		if err := m.doCommit(tx.Tx()); err != nil {
+		if err := m.doCommit(tx.Tx().(RwTx)); err != nil {
 			return 0, err
 		}
 	} else {
-		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx Tx) error {
+		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
 			return 0, err

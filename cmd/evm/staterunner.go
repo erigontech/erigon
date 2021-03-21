@@ -109,7 +109,7 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background(), ethdb.RO)
+					tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
 					if err1 != nil {
 						return fmt.Errorf("transition cannot open tx: %v", err1)
 					}

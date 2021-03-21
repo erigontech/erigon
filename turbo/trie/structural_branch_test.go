@@ -57,7 +57,7 @@ func TestIHCursor(t *testing.T) {
 	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 
-	tx, err := db.KV().Begin(context.Background(), ethdb.RW)
+	tx, err := db.KV().BeginRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 

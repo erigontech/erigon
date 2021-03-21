@@ -115,8 +115,8 @@ func newPersistentDB(path string) (*DB, error) {
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
 	var blob []byte
-	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.InodesBucket)
+	if err := kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		c := tx.RwCursor(dbutils.InodesBucket)
 		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
@@ -230,8 +230,8 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+	return db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.RwCursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -257,8 +257,8 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Cursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
+	return db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.RwCursor(dbutils.InodesBucket).Put(common.CopyBytes(key), blob)
 	})
 }
 
@@ -303,8 +303,8 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.Cursor(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
+	if err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.RwCursor(dbutils.InodesBucket).Put(nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -331,8 +331,8 @@ func (db *DB) DeleteNode(id ID) {
 }
 
 func deleteRange(db ethdb.KV, prefix []byte) {
-	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.InodesBucket)
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		c := tx.RwCursor(dbutils.InodesBucket)
 		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 			if err != nil {
 				return err

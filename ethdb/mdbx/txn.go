@@ -9,7 +9,6 @@ import "C"
 
 import (
 	"log"
-	"runtime"
 	"time"
 	"unsafe"
 )
@@ -196,7 +195,6 @@ func (txn *Txn) Commit() (CommitLatency, error) {
 		panic("managed transaction cannot be committed directly")
 	}
 
-	runtime.SetFinalizer(txn, nil)
 	return txn.commit()
 }
 
@@ -242,7 +240,6 @@ func (txn *Txn) Abort() {
 		panic("managed transaction cannot be aborted directly")
 	}
 
-	runtime.SetFinalizer(txn, nil)
 	txn.abort()
 }
 
@@ -615,7 +612,6 @@ func (txn *Txn) Del(dbi DBI, key, val []byte) error {
 func (txn *Txn) OpenCursor(dbi DBI) (*Cursor, error) {
 	cur, err := openCursor(txn, dbi)
 	if cur != nil && txn.readonly {
-		runtime.SetFinalizer(cur, (*Cursor).close)
 	}
 	return cur, err
 }

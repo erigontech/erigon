@@ -186,7 +186,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background(), RO)
+		tx, innerErr := db.Begin(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -203,7 +203,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 			return nil, err
 		}
 	} else {
-		if err := db.Update(context.Background(), func(tx Tx) error {
+		if err := db.Update(context.Background(), func(tx RwTx) error {
 			for name, cfg := range db.buckets {
 				if cfg.IsDeprecated {
 					continue
@@ -360,7 +360,7 @@ func (db *LmdbKV) CollectMetrics() {
 	}
 }
 
-func (db *LmdbKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
+func (db *LmdbKV) Begin(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -371,28 +371,47 @@ func (db *LmdbKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 		}
 	}()
 
-	nativeFlags := uint(0)
-	if flags&RO != 0 {
-		nativeFlags |= lmdb.Readonly
-	}
-	tx, err := db.env.BeginTxn(nil, nativeFlags)
+	tx, err := db.env.BeginTxn(nil, lmdb.Readonly)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
 	return &lmdbTx{
-		db:    db,
-		tx:    tx,
-		flags: flags,
+		db:       db,
+		tx:       tx,
+		readOnly: true,
+	}, nil
+}
+
+func (db *LmdbKV) BeginRw(_ context.Context) (txn RwTx, err error) {
+	if db.env == nil {
+		return nil, fmt.Errorf("db closed")
+	}
+	runtime.LockOSThread()
+	defer func() {
+		if err == nil {
+			db.wg.Add(1)
+		}
+	}()
+
+	tx, err := db.env.BeginTxn(nil, 0)
+	if err != nil {
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		return nil, err
+	}
+	tx.RawRead = true
+	return &lmdbTx{
+		db: db,
+		tx: tx,
 	}, nil
 }
 
 type lmdbTx struct {
-	flags   TxFlags
-	tx      *lmdb.Txn
-	db      *LmdbKV
-	cursors []*lmdb.Cursor
+	readOnly bool
+	tx       *lmdb.Txn
+	db       *LmdbKV
+	cursors  []*lmdb.Cursor
 }
 
 type LmdbCursor struct {
@@ -453,7 +472,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx, RO)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -462,14 +481,14 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *LmdbKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	tx, err := db.Begin(ctx, RW)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -730,7 +749,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c := tx.Cursor(dbutils.Sequence)
+	c := tx.RwCursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -785,27 +804,35 @@ func (tx *lmdbTx) BucketStat(name string) (*lmdb.Stat, error) {
 	return tx.tx.Stat(lmdb.DBI(tx.db.buckets[name].DBI))
 }
 
-func (tx *lmdbTx) Cursor(bucket string) Cursor {
+func (tx *lmdbTx) RwCursor(bucket string) RwCursor {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)
 	}
 
 	if b.Flags&dbutils.DupSort != 0 {
-		return tx.CursorDupSort(bucket)
+		return tx.RwCursorDupSort(bucket)
 	}
 
 	return tx.stdCursor(bucket)
 }
 
-func (tx *lmdbTx) stdCursor(bucket string) Cursor {
+func (tx *lmdbTx) Cursor(bucket string) Cursor {
+	return tx.RwCursor(bucket)
+}
+
+func (tx *lmdbTx) stdCursor(bucket string) RwCursor {
 	b := tx.db.buckets[bucket]
 	return &LmdbCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: lmdb.DBI(tx.db.buckets[bucket].DBI)}
 }
 
-func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
+func (tx *lmdbTx) RwCursorDupSort(bucket string) RwCursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*LmdbCursor)
 	return &LmdbDupSortCursor{LmdbCursor: basicCursor}
+}
+
+func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
+	return tx.RwCursorDupSort(bucket)
 }
 
 func (tx *lmdbTx) CHandle() unsafe.Pointer {
