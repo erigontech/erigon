@@ -48,8 +48,6 @@ import (
 
 // Create revival problem
 func TestCreate2Revive(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
-
 	// Configure and generate a sample block chain
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -221,7 +219,6 @@ func TestCreate2Revive(t *testing.T) {
 
 // Polymorthic contracts via CREATE2
 func TestCreate2Polymorth(t *testing.T) {
-
 	// Configure and generate a sample block chain
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -963,8 +960,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 }
 
 func TestReproduceCrash(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
-
 	// This example was taken from Ropsten contract that used to cause a crash
 	// it is created in the block 598915 and then there are 3 transactions modifying
 	// its storage in the same block:
@@ -1364,7 +1359,7 @@ func TestWrongIncarnation2(t *testing.T) {
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	db := ethdb.NewMemDatabase()
@@ -1411,7 +1406,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
@@ -1471,7 +1466,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 

@@ -62,17 +62,14 @@ func FixState(chaindata string, url string) {
 	}
 	for addrHash, account := range roots {
 		if account != nil && account.Root != trie.EmptyRoot {
+			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation)
 			rl := trie.NewRetainList(0)
-			loader := trie.NewFlatDBTrieLoader("checkRoots")
-			if err := loader.Reset(rl, nil, nil, false); err != nil {
-				panic(err)
-			}
-			root, err1 := loader.CalcTrieRoot(stateDb, contractPrefix, nil)
-			if err1 != nil || root != account.Root {
-				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, root, account.Root)
+			subTries, err1 := sl.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
+			if err1 != nil || subTries.Hashes[0] != account.Root {
+				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, subTries.Hashes[0], account.Root)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
 				template := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 				sm := make(map[common.Hash]storageEntry)

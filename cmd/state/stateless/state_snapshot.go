@@ -264,21 +264,18 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 	}
 }
 
-func checkRoots(stateDb ethdb.Database, expect common.Hash, blockNum uint64) {
+func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	if blockNum > 0 {
+		l := trie.NewSubTrieLoader(blockNum)
+		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 		rl := trie.NewRetainList(0)
-		loader := trie.NewFlatDBTrieLoader("checkRoots")
-		if err := loader.Reset(rl, nil, nil, false); err != nil {
-			panic(err)
-		}
-		root, err := loader.CalcTrieRoot(stateDb, []byte{}, nil)
+		subTries, err := l.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 		if err != nil {
-			panic(err)
+			fmt.Printf("%v\n", err)
 		}
-		fmt.Printf("new resolve request for root block with hash %x\n", expect)
-		if root != expect {
-			fmt.Printf("State root hash mismatch, got %x, expected %x\n", root, expect)
+		if subTries.Hashes[0] != rootHash {
+			fmt.Printf("State root hash mismatch, got %x, expected %x\n", subTries.Hashes[0], rootHash)
 		}
 		fmt.Printf("Trie computation took %v\n", time.Since(startTime))
 	} else {
@@ -309,21 +306,18 @@ func checkRoots(stateDb ethdb.Database, expect common.Hash, blockNum uint64) {
 
 	for addrHash, account := range roots {
 		if account != nil {
-			rl := trie.NewRetainList(0)
-			loader := trie.NewFlatDBTrieLoader("checkRoots")
-			if err := loader.Reset(rl, nil, nil, false); err != nil {
-				panic(err)
-			}
+			sl := trie.NewSubTrieLoader(blockNum)
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation)
-			root, err := loader.CalcTrieRoot(stateDb, contractPrefix, nil)
+			rl := trie.NewRetainList(0)
+			subTries, err := sl.LoadSubTries(stateDb, blockNum, rl, nil /* HashCollector */, [][]byte{contractPrefix}, []int{8 * len(contractPrefix)}, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)
 				fmt.Printf("incarnation: %d, account.Root: %x\n", account.Incarnation, account.Root)
 			}
-			if root != account.Root {
-				fmt.Printf("Storage root hash mismatch for %x, got %x, expected %x\n", addrHash, root, account.Root)
+			if subTries.Hashes[0] != account.Root {
+				fmt.Printf("Storage root hash mismatch for %x, got %x, expected %x\n", addrHash, subTries.Hashes[0], account.Root)
 			}
 		}
 	}

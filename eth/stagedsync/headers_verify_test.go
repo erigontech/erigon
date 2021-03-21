@@ -45,6 +45,7 @@ func decodeHeaders(encodings []string) map[common.Hash]HeaderRecord {
 }
 
 func TestVerifyHeadersEthash(t *testing.T) {
+	t.Skip("to")
 	headerRecs := decodeHeaders(verifyHardCodedHeadersEthash)
 	headers := toHeaders(headerRecs)
 

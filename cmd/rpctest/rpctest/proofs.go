@@ -22,16 +22,13 @@ func Proofs(chaindata string, url string, block uint64) {
 	if _, err := os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
+			l := trie.NewSubTrieLoader(block)
 			rl := trie.NewRetainList(6)
-			loader := trie.NewFlatDBTrieLoader("checkRoots")
-			if err := loader.Reset(rl, nil, nil, false); err != nil {
-				panic(err)
+			subTries, err1 := l.LoadSubTries(ethDb, block, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
+			if err1 != nil {
+				panic(err1)
 			}
-			root, err := loader.CalcTrieRoot(ethDb, []byte{}, nil)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("Resolved with hash: %x\n", root)
+			fmt.Printf("Resolved with hash: %x\n", subTries.Hashes[0])
 			f, err1 := os.Create(fileName)
 			if err1 == nil {
 				defer f.Close()

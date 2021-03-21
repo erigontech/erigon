@@ -538,10 +538,6 @@ func setupFlags(t T, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("mkdir: %s", path)
 	}
-	err = env.SetMaxDBs(64 << 10)
-	if err == nil {
-		t.Fatalf("expecting error")
-	}
 	err = env.SetMaxDBs(1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
