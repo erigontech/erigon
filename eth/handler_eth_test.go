@@ -169,7 +169,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			if err != nil {
 				t.Fatalf("frontier nofork <-> profork failed: %v", err)
 			}
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("frontier nofork <-> profork handler timeout")
 		}
 	}
@@ -206,7 +206,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			if err != nil {
 				t.Fatalf("homestead nofork <-> profork failed: %v", err)
 			}
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("homestead nofork <-> profork handler timeout")
 		}
 	}
