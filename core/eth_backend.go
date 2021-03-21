@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -13,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"google.golang.org/grpc/status"
 )
 
 // ApiBackend - interface which must be used by API layer
@@ -93,6 +95,9 @@ func NewRemoteBackend(kv ethdb.KV) *RemoteBackend {
 func (back *RemoteBackend) AddLocal(ctx context.Context, signedTx []byte) ([]byte, error) {
 	res, err := back.remoteEthBackend.Add(ctx, &remote.TxRequest{Signedtx: signedTx})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return common.Hash{}.Bytes(), errors.New(s.Message())
+		}
 		return common.Hash{}.Bytes(), err
 	}
 	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
@@ -101,6 +106,9 @@ func (back *RemoteBackend) AddLocal(ctx context.Context, signedTx []byte) ([]byt
 func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {
 	res, err := back.remoteEthBackend.Etherbase(ctx, &remote.EtherbaseRequest{})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return common.Address{}, errors.New(s.Message())
+		}
 		return common.Address{}, err
 	}
 
@@ -110,6 +118,9 @@ func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error
 func (back *RemoteBackend) NetVersion(ctx context.Context) (uint64, error) {
 	res, err := back.remoteEthBackend.NetVersion(ctx, &remote.NetVersionRequest{})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return 0, errors.New(s.Message())
+		}
 		return 0, err
 	}
 
@@ -119,6 +130,9 @@ func (back *RemoteBackend) NetVersion(ctx context.Context) (uint64, error) {
 func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remote.SubscribeReply)) error {
 	subscription, err := back.remoteEthBackend.Subscribe(ctx, &remote.SubscribeRequest{})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
 		return err
 	}
 	for {
@@ -140,6 +154,9 @@ func (back *RemoteBackend) GetWork(ctx context.Context) ([4]string, error) {
 	var res [4]string
 	repl, err := back.remoteEthBackend.GetWork(ctx, &remote.GetWorkRequest{})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return res, errors.New(s.Message())
+		}
 		return res, err
 	}
 	res[0] = repl.HeaderHash
@@ -152,6 +169,9 @@ func (back *RemoteBackend) GetWork(ctx context.Context) ([4]string, error) {
 func (back *RemoteBackend) SubmitWork(ctx context.Context, nonce types.BlockNonce, hash, digest common.Hash) (bool, error) {
 	repl, err := back.remoteEthBackend.SubmitWork(ctx, &remote.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: hash.Bytes(), Digest: digest.Bytes()})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
 		return false, err
 	}
 	return repl.Ok, err
@@ -160,6 +180,9 @@ func (back *RemoteBackend) SubmitWork(ctx context.Context, nonce types.BlockNonc
 func (back *RemoteBackend) SubmitHashRate(ctx context.Context, rate hexutil.Uint64, id common.Hash) (bool, error) {
 	repl, err := back.remoteEthBackend.SubmitHashRate(ctx, &remote.SubmitHashRateRequest{Rate: uint64(rate), Id: id.Bytes()})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
 		return false, err
 	}
 	return repl.Ok, err
@@ -168,6 +191,9 @@ func (back *RemoteBackend) SubmitHashRate(ctx context.Context, rate hexutil.Uint
 func (back *RemoteBackend) GetHashRate(ctx context.Context) (uint64, error) {
 	repl, err := back.remoteEthBackend.GetHashRate(ctx, &remote.GetHashRateRequest{})
 	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return 0, errors.New(s.Message())
+		}
 		return 0, err
 	}
 	return repl.HashRate, err

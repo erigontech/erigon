@@ -115,7 +115,8 @@ func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*re
 		fmt.Printf("remove me: %s\n", err)
 		return nil, err
 	}
-	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, err
+
+	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
 }
 
 func (s *EthBackendServer) SubmitWork(_ context.Context, req *remote.SubmitWorkRequest) (*remote.SubmitWorkReply, error) {
