@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -138,23 +136,24 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-
-						var a accounts.Account
-						c := world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
-						for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-							if err != nil {
-								return err
-							}
-							if len(k) != 20 {
-								fmt.Printf("%x => %x\n", k, v)
-							} else {
-								if err1 := a.DecodeForStorage(v); err1 != nil {
-									return err1
+						/*
+							var a accounts.Account
+							c := world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+								if err != nil {
+									return err
 								}
-								fmt.Printf("%x => bal: %d nonce: %d codehash: %x, inc: %d\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash, a.Incarnation)
+								if len(k) != 20 {
+									fmt.Printf("%x => %x\n", k, v)
+								} else {
+									if err1 := a.DecodeForStorage(v); err1 != nil {
+										return err1
+									}
+									fmt.Printf("%x => bal: %d nonce: %d codehash: %x, inc: %d\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash, a.Incarnation)
+								}
 							}
-						}
-						c.Close()
+							c.Close()
+						*/
 						/*
 							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
 							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
