@@ -4,7 +4,6 @@ package remote
 
 import (
 	"context"
-	"fmt"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -299,7 +298,6 @@ func (x *eTHBACKENDSubscribeServer) Send(m *SubscribeReply) error {
 }
 
 func _ETHBACKEND_GetWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	fmt.Printf("0: getWork call\n")
 	in := new(GetWorkRequest)
 	if err := dec(in); err != nil {
 		return nil, err
