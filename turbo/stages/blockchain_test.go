@@ -245,7 +245,8 @@ func TestLastBlock(t *testing.T) {
 	defer db.Close()
 
 	blocks := makeBlockChain(blockchain.CurrentBlock(), 1, ethash.NewFullFaker(), db, 0)
-	if _, err := blockchain.InsertChain(context.Background(), blocks); err != nil {
+	engine := ethash.NewFaker()
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
 	if blocks[len(blocks)-1].Hash() != rawdb.ReadHeadBlockHash(db) {

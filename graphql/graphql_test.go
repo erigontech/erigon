@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -220,6 +221,9 @@ func createGQLService(t *testing.T, stack *node.Node) { //nolint:unparam
 		params.AllEthashProtocolChanges,
 		ethBackend.BlockChain().Genesis(),
 		ethash.NewFaker(), ethBackend.ChainDb().(*ethdb.ObjectDatabase), 10, func(i int, gen *core.BlockGen) {}, false)
+	if _, err = stagedsync.InsertBlocksInStages(ethBackend.ChainDb(), ethdb.DefaultStorageMode, params.TestChainConfig, ethBackend.BlockChain().GetVMConfig(), ethBackend.BlockChain().Engine(), chain, true /* checkRoot */); err != nil {
+		t.Fatalf("could not create import blocks: %v", err)
+	}
 	_, err = ethBackend.BlockChain().InsertChain(context.TODO(), chain)
 	if err != nil {
 		t.Fatalf("could not create import blocks: %v", err)
