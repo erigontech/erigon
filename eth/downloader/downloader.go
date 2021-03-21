@@ -550,6 +550,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
+		fmt.Printf("before everything?\n")
 		hashStateStageProgress, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
 		if err != nil {
 			return err
@@ -706,7 +707,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			false,
-			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, false, nil, nil, localTxs, remoteTxs),
+			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, true, nil, nil, localTxs, remoteTxs),
 		); err != nil {
 			return err
 		}
