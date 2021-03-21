@@ -33,12 +33,12 @@ const (
 	handshakeTimeout = 5 * time.Second
 )
 
-var handshakeCounter int32
+var HandshakeCounter int32
 
 // Handshake executes the eth protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis blocks.
 func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
-	counter := atomic.AddInt32(&handshakeCounter, 1)
+	counter := atomic.AddInt32(&HandshakeCounter, 1)
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
