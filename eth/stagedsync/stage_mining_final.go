@@ -38,8 +38,11 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 
 	//TODO: why worker.go does insert new block to chain?
 
+	log.Info("mined block", "txs", block.Transactions().Len())
 	// Broadcast the block and announce chain insertion event
-	_ = mux.Post(core.NewMinedBlockEvent{Block: block})
+	if err := mux.Post(core.NewMinedBlockEvent{Block: block}); err != nil {
+		return err
+	}
 
 	s.Done()
 	*current = miningBlock{} // hack to clean global data
