@@ -23,6 +23,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -217,6 +218,7 @@ func (p *MsgPipeRW) Close() error {
 		atomic.StoreInt32(p.closed, 1) // avoid overflow
 		return nil
 	}
+	fmt.Printf("Closing pipe from %s\n", debug.Stack())
 	close(p.closing)
 	return nil
 }
