@@ -679,31 +679,6 @@ func testRewind(chaindata string, block, rewind int) {
 	*/
 }
 
-func testStartup() {
-	startTime := time.Now()
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	fmt.Printf("Current block number: %d\n", currentBlockNr)
-	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	l := trie.NewSubTrieLoader(currentBlockNr)
-	rl := trie.NewRetainList(0)
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		fmt.Printf("%v\n", err1)
-	}
-	if subTries.Hashes[0] != currentBlock.Root() {
-		fmt.Printf("Hash mismatch, got %x, expected %x\n", subTries.Hashes[0], currentBlock.Root())
-	}
-	fmt.Printf("Took %v\n", time.Since(startTime))
-}
-
 func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -719,55 +694,6 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 	}); err != nil {
 		panic(err)
 	}
-}
-
-func testResolve(chaindata string) {
-	startTime := time.Now()
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-	//check(err)
-	/*
-		currentBlock := bc.CurrentBlock()
-		currentBlockNr := currentBlock.NumberU64()
-		fmt.Printf("Current block number: %d\n", currentBlockNr)
-		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
-		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-	*/
-	currentBlockNr := uint64(286798)
-	//var contract []byte
-	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
-	resolveHash := common.HexToHash("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
-	l := trie.NewSubTrieLoader(currentBlockNr)
-	key := common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
-	rl := trie.NewRetainList(0)
-	rl.AddHex(key[:3])
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
-	if err1 != nil {
-		fmt.Printf("Resolve error: %v\n", err1)
-	}
-	if subTries.Hashes[0] != resolveHash {
-		fmt.Printf("Has mismatch, got %x, expected %x\n", subTries.Hashes[0], resolveHash)
-	}
-	/*
-		var filename string
-		if err == nil {
-			filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
-		} else {
-			filename = fmt.Sprintf("root_%d.txt", currentBlockNr)
-		}
-		fmt.Printf("Generating deep snapshot of the tries... %s\n", filename)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			t.Print(f)
-		}
-		if err != nil {
-			fmt.Printf("%v\n", err)
-		}
-	*/
-	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
 func hashFile() {
@@ -1317,16 +1243,21 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+
+	loader := trie.NewFlatDBTrieLoader("checkRoots")
+	if err := loader.Reset(unfurl, nil, nil, false); err != nil {
+		panic(err)
+	}
+	_, err = loader.CalcTrieRoot(db, nil, nil)
+	if err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
-	subTries, err1 := loader.LoadSubTries()
-	if err1 != nil {
-		return err1
+	root, err := loader.CalcTrieRoot(db, nil, nil)
+	if err != nil {
+		return err
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
@@ -1334,14 +1265,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	hash, err := rawdb.ReadCanonicalHash(db, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(db, hash, block)
-	tr := trie.New(common.Hash{})
-	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
-		fmt.Printf("Error hooking: %v\n", err)
-	}
 	runtime.ReadMemStats(&m)
-	log.Info("Constructed trie", "nodes", tr.NumberOfAccounts(),
+	log.Info("Constructed trie",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	fmt.Printf("Resulting root: %x (subTrie %x), expected root: %x\n", tr.Hash(), subTries.Hashes[0], header.Root)
+	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }
 

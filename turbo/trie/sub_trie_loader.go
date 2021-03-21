@@ -2,7 +2,6 @@ package trie
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 var emptyHash [32]byte

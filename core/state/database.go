@@ -662,30 +662,31 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(loadFunc trie.LoadFunc) error {
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
 func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
-	var witnesses []*trie.Witness
-
-	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
-		if loader == nil {
-			return trie.SubTries{}, nil
-		}
-		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, trace)
-		if err != nil {
-			return subTries, err
-		}
-
-		if !extractWitnesses {
-			return subTries, nil
-		}
-
-		rl.Rewind()
-		witnesses, err = trie.ExtractWitnesses(subTries, trace, rl)
-		return subTries, err
-	}
-	if err := tds.resolveStateTrieWithFunc(loadFunc); err != nil {
-		return nil, err
-	}
-
-	return witnesses, nil
+	return nil, nil
+	//var witnesses []*trie.Witness
+	//
+	//loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
+	//	if loader == nil {
+	//		return trie.SubTries{}, nil
+	//	}
+	//	subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, trace)
+	//	if err != nil {
+	//		return subTries, err
+	//	}
+	//
+	//	if !extractWitnesses {
+	//		return subTries, nil
+	//	}
+	//
+	//	rl.Rewind()
+	//	witnesses, err = trie.ExtractWitnesses(subTries, trace, rl)
+	//	return subTries, err
+	//}
+	//if err := tds.resolveStateTrieWithFunc(loadFunc); err != nil {
+	//	return nil, err
+	//}
+	//
+	//return witnesses, nil
 }
 
 // CalcTrieRoots calculates trie roots without modifying the state trie

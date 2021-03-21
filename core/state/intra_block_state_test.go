@@ -30,7 +30,7 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	check "gopkg.in/check.v1"
+	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -85,6 +85,7 @@ func TestUpdateLeaks(t *testing.T) {
 // Tests that no intermediate state of an object is stored into the database,
 // only the one right before the commit.
 func TestIntermediateLeaks(t *testing.T) {
+	t.Skip("switch to TG state readers/writers")
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
 	defer transDb.Close()

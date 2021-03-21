@@ -174,6 +174,8 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
+	t.Skip("switch to TG state readers/writers")
+
 	db := ethdb.NewMemDatabase()
 	ctx := context.TODO()
 	tds := NewTrieDbState(common.Hash{}, db, 0)
@@ -297,6 +299,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
+	t.Skip("switch to TG state readers/writers")
+
 	db := ethdb.NewMemDatabase()
 	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
