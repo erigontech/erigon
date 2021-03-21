@@ -101,7 +101,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
-	if err = env.SetMaxDBs(100); err != nil {
+	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, ReadersLimit); err != nil {
@@ -131,11 +131,9 @@ func (opts MdbxOpts) Open() (KV, error) {
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
 			return nil, err
 		}
-
 		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
 			return nil, err
 		}
-
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
