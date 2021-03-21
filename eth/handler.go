@@ -160,10 +160,10 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	}
 	h.forkFilter = forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), heighter)
 	// If we have trusted checkpoints, enforce them on the chain
-	if config.Checkpoint != nil {
-		h.checkpointNumber = (config.Checkpoint.SectionIndex+1)*params.CHTFrequency - 1
-		h.checkpointHash = config.Checkpoint.SectionHead
-	}
+	//if config.Checkpoint != nil {
+	//	h.checkpointNumber = (config.Checkpoint.SectionIndex+1)*params.CHTFrequency - 1
+	//	h.checkpointHash = config.Checkpoint.SectionHead
+	//}
 	// Construct the downloader (long sync) and its backing state bloom if fast
 	// sync is requested. The downloader is responsible for deallocating the state
 	// bloom when it's done.
