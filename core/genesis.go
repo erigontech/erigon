@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -176,6 +177,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		} else {
 			log.Info("Writing custom genesis block")
 		}
+
 		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
@@ -184,6 +186,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
+		panic(3)
 		block, stateDB1, _, err := genesis.ToBlock(nil, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
@@ -193,6 +196,8 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
 		}
 	}
+	panic(4)
+
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
 	if overrideBerlin != nil {
@@ -293,11 +298,12 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	roots, err := tds.ComputeTrieRoots()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	root := roots[len(roots)-1]
+	//roots, err := tds.ComputeTrieRoots()
+	//if err != nil {
+	//	return nil, nil, nil, err
+	//}
+	//root := roots[len(roots)-1]
+
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
@@ -309,7 +315,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		Difficulty: g.Difficulty,
 		MixDigest:  g.Mixhash,
 		Coinbase:   g.Coinbase,
-		Root:       root,
+		Root:       trie.EmptyRoot,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit

@@ -14,17 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package core_test
 
 import (
-	"context"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -35,14 +36,14 @@ func TestHeaderVerification(t *testing.T) {
 	testdb := ethdb.NewMemDatabase()
 	defer testdb.Close()
 	var (
-		gspec   = &Genesis{Config: params.TestChainConfig}
+		gspec   = &core.Genesis{Config: params.TestChainConfig}
 		genesis = gspec.MustCommit(testdb)
 	)
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := core.NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
-	blocks, _, err := GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
+	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -79,7 +80,8 @@ func TestHeaderVerification(t *testing.T) {
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
-		if _, err := chain.InsertChain(context.Background(), blocks[i:i+1]); err != nil {
+		engine := ethash.NewFaker()
+		if _, err = stagedsync.InsertBlocksInStages(testdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 	}
@@ -95,9 +97,9 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 	testdb := ethdb.NewMemDatabase()
 	defer testdb.Close()
 	var (
-		gspec          = &Genesis{Config: params.TestChainConfig}
+		gspec          = &core.Genesis{Config: params.TestChainConfig}
 		genesis        = gspec.MustCommit(testdb)
-		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
+		blocks, _, err = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
@@ -119,14 +121,14 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 		var results <-chan error
 
 		if valid {
-			txCacher := NewTxSenderCacher(runtime.NumCPU())
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
+			txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+			chain, _ := core.NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+			_, results = chain.Engine().VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		} else {
-			txCacher := NewTxSenderCacher(runtime.NumCPU())
-			chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, txCacher)
-			_, results = chain.engine.VerifyHeaders(chain, headers, seals)
+			txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+			chain, _ := core.NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeFailer(uint64(len(headers)-1)), vm.Config{}, nil, txCacher)
+			_, results = chain.Engine().VerifyHeaders(chain, headers, seals)
 			chain.Stop()
 		}
 		// Wait for all the verification results
@@ -174,9 +176,9 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	defer testdb.Close()
 
 	var (
-		gspec          = &Genesis{Config: params.TestChainConfig}
+		gspec          = &core.Genesis{Config: params.TestChainConfig}
 		genesis        = gspec.MustCommit(testdb)
-		blocks, _, err = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil, false /* intemediateHashes */)
+		blocks, _, err = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil, false /* intemediateHashes */)
 	)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
@@ -193,11 +195,11 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	defer runtime.GOMAXPROCS(old)
 
 	// Start the verifications and immediately abort
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, txCacher)
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	chain, _ := core.NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFakeDelayer(time.Millisecond), vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
-	cancel, results := chain.engine.VerifyHeaders(chain, headers, seals)
+	cancel, results := chain.Engine().VerifyHeaders(chain, headers, seals)
 	cancel()
 
 	// Deplete the results channel

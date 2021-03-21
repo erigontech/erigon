@@ -3,14 +3,12 @@ package ethapi
 import (
 	"bytes"
 	"context"
-	"math/big"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
@@ -119,17 +117,18 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		}
 	}
 	sort.Strings(unfurlList)
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, unfurl, nil /* hashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
-		return nil, err
+	loader := trie.NewFlatDBTrieLoader("checkRoots")
+	if err := loader.Reset(unfurl, nil, nil, false); err != nil {
+		panic(err)
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil /* hashCollector */, false)
 	loader.SetStreamReceiver(r)
-	subTries, err1 := loader.LoadSubTries()
-	if err1 != nil {
-		return nil, err1
+	_, err = loader.CalcTrieRoot(db, []byte{}, nil)
+	if err != nil {
+		panic(err)
 	}
+	/*TODO: to support proofs
 	hash, err := rawdb.ReadCanonicalHash(db, block-1)
 	if err != nil {
 		return nil, err
@@ -139,7 +138,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
 		return nil, err
 	}
-	accountProof, err2 := tr.Prove(addrHash[:], 0, false /* storage */)
+	accountProof, err2 := tr.Prove(addrHash[:], 0, false)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -148,7 +147,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		keyAsHash := common.HexToHash(key)
 		if keyHash, err1 := common.HashData(keyAsHash[:]); err1 == nil {
 			trieKey := append(addrHash[:], keyHash[:]...)
-			if proof, err3 := tr.Prove(trieKey, 64 /* nibbles to get to the storage sub-trie */, true /* storage */); err3 == nil {
+			if proof, err3 := tr.Prove(trieKey, 64 , true); err3 == nil {
 				v, _ := tr.Get(trieKey)
 				bv := new(big.Int)
 				bv.SetBytes(v)
@@ -173,6 +172,8 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		StorageHash:  acc.Root,
 		StorageProof: storageProof,
 	}, nil
+	*/
+	return &AccountResult{}, nil
 }
 
 type Receiver struct {
