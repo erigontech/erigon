@@ -652,11 +652,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 
 			commitStart := time.Now()
-			errTx := tx.Commit()
-			if errTx == nil {
-				log.Info("Commit cycle", "in", time.Since(commitStart))
+			if _, errTx := tx.Commit(); errTx != nil {
+				return errTx
 			}
-			return errTx
+			log.Info("Commit cycle", "in", time.Since(commitStart))
 		}
 
 		// heuristic - run mining only if we are on top of chain
