@@ -100,6 +100,7 @@ func TestTxn_ID(t *testing.T) {
 }
 
 func TestTxn_errLogf(t *testing.T) {
+	t.Skip("to investigate")
 	env := setup(t)
 	defer clean(env, t)
 
