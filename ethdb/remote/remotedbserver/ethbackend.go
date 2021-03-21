@@ -107,6 +107,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 }
 
 func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*remote.GetWorkReply, error) {
+	fmt.Printf("getWork call\n")
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
