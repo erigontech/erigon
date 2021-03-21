@@ -82,14 +82,8 @@ func (h *testEthHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit64(t *testing.T) {
-	fmt.Printf("TestForkIDSplit64: %d\n", atomic.LoadInt32(&eth.HandshakeCounter))
-	testForkIDSplit(t, 64)
-}
-func TestForkIDSplit65(t *testing.T) {
-	fmt.Printf("TestForkIDSplit65: %d\n", atomic.LoadInt32(&eth.HandshakeCounter))
-	testForkIDSplit(t, 65)
-}
+func TestForkIDSplit64(t *testing.T) { testForkIDSplit(t, 64) }
+func TestForkIDSplit65(t *testing.T) { testForkIDSplit(t, 65) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -254,14 +248,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 }
 
 // Tests that received transactions are added to the local pool.
-func TestRecvTransactions64(t *testing.T) {
-	fmt.Printf("TestRecvTransactions64: %d\n", atomic.LoadInt32(&eth.HandshakeCounter))
-	testRecvTransactions(t, 64)
-}
-func TestRecvTransactions65(t *testing.T) {
-	fmt.Printf("TestRecvTransactions65: %d\n", atomic.LoadInt32(&eth.HandshakeCounter))
-	testRecvTransactions(t, 65)
-}
+func TestRecvTransactions64(t *testing.T) { testRecvTransactions(t, 64) }
+func TestRecvTransactions65(t *testing.T) { testRecvTransactions(t, 65) }
 
 func testRecvTransactions(t *testing.T, protocol uint) {
 	// Create a message handler, configure it to accept transactions and watch them

@@ -19,7 +19,6 @@ package eth
 import (
 	"fmt"
 	"math/big"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,19 +32,16 @@ const (
 	handshakeTimeout = 5 * time.Second
 )
 
-var HandshakeCounter int32
-
 // Handshake executes the eth protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis blocks.
 func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
-	counter := atomic.AddInt32(&HandshakeCounter, 1)
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
 	var status StatusPacket // safe to read after two values have been received from errc
 
 	go func() {
-		err := p2p.Send(p.rw, StatusMsg, &StatusPacket{
+		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
 			ProtocolVersion: uint32(p.version),
 			NetworkID:       network,
 			TD:              td,
@@ -53,13 +49,9 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 			Genesis:         genesis,
 			ForkID:          forkID,
 		})
-		errc <- err
-		fmt.Printf("Sent Status Msg from %d: %v\n", counter, err)
 	}()
 	go func() {
-		err := p.readStatus(network, &status, genesis, forkFilter)
-		errc <- err
-		fmt.Printf("Received Status Msg to %d: %v\n", counter, err)
+		errc <- p.readStatus(network, &status, genesis, forkFilter)
 	}()
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
