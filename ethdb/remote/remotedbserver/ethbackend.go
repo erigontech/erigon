@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -110,10 +111,10 @@ func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*re
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	res, err := s.ethash.GetWork()
+	fmt.Printf("getWork result: %v %v\n", res, err)
 	if err != nil {
 		return nil, err
 	}
-
 	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
 }
 
