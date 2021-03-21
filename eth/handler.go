@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
@@ -224,7 +225,7 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 // various subsistems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// TODO(karalabe): Not sure why this is needed
-	if !h.chainSync.handlePeerEvent(peer) {
+	if !h.chainSync.handlePeerEvent() {
 		return p2p.DiscQuitting
 	}
 	h.peerWG.Add(1)
@@ -233,12 +234,17 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Execute the Ethereum handshake
 	var (
 		genesis = h.chain.Genesis()
-		head    = h.chain.CurrentHeader()
-		hash    = head.Hash()
-		number  = head.Number.Uint64()
-		td      = h.chain.GetTd(hash, number)
+		number  = atomic.LoadUint64(&h.currentHeight)
 	)
-	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), atomic.LoadUint64(&h.currentHeight))
+	hash, err := rawdb.ReadCanonicalHash(h.database, number)
+	if err != nil {
+		return fmt.Errorf("reading canonical hash for %d: %v", number, err)
+	}
+	td, err1 := rawdb.ReadTd(h.database, hash, number)
+	if err1 != nil {
+		return fmt.Errorf("reading td for %d %x: %v", number, hash, err1)
+	}
+	forkID := forkid.NewID(h.chain.Config(), genesis.Hash(), number)
 	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
@@ -268,7 +274,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		peer.Log().Error("Failed to register peer in eth syncer", "err", err)
 		return err
 	}
-	h.chainSync.handlePeerEvent(peer)
+	h.chainSync.handlePeerEvent()
 
 	// Propagate existing transactions. new transactions appearing
 	// after this will be sent via broadcasts.

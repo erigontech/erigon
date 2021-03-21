@@ -210,7 +210,7 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td
 	// Update the peer's total difficulty if better than the previous
 	if _, headNumber := peer.Head(); block.NumberU64() > headNumber {
 		peer.SetHead(trueHead, block.NumberU64())
-		h.chainSync.handlePeerEvent(peer)
+		h.chainSync.handlePeerEvent()
 	}
 	return nil
 }
