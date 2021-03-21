@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -111,6 +112,7 @@ func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*re
 	}
 	res, err := s.ethash.GetWork()
 	if err != nil {
+		fmt.Printf("remove me: %s\n", err)
 		return nil, err
 	}
 	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, err

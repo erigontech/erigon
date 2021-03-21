@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -10,19 +9,13 @@ import (
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
-func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
-	var stub common.Address
-	return stub, fmt.Errorf(NotImplemented, "eth_coinbase")
-	// if api.ethBackend == nil {
-	// 	// We're running in --chaindata mode or otherwise cannot get the backend
-	// 	return common.Address{}, fmt.Errorf(NotAvailableChainData, "eth_coinbase")
-	// }
-	// return api.ethBackend.Etherbase()
+func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
+	return api.ethBackend.Etherbase(ctx)
 }
 
 // Hashrate implements eth_hashrate. Returns the number of hashes per second that the node is mining with.
-func (api *APIImpl) Hashrate(_ context.Context) (uint64, error) {
-	return 0, fmt.Errorf(NotImplemented, "eth_hashrate")
+func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
+	return api.ethBackend.GetHashRate(ctx)
 }
 
 // Mining implements eth_mining. Returns true if client is actively mining new blocks.
