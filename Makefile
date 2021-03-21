@@ -94,6 +94,7 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
+		&& echo '#define MDBX_ENABLE_MADVISE 0' >> config.h \
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
@@ -141,7 +142,6 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	PATH=$(GOBIN):$(PATH) go generate ./common
 	PATH=$(GOBIN):$(PATH) go generate ./core/types
-	PATH=$(GOBIN):$(PATH) go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'

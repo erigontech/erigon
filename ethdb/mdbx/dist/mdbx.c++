@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY f8467b2f2f730d8c516231ac1a197fafb5f8b8a6758e5c978d7e6b38f4b39fb7_v0_9_3_40_g4b8b7d5a
+#define MDBX_BUILD_SOURCERY 162afb9ada1f4431f2b54f0a20d732bd31c7399ab5f371f0097b27427fbbda0a_v0_9_3_66_gb2f52e55
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -741,6 +741,11 @@ static inline void *mdbx_realloc(void *ptr, size_t bytes) {
 
 #else /*----------------------------------------------------------------------*/
 
+#include <unistd.h>
+#if !defined(_POSIX_MAPPED_FILES) || _POSIX_MAPPED_FILES < 1
+#error "libmdbx requires the _POSIX_MAPPED_FILES feature"
+#endif /* _POSIX_MAPPED_FILES */
+
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -751,7 +756,6 @@ static inline void *mdbx_realloc(void *ptr, size_t bytes) {
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/uio.h>
-#include <unistd.h>
 typedef pthread_t mdbx_thread_t;
 typedef pthread_key_t mdbx_thread_key_t;
 #define INVALID_HANDLE_VALUE (-1)
@@ -1595,6 +1599,14 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
 
+/** Controls use of POSIX madvise() hints and friends. */
+#ifndef MDBX_ENABLE_MADVISE
+#define MDBX_ENABLE_MADVISE 1
+#endif
+#if !(MDBX_ENABLE_MADVISE == 0 || MDBX_ENABLE_MADVISE == 1)
+#error MDBX_ENABLE_MADVISE must be defined as 0 or 1
+#endif /* MDBX_ENABLE_MADVISE */
+
 /** Disable some checks to reduce an overhead and detection probability of
  * database corruption to a values closer to the LMDB. */
 #ifndef MDBX_DISABLE_PAGECHECKS
@@ -1838,19 +1850,6 @@ typedef union {
   };
 #endif
 } MDBX_atomic_uint64_t;
-
-/* The minimum number of keys required in a database page.
- * Setting this to a larger value will place a smaller bound on the
- * maximum size of a data item. Data items larger than this size will
- * be pushed into overflow pages instead of being stored directly in
- * the B-tree node. This value used to default to 4. With a page size
- * of 4096 bytes that meant that any item larger than 1024 bytes would
- * go into an overflow page. That also meant that on average 2-3KB of
- * each overflow page was wasted space. The value cannot be lower than
- * 2 because then there would no longer be a tree structure. With this
- * value, items larger than 2KB will go into overflow pages, and on
- * average only 1KB will be wasted. */
-#define MDBX_MINKEYS 2
 
 /* A stamp that identifies a file as an MDBX file.
  * There's nothing special about this value other than that it is easily
@@ -2567,8 +2566,9 @@ struct MDBX_env {
 #define me_lfd me_lck_mmap.fd
 #define me_lck me_lck_mmap.lck
 
-  unsigned me_psize;    /* DB page size, initialized from me_os_psize */
-  uint8_t me_psize2log; /* log2 of DB page size */
+  unsigned me_psize;        /* DB page size, initialized from me_os_psize */
+  unsigned me_leaf_nodemax; /* max size of a leaf-node */
+  uint8_t me_psize2log;     /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
   unsigned me_os_psize; /* OS page size, from mdbx_syspagesize() */
   unsigned me_maxreaders; /* size of the reader table */
@@ -2598,14 +2598,13 @@ struct MDBX_env {
   uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
   unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
   atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dp_reserve;  /* list of malloc'd blocks for re-use */
+  MDBX_page *me_dp_reserve;  /* list of malloc'ed blocks for re-use */
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
   /* Number of freelist items that can fit in a single overflow page */
   unsigned me_maxgc_ov1page;
-  unsigned me_branch_nodemax; /* max size of a branch-node */
-  uint32_t me_live_reader;    /* have liveness lock in reader table */
-  void *me_userctx;           /* User-settable context */
+  uint32_t me_live_reader; /* have liveness lock in reader table */
+  void *me_userctx;        /* User-settable context */
   MDBX_atomic_uint64_t *me_sync_timestamp;
   MDBX_atomic_uint64_t *me_autosync_period;
   atomic_pgno_t *me_unsynced_pages;
@@ -2868,14 +2867,13 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
 #define DDBI(mc)                                                               \
   (((mc)->mc_flags & C_SUB) ? -(int)(mc)->mc_dbi : (int)(mc)->mc_dbi)
 
-/* Key size which fits in a DKBUF. */
-#define DKBUF_MAXKEYSIZE 511 /* FIXME */
+/* Key size which fits in a DKBUF (debug key buffer). */
+#define DKBUF_MAX 511
 
 #if MDBX_DEBUG
-#define DKBUF char _kbuf[DKBUF_MAXKEYSIZE * 4 + 2]
-#define DKEY(x) mdbx_dump_val(x, _kbuf, DKBUF_MAXKEYSIZE * 2 + 1)
-#define DVAL(x)                                                                \
-  mdbx_dump_val(x, _kbuf + DKBUF_MAXKEYSIZE * 2 + 1, DKBUF_MAXKEYSIZE * 2 + 1)
+#define DKBUF char _kbuf[DKBUF_MAX * 4 + 2]
+#define DKEY(x) mdbx_dump_val(x, _kbuf, DKBUF_MAX * 2 + 1)
+#define DVAL(x) mdbx_dump_val(x, _kbuf + DKBUF_MAX * 2 + 1, DKBUF_MAX * 2 + 1)
 #else
 #define DKBUF ((void)(0))
 #define DKEY(x) ("-")
