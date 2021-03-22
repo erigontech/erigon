@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -27,6 +28,7 @@ func HeadersForward(
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	initialCycle bool,
 	wakeUpChan chan struct{},
+	batchSize datasize.ByteSize,
 ) error {
 	var headerProgress uint64
 	var err error
@@ -115,7 +117,7 @@ func HeadersForward(
 		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
-		if batch.BatchSize() >= batch.IdealBatchSize() {
+		if batch.BatchSize() >= int(batchSize) {
 			if err = batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}

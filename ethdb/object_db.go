@@ -352,11 +352,6 @@ func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendi
 	return batch, nil
 }
 
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (db *ObjectDatabase) IdealBatchSize() int {
-	panic("only mutation hast preferred batch size, because it limited by RAM")
-}
-
 // [TURBO-GETH] Freezer support (not implemented yet)
 // Ancients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) Ancients() (uint64, error) {

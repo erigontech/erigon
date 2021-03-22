@@ -195,11 +195,6 @@ func (m *mutation) BatchSize() int {
 	return m.size
 }
 
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (m *mutation) IdealBatchSize() int {
-	return int(512 * datasize.MB)
-}
-
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()

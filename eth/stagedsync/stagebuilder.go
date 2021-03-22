@@ -34,7 +34,7 @@ type StageParameters struct {
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
 	pid         string
-	batchSize   datasize.ByteSize // Batch size for the execution stage
+	BatchSize   datasize.ByteSize // Batch size for the execution stage
 	cache       *shards.StateCache
 	storageMode ethdb.StorageMode
 	TmpDir      string
@@ -184,7 +184,7 @@ func DefaultStages() StageBuilders {
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
+								BatchSize:             world.BatchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
@@ -195,7 +195,7 @@ func DefaultStages() StageBuilders {
 						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
-							BatchSize:             world.batchSize,
+							BatchSize:             world.BatchSize,
 							ChangeSetHook:         world.changeSetHook,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
@@ -298,14 +298,14 @@ func DefaultStages() StageBuilders {
 						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 				}

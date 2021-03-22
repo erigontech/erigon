@@ -97,7 +97,7 @@ func (stagedSync *StagedSync) Prepare(
 			poolStart:             poolStart,
 			changeSetHook:         changeSetHook,
 			cache:                 cache,
-			batchSize:             batchSize,
+			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
 			stateWriterBuilder:    writerBuilder,
