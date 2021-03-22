@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -24,7 +25,9 @@ func BodiesForward(
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
-	wakeUpChan chan struct{}, timeout int) error {
+	wakeUpChan chan struct{},
+	timeout int,
+	batchSize datasize.ByteSize) error {
 	var tx ethdb.DbWithPendingMutations
 	var err error
 	var useExternalTx bool
@@ -125,7 +128,8 @@ func BodiesForward(
 				rawdb.WriteHeadBlockHash(batch, headHash)
 				headSet = true
 			}
-			if batch.BatchSize() >= batch.IdealBatchSize() {
+
+			if batch.BatchSize() >= int(batchSize) {
 				if err = batch.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}

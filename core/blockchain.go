@@ -819,7 +819,8 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		return 0, err
 	}
 	defer bc.doneJob()
-
+	commitEvery := time.NewTicker(30 * time.Second)
+	defer commitEvery.Stop()
 	var (
 		ancientBlocks, liveBlocks     types.Blocks
 		ancientReceipts, liveReceipts []types.Receipts
@@ -998,13 +999,14 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 
 			stats.processed++
-			if batch.BatchSize() >= batch.IdealBatchSize() {
+			select {
+			case <-commitEvery.C:
 				size += batch.BatchSize()
 				if err := batch.CommitAndBegin(context.Background()); err != nil {
 					return 0, err
 				}
+			default:
 			}
-			stats.processed++
 		}
 		if batch.BatchSize() > 0 {
 			size += batch.BatchSize()
