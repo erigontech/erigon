@@ -183,7 +183,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, stateDB1, _, err := genesis.ToBlock(nil, history)
+		block, stateDB1, err := genesis.ToBlock(nil, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
 		}
@@ -256,10 +256,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, *state.TrieDbState, error) {
-	if db == nil {
-		db = ethdb.NewMemDatabase()
-	}
+func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
 	tds := state.NewTrieDbState(common.Hash{}, db, 0)
 
 	tds.StartNewBuffer()
@@ -284,17 +281,18 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
 			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
+			//fmt.Printf("Set inc 1 for addr %x\n", addr)
 		}
 	}
 	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	root := roots[len(roots)-1]
 	head := &types.Header{
@@ -317,22 +315,23 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 		head.Difficulty = params.GenesisDifficulty
 	}
 
-	return types.NewBlock(head, nil, nil, nil), statedb, tds, nil
+	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
 func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	batch := db.NewBatch()
-	block, statedb, tds, err := g.ToBlock(batch, history)
+	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
+	if dbErr != nil {
+		return nil, nil, dbErr
+	}
+	block, statedb, err := g.ToBlock(tx, history)
 	if err != nil {
 		return nil, nil, err
 	}
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
-	tds.SetBlockNr(0)
 
-	var blockWriter state.WriterWithChangeSets
-	blockWriter = tds.PlainStateWriter()
+	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -348,7 +347,7 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 		}
 	}
 
-	if _, err := batch.Commit(); err != nil {
+	if _, err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
 	return block, statedb, nil

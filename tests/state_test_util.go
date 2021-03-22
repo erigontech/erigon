@@ -175,11 +175,12 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, tds1, err := t.genesis(config).ToBlock(nil, false)
+	db := ethdb.NewMemDatabase()
+	block, _, err := t.genesis(config).ToBlock(db, false)
 	if err != nil {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	defer tds1.Database().Close()
+	defer db.Close()
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
