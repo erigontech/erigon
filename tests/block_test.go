@@ -31,10 +31,6 @@ func TestBlockchain(t *testing.T) {
 	// Skip random failures due to selfish mining test
 	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
 
-	// FIXME: unstable tests after Berlin rebase
-	//bt.skipLoad(`.*stSStoreTest/InitCollision\.json.*`)
-	bt.skipLoad(`.*stExtCodeHash/dynamicAccountOverwriteEmpty\.json.*`)
-
 	// Slow tests
 	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
 	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
