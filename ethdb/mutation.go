@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
