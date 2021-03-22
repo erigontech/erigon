@@ -266,7 +266,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 		if miningConfig.Enabled {
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
-				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, nil, nil, miningTransactions(tx, execToBlock), nil),
+				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, miningTransactions(tx, execToBlock), nil),
 			)
 			if err != nil {
 				panic(err)

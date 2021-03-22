@@ -550,7 +550,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
-		fmt.Printf("before everything?\n")
 		hashStateStageProgress, err := stages.GetStageProgress(d.stateDB, stages.HashState) // because later stages can be disabled
 		if err != nil {
 			return err
@@ -661,12 +660,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 		// heuristic - run mining only if we are on top of chain
 		canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
-		fmt.Printf("mining can start: %s, %t\n", time.Since(syncCycleStart), canRunMiningCycle)
 
 		if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
 			return nil
 		}
-		fmt.Printf("mining gogo\n")
 		if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
 			return err
 		}
@@ -688,7 +685,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				localTxs[account] = txs
 			}
 		}
-		fmt.Printf("mining prepare\n")
 
 		if d.miningState, err = d.mining.Prepare(
 			d,
@@ -707,15 +703,13 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			false,
-			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, true, nil, nil, localTxs, remoteTxs),
+			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, true, localTxs, remoteTxs),
 		); err != nil {
 			return err
 		}
-		fmt.Printf("mining run\n")
 		if err = d.miningState.Run(tx, tx); err != nil {
 			return err
 		}
-		fmt.Printf("mining after run\n")
 		tx.Rollback()
 		return nil
 	}

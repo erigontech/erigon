@@ -74,8 +74,8 @@ type MiningStagesParameters struct {
 	block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localUncles, remoteUncles map[common.Hash]*types.Block, localTxs, remoteTxs map[common.Address]types.Transactions) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localUncles: localUncles, remoteUncles: remoteUncles, localTxs: localTxs, remoteTxs: remoteTxs, block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localTxs, remoteTxs map[common.Address]types.Transactions) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localTxs: localTxs, remoteTxs: remoteTxs, block: &miningBlock{}}
 
 }
 
