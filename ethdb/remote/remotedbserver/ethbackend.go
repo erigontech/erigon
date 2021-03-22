@@ -140,3 +140,10 @@ func (s *EthBackendServer) GetHashRate(_ context.Context, req *remote.GetHashRat
 	}
 	return &remote.GetHashRateReply{HashRate: s.ethash.GetHashrate()}, nil
 }
+
+func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) (*remote.MiningReply, error) {
+	if s.ethash == nil {
+		return nil, errors.New("not supported, consensus engine is not ethash")
+	}
+	return &remote.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+}

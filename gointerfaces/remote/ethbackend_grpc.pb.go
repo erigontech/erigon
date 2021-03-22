@@ -3,11 +3,10 @@
 package remote
 
 import (
-	"context"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -44,6 +43,7 @@ type ETHBACKENDClient interface {
 	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
 	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
 	GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error)
+	Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -149,6 +149,15 @@ func (c *eTHBACKENDClient) GetHashRate(ctx context.Context, in *GetHashRateReque
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error) {
+	out := new(MiningReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Mining", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
@@ -178,6 +187,7 @@ type ETHBACKENDServer interface {
 	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
 	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
 	GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error)
+	Mining(context.Context, *MiningRequest) (*MiningReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -208,6 +218,9 @@ func (UnimplementedETHBACKENDServer) SubmitHashRate(context.Context, *SubmitHash
 }
 func (UnimplementedETHBACKENDServer) GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHashRate not implemented")
+}
+func (UnimplementedETHBACKENDServer) Mining(context.Context, *MiningRequest) (*MiningReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Mining not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -369,6 +382,24 @@ func _ETHBACKEND_GetHashRate_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_Mining_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MiningRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).Mining(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/Mining",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).Mining(ctx, req.(*MiningRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -403,6 +434,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetHashRate",
 			Handler:    _ETHBACKEND_GetHashRate_Handler,
+		},
+		{
+			MethodName: "Mining",
+			Handler:    _ETHBACKEND_Mining_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

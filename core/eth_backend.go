@@ -26,6 +26,7 @@ type ApiBackend interface {
 	NetVersion(ctx context.Context) (uint64, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 
+	Mining(ctx context.Context) (bool, error)
 	GetWork(ctx context.Context) ([4]string, error)
 	SubmitWork(ctx context.Context, nonce types.BlockNonce, hash, digest common.Hash) (bool, error)
 	SubmitHashRate(ctx context.Context, rate hexutil.Uint64, id common.Hash) (bool, error)
@@ -36,6 +37,7 @@ type EthBackend interface {
 	TxPool() *TxPool
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	IsMining() bool
 }
 
 type EthBackendImpl struct {
@@ -78,6 +80,9 @@ func (back *EthBackendImpl) SubmitHashRate(ctx context.Context, rate hexutil.Uin
 }
 func (back *EthBackendImpl) GetHashRate(ctx context.Context) (uint64, error) {
 	return back.ethash.GetHashrate(), nil
+}
+func (back *EthBackendImpl) Mining(ctx context.Context) (bool, error) {
+	return back.eth.IsMining(), nil
 }
 
 type RemoteBackend struct {
@@ -186,6 +191,18 @@ func (back *RemoteBackend) SubmitHashRate(ctx context.Context, rate hexutil.Uint
 		return false, err
 	}
 	return repl.Ok, err
+}
+
+func (back *RemoteBackend) Mining(ctx context.Context) (bool, error) {
+	repl, err := back.remoteEthBackend.Mining(ctx, &remote.MiningRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
+		return false, err
+	}
+	return repl.Enabled && repl.Running, err
+
 }
 
 func (back *RemoteBackend) GetHashRate(ctx context.Context) (uint64, error) {

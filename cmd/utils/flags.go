@@ -36,6 +36,7 @@ import (
 	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/spf13/pflag"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
@@ -831,6 +832,11 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 		cfg.UserIdent = identity
 	}
 }
+func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
+	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
+		cfg.UserIdent = *identity
+	}
+}
 
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
@@ -1172,6 +1178,32 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	}
 
 }
+func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
+	flags := cmd.Flags()
+	//SetP2PConfig(ctx, &cfg.P2P)
+	setNodeUserIdentCobra(flags, cfg)
+	setDataDirCobra(flags, cfg)
+	setSmartCardCobra(flags, cfg)
+
+	if v := flags.String(ExternalSignerFlag.Name, ExternalSignerFlag.Value, ExternalSignerFlag.Usage); v != nil {
+		cfg.ExternalSigner = *v
+	}
+	if v := flags.String(KeyStoreDirFlag.Name, KeyStoreDirFlag.Value.String(), KeyStoreDirFlag.Usage); v != nil {
+		cfg.KeyStoreDir = *v
+	}
+	if v := flags.Bool(LightKDFFlag.Name, false, LightKDFFlag.Usage); v != nil {
+		cfg.UseLightweightKDF = *v
+	}
+	if v := flags.Bool(NoUSBFlag.Name, false, NoUSBFlag.Usage); v != nil || cfg.NoUSB {
+		log.Warn("Option nousb is deprecated and USB is deactivated by default. Use --usb to enable")
+	}
+	if v := flags.Bool(USBFlag.Name, false, USBFlag.Usage); v != nil {
+		cfg.USB = *v
+	}
+	if v := flags.Bool(InsecureUnlockAllowedFlag.Name, false, InsecureUnlockAllowedFlag.Usage); v != nil {
+		cfg.InsecureUnlockAllowed = *v
+	}
+}
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
 	// Skip enabling smartcards if no path is set
@@ -1192,6 +1224,25 @@ func setSmartCard(ctx *cli.Context, cfg *node.Config) {
 	// Smartcard daemon path exists and is a socket, enable it
 	cfg.SmartCardDaemonPath = path
 }
+func setSmartCardCobra(f *pflag.FlagSet, cfg *node.Config) {
+	// Skip enabling smartcards if no path is set
+	path := f.String(SmartCardDaemonPathFlag.Name, SmartCardDaemonPathFlag.Value, SmartCardDaemonPathFlag.Usage)
+	if path == nil || *path == "" {
+		return
+	}
+	// Sanity check that the smartcard path is valid
+	fi, err := os.Stat(*path)
+	if err != nil {
+		log.Info("Smartcard socket not found, disabling", "err", err)
+		return
+	}
+	if fi.Mode()&os.ModeType != os.ModeSocket {
+		log.Error("Invalid smartcard daemon path", "path", *path, "type", fi.Mode().String())
+		return
+	}
+	// Smartcard daemon path exists and is a socket, enable it
+	cfg.SmartCardDaemonPath = *path
+}
 
 func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	switch {
@@ -1204,6 +1255,25 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	case ctx.GlobalBool(GoerliFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
 	case ctx.GlobalBool(YoloV3Flag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
+	}
+}
+func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
+	dirname := f.String(DataDirFlag.Name, DataDirFlag.Value.String(), DataDirFlag.Usage)
+	dev := f.Bool(DeveloperFlag.Name, false, DeveloperFlag.Usage)
+	rinkeby := f.Bool(RinkebyFlag.Name, false, RinkebyFlag.Usage)
+	goerli := f.Bool(GoerliFlag.Name, false, GoerliFlag.Usage)
+	yolov3 := f.Bool(YoloV3Flag.Name, false, YoloV3Flag.Usage)
+	switch {
+	case dirname != nil:
+		cfg.DataDir = *dirname
+	case dev != nil:
+		cfg.DataDir = "" // unless explicitly requested, use memory databases
+	case rinkeby != nil && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
+	case goerli != nil && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
+	case yolov3 != nil && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
 	}
 }
@@ -1225,6 +1295,17 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 	}
 	if ctx.GlobalIsSet(GpoMaxGasPriceFlag.Name) {
 		cfg.MaxPrice = big.NewInt(ctx.GlobalInt64(GpoMaxGasPriceFlag.Name))
+	}
+}
+func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config, light bool) {
+	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
+		cfg.Blocks = *v
+	}
+	if v := f.Int(GpoPercentileFlag.Name, GpoPercentileFlag.Value, GpoPercentileFlag.Usage); v != nil {
+		cfg.Percentile = *v
+	}
+	if v := f.Int64(GpoMaxGasPriceFlag.Name, GpoMaxGasPriceFlag.Value, GpoMaxGasPriceFlag.Usage); v != nil {
+		cfg.MaxPrice = big.NewInt(*v)
 	}
 }
 
@@ -1289,7 +1370,12 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
-func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
+func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.MiningConfig) {
+	var ks *keystore.KeyStore
+	if keystores := am.Backends(keystore.KeyStoreType); len(keystores) > 0 {
+		ks = keystores[0].(*keystore.KeyStore)
+	}
+
 	flags := cmd.Flags()
 	var err error
 	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
@@ -1334,21 +1420,18 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 
-	//TODO: need add keystore support - see method setEtherbase
-	/*
-		// Convert the etherbase into an address and configure it
-		if etherbase != "" {
-			if ks != nil {
-				account, err := MakeAddress(ks, etherbase)
-				if err != nil {
-					Fatalf("Invalid miner etherbase: %v", err)
-				}
-				cfg.Etherbase = account.Address
-			} else {
-				Fatalf("No etherbase configured")
+	// Convert the etherbase into an address and configure it
+	if etherbase != "" {
+		if ks != nil {
+			account, err := MakeAddress(ks, etherbase)
+			if err != nil {
+				Fatalf("Invalid miner etherbase: %v", err)
 			}
+			cfg.Etherbase = account.Address
+		} else {
+			Fatalf("No etherbase configured")
 		}
-	*/
+	}
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 

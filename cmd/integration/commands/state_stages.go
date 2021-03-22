@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/spf13/cobra"
 )
@@ -46,8 +47,18 @@ Examples:
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
+		cfg := &node.DefaultConfig
+		utils.SetNodeConfigCobra(cmd, cfg)
+		accManagerConf, err := cfg.AccountConfig()
+		if err != nil {
+			return err
+		}
+		am, _, err := node.MakeAccountManager(accManagerConf)
+		if err != nil {
+			return err
+		}
 		miningConfig := &params.MiningConfig{}
-		utils.SetupMinerCobra(cmd, miningConfig)
+		utils.SetupMinerCobra(cmd, am, miningConfig)
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err

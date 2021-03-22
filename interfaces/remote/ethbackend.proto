@@ -39,6 +39,7 @@ service ETHBACKEND {
 
   // GetHashRate returns the current hashrate for local CPU miner and remote miner.
   rpc GetHashRate(GetHashRateRequest) returns (GetHashRateReply);
+  rpc Mining(MiningRequest) returns (MiningReply);
 }
 
 message TxRequest { bytes signedtx = 1; }
@@ -90,4 +91,10 @@ message SubmitHashRateReply {
 message GetHashRateRequest {}
 message GetHashRateReply {
   uint64 hashRate = 1;
+}
+
+message MiningRequest {}
+message MiningReply {
+  bool enabled = 1;
+  bool running = 2;
 }
