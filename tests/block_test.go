@@ -32,7 +32,7 @@ func TestBlockchain(t *testing.T) {
 	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
 
 	// FIXME: unstable tests after Berlin rebase
-	bt.skipLoad(`.*stSStoreTest/InitCollision\.json.*`)
+	//bt.skipLoad(`.*stSStoreTest/InitCollision\.json.*`)
 	bt.skipLoad(`.*stExtCodeHash/dynamicAccountOverwriteEmpty\.json.*`)
 
 	// Slow tests

@@ -347,7 +347,7 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 		}
 	}
 
-	if _, err := tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
 	return block, statedb, nil
