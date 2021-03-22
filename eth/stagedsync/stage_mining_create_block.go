@@ -56,19 +56,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 
 	blockNum := executionAt + 1
 
-	localUncles := map[common.Hash]*types.Header{}
-	remoteUncles := map[common.Hash]*types.Header{}
-	nonCanonicalBlocks, err := readNonCanonicalHeaders(tx, blockNum)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
-	}
-	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
-			localUncles[u.Hash()] = u
-		} else {
-			remoteUncles[u.Hash()] = u
-		}
-
 	}
 	chain := ChainReader{chainConfig, tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
@@ -233,6 +223,19 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	return nil
 }
 
-func readNonCanonicalHeaders(tx ethdb.Getter, blockNum uint64) ([]*types.Header, error) {
-	return rawdb.ReadHeadersByNumber(tx, blockNum)
+func readNonCanonicalHeaders(tx ethdb.Getter, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
+	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
+	if err != nil {
+		return
+	}
+	for _, u := range nonCanonicalBlocks {
+		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+			localUncles[u.Hash()] = u
+		} else {
+			remoteUncles[u.Hash()] = u
+		}
+
+	}
+	return
 }
