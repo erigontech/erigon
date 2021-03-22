@@ -117,7 +117,7 @@ type DbWithPendingMutations interface {
 	// ... some calculations on `tx`
 	// tx.Commit()
 	//
-	Commit() (uint64, error)
+	Commit() error
 
 	// CommitAndBegin - commits and starts new transaction inside same db object.
 	// useful for periodical commits implementation.

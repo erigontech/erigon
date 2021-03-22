@@ -399,7 +399,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
-		if _, err1 = tx.Commit(); err1 != nil {
+		if err1 = tx.Commit(); err1 != nil {
 			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 		}
 		return false, nil // No change of the chain
@@ -445,7 +445,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-	if _, err1 = tx.Commit(); err1 != nil {
+	if err1 = tx.Commit(); err1 != nil {
 		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 	}
 	return true, nil

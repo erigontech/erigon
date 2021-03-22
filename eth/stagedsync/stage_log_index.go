@@ -65,7 +65,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -226,7 +226,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

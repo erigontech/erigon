@@ -60,7 +60,7 @@ func HeadersForward(
 			return err
 		}
 		if !useExternalTx {
-			if _, err = tx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				return err
 			}
 		}
@@ -165,11 +165,11 @@ func HeadersForward(
 			s.Done()
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -234,7 +234,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

@@ -122,7 +122,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 		return err
 	}
 	log.Info("Copy contract code end", "t", time.Since(tt))
-	_, err = sndb.Commit()
+	err = sndb.Commit()
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 		return err
 	}
 	log.Info("Copy code end", "t", time.Since(tt))
-	_, err = sndb.Commit()
+	err = sndb.Commit()
 	if err != nil {
 		return err
 	}

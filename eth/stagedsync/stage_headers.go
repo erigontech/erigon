@@ -268,7 +268,7 @@ Error: %v
 			return false, false, 0, fmt.Errorf("[%s] failed to write head header hash: %w", logPrefix, err)
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return false, false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
 	}
 	// Report some public statistics so the user has a clue what's going on

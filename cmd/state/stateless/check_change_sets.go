@@ -215,7 +215,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	}
 	if writeReceipts {
 		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
-		if _, err := batch.Commit(); err != nil {
+		if err := batch.Commit(); err != nil {
 			return err
 		}
 	}

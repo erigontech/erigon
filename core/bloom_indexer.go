@@ -87,7 +87,7 @@ func (b *BloomIndexer) Commit(blockNr uint64) error {
 			rawdb.WriteBloomBits(batch, uint(i), b.section, b.head, bitutil.CompressBytes(bits))
 		}
 	}
-	_, err := batch.Commit()
+	err := batch.Commit()
 	return err
 }
 

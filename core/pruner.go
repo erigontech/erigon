@@ -200,7 +200,7 @@ func batchDelete(db ethdb.Database, keys *keysToRemove) error {
 				continue
 			}
 		}
-		_, err := batch.Commit()
+		err := batch.Commit()
 		if err != nil {
 			return err
 		}

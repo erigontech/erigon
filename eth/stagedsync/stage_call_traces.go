@@ -69,7 +69,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -266,7 +266,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}

@@ -628,7 +628,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 			log.Info("Commit cycle")
-			_, errCommit := tx.Commit()
+			errCommit := tx.Commit()
 			return errCommit
 		})
 
@@ -642,7 +642,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 
 			commitStart := time.Now()
-			_, errTx := tx.Commit()
+			errTx := tx.Commit()
 			if errTx == nil {
 				log.Info("Commit cycle", "in", time.Since(commitStart))
 			}
@@ -1873,7 +1873,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 			index = len(results)
 		}
 		if err == nil {
-			if _, err1 := tx.Commit(); err1 != nil {
+			if err1 := tx.Commit(); err1 != nil {
 				return 0, err1
 			}
 		} else {

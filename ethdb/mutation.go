@@ -209,7 +209,7 @@ func (m *mutation) Delete(table string, k, v []byte) error {
 }
 
 func (m *mutation) CommitAndBegin(ctx context.Context) error {
-	_, err := m.Commit()
+	err := m.Commit()
 	return err
 }
 
@@ -275,27 +275,27 @@ func (m *mutation) doCommit(tx RwTx) error {
 	return innerErr
 }
 
-func (m *mutation) Commit() (uint64, error) {
+func (m *mutation) Commit() error {
 	if m.db == nil {
-		return 0, nil
+		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if tx, ok := m.db.(HasTx); ok {
 		if err := m.doCommit(tx.Tx().(RwTx)); err != nil {
-			return 0, err
+			return err
 		}
 	} else {
 		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
-			return 0, err
+			return err
 		}
 	}
 
 	m.puts.Clear(false /* addNodesToFreelist */)
 	m.size = 0
-	return 0, nil
+	return nil
 }
 
 func (m *mutation) Rollback() {

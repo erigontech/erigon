@@ -1010,7 +1010,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		}
 		if batch.BatchSize() > 0 {
 			size += batch.BatchSize()
-			if _, err := batch.Commit(); err != nil {
+			if err := batch.Commit(); err != nil {
 				return 0, err
 			}
 		}

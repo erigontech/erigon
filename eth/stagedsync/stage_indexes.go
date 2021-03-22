@@ -61,7 +61,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -108,7 +108,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -236,7 +236,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -268,7 +268,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
