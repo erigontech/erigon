@@ -64,9 +64,8 @@ type MiningStagesParameters struct {
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
-	noempty                   bool
-	localUncles, remoteUncles map[common.Hash]*types.Block
-	localTxs, remoteTxs       map[common.Address]types.Transactions
+	noempty             bool
+	localTxs, remoteTxs map[common.Address]types.Transactions
 
 	mux *event.TypeMux // Event multiplexer to announce sync operation events
 

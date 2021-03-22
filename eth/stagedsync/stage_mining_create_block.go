@@ -233,6 +233,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	return nil
 }
 
-func readNonCanonicalHeaders(tx ethdb.Database, blockNum uint64) ([]*types.Header, error) {
+func readNonCanonicalHeaders(tx ethdb.Getter, blockNum uint64) ([]*types.Header, error) {
 	return rawdb.ReadHeadersByNumber(tx, blockNum)
 }
