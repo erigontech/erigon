@@ -104,7 +104,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if err = env.SetMaxDBs(100); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, 512); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, 1024); err != nil {
 		return nil, err
 	}
 
