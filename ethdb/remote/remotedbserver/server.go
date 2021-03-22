@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
