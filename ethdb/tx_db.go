@@ -15,7 +15,7 @@ import (
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
-// you can put unlimited amount of data into this class, call IdealBatchSize is unnecessary
+// you can put unlimited amount of data into this class
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db      Database
@@ -220,11 +220,6 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 
 func (m *TxDb) BatchSize() int {
 	return int(m.len)
-}
-
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (m *TxDb) IdealBatchSize() int {
-	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {

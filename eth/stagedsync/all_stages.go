@@ -95,7 +95,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
+								BatchSize:             world.BatchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
@@ -106,7 +106,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
-							BatchSize:             world.batchSize,
+							BatchSize:             world.BatchSize,
 							ChangeSetHook:         world.changeSetHook,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
@@ -244,14 +244,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 				}

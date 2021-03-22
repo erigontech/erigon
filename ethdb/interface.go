@@ -87,9 +87,6 @@ type Database interface {
 	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
-	// IdealBatchSize defines the size of the data batches should ideally add in one write.
-	IdealBatchSize() int
-
 	Keys() ([][]byte, error)
 
 	Append(bucket string, key, value []byte) error

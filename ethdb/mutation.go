@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -193,11 +192,6 @@ func (m *mutation) BatchSize() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.size
-}
-
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (m *mutation) IdealBatchSize() int {
-	return int(512 * datasize.MB)
 }
 
 // WARNING: Merged mem/DB walk is not implemented

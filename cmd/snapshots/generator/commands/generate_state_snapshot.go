@@ -85,6 +85,9 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	i := 0
 	t := time.Now()
 	tt := time.Now()
+	commitEvery := time.NewTicker(30 * time.Second)
+	defer commitEvery.Stop()
+
 	err = state.WalkAsOfAccounts(tx, common.Address{}, toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
 		if i%100000 == 0 {
@@ -93,8 +96,14 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			select {
 			case <-ctx.Done():
 				return false, errors.New("interrupted")
+			case <-commitEvery.C:
+				ttt := time.Now()
+				innerErr := mt.CommitAndBegin(context.Background())
+				if innerErr != nil {
+					return false, innerErr
+				}
+				fmt.Println("Committed", time.Since(ttt))
 			default:
-
 			}
 		}
 		if len(k) != 20 {
@@ -155,14 +164,6 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			return false, innerErr
 		}
 
-		if mt.BatchSize() >= mt.IdealBatchSize() {
-			ttt := time.Now()
-			innerErr = mt.CommitAndBegin(context.Background())
-			if innerErr != nil {
-				return false, innerErr
-			}
-			fmt.Println("Committed", time.Since(ttt))
-		}
 		return true, nil
 	})
 	if err != nil {
