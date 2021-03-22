@@ -183,9 +183,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, stateDB1, err := genesis.ToBlock(nil, history)
-		if err != nil {
-			return genesis.Config, common.Hash{}, nil, err
+		block, stateDB1, err1 := genesis.ToBlock(nil, history)
+		if err1 != nil {
+			return genesis.Config, common.Hash{}, nil, err1
 		}
 		hash := block.Hash()
 		if hash != stored {
