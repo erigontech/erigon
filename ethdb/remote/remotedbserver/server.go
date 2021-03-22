@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -49,10 +50,10 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
-	//cpus := uint32(runtime.GOMAXPROCS(-1))
+	cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
-		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
+		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
 		grpc.MaxConcurrentStreams(1000), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
