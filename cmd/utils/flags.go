@@ -1297,6 +1297,8 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 		cfg.MaxPrice = big.NewInt(ctx.GlobalInt64(GpoMaxGasPriceFlag.Name))
 	}
 }
+
+//nolint
 func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config, light bool) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
