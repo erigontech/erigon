@@ -48,7 +48,11 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 }
 
 func MustOpen(path string) *ObjectDatabase {
-	db, err := Open(path, false)
+	return NewObjectDatabase(MustOpenKV(path))
+}
+
+func MustOpenKV(path string) KV {
+	db, err := OpenKV(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +61,7 @@ func MustOpen(path string) *ObjectDatabase {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string, readOnly bool) (*ObjectDatabase, error) {
+func OpenKV(path string, readOnly bool) (KV, error) {
 	var kv KV
 	var err error
 	testDB := debug.TestDB()
@@ -77,6 +81,15 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
+	return kv, nil
+}
+
+func Open(path string, readOnly bool) (*ObjectDatabase, error) {
+	kv, kvErr := OpenKV(path, readOnly)
+	if kvErr != nil {
+		return nil, kvErr
+	}
+
 	return NewObjectDatabase(kv), nil
 }
 
@@ -380,23 +393,6 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i3], t[j3] = t[j3], t[i3]
 	t[i3+1], t[j3+1] = t[j3+1], t[i3+1]
 	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
-}
-
-func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
-	// Retrieve the key and increment the miss counter if not found
-	var dat []byte
-	v, err := tx.GetOne(bucket, key)
-	if err != nil {
-		return nil, err
-	}
-	if v != nil {
-		dat = make([]byte, len(v))
-		copy(dat, v)
-	}
-	if dat == nil {
-		return nil, ErrKeyNotFound
-	}
-	return dat, err
 }
 
 func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
