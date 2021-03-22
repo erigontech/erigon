@@ -344,7 +344,7 @@ func (db *MdbxKV) CollectMetrics() {
 		tableGcEntries.Update(int64(stat.Entries))
 		return nil
 	}); err != nil {
-		panic(err)
+		log.Error("collecting metrics failed", "err", err)
 	}
 }
 
