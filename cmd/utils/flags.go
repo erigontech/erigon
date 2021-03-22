@@ -1371,11 +1371,6 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 }
 
 func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.MiningConfig) {
-	var ks *keystore.KeyStore
-	if keystores := am.Backends(keystore.KeyStoreType); len(keystores) > 0 {
-		ks = keystores[0].(*keystore.KeyStore)
-	}
-
 	flags := cmd.Flags()
 	var err error
 	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
@@ -1418,6 +1413,11 @@ func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.Minin
 	etherbase, err = flags.GetString(MinerEtherbaseFlag.Name)
 	if err != nil {
 		panic(err)
+	}
+
+	var ks *keystore.KeyStore
+	if keystores := am.Backends(keystore.KeyStoreType); len(keystores) > 0 {
+		ks = keystores[0].(*keystore.KeyStore)
 	}
 
 	// Convert the etherbase into an address and configure it
