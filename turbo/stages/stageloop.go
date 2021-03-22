@@ -121,7 +121,7 @@ func StageLoop(
 				return nil
 			}
 			log.Info("Commit cycle")
-			_, errCommit := tx.Commit()
+			errCommit := tx.Commit()
 			return errCommit
 		})
 
@@ -132,7 +132,7 @@ func StageLoop(
 		if canRunCycleInOneTransaction {
 			if hasTx, ok := tx.(ethdb.HasTx); !ok || hasTx.Tx() != nil {
 				commitStart := time.Now()
-				_, errTx := tx.Commit()
+				errTx := tx.Commit()
 				if errTx == nil {
 					log.Info("Commit cycle", "in", time.Since(commitStart))
 				} else {

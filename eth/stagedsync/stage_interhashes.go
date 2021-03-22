@@ -83,7 +83,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 	}
 
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -449,7 +449,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		return fmt.Errorf("%s: reset: %w", logPrefix, err)
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -546,7 +546,7 @@ func ResetHashState(db ethdb.Database) error {
 	if err := stages.SaveStageUnwind(batch, stages.HashState, 0); err != nil {
 		return err
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return err
 	}
 
@@ -567,7 +567,7 @@ func ResetIH(db ethdb.Database) error {
 	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return err
 	}
 

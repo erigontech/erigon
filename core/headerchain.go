@@ -593,7 +593,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		}
 		// Update head header then.
 		rawdb.WriteHeadHeaderHash(markerBatch, parentHash)
-		if _, err := markerBatch.Commit(); err != nil {
+		if err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to update chain markers", "error", err)
 		}
 		hc.currentHeader.Store(parent)
@@ -633,7 +633,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 			}
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		panic(err)
 	}
 }

@@ -169,7 +169,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	if err != nil {
 		return err
 	}
-	_, err = mt.Commit()
+	err = mt.Commit()
 	if err != nil {
 		return err
 	}

@@ -45,7 +45,7 @@ func (bw *bucketWriter) walker(k, v []byte) (bool, error) {
 	bw.written++
 
 	if bw.pending.BatchSize() >= 100000 {
-		if _, err := bw.pending.Commit(); err != nil {
+		if err := bw.pending.Commit(); err != nil {
 			return false, err
 		}
 
@@ -61,7 +61,7 @@ func (bw *bucketWriter) commit() error {
 	defer bw.printStats()
 
 	if bw.pending != nil {
-		_, err := bw.pending.Commit()
+		err := bw.pending.Commit()
 		return err
 	}
 

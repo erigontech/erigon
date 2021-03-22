@@ -160,7 +160,7 @@ func BodiesForward(
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if headSet {
@@ -176,7 +176,7 @@ func BodiesForward(
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

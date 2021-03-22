@@ -335,7 +335,7 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {
-	_, err := m.Commit()
+	err := m.Commit()
 	if err != nil {
 		return err
 	}
@@ -348,21 +348,21 @@ func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 	return m.begin(ctx, m.txFlags)
 }
 
-func (m *TxDb) Commit() (uint64, error) {
+func (m *TxDb) Commit() error {
 	if metrics.Enabled {
 		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
 	}
 
 	if m.tx == nil {
-		return 0, fmt.Errorf("second call .Commit() on same transaction")
+		return fmt.Errorf("second call .Commit() on same transaction")
 	}
 	if err := m.tx.Commit(context.Background()); err != nil {
-		return 0, err
+		return err
 	}
 	m.tx = nil
 	m.cursors = nil
 	m.len = 0
-	return 0, nil
+	return nil
 }
 
 func (m *TxDb) Rollback() {

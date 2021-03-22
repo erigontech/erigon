@@ -378,7 +378,7 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	if err = tds.UnwindTo(50); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = mutDB.Commit(); err != nil {
+	if err = mutDB.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	a, err = tds.ReadAccountData(addr)

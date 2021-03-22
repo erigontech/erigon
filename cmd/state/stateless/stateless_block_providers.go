@@ -153,7 +153,7 @@ func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
 	rawdb.WriteHeader(context.TODO(), p.batch, h)
 
 	if p.batch.BatchSize() > 1000 {
-		if _, err := p.batch.Commit(); err != nil {
+		if err := p.batch.Commit(); err != nil {
 			panic(fmt.Errorf("error writing headers: %w", err))
 		}
 		p.batch = nil
