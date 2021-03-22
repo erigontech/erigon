@@ -97,7 +97,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 	if err != nil {
 		return nil, err
 	}
-	err = env.SetMaxReaders(1024)
+	err = env.SetMaxReaders(2048)
 	if err != nil {
 		return nil, err
 	}
