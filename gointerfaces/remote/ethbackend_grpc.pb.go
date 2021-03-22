@@ -43,6 +43,7 @@ type ETHBACKENDClient interface {
 	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
 	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
 	GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error)
+	// Mining returns an indication if this node is currently mining and it's mining configuration
 	Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error)
 }
 
@@ -187,6 +188,7 @@ type ETHBACKENDServer interface {
 	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
 	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
 	GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error)
+	// Mining returns an indication if this node is currently mining and it's mining configuration
 	Mining(context.Context, *MiningRequest) (*MiningReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }

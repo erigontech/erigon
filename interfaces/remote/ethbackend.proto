@@ -39,6 +39,8 @@ service ETHBACKEND {
 
   // GetHashRate returns the current hashrate for local CPU miner and remote miner.
   rpc GetHashRate(GetHashRateRequest) returns (GetHashRateReply);
+
+  // Mining returns an indication if this node is currently mining and it's mining configuration
   rpc Mining(MiningRequest) returns (MiningReply);
 }
 

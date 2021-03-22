@@ -18,11 +18,9 @@ func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
 	return api.ethBackend.GetHashRate(ctx)
 }
 
-// Mining implements eth_mining. Returns true if client is actively mining new blocks.
-func (api *APIImpl) Mining(_ context.Context) (bool, error) {
-	// ethstats needs this method, and even though we don't support mining,
-	// we can easily say that we don't do that.
-	return false, nil
+// Mining returns an indication if this node is currently mining.
+func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
+	return api.ethBackend.Mining(ctx)
 }
 
 // GetWork returns a work package for external miner.
