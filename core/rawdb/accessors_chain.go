@@ -223,6 +223,22 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
+// ReadHeadersByNumber retrieves all the block header corresponding to the number.
+func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error) {
+	var res []*types.Header
+	if err := db.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(number), 8*8, func(k, v []byte) (bool, error) {
+		header := new(types.Header)
+		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+			return false, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+		}
+		res = append(res, header)
+		return true, nil
+	}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
 func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {

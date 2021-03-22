@@ -56,14 +56,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 
 	blockNum := executionAt + 1
 
-	localUncles := map[common.Hash]*types.Block{}
-	remoteUncles := map[common.Hash]*types.Block{}
-	nonCanonicalBlocks, err := readNonCanonicalBlocks(tx, blockNum)
+	localUncles := map[common.Hash]*types.Header{}
+	remoteUncles := map[common.Hash]*types.Header{}
+	nonCanonicalBlocks, err := readNonCanonicalHeaders(tx, blockNum)
 	if err != nil {
 		return err
 	}
 	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u.Header()) {
+		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u
@@ -173,7 +173,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 			if !exist {
 				return false
 			}
-			uncles = append(uncles, uncle.Header())
+			uncles = append(uncles, uncle)
 			return false
 		})
 		return uncles
@@ -207,10 +207,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	// Accumulate the miningUncles for the env block
 	// Prefer to locally generated uncle
 	uncles := make([]*types.Header, 0, 2)
-	for _, blocks := range []map[common.Hash]*types.Block{localUncles, remoteUncles} {
+	for _, blocks := range []map[common.Hash]*types.Header{localUncles, remoteUncles} {
 		// Clean up stale uncle blocks first
 		for hash, uncle := range blocks {
-			if uncle.NumberU64()+staleThreshold <= header.Number.Uint64() {
+			if uncle.Number.Uint64()+staleThreshold <= header.Number.Uint64() {
 				delete(blocks, hash)
 			}
 		}
@@ -218,11 +218,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 			if len(uncles) == 2 {
 				break
 			}
-			if err = commitUncle(env, uncle.Header()); err != nil {
+			if err = commitUncle(env, uncle); err != nil {
 				log.Trace("Possible uncle rejected", "hash", hash, "reason", err)
 			} else {
 				log.Debug("Committing new uncle to block", "hash", hash)
-				uncles = append(uncles, uncle.Header())
+				uncles = append(uncles, uncle)
 			}
 		}
 	}
@@ -233,7 +233,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	return nil
 }
 
-func readNonCanonicalBlocks(tx ethdb.Database, blockNum uint64) ([]*types.Block, error) {
-	//todo: implement me
-	return nil, nil
+func readNonCanonicalHeaders(tx ethdb.Database, blockNum uint64) ([]*types.Header, error) {
+	return rawdb.ReadHeadersByNumber(tx, blockNum)
 }
