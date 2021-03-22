@@ -49,8 +49,3 @@ func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powH
 func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error) {
 	return api.ethBackend.SubmitHashRate(ctx, hashRate, id)
 }
-
-// GetHashrate returns the current hashrate for local CPU miner and remote miner.
-func (api *APIImpl) GetHashrate(ctx context.Context) (uint64, error) {
-	return api.ethBackend.GetHashRate(ctx)
-}
