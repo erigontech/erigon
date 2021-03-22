@@ -19,7 +19,7 @@ import (
 //TODO:
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs map[common.Address]types.Transactions, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs *types.TransactionsByPriceAndNonce, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
@@ -180,20 +180,18 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
-	if len(localTxs) == 0 && len(remoteTxs) == 0 && !noempty {
+	if localTxs.Empty() && remoteTxs.Empty() && !noempty {
 		s.Done()
 		return nil
 	}
 
-	if len(localTxs) > 0 {
-		txs := types.NewTransactionsByPriceAndNonce(signer, localTxs)
-		if commitTransactions(current, txs, coinbase) {
+	if !localTxs.Empty() {
+		if commitTransactions(current, localTxs, coinbase) {
 			return common.ErrStopped
 		}
 	}
-	if len(remoteTxs) > 0 {
-		txs := types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
-		if commitTransactions(current, txs, coinbase) {
+	if !remoteTxs.Empty() {
+		if commitTransactions(current, remoteTxs, coinbase) {
 			return common.ErrStopped
 		}
 	}

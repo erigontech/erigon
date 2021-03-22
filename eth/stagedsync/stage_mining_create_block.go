@@ -28,13 +28,16 @@ type miningBlock struct {
 	uncles   []*types.Header
 	txs      []*types.Transaction
 	receipts types.Receipts
+
+	localTxs  *types.TransactionsByPriceAndNonce
+	remoteTxs *types.TransactionsByPriceAndNonce
 }
 
 // SpawnMiningCreateBlockStage
 //TODO:
 // - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -53,6 +56,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if parent == nil { // todo: how to return error and don't stop TG?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
+	signer := types.NewEIP155Signer(chainConfig.ChainID)
 
 	blockNum := executionAt + 1
 
@@ -219,6 +223,17 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 
 	current.header = header
 	current.uncles = makeUncles(env.uncles)
+
+	// Split the pending transactions into locals and remotes
+	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pendingTxs
+	for _, account := range txPoolLocals {
+		if txs := remoteTxs[account]; len(txs) > 0 {
+			delete(remoteTxs, account)
+			localTxs[account] = txs
+		}
+	}
+	current.localTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
+	current.remoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
 	s.Done()
 	return nil
 }

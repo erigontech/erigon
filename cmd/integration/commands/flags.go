@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
@@ -96,6 +97,13 @@ func withReset(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withDatadir2(cmd *cobra.Command) {
+	cmd.Flags().String(utils.DataDirFlag.Name, utils.DataDirFlag.Value.String(), utils.DataDirFlag.Usage)
+	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
+	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func withDatadir(cmd *cobra.Command) {

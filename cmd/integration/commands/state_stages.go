@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -25,7 +26,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
+	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -40,25 +43,25 @@ Examples:
 --block # Stop at exact blocks
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
-	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
+	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
-		//cfg := &node.DefaultConfig
-		//utils.SetNodeConfigCobra(cmd, cfg)
-		//turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
-		//accManagerConf, err := cfg.AccountConfig()
-		//if err != nil {
-		//	return err
-		//}
-		//am, _, err := node.MakeAccountManager(accManagerConf)
-		//if err != nil {
-		//	return err
-		//}
-		miningConfig := &params.MiningConfig{}
-		//utils.SetupMinerCobra(cmd, am, miningConfig)
 
-		//db := openDatabase(path.Join(cfg.DataDir, "tg", "chaindata"), true)
-		db := openDatabase(chaindata, true)
+		ctx := utils.RootContext()
+		cfg := &node.DefaultConfig
+		utils.SetNodeConfigCobra(cmd, cfg)
+		ethConfig := &ethconfig.Defaults
+		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
+		accManagerConf, err := cfg.AccountConfig()
+		if err != nil {
+			return err
+		}
+		am, _, err := node.MakeAccountManager(accManagerConf)
+		if err != nil {
+			return err
+		}
+		miningConfig := &params.MiningConfig{}
+		utils.SetupMinerCobra(cmd, am, miningConfig)
+		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -114,12 +117,13 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	withChaindata(stateStags)
+	//withChaindata(stateStags)
+	withDatadir2(stateStags)
 	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	withBatchSize(stateStags)
+	//withBatchSize(stateStags)
 	withIntegrityChecks(stateStags)
 	withMining(stateStags)
 
@@ -164,7 +168,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 	}
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	sm, cc, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
@@ -265,8 +269,10 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 		if miningConfig.Enabled {
+			unordered, ordered := miningTransactions(tx, execToBlock)
+			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
-				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, miningTransactions(tx, execToBlock), nil),
+				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered),
 			)
 			if err != nil {
 				panic(err)
@@ -355,7 +361,7 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func miningTransactions(tx ethdb.Getter, blockNum uint64) map[common.Address]types.Transactions {
+func miningTransactions(tx ethdb.Getter, blockNum uint64) (map[common.Address]types.Transactions, types.Transactions) {
 	nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		panic(err)
@@ -365,12 +371,12 @@ func miningTransactions(tx ethdb.Getter, blockNum uint64) map[common.Address]typ
 	for i, txn := range nextBlock.Transactions() {
 		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
 	}
-	return localTxs
+	return localTxs, nextBlock.Transactions()
 }
 
 func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	_, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)
@@ -435,7 +441,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 
 func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	cc, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)

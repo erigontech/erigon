@@ -64,8 +64,8 @@ type MiningStagesParameters struct {
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
-	noempty             bool
-	localTxs, remoteTxs map[common.Address]types.Transactions
+	noempty    bool
+	pendingTxs map[common.Address]types.Transactions
 
 	mux *event.TypeMux // Event multiplexer to announce sync operation events
 
@@ -73,8 +73,8 @@ type MiningStagesParameters struct {
 	block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, localTxs, remoteTxs map[common.Address]types.Transactions) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, localTxs: localTxs, remoteTxs: remoteTxs, block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, pendingTxs map[common.Address]types.Transactions) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, pendingTxs: pendingTxs, block: &miningBlock{}}
 
 }
 
@@ -421,6 +421,7 @@ func MiningStages() StageBuilders {
 							world.mining.GasCeil,
 							world.mining.Etherbase,
 							world.txPool.Locals(),
+							world.mining.pendingTxs,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -439,8 +440,8 @@ func MiningStages() StageBuilders {
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.mining.localTxs,
-							world.mining.remoteTxs,
+							world.mining.block.localTxs,
+							world.mining.block.remoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)

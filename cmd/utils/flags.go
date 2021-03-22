@@ -1259,14 +1259,17 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
-	dirname := f.String(DataDirFlag.Name, DataDirFlag.Value.String(), DataDirFlag.Usage)
+	dirname, err := f.GetString(DataDirFlag.Name)
+	if err != nil {
+		panic(err)
+	}
 	dev := f.Bool(DeveloperFlag.Name, false, DeveloperFlag.Usage)
 	rinkeby := f.Bool(RinkebyFlag.Name, false, RinkebyFlag.Usage)
 	goerli := f.Bool(GoerliFlag.Name, false, GoerliFlag.Usage)
 	yolov3 := f.Bool(YoloV3Flag.Name, false, YoloV3Flag.Usage)
 	switch {
-	case dirname != nil:
-		cfg.DataDir = *dirname
+	case dirname != "":
+		cfg.DataDir = dirname
 	case dev != nil:
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
 	case rinkeby != nil && cfg.DataDir == node.DefaultDataDir():

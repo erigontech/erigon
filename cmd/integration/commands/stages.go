@@ -404,7 +404,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 func stageTrie(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	_, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, tx, nil)
@@ -764,14 +764,10 @@ func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig
 	return params.MainnetChainConfig, blockchain, nil
 }
 
-func SetSnapshotKV(db ethdb.Database, snapshotDir, snapshotMode string) error {
-	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			panic(err)
-		}
-
+func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.SnapshotMode) error {
+	if len(snapshotDir) > 0 {
 		snapshotKV := db.(ethdb.HasKV).KV()
+		var err error
 		snapshotKV, err = snapshotsync.WrapBySnapshotsFromDir(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err

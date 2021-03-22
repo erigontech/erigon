@@ -677,14 +677,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if err != nil {
 			return fmt.Errorf("failed to fetch pending transactions: %w", err)
 		}
-		// Split the pending transactions into locals and remotes
-		localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
-		for _, account := range txPool.Locals() {
-			if txs := remoteTxs[account]; len(txs) > 0 {
-				delete(remoteTxs, account)
-				localTxs[account] = txs
-			}
-		}
 
 		if d.miningState, err = d.mining.Prepare(
 			d,
@@ -703,7 +695,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			false,
-			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, true, localTxs, remoteTxs),
+			stagedsync.NewMiningStagesParameters(d.miningConfig, d.mux, true, pending),
 		); err != nil {
 			return err
 		}

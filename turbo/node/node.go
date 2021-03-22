@@ -88,7 +88,7 @@ func New(
 	return &TurboGethNode{stack: node, backend: ethereum}
 }
 
-func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
+func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, node, ethConfig)
 	turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
