@@ -6,7 +6,7 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
-	github.com/VictoriaMetrics/fastcache v1.5.7
+	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.7.0
 	github.com/anacrolix/torrent v1.15.2
 	github.com/aws/aws-sdk-go v1.34.21
@@ -28,7 +28,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.5.1
-	github.com/golang/snappy v0.0.3-0.20201103224600-674baa8c7fc3
+	github.com/golang/snappy v0.0.3
 	github.com/google/btree v1.0.0
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/google/uuid v1.1.5
