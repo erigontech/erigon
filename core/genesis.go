@@ -285,7 +285,6 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
 				return nil, nil, err
 			}
-			//fmt.Printf("Set inc 1 for addr %x\n", addr)
 		}
 	}
 	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())

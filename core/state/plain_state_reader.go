@@ -73,7 +73,6 @@ func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint6
 	if b, err := r.db.Get(dbutils.IncarnationMapBucket, address.Bytes()); err == nil {
 		return binary.BigEndian.Uint64(b), nil
 	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-		//fmt.Printf("ReadAccountIncarnation(%x) - not found\n", address)
 		return 0, nil
 	} else {
 		return 0, err
