@@ -194,7 +194,9 @@ func Stateless(
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory, true /* overwrite */)
 		check(err)
-		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
+		db := ethdb.NewMemDatabase()
+		defer db.Close()
+		genesisBlock, _, err1 := core.DefaultGenesisBlock().ToBlock(db, writeHistory)
 		check(err1)
 		preRoot = genesisBlock.Header().Root
 	}
