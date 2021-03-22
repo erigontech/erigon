@@ -146,7 +146,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 			return fmt.Errorf("promote state err: %w", err)
 		}
 		tt = time.Now()
-		_, err = tx.Commit()
+		err = tx.Commit()
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("commit promote state err: %w", err)
@@ -182,7 +182,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		}
 		log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
 		tt = time.Now()
-		_, err = tx.Commit()
+		err = tx.Commit()
 		if err != nil {
 			tx.Rollback()
 			return err

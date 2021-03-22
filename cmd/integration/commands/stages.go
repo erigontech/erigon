@@ -421,7 +421,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 		if err := stagedsync.ResetIH(tx); err != nil {
 			return err
 		}
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			panic(err)
 		}
 		return nil
@@ -444,7 +444,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 		}
 	}
 	integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
-	if _, err := tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		panic(err)
 	}
 	return nil

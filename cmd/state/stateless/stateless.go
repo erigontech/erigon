@@ -221,7 +221,7 @@ func Stateless(
 	}
 	batch := stateDb.NewBatch()
 	defer func() {
-		if _, err = batch.Commit(); err != nil {
+		if err = batch.Commit(); err != nil {
 			fmt.Printf("Failed to commit batch: %v\n", err)
 		}
 	}()
@@ -480,7 +480,7 @@ func Stateless(
 		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0
 
 		if batch.BatchSize() >= 100000 || willSnapshot {
-			if _, err := batch.Commit(); err != nil {
+			if err := batch.Commit(); err != nil {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}

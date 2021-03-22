@@ -54,7 +54,7 @@ func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, re
 		panic(fmt.Errorf("error while upserting witness: %w", err))
 	}
 
-	_, err = batch.Commit()
+	err = batch.Commit()
 	if err != nil {
 		panic(err)
 	}

@@ -229,7 +229,7 @@ func UnwindSendersStage(u *UnwindState, s *StageState, stateDB ethdb.Database) e
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
-	_, err = mutation.Commit()
+	err = mutation.Commit()
 	if err != nil {
 		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 	}

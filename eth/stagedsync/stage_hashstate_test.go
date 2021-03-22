@@ -41,12 +41,12 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
 
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
@@ -90,12 +90,12 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
@@ -125,11 +125,11 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
@@ -163,11 +163,11 @@ func TestUnwindHashed(t *testing.T) {
 		t.Errorf("error while unwind state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}

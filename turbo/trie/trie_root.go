@@ -310,7 +310,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	}
 
 	if !useExternalTx {
-		_, err := txDB.Commit()
+		err := txDB.Commit()
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -1850,7 +1850,7 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 		return EmptyRoot, err
 	}
 	if !useExternalTx {
-		_, err := txDB.Commit()
+		err := txDB.Commit()
 		if err != nil {
 			return EmptyRoot, err
 		}

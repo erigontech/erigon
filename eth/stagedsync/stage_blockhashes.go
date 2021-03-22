@@ -71,7 +71,7 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
