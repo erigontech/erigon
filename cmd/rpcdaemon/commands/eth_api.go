@@ -78,7 +78,6 @@ type EthAPI interface {
 	GetWork(ctx context.Context) ([4]string, error)
 	SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error)
-	GetHashrate(ctx context.Context) (uint64, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
 	GetCompilers(_ context.Context) ([]string, error)
