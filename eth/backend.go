@@ -437,9 +437,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-	if config.SyncMode == downloader.StagedSync {
-		config.Miner.ExtraData = makeExtraData(config.Miner.ExtraData)
-	}
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:   chainDb,
 		Chain:      eth.blockchain,
@@ -536,7 +533,6 @@ func makeExtraData(extra []byte) []byte {
 		extra, _ = rlp.EncodeToBytes([]interface{}{
 			uint(params.VersionMajor<<16 | params.VersionMinor<<8 | params.VersionMicro),
 			"turbo-geth",
-			runtime.Version(),
 			runtime.GOOS,
 		})
 	}
