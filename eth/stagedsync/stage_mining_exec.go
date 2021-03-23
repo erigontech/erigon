@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -233,6 +234,10 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		}
 	*/
 
+	// hack: pretend that we are real execution stage - next stages will rely on this progress
+	if err := stages.SaveStageProgress(tx, stages.Execution, current.header.Number.Uint64()); err != nil {
+		return err
+	}
 	s.Done()
 	return nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -265,6 +266,14 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		if err := stateStages.Run(db, tx); err != nil {
 			return err
 		}
+
+		if integrityFast {
+			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
+				return err
+			}
+			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
+		}
+
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -297,7 +306,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 			minedBlock = <-minedBlocks
 
-			if nextBlock.Header().Hash() != minedBlock.Header().Hash() {
+			if minedBlock.Header().Root != nextBlock.Header().Root {
+				printBlocks(minedBlock, nextBlock)
 				panic(fmt.Errorf("state hash: %x, mined hash: %x", nextBlock.Header().Hash(), minedBlock.Header().Hash()))
 			}
 		}
@@ -347,6 +357,21 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
 	}
 	return localTxs, nextBlock.Transactions()
+}
+func printBlocks(b1, b2 *types.Block) {
+	h1 := b1.Header()
+	h2 := b2.Header()
+	fmt.Printf("==== Header ====\n")
+	fmt.Printf("root:        %x, %x\n", h1.Root, h2.Root)
+	fmt.Printf("nonce:       %d, %d\n", h1.Nonce.Uint64(), h2.Nonce.Uint64())
+	fmt.Printf("number:      %d, %d\n", h1.Number.Uint64(), h2.Number.Uint64())
+	fmt.Printf("gasLimit:    %d, %d\n", h1.GasLimit, h2.GasLimit)
+	fmt.Printf("gasUsed:     %d, %d\n", h1.GasUsed, h2.GasUsed)
+	fmt.Printf("Difficulty:  %d, %d\n", h1.Difficulty, h2.Difficulty)
+	fmt.Printf("ReceiptHash: %x, %x\n", h1.ReceiptHash, h2.ReceiptHash)
+	fmt.Printf("TxHash:      %x, %x\n", h1.TxHash, h2.TxHash)
+	fmt.Printf("UncleHash:   %x, %x\n", h1.UncleHash, h2.UncleHash)
+	fmt.Printf("ParentHash:  %x, %x\n", h1.ParentHash, h2.ParentHash)
 }
 
 func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
