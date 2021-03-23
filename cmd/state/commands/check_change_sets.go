@@ -36,7 +36,7 @@ func init() {
 	withChaindata(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as --chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn off writing receipts as the exection ongoing")
+	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn on writing receipts as the exection ongoing")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -86,8 +86,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	batch := chainDb.NewBatch()
-	defer batch.Rollback()
+	receiptBatch := chainDb.NewBatch()
+	defer receiptBatch.Rollback()
 
 	execAt, err1 := stages.GetStageProgress(chainDb, stages.Execution)
 	if err1 != nil {
@@ -141,7 +141,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				}
 			}
 
-			if err := rawdb.AppendReceipts(batch, block.NumberU64(), receipts); err != nil {
+			if err := rawdb.AppendReceipts(receiptBatch, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 		}
@@ -230,16 +230,18 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		case interrupt = <-interruptCh:
 			fmt.Println("interrupted, please wait for cleanup...")
 		case <-commitEvery.C:
-			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-			if err := batch.CommitAndBegin(context.Background()); err != nil {
-				return err
+			if writeReceipts {
+				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(receiptBatch.BatchSize()))
+				if err := receiptBatch.CommitAndBegin(context.Background()); err != nil {
+					return err
+				}
 			}
 		default:
 		}
 	}
 	if writeReceipts {
-		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
-		if err := batch.Commit(); err != nil {
+		log.Info("Committing final receipts", "batch size", common.StorageSize(receiptBatch.BatchSize()))
+		if err := receiptBatch.Commit(); err != nil {
 			return err
 		}
 	}
