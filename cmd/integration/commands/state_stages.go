@@ -273,9 +273,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
 
-		if err := tx.RollbackAndBegin(context.Background()); err != nil {
-			return err
-		}
+		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
+		//	return err
+		//}
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
