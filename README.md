@@ -10,15 +10,15 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 - [Key features](#key-features)
-  - [More Efficient State Storage](#more-efficient-state-storage)
-  - [Faster Initial Sync](#faster-initial-sync)
-  - [JSON-RPC daemon](#json-rpc-daemon)
-  - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-  - [Grafana dashboard](#grafana-dashboard)
+    + [More Efficient State Storage](#more-efficient-state-storage)
+    + [Faster Initial Sync](#faster-initial-sync)
+    + [JSON-RPC daemon](#json-rpc-daemon)
+    + [Run all components by docker-compose](#run-all-components-by-docker-compose)
+    + [Grafana dashboard](#grafana-dashboard)
 - [Getting in touch](#getting-in-touch)
-  - [Turbo-Geth Discord Server](#turbo-geth-discord-server)
-  - [Reporting security issues/concerns](#reporting-security-issues-concerns)
-- [Team](#team)
+    + [Turbo-Geth Discord Server](#turbo-geth-discord-server)
+    + [Reporting security issues/concerns](#reporting-security-issues-concerns)
+    + [Team](#team)
 - [Known issues](#known-issues)
     + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage)
 <!--te-->
@@ -95,7 +95,7 @@ Key features
 
 <code>🔬 See more detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It is being updated on recurring basis.</code>
 
-#### More Efficient State Storage
+### More Efficient State Storage
 
 **Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
 a simple way. 
@@ -114,7 +114,7 @@ DB inserts are orders of magnitude quicker.
 accounts and the storage.
 
 
-#### Faster Initial Sync
+### Faster Initial Sync
 
 Turbo-Geth uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
@@ -142,7 +142,7 @@ Examples of stages are:
 
 * And more...
 
-#### JSON-RPC daemon
+### JSON-RPC daemon
 
 In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
@@ -182,7 +182,7 @@ Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./
 
 For a details on the implementation status of each command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
-#### Run all components by docker-compose
+### Run all components by docker-compose
 
 Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
@@ -191,20 +191,20 @@ docker-compose build
 XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
 
-#### Grafana dashboard
+### Grafana dashboard
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
 Getting in touch
 ================
 
-#### Turbo-Geth Discord Server
+### Turbo-Geth Discord Server
 
 The main discussions are happening on our Discord server. 
 To get an invite, send an email to `tg [at] torquem.ch` with your name, occupation, 
 a brief explanation of why you want to join the Discord, and how you heard about Turbo-Geth.
 
-#### Reporting security issues/concerns
+### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
 
