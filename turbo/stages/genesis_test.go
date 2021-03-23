@@ -34,17 +34,19 @@ import (
 )
 
 func TestDefaultGenesisBlock(t *testing.T) {
-	block, _, tds, _ := core.DefaultGenesisBlock().ToBlock(nil, true)
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	block, _, _ := core.DefaultGenesisBlock().ToBlock(db, true)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
-	defer tds.Database().Close()
 	var err error
-	block, _, tds, err = core.DefaultRopstenGenesisBlock().ToBlock(nil, true)
+	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
+	block, _, err = core.DefaultRopstenGenesisBlock().ToBlock(db1, true)
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}
-	defer tds.Database().Close()
 	if block.Hash() != params.RopstenGenesisHash {
 		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
 	}
