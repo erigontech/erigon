@@ -652,8 +652,6 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, *core.Ti
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
 	chainConfig := params.MainnetChainConfig
 
-	txPool := core.NewTxPool(core.TxPoolConfig{}, chainConfig, db, core.NewTxSenderCacher(runtime.NumCPU()))
-
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
 	cc.SetEngine(ethash.NewFaker())
@@ -675,7 +673,7 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, *core.Ti
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	)
-	return sm, cc, chainConfig, vmConfig, txPool, st, stMining, cache
+	return sm, cc, chainConfig, vmConfig, nil, st, stMining, cache
 }
 
 func progress(tx ethdb.Getter, stage stages.SyncStage) uint64 {
@@ -706,8 +704,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		panic(err)
 	}
 
-	txPool := core.NewTxPool(core.TxPoolConfig{}, chainConfig, db, core.NewTxSenderCacher(runtime.NumCPU()))
-
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
 	cc.SetEngine(ethash.NewFaker())
@@ -723,7 +719,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, false, nil)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, false, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -732,7 +728,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.MiningStages(),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, txPool, func() error { return nil }, false, miningParams)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, false, miningParams)
 	if err != nil {
 		panic(err)
 	}
@@ -751,7 +747,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		}
 		return s
 	}
-	return cc, bc, txPool, st, stMining, cache, progress
+	return cc, bc, nil, st, stMining, cache, progress
 }
 
 func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig, *core.BlockChain, error) {

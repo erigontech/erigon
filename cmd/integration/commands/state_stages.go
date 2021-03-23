@@ -273,9 +273,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
 
-		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
-		//	return err
-		//}
+		if err := tx.RollbackAndBegin(context.Background()); err != nil {
+			return err
+		}
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -296,7 +296,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
-				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered),
+				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered, nil),
 			)
 			if err != nil {
 				panic(err)

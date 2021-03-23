@@ -45,9 +45,9 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			batch.Rollback()
 			return nil, err
 		}
-		//if !chainConfig.IsByzantium(header.Number) {
-		//	batch.Rollback()
-		//}
+		if !chainConfig.IsByzantium(header.Number) {
+			batch.Rollback()
+		}
 		if err = batch.CommitAndBegin(context.Background()); err != nil {
 			return nil, err
 		}
