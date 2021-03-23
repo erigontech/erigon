@@ -189,7 +189,7 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, retst *stack.ReturnStack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
 
 	//sanity check
@@ -247,16 +247,6 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	//startcopy := sl-minl
 	//stackTop := &stack.Stack{Data: make([]uint256.Int, minl, minl)}//stack.New()
 	//copy(stackTop.Data, st.Data[startcopy:sl])
-
-	// deal with the RStack - is it used at all??
-	lrs := len(retst.Data())
-	var retStackTop []uint32
-	if lrs > 0 {
-		fmt.Fprintf(ot.fsumWriter, "RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
-		//fmt.Printf("RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
-		retStackTop = make([]uint32, lrs)
-		copy(retStackTop, retst.Data())
-	}
 
 	//sanity check
 	if currentEntry.OpcodeFault != "" {
@@ -333,11 +323,11 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rst *stack.ReturnStack, contract *vm.Contract, opDepth int, err error) error {
+func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	e := ot.CaptureState(env, pc, op, gas, cost, memory, stack, rst, nil, contract, opDepth, err)
+	e := ot.CaptureState(env, pc, op, gas, cost, memory, stack, nil, contract, opDepth, err)
 
 	return e
 }

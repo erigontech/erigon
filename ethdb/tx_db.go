@@ -15,7 +15,7 @@ import (
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
-// you can put unlimited amount of data into this class, call IdealBatchSize is unnecessary
+// you can put unlimited amount of data into this class
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db      Database
@@ -32,7 +32,7 @@ func (m *TxDb) Close() {
 // NewTxDbWithoutTransaction creates TxDb object without opening transaction,
 // such TxDb not usable before .Begin() call on it
 // It allows inject TxDb object into class hierarchy, but open write transaction later
-func NewTxDbWithoutTransaction(db Database, flags TxFlags) *TxDb {
+func NewTxDbWithoutTransaction(db Database, flags TxFlags) DbWithPendingMutations {
 	return &TxDb{db: db, txFlags: flags}
 }
 
@@ -57,33 +57,32 @@ func (m *TxDb) cursor(bucket string) Cursor {
 	return c
 }
 
-func (m *TxDb) Sequence(bucket string, amount uint64) (res uint64, err error) {
-	return m.tx.Sequence(bucket, amount)
+func (m *TxDb) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
+	return m.tx.(RwTx).IncrementSequence(bucket, amount)
+}
+
+func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
+	return m.tx.ReadSequence(bucket)
 }
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).Put(key, value)
-}
-
-func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
-	m.len += uint64(len(key) + i)
-	return m.cursor(bucket).Reserve(key, i)
+	return m.cursor(bucket).(RwCursor).Put(key, value)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).Append(key, value)
+	return m.cursor(bucket).(RwCursor).Append(key, value)
 }
 
 func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursor(bucket).(CursorDupSort).AppendDup(key, value)
+	return m.cursor(bucket).(RwCursorDupSort).AppendDup(key, value)
 }
 
 func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	m.len += uint64(len(k))
-	return m.cursor(bucket).Delete(k, v)
+	return m.cursor(bucket).(RwCursor).Delete(k, v)
 }
 
 func (m *TxDb) NewBatch() DbWithPendingMutations {
@@ -94,7 +93,15 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 }
 
 func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
-	tx, err := m.db.(HasKV).KV().Begin(ctx, flags)
+	kv := m.db.(HasKV).KV()
+
+	var tx Tx
+	var err error
+	if flags&RO != 0 {
+		tx, err = kv.Begin(ctx)
+	} else {
+		tx, err = kv.BeginRw(ctx)
+	}
 	if err != nil {
 		return err
 	}
@@ -147,10 +154,10 @@ func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
 }
 
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
-	return 0, MultiPut(m.tx, tuples...)
+	return 0, MultiPut(m.tx.(RwTx), tuples...)
 }
 
-func MultiPut(tx Tx, tuples ...[]byte) error {
+func MultiPut(tx RwTx, tuples ...[]byte) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -161,7 +168,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 		}
 		bucketName := string(tuples[bucketStart])
-		c := tx.Cursor(bucketName)
+		c := tx.RwCursor(bucketName)
 
 		// move cursor to a first element in batch
 		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
@@ -213,11 +220,6 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 
 func (m *TxDb) BatchSize() int {
 	return int(m.len)
-}
-
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (m *TxDb) IdealBatchSize() int {
-	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
@@ -333,7 +335,7 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {
-	_, err := m.Commit()
+	err := m.Commit()
 	if err != nil {
 		return err
 	}
@@ -346,21 +348,21 @@ func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 	return m.begin(ctx, m.txFlags)
 }
 
-func (m *TxDb) Commit() (uint64, error) {
+func (m *TxDb) Commit() error {
 	if metrics.Enabled {
 		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
 	}
 
 	if m.tx == nil {
-		return 0, fmt.Errorf("second call .Commit() on same transaction")
+		return fmt.Errorf("second call .Commit() on same transaction")
 	}
 	if err := m.tx.Commit(context.Background()); err != nil {
-		return 0, err
+		return err
 	}
 	m.tx = nil
 	m.cursors = nil
 	m.len = 0
-	return 0, nil
+	return nil
 }
 
 func (m *TxDb) Rollback() {

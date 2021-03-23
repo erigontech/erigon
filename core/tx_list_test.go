@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -61,7 +62,7 @@ func BenchmarkTxListAdd(t *testing.B) {
 	}
 	// Insert the transactions in a random order
 	list := newTxList(true)
-	priceLimit := big.NewInt(int64(DefaultTxPoolConfig.PriceLimit))
+	priceLimit, _ := uint256.FromBig(big.NewInt(int64(DefaultTxPoolConfig.PriceLimit)))
 	t.ResetTimer()
 	for _, v := range rand.Perm(len(txs)) {
 		list.Add(txs[v], DefaultTxPoolConfig.PriceBump)

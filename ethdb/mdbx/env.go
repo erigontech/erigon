@@ -26,15 +26,16 @@ const (
 	EnvDefaults = C.MDBX_ENV_DEFAULTS
 	LifoReclaim = C.MDBX_LIFORECLAIM
 	//FixedMap    = C.MDBX_FIXEDMAP   // Danger zone. Map memory at a fixed address.
-	NoSubdir   = C.MDBX_NOSUBDIR // Argument to Open is a file, not a directory.
-	Accede     = C.MDBX_ACCEDE
-	Coalesce   = C.MDBX_COALESCE
-	Readonly   = C.MDBX_RDONLY     // Used in several functions to denote an object as readonly.
-	WriteMap   = C.MDBX_WRITEMAP   // Use a writable memory map.
-	NoMetaSync = C.MDBX_NOMETASYNC // Don't fsync metapage after commit.
-	SafeNoSync = C.MDBX_SAFE_NOSYNC
-	Durable    = C.MDBX_SYNC_DURABLE
-	NoTLS      = C.MDBX_NOTLS // Danger zone. When unset reader locktable slots are tied to their thread.
+	NoSubdir      = C.MDBX_NOSUBDIR // Argument to Open is a file, not a directory.
+	Accede        = C.MDBX_ACCEDE
+	Coalesce      = C.MDBX_COALESCE
+	Readonly      = C.MDBX_RDONLY     // Used in several functions to denote an object as readonly.
+	WriteMap      = C.MDBX_WRITEMAP   // Use a writable memory map.
+	NoMetaSync    = C.MDBX_NOMETASYNC // Don't fsync metapage after commit.
+	UtterlyNoSync = C.MDBX_UTTERLY_NOSYNC
+	SafeNoSync    = C.MDBX_SAFE_NOSYNC
+	Durable       = C.MDBX_SYNC_DURABLE
+	NoTLS         = C.MDBX_NOTLS // Danger zone. When unset reader locktable slots are tied to their thread.
 	//NoLock      = C.MDBX_NOLOCK     // Danger zone. LMDB does not use any locks.
 	NoReadahead = C.MDBX_NORDAHEAD // Disable readahead. Requires OS support.
 	NoMemInit   = C.MDBX_NOMEMINIT // Disable LMDB memory initialization.
@@ -382,7 +383,7 @@ func (env *Env) Info() (*EnvInfo, error) {
 }
 
 // Sync flushes buffers to disk.  If force is true a synchronous flush occurs
-// and ignores any NoSync or MapAsync flag on the environment.
+// and ignores any UtterlyNoSync or MapAsync flag on the environment.
 //
 // See mdbx_env_sync.
 func (env *Env) Sync(force bool, nonblock bool) error {
@@ -539,19 +540,12 @@ func (env *Env) SetMaxDBs(size int) error {
 // methods, which assist in management of Txn objects and provide OS thread
 // locking required for write transactions.
 //
-// A finalizer detects unreachable, live transactions and logs thems to
-// standard error.  The transactions are aborted, but their presence should be
-// interpreted as an application error which should be patched so transactions
-// are terminated explicitly.  Unterminated transactions can adversly effect
+// Unterminated transactions can adversly effect
 // database performance and cause the database to grow until the map is full.
 //
 // See mdbx_txn_begin.
 func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
-	txn, err := beginTxn(env, parent, flags)
-	if txn != nil {
-		runtime.SetFinalizer(txn, func(v interface{}) { v.(*Txn).finalize() })
-	}
-	return txn, err
+	return beginTxn(env, parent, flags)
 }
 
 // RunTxn creates a new Txn and calls fn with it as an argument.  Run commits

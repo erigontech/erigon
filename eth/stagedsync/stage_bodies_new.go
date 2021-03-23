@@ -3,10 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -23,8 +24,10 @@ func BodiesForward(
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *big.Int),
-	wakeUpChan chan struct{}, timeout int) error {
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	wakeUpChan chan struct{},
+	timeout int,
+	batchSize datasize.ByteSize) error {
 	var tx ethdb.DbWithPendingMutations
 	var err error
 	var useExternalTx bool
@@ -125,7 +128,8 @@ func BodiesForward(
 				rawdb.WriteHeadBlockHash(batch, headHash)
 				headSet = true
 			}
-			if batch.BatchSize() >= batch.IdealBatchSize() {
+
+			if batch.BatchSize() >= int(batchSize) {
 				if err = batch.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
@@ -156,12 +160,14 @@ func BodiesForward(
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if headSet {
 		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
-			updateHead(ctx, bodyProgress, headHash, headTd)
+			headTd256 := new(uint256.Int)
+			headTd256.SetFromBig(headTd)
+			updateHead(ctx, bodyProgress, headHash, headTd256)
 		} else {
 			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
 		}
@@ -170,7 +176,7 @@ func BodiesForward(
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

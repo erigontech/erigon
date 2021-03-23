@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -67,7 +66,7 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	return i.(*MutationItem).value, true
 }
 
-func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
+func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
@@ -84,6 +83,21 @@ func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
 	if err = m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
 		return 0, err
+	}
+
+	return currentV, nil
+}
+func (m *mutation) ReadSequence(bucket string) (res uint64, err error) {
+	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
+	if !ok && m.db != nil {
+		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
+		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+			return 0, err
+		}
+	}
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
 	}
 
 	return currentV, nil
@@ -105,10 +119,6 @@ func (m *mutation) Get(table string, key []byte) ([]byte, error) {
 
 func (m *mutation) Last(table string) ([]byte, []byte, error) {
 	return m.db.Last(table)
-}
-
-func (m *mutation) Reserve(table string, key []byte, i int) ([]byte, error) {
-	return m.db.(DbWithPendingMutations).Reserve(table, key, i)
 }
 
 func (m *mutation) hasMem(table string, key []byte) bool {
@@ -184,11 +194,6 @@ func (m *mutation) BatchSize() int {
 	return m.size
 }
 
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (m *mutation) IdealBatchSize() int {
-	return int(512 * datasize.MB)
-}
-
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
@@ -204,7 +209,7 @@ func (m *mutation) Delete(table string, k, v []byte) error {
 }
 
 func (m *mutation) CommitAndBegin(ctx context.Context) error {
-	_, err := m.Commit()
+	err := m.Commit()
 	return err
 }
 
@@ -213,9 +218,9 @@ func (m *mutation) RollbackAndBegin(ctx context.Context) error {
 	return nil
 }
 
-func (m *mutation) doCommit(tx Tx) error {
+func (m *mutation) doCommit(tx RwTx) error {
 	var prevTable string
-	var c Cursor
+	var c RwCursor
 	var innerErr error
 	var isEndOfBucket bool
 	logEvery := time.NewTicker(30 * time.Second)
@@ -229,7 +234,7 @@ func (m *mutation) doCommit(tx Tx) error {
 			if c != nil {
 				c.Close()
 			}
-			c = tx.Cursor(mi.table)
+			c = tx.RwCursor(mi.table)
 			prevTable = mi.table
 			firstKey, _, err := c.Seek(mi.key)
 			if err != nil {
@@ -270,27 +275,27 @@ func (m *mutation) doCommit(tx Tx) error {
 	return innerErr
 }
 
-func (m *mutation) Commit() (uint64, error) {
+func (m *mutation) Commit() error {
 	if m.db == nil {
-		return 0, nil
+		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if tx, ok := m.db.(HasTx); ok {
-		if err := m.doCommit(tx.Tx()); err != nil {
-			return 0, err
+		if err := m.doCommit(tx.Tx().(RwTx)); err != nil {
+			return err
 		}
 	} else {
-		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx Tx) error {
+		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
-			return 0, err
+			return err
 		}
 	}
 
 	m.puts.Clear(false /* addNodesToFreelist */)
 	m.size = 0
-	return 0, nil
+	return nil
 }
 
 func (m *mutation) Rollback() {

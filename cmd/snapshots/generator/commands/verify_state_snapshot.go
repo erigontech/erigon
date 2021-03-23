@@ -3,6 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"time"
+
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -10,9 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
-	"io/ioutil"
-	"os"
-	"time"
 )
 
 func init() {
@@ -92,7 +93,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, os.TempDir(), expectedRootHash, ctx.Done())
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, os.TempDir(), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}

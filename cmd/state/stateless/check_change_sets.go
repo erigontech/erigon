@@ -74,6 +74,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		return err1
 	}
 
+	commitEvery := time.NewTicker(30 * time.Second)
+	defer commitEvery.Stop()
 	for !interrupt {
 		if blockNum > execAt {
 			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than Exec stage=%d", blockNum, execAt))
@@ -117,12 +119,6 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 			if err := rawdb.AppendReceipts(batch, block.NumberU64(), receipts); err != nil {
 				return err
-			}
-			if batch.BatchSize() >= batch.IdealBatchSize() {
-				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-				if err := batch.CommitAndBegin(context.Background()); err != nil {
-					return err
-				}
 			}
 		}
 
@@ -209,12 +205,17 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		select {
 		case interrupt = <-interruptCh:
 			fmt.Println("interrupted, please wait for cleanup...")
+		case <-commitEvery.C:
+			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
+			if err := batch.CommitAndBegin(context.Background()); err != nil {
+				return err
+			}
 		default:
 		}
 	}
 	if writeReceipts {
 		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
-		if _, err := batch.Commit(); err != nil {
+		if err := batch.Commit(); err != nil {
 			return err
 		}
 	}

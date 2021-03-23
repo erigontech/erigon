@@ -87,14 +87,12 @@ type Database interface {
 	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
-	// IdealBatchSize defines the size of the data batches should ideally add in one write.
-	IdealBatchSize() int
-
 	Keys() ([][]byte, error)
 
 	Append(bucket string, key, value []byte) error
 	AppendDup(bucket string, key, value []byte) error
-	Sequence(bucket string, amount uint64) (uint64, error)
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	ReadSequence(bucket string) (uint64, error)
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
@@ -119,7 +117,7 @@ type DbWithPendingMutations interface {
 	// ... some calculations on `tx`
 	// tx.Commit()
 	//
-	Commit() (uint64, error)
+	Commit() error
 
 	// CommitAndBegin - commits and starts new transaction inside same db object.
 	// useful for periodical commits implementation.
@@ -136,10 +134,9 @@ type DbWithPendingMutations interface {
 	// tx.Commit()
 	//
 	CommitAndBegin(ctx context.Context) error
+	RollbackAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
-
-	Reserve(bucket string, key []byte, i int) ([]byte, error)
 }
 
 type HasKV interface {

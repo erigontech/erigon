@@ -74,10 +74,7 @@ var migrations = []Migration{
 	splitHashStateBucket,
 	splitIHBucket,
 	deleteExtensionHashesFromTrieBucket,
-}
-
-var cliqueMigrations = []Migration{
-	cliqueDB,
+	headerPrefixToSeparateBuckets,
 }
 
 type Migration struct {

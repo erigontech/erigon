@@ -45,7 +45,7 @@ func (bw *bucketWriter) walker(k, v []byte) (bool, error) {
 	bw.written++
 
 	if bw.pending.BatchSize() >= 100000 {
-		if _, err := bw.pending.Commit(); err != nil {
+		if err := bw.pending.Commit(); err != nil {
 			return false, err
 		}
 
@@ -61,7 +61,7 @@ func (bw *bucketWriter) commit() error {
 	defer bw.printStats()
 
 	if bw.pending != nil {
-		_, err := bw.pending.Commit()
+		err := bw.pending.Commit()
 		return err
 	}
 
@@ -123,9 +123,9 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 //nolint
 func loadCodes(db ethdb.KV, codeDb ethdb.Database) error {
 	var account accounts.Account
-	err := db.Update(context.Background(), func(tx ethdb.Tx) error {
+	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c := tx.Cursor(dbutils.HashedAccountsBucket)
-		cb := tx.Cursor(dbutils.CodeBucket)
+		cb := tx.RwCursor(dbutils.CodeBucket)
 
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {

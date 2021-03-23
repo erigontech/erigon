@@ -829,7 +829,8 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
+	db := ethdb.NewMemDatabase()
+	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(db, false /* history */)
 	tool.Check(err)
 	genesisHeader := genesisBlock.Header()
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)
@@ -1031,8 +1032,8 @@ func repairCurrent() {
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()
 	tool.Check(historyDb.ClearBuckets(dbutils.HashedStorageBucket))
-	tool.Check(historyDb.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		newB := tx.Cursor(dbutils.HashedStorageBucket)
+	tool.Check(historyDb.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+		newB := tx.RwCursor(dbutils.HashedStorageBucket)
 		count := 0
 		if err := currentDb.KV().View(context.Background(), func(ctx ethdb.Tx) error {
 			c := ctx.Cursor(dbutils.HashedStorageBucket)
@@ -1232,7 +1233,8 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	tool.Check(stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil))
+	_, err = stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil)
+	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
 }
@@ -1576,16 +1578,13 @@ func mint(chaindata string, block uint64) error {
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	canonical := make(map[common.Hash]struct{})
 	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeaderCanonicalBucket)
 		// This is a mapping of contractAddress + incarnation => CodeHash
 		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			// Skip non relevant records
-			if !dbutils.CheckCanonicalKey(k) {
-				continue
-			}
 			canonical[common.BytesToHash(v)] = struct{}{}
 			if len(canonical)%100_000 == 0 {
 				log.Info("Read canonical hashes", "count", len(canonical))
@@ -1677,7 +1676,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 		b += blockStep
 	}
 	b -= blockStep
-	fmt.Fprintf(w, "}\n")
+	fmt.Fprintf(w, "}\n\n")
 	fmt.Fprintf(w, "const %sPreverifiedHeight uint64 = %d\n", name, b)
 	fmt.Printf("Last block is %d\n", b)
 	return nil
@@ -1721,8 +1720,6 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 			base64writer.Close()
 			return err
 		}
-
-		//gz.Name = strconv.Itoa(i)
 
 		if err = rlp.Encode(gz, h); err != nil {
 			base64writer.Close()
@@ -1901,7 +1898,7 @@ func snapSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	tx, err := db.KV().Begin(context.Background(), ethdb.RO)
+	tx, err := db.KV().Begin(context.Background())
 	if err != nil {
 		return err
 	}

@@ -6,23 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/protobuf/ptypes/empty"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -77,10 +79,11 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 	// TODO: Make a reconnection loop
 	statusMsg := &proto_sentry.StatusData{
 		NetworkId:       controlServer.networkId,
-		TotalDifficulty: controlServer.headTd.Bytes(),
-		BestHash:        controlServer.headHash.Bytes(),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
+		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
+		MaxBlock:        controlServer.headHeight,
 		ForkData: &proto_sentry.Forks{
-			Genesis: controlServer.genesisHash.Bytes(),
+			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
 			Forks:   controlServer.forks,
 		},
 	}
@@ -184,10 +187,11 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	}
 	statusMsg := &proto_sentry.StatusData{
 		NetworkId:       controlServer.networkId,
-		TotalDifficulty: controlServer.headTd.Bytes(),
-		BestHash:        controlServer.headHash.Bytes(),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
+		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
+		MaxBlock:        controlServer.headHeight,
 		ForkData: &proto_sentry.Forks{
-			Genesis: controlServer.genesisHash.Bytes(),
+			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
 			Forks:   controlServer.forks,
 		},
 	}
@@ -261,7 +265,7 @@ type ControlServerImpl struct {
 	requestWakeUpBodies  chan struct{}
 	headHeight           uint64
 	headHash             common.Hash
-	headTd               *big.Int
+	headTd               *uint256.Int
 	chainConfig          *params.ChainConfig
 	forks                []uint64
 	genesisHash          common.Hash
@@ -303,7 +307,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	if chainConfig, _, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
-	engine := eth.CreateConsensusEngine(chainConfig, ethashConfig, nil, false)
+	engine := ethconfig.CreateConsensusEngine(chainConfig, ethashConfig, nil, false)
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* tipLimit */
@@ -326,7 +330,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	return cs, err
 }
 
-func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash common.Hash, td *big.Int) {
+func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
@@ -334,10 +338,11 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 	cs.headTd = td
 	statusMsg := &proto_sentry.StatusData{
 		NetworkId:       cs.networkId,
-		TotalDifficulty: cs.headTd.Bytes(),
-		BestHash:        cs.headHash.Bytes(),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(cs.headTd),
+		BestHash:        gointerfaces.ConvertHashToH256(cs.headHash),
+		MaxBlock:        cs.headHeight,
 		ForkData: &proto_sentry.Forks{
-			Genesis: cs.genesisHash.Bytes(),
+			Genesis: gointerfaces.ConvertHashToH256(cs.genesisHash),
 			Forks:   cs.forks,
 		},
 	}
@@ -349,14 +354,14 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
-	var request eth.NewBlockHashesData
+	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
 		if !cs.hd.HasLink(announce.Hash) {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
 				Amount:  1,
 				Reverse: false,
 				Skip:    0,
@@ -458,7 +463,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 		return fmt.Errorf("decode NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
-	var request eth.NewBlockData
+	var request eth.NewBlockPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
@@ -488,7 +493,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	if _, err1 := cs.sentryClient.PeerMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), inreq.PeerId))
+	log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 
@@ -548,7 +553,7 @@ func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, m
 	return hash, number
 }
 
-func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersData) ([]*types.Header, error) {
+func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -633,9 +638,9 @@ func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersData) ([]*types.H
 }
 
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
-	var query eth.GetBlockHeadersData
+	var query eth.GetBlockHeadersPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader: %v", err)
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
 	headers, err1 := queryHeaders(cs.db, &query)
 	if err1 != nil {
@@ -678,7 +683,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		if err := msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
 			break
 		} else if err != nil {
-			return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg: %v", err)
+			return fmt.Errorf("decode hash for GetBlockBodiesMsg: %v", err)
 		}
 		if hashesStr.Len() > 0 {
 			hashesStr.WriteString(",")
@@ -749,7 +754,7 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-	reqData := &eth.GetBlockHeadersData{
+	reqData := &eth.GetBlockHeadersPacket{
 		Amount:  req.Length,
 		Reverse: req.Reverse,
 		Skip:    req.Skip,
@@ -784,7 +789,7 @@ func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerd
 	if sentPeers == nil || len(sentPeers.Peers) == 0 {
 		return nil
 	}
-	return sentPeers.Peers[0]
+	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 }
 
 func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
@@ -813,11 +818,11 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	if sentPeers == nil || len(sentPeers.Peers) == 0 {
 		return nil
 	}
-	return sentPeers.Peers[0]
+	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 }
 
 func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
-	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: peer, Penalty: proto_sentry.PenaltyKind_Kick}
+	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: gointerfaces.ConvertBytesToH512(peer), Penalty: proto_sentry.PenaltyKind_Kick}
 	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err := cs.sentryClient.PenalizePeer(callCtx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {

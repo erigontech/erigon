@@ -173,14 +173,11 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 		prevLink := attachmentLink
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
-				prevLink.next = append(prevLink.next, link)
-				prevLink = link
-				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-					hd.markPreverified(link)
-				}
-			} else {
-				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+			link := hd.addHeaderAsLink(header, false /* persisted */)
+			prevLink.next = append(prevLink.next, link)
+			prevLink = link
+			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+				hd.markPreverified(link)
 			}
 		}
 	} else {
@@ -232,20 +229,17 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 		var prevLink *Link
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if link, err := hd.addHeaderAsLink(header, false /* pesisted */); err == nil {
-				if prevLink == nil {
-					newAnchor.links = append(newAnchor.links, link)
-				} else {
-					prevLink.next = append(prevLink.next, link)
-				}
-				prevLink = link
-				if !anchorPreverified {
-					if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-						hd.markPreverified(link)
-					}
-				}
+			link := hd.addHeaderAsLink(header, false /* pesisted */)
+			if prevLink == nil {
+				newAnchor.links = append(newAnchor.links, link)
 			} else {
-				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+				prevLink.next = append(prevLink.next, link)
+			}
+			prevLink = link
+			if !anchorPreverified {
+				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+					hd.markPreverified(link)
+				}
 			}
 		}
 		prevLink.next = anchor.links
@@ -289,16 +283,13 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
-			prevLink.next = append(prevLink.next, link)
-			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-					hd.markPreverified(link)
-				}
+		link := hd.addHeaderAsLink(header, false /* persisted */)
+		prevLink.next = append(prevLink.next, link)
+		prevLink = link
+		if !anchorPreverified {
+			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+				hd.markPreverified(link)
 			}
-		} else {
-			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
 	prevLink.next = anchor.links
@@ -334,18 +325,15 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	var prevLink *Link
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if link, err1 := hd.addHeaderAsLink(header, false /* persisted */); err1 == nil {
-			if prevLink == nil {
-				anchor.links = append(anchor.links, link)
-			} else {
-				prevLink.next = append(prevLink.next, link)
-			}
-			prevLink = link
-			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-				hd.markPreverified(link)
-			}
+		link := hd.addHeaderAsLink(header, false /* persisted */)
+		if prevLink == nil {
+			anchor.links = append(anchor.links, link)
 		} else {
-			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err1)
+			prevLink.next = append(prevLink.next, link)
+		}
+		prevLink = link
+		if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+			hd.markPreverified(link)
 		}
 	}
 	return nil
@@ -443,48 +431,6 @@ func DecodeHashes(encodings []string) map[common.Hash]struct{} {
 	return hashes
 }
 
-func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
-	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
-
-	var buf bytes.Buffer
-
-	for i, encoding := range encodings {
-		b, err := base64.RawStdEncoding.DecodeString(encoding)
-		if err != nil {
-			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
-		}
-
-		if _, err := buf.Write(b); err != nil {
-			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
-		}
-
-		zr, err := gzip.NewReader(&buf)
-		if err != nil {
-			return nil, fmt.Errorf("gzip reader on %d: %w %q", i, err, encoding)
-		}
-
-		res, err := io.ReadAll(zr)
-		if err != nil {
-			return nil, fmt.Errorf("gzip copy on %d: %w %q", i, err, encoding)
-		}
-
-		if err := zr.Close(); err != nil {
-			return nil, fmt.Errorf("gzip close on %d: %w", i, err)
-		}
-
-		var h types.Header
-		if err := rlp.DecodeBytes(res, &h); err != nil {
-			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
-		}
-
-		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
-
-		buf.Reset()
-	}
-
-	return hardTips, nil
-}
-
 func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash]struct{}, preverifiedHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -494,22 +440,17 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
+		c := tx.Cursor(dbutils.HeadersBucket)
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
 			}
-			if len(k) != 40 {
-				continue
-			}
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			if _, err1 := hd.addHeaderAsLink(&h, true /* persisted */); err1 != nil {
-				return err1
-			}
+			hd.addHeaderAsLink(&h, true /* persisted */)
 		}
 		return nil
 	})
@@ -552,7 +493,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest 
 				return nil
 			}
 		}
-		// Anchor disappered or unavailble, pop from the queue and move on
+		// Anchor disappeared or unavailable, pop from the queue and move on
 		heap.Remove(hd.anchorQueue, 0)
 	}
 	return nil
@@ -577,7 +518,14 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
 	stride := uint64(8 * 192)
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: 192, Skip: stride, Reverse: false}
+	if hd.topSeenHeight < hd.highestInDb+stride {
+		return nil
+	}
+	length := (hd.topSeenHeight - hd.highestInDb) / stride
+	if length > 192 {
+		length = 192
+	}
+	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
 func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
@@ -594,7 +542,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			heap.Remove(hd.linkQueue, link.idx)
 		}
 		if !link.preverified {
-			if err := hd.engine.VerifySeal(hd.headerReader, link.header); err != nil {
+			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				// skip this link and its children
 				continue
@@ -642,7 +590,7 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) (*Link, error) {
+func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) *Link {
 	height := header.Number.Uint64()
 	linkHash := header.Hash()
 	link := &Link{
@@ -657,7 +605,7 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	} else {
 		heap.Push(hd.linkQueue, link)
 	}
-	return link, nil
+	return link
 }
 
 func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) error {
@@ -733,7 +681,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	if err = rawdb.WriteTd(hi.batch, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = hi.batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = hi.batch.Put(dbutils.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash
@@ -864,4 +812,47 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headerReader = headerReader
+}
+
+
+func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
+	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+
+	var buf bytes.Buffer
+
+	for i, encoding := range encodings {
+		b, err := base64.RawStdEncoding.DecodeString(encoding)
+		if err != nil {
+			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
+		}
+
+		if _, err := buf.Write(b); err != nil {
+			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
+		}
+
+		zr, err := gzip.NewReader(&buf)
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader on %d: %w %q", i, err, encoding)
+		}
+
+		res, err := io.ReadAll(zr)
+		if err != nil {
+			return nil, fmt.Errorf("gzip copy on %d: %w %q", i, err, encoding)
+		}
+
+		if err := zr.Close(); err != nil {
+			return nil, fmt.Errorf("gzip close on %d: %w", i, err)
+		}
+
+		var h types.Header
+		if err := rlp.DecodeBytes(res, &h); err != nil {
+			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
+		}
+
+		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+
+		buf.Reset()
+	}
+
+	return hardTips, nil
 }

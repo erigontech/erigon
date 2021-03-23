@@ -204,7 +204,8 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 				copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
 				copy(csKey[8:], address[:]) // address + incarnation
 				binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
-				kData, data, err3 := csCursor.SeekBothRange(csKey, hLoc)
+				kData := csKey
+				data, err3 := csCursor.SeekBothRange(csKey, hLoc)
 				if err3 != nil {
 					return err3
 				}
@@ -299,7 +300,8 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 			if ok {
 				// Extract value from the changeSet
 				csKey := dbutils.EncodeBlockNumber(changeSetBlock)
-				kData, data, err3 := csCursor.SeekBothRange(csKey, hK)
+				kData := csKey
+				data, err3 := csCursor.SeekBothRange(csKey, hK)
 				if err3 != nil {
 					return err3
 				}

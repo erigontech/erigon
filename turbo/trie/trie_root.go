@@ -261,7 +261,8 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 				if storageTrie.skipState {
 					goto SkipStorage
 				}
-				for kS, vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = ss.NextDup() {
+
+				for vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
@@ -309,7 +310,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	}
 
 	if !useExternalTx {
-		_, err := txDB.Commit()
+		err := txDB.Commit()
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -911,6 +912,9 @@ func (c *AccTrieCursor) _unmarshal(k, v []byte) {
 }
 
 func (c *AccTrieCursor) _deleteCurrent() error {
+	if c.hc == nil {
+		return nil
+	}
 	if c.hc == nil || c.deleted[c.lvl] {
 		return nil
 	}
@@ -1305,6 +1309,9 @@ func (c *StorageTrieCursor) _unmarshal(k, v []byte) {
 }
 
 func (c *StorageTrieCursor) _deleteCurrent() error {
+	if c.shc == nil {
+		return nil
+	}
 	if c.shc == nil || c.deleted[c.lvl] {
 		return nil
 	}
@@ -1736,7 +1743,8 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 					goto SkipStorage
 				}
 				i4++
-				for kS, vS, err3 := storages.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = storages.NextDup() {
+
+				for vS, err3 := storages.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = storages.NextDup() {
 					if err3 != nil {
 						return false, err3
 					}
@@ -1842,7 +1850,7 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 		return EmptyRoot, err
 	}
 	if !useExternalTx {
-		_, err := txDB.Commit()
+		err := txDB.Commit()
 		if err != nil {
 			return EmptyRoot, err
 		}

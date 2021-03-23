@@ -5,16 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNum uint64, notRegenerateGethData bool) {
@@ -108,11 +109,11 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 		}
 	}
 
-	tgTx, err := resultsKV.Begin(context.Background(), ethdb.RO)
+	tgTx, err := resultsKV.Begin(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	gethTx, err := gethKV.Begin(context.Background(), ethdb.RO)
+	gethTx, err := gethKV.Begin(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -284,7 +284,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	defer file.Close()
 
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
-	dstTx, err1 := dst.Begin(ctx, ethdb.RW)
+	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
 	}
@@ -328,7 +328,7 @@ MainLoop:
 			panic("bucket not parse")
 		}
 
-		c := dstTx.Cursor(bucket)
+		c := dstTx.RwCursor(bucket)
 
 		var prevK []byte
 		for {
@@ -346,7 +346,7 @@ MainLoop:
 			v := common.CopyBytes(fileScanner.Bytes())
 			v = common.FromHex(string(v[1:]))
 
-			if casted, ok := c.(ethdb.CursorDupSort); ok {
+			if casted, ok := c.(ethdb.RwCursorDupSort); ok {
 				if bytes.Equal(k, prevK) {
 					if err = casted.AppendDup(k, v); err != nil {
 						panic(err)
@@ -388,7 +388,7 @@ MainLoop:
 	if err != nil {
 		return err
 	}
-	dstTx, err = dst.Begin(ctx, ethdb.RW)
+	dstTx, err = dst.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -422,12 +422,12 @@ func mdbxToMdbx(ctx context.Context, from, to string) error {
 }
 
 func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
-	srcTx, err1 := src.Begin(ctx, ethdb.RO)
+	srcTx, err1 := src.Begin(ctx)
 	if err1 != nil {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, ethdb.RW)
+	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
 	}
@@ -443,10 +443,10 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 			continue
 		}
 
-		c := dstTx.Cursor(name)
+		c := dstTx.RwCursor(name)
 		srcC := srcTx.Cursor(name)
 		var prevK []byte
-		casted, isDupsort := c.(ethdb.CursorDupSort)
+		casted, isDupsort := c.(ethdb.RwCursorDupSort)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
@@ -478,12 +478,12 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, ethdb.RW)
+				dstTx, err = dst.BeginRw(ctx)
 				if err != nil {
 					return err
 				}
-				c = dstTx.Cursor(name)
-				casted, isDupsort = c.(ethdb.CursorDupSort)
+				c = dstTx.RwCursor(name)
+				casted, isDupsort = c.(ethdb.RwCursorDupSort)
 			default:
 			}
 		}
@@ -503,7 +503,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 	if err != nil {
 		return err
 	}
-	dstTx, err = dst.Begin(ctx, ethdb.RW)
+	dstTx, err = dst.BeginRw(ctx)
 	if err != nil {
 		return err
 	}

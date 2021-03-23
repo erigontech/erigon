@@ -5,11 +5,11 @@ import (
 	"errors"
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
+
+const ReadersLimit = 2000 // MDBX_READERS_LIMIT on 64bit system
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
@@ -64,7 +64,7 @@ var (
 //
 type KV interface {
 	View(ctx context.Context, f func(tx Tx) error) error
-	Update(ctx context.Context, f func(tx Tx) error) error
+	Update(ctx context.Context, f func(tx RwTx) error) error
 	Close()
 
 	// Begin - creates transaction
@@ -80,7 +80,8 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context, flags TxFlags) (Tx, error)
+	Begin(ctx context.Context) (Tx, error)
+	BeginRw(ctx context.Context) (RwTx, error)
 	AllBuckets() dbutils.BucketsCfg
 
 	CollectMetrics()
@@ -89,10 +90,8 @@ type KV interface {
 type TxFlags uint
 
 const (
-	RW     TxFlags = 0x00 // default
-	RO     TxFlags = 0x02
-	Try    TxFlags = 0x04
-	NoSync TxFlags = 0x08
+	RW TxFlags = 0x00 // default
+	RO TxFlags = 0x02
 )
 
 type Tx interface {
@@ -113,19 +112,26 @@ type Tx interface {
 	BucketSize(name string) (uint64, error)
 
 	Comparator(bucket string) dbutils.CmpFunc
-	Cmp(bucket string, a, b []byte) int
-	DCmp(bucket string, a, b []byte) int
 
-	// Allows to create a linear sequence of unique positive integers for each table.
+	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
-	Sequence(bucket string, amount uint64) (uint64, error)
+	ReadSequence(bucket string) (uint64, error)
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
-// Interface used for buckets migration, don't use it in usual app code
+type RwTx interface {
+	Tx
+
+	RwCursor(bucket string) RwCursor
+	RwCursorDupSort(bucket string) RwCursorDupSort
+
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
+}
+
+// BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
 	DropBucket(string) error
 	CreateBucket(string) error
@@ -155,6 +161,14 @@ type Cursor interface {
 	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
 	Current() ([]byte, []byte, error)             // Current - return key/data at current cursor position
 
+	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
+
+	Close()
+}
+
+type RwCursor interface {
+	Cursor
+
 	Put(k, v []byte) error           // Put - based on order
 	Append(k []byte, v []byte) error // Append - append the given key/data pair to the end of the database. This option allows fast bulk loading when keys are already known to be in the correct order.
 	Delete(k, v []byte) error        // Delete - short version of SeekExact+DeleteCurrent or SeekBothExact+DeleteCurrent
@@ -165,16 +179,6 @@ type Cursor interface {
 	// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 	// this operation.
 	DeleteCurrent() error
-
-	// PutNoOverwrite(key, value []byte) error
-	Reserve(k []byte, n int) ([]byte, error)
-
-	// PutCurrent - replace the item at the current cursor position.
-	PutCurrent(key, value []byte) error
-
-	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
-
-	Close()
 }
 
 type CursorDupSort interface {
@@ -183,35 +187,25 @@ type CursorDupSort interface {
 	// SeekBothExact -
 	// second parameter can be nil only if searched key has no duplicates, or return error
 	SeekBothExact(key, value []byte) ([]byte, []byte, error)
-	SeekBothRange(key, value []byte) ([]byte, []byte, error)
+	SeekBothRange(key, value []byte) ([]byte, error)
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
-	LastDup(k []byte) ([]byte, error)   // LastDup - position at last data item of current key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
 
-	CountDuplicates() (uint64, error)  // CountDuplicates - number of duplicates for the current key
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+}
+
+type RwCursorDupSort interface {
+	CursorDupSort
+	RwCursor
+
 	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all of the data items for the current key
 	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
-
-	//PutIfNoDup()      // Store the key-value pair only if key is not present
 }
 
 type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
 }
-
-type Backend interface {
-	AddLocal([]byte) ([]byte, error)
-	Etherbase() (common.Address, error)
-	NetVersion() (uint64, error)
-	Subscribe(func(*remote.SubscribeReply)) error
-}
-
-type DbProvider uint8
-
-const (
-	Remote DbProvider = iota
-	Lmdb
-)
 
 var ErrDBClosed = errors.New("db closed")

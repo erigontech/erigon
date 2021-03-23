@@ -194,7 +194,9 @@ func Stateless(
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory, true /* overwrite */)
 		check(err)
-		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
+		db := ethdb.NewMemDatabase()
+		defer db.Close()
+		genesisBlock, _, err1 := core.DefaultGenesisBlock().ToBlock(db, writeHistory)
 		check(err1)
 		preRoot = genesisBlock.Header().Root
 	}
@@ -221,7 +223,7 @@ func Stateless(
 	}
 	batch := stateDb.NewBatch()
 	defer func() {
-		if _, err = batch.Commit(); err != nil {
+		if err = batch.Commit(); err != nil {
 			fmt.Printf("Failed to commit batch: %v\n", err)
 		}
 	}()
@@ -480,7 +482,7 @@ func Stateless(
 		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0
 
 		if batch.BatchSize() >= 100000 || willSnapshot {
-			if _, err := batch.Commit(); err != nil {
+			if err := batch.Commit(); err != nil {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}

@@ -44,11 +44,11 @@ import (
 
 // Ethash proof-of-work protocol constants.
 var (
-	FrontierBlockReward       = uint256.NewInt().SetUint64(5e+18) // Block reward in wei for successfully mining a block
-	ByzantiumBlockReward      = uint256.NewInt().SetUint64(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
-	ConstantinopleBlockReward = uint256.NewInt().SetUint64(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
-	maxUncles                 = 2                                 // Maximum number of uncles allowed in a single block
-	allowedFutureBlockTime    = 15 * time.Second                  // Max time from current time allowed for blocks, before they're considered future blocks
+	FrontierBlockReward           = uint256.NewInt().SetUint64(5e+18) // Block reward in wei for successfully mining a block
+	ByzantiumBlockReward          = uint256.NewInt().SetUint64(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
+	ConstantinopleBlockReward     = uint256.NewInt().SetUint64(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
+	maxUncles                     = 2                                 // Maximum number of uncles allowed in a single block
+	allowedFutureBlockTimeSeconds = int64(15)                         // Max seconds from current time allowed for blocks, before they're considered future blocks
 
 	// calcDifficultyEip2384 is the difficulty adjustment algorithm as specified by EIP 2384.
 	// It offsets the bomb 4M blocks from Constantinople, so in total 9M blocks.
@@ -276,7 +276,8 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the header's timestamp
 	if !uncle {
-		if header.Time > uint64(time.Now().Add(allowedFutureBlockTime).Unix()) {
+		unixNow := time.Now().Unix()
+		if header.Time > uint64(unixNow+allowedFutureBlockTimeSeconds) {
 			return consensus.ErrFutureBlock
 		}
 	}
@@ -349,9 +350,9 @@ func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentD
 	case config.IsByzantium(next):
 		return calcDifficultyByzantium(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsHomestead(next):
-		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	default:
-		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	}
 }
 
@@ -431,7 +432,7 @@ func makeDifficultyCalculator(bombDelay *big.Int) func(time, parentTime uint64, 
 // calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
 // parent block's time and difficulty. The calculation uses the Homestead rules.
-func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
+func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, _ common.Hash) *big.Int {
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
 	// algorithm:
 	// diff = (parent_diff +
@@ -480,7 +481,7 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty, parentNu
 // calcDifficultyFrontier is the difficulty adjustment algorithm. It returns the
 // difficulty that a new block should have when created at time given the parent
 // block's time and difficulty. The calculation uses the Frontier rules.
-func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNumber *big.Int) *big.Int {
+func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNumber *big.Int, _ common.Hash) *big.Int {
 	diff := new(big.Int)
 	adjust := new(big.Int).Div(parentDifficulty, params.DifficultyBoundDivisor)
 	bigTime := new(big.Int)
@@ -515,6 +516,11 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNum
 func (ethash *Ethash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
 	return ethash.verifySeal(header, false)
 }
+
+// Exported for fuzzing
+var FrontierDifficultyCalulator = calcDifficultyFrontier
+var HomesteadDifficultyCalulator = calcDifficultyHomestead
+var DynamicDifficultyCalculator = makeDifficultyCalculator
 
 // verifySeal checks whether a block satisfies the PoW difficulty requirements,
 // either using the usual ethash cache for it, or alternatively using a full DAG
@@ -596,8 +602,9 @@ func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header,
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
-	// Accumulate any block and uncle rewards and commit the final state root
-	accumulateRewards(chainConfig, state, header, uncles)
+
+	// Finalize block
+	ethash.Finalize(chainConfig, header, state, txs, uncles)
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, receipts), nil
 }

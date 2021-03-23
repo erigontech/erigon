@@ -20,7 +20,6 @@ package ethdb
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -90,31 +89,31 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Put(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Put(key, value)
 	})
 	return err
 }
 
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Append(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Append(key, value)
 	})
 	return err
 }
 
 // AppendDup appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.CursorDupSort(bucket).AppendDup(key, value)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursorDupSort(bucket).AppendDup(key, value)
 	})
 	return err
 }
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
 		return MultiPut(tx, tuples...)
 	})
 	if err != nil {
@@ -144,16 +143,16 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 	return casted.DiskSize(ctx)
 }
 
-func (db *ObjectDatabase) Sequence(bucket string, amount uint64) (res uint64, err error) {
-	if amount == 0 {
-		err = db.kv.View(context.Background(), func(tx Tx) error {
-			res, err = tx.Sequence(bucket, amount)
-			return err
-		})
-		return res, err
-	}
-	err = db.kv.Update(context.Background(), func(tx Tx) error {
-		res, err = tx.Sequence(bucket, amount)
+func (db *ObjectDatabase) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
+	err = db.kv.Update(context.Background(), func(tx RwTx) error {
+		res, err = tx.IncrementSequence(bucket, amount)
+		return err
+	})
+	return res, err
+}
+func (db *ObjectDatabase) ReadSequence(bucket string) (res uint64, err error) {
+	err = db.kv.View(context.Background(), func(tx Tx) error {
+		res, err = tx.ReadSequence(bucket)
 		return err
 	})
 	return res, err
@@ -208,8 +207,8 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 // Delete deletes the key from the queue and database
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
-	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Delete(k, v)
+	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+		return tx.RwCursor(bucket).Delete(k, v)
 	})
 	return err
 }
@@ -232,7 +231,7 @@ func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
 			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
@@ -253,7 +252,7 @@ func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		log.Info("Dropping bucket", "name", name)
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
+		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
 			migrator, ok := tx.(BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
@@ -315,8 +314,8 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
 		for _, name := range dbutils.Buckets {
 			name := name
-			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
-				newBucketToWrite := writeTx.Cursor(name)
+			if err := mem.kv.Update(context.Background(), func(writeTx RwTx) error {
+				newBucketToWrite := writeTx.RwCursor(name)
 				defer newBucketToWrite.Close()
 				readC := readTx.Cursor(name)
 				defer readC.Close()
@@ -349,17 +348,9 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, flags); err != nil {
-		if !errors.Is(err, ErrDBClosed) {
-			panic(err)
-		}
-		return nil, err
+		return batch, err
 	}
 	return batch, nil
-}
-
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (db *ObjectDatabase) IdealBatchSize() int {
-	panic("only mutation hast preferred batch size, because it limited by RAM")
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
@@ -371,10 +362,6 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
-}
-
-func (db *ObjectDatabase) Reserve(bucket string, key []byte, i int) ([]byte, error) {
-	panic("supported only by TxDb")
 }
 
 // Type which expecting sequence of triplets: dbi, key, value, ....

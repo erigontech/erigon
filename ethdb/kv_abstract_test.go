@@ -9,8 +9,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,33 +27,33 @@ func TestSequence(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, ethdb.RW)
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		i, err := tx.Sequence(dbutils.Buckets[0], 0)
+		i, err := tx.ReadSequence(dbutils.Buckets[0])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.Sequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.Sequence(dbutils.Buckets[0], 6)
+		i, err = tx.IncrementSequence(dbutils.Buckets[0], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.Sequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 
-		i, err = tx.Sequence(dbutils.Buckets[1], 0)
+		i, err = tx.ReadSequence(dbutils.Buckets[1])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.Sequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.Sequence(dbutils.Buckets[1], 6)
+		i, err = tx.IncrementSequence(dbutils.Buckets[1], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.Sequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 	}
@@ -87,12 +87,12 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, ethdb.RW)
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c := tx.Cursor(bucket1)
-		c1 := tx.Cursor(bucket2)
+		c := tx.RwCursor(bucket1)
+		c1 := tx.RwCursor(bucket2)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
@@ -142,7 +142,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
+	rdb := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],

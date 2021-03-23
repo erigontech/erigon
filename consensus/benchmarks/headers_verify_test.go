@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -287,7 +287,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 		t.Errorf("setting up genensis block: %v", err)
 	}
 
-	engine := eth.CreateConsensusEngine(config, consensusConfig, nil, false)
+	engine := ethconfig.CreateConsensusEngine(config, consensusConfig, nil, false)
 	defer engine.Close()
 
 	var done int

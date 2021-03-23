@@ -2,7 +2,6 @@
 
 package ethdb
 
-import "C"
 import (
 	"bytes"
 	"context"
@@ -103,44 +102,42 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
-	if err = env.SetMaxDBs(100); err != nil {
+	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, 256); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, ReadersLimit); err != nil {
 		return nil, err
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
-		if opts.mapSize == 0 {
-			if opts.inMem {
-				opts.mapSize = 64 * datasize.MB
-			} else {
-				opts.mapSize = LMDBDefaultMapSize
-			}
-		}
-
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
-			return nil, err
-		}
-
-		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
-			return nil, err
-		}
-
-		if opts.maxFreelistReuse == 0 {
-			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-		}
-
-		if err = os.MkdirAll(opts.path, 0744); err != nil {
-			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+	if opts.mapSize == 0 {
+		if opts.inMem {
+			opts.mapSize = 64 * datasize.MB
+		} else {
+			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
 
 	var flags = opts.flags
 	if opts.inMem {
 		flags ^= mdbx.Durable
-		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync | mdbx.WriteMap // it's ok for tests
 		opts.dirtyListMaxPages = 8 * 1024
+	}
+
+	if opts.maxFreelistReuse == 0 {
+		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+	}
+
+	if opts.flags&mdbx.Accede == 0 {
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
+			return nil, err
+		}
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	err = env.Open(opts.path, flags, 0664)
@@ -164,7 +161,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.flags&mdbx.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background(), RO)
+		tx, innerErr := db.Begin(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -181,7 +178,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 			return nil, err
 		}
 	} else {
-		if err := db.Update(context.Background(), func(tx Tx) error {
+		if err := db.Update(context.Background(), func(tx RwTx) error {
 			for name, cfg := range db.buckets {
 				if cfg.IsDeprecated {
 					continue
@@ -343,14 +340,42 @@ func (db *MdbxKV) CollectMetrics() {
 		tableGcEntries.Update(int64(stat.Entries))
 		return nil
 	}); err != nil {
-		panic(err)
+		log.Error("collecting metrics failed", "err", err)
 	}
 }
 
-func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
+func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
 		fmt.Println("begin-err-1", atomic.LoadUint32(db.status), db.env == nil)
 		return nil, ErrDBClosed
+	}
+
+	defer func() {
+		if err == nil {
+			if atomic.LoadUint32(db.status) != statusOK {
+				fmt.Println("begin-err-2", atomic.LoadUint32(db.status))
+				err = ErrDBClosed
+				return
+			}
+			db.wg.Add(1)
+		}
+	}()
+
+	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
+	if err != nil {
+		return nil, err
+	}
+	tx.RawRead = true
+	return &MdbxTx{
+		db:       db,
+		tx:       tx,
+		readOnly: true,
+	}, nil
+}
+
+func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
+	if db.env == nil {
+		return nil, fmt.Errorf("db closed")
 	}
 	runtime.LockOSThread()
 	defer func() {
@@ -364,26 +389,15 @@ func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 		}
 	}()
 
-	var ro bool
-	nativeFlags := uint(0)
-	if flags&RO != 0 {
-		ro = true
-		nativeFlags |= mdbx.Readonly
-	}
-	if flags&NoSync != 0 {
-		nativeFlags |= mdbx.TxNoSync
-	}
-
-	tx, err := db.env.BeginTxn(nil, nativeFlags)
+	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
 	return &MdbxTx{
-		db:       db,
-		tx:       tx,
-		readOnly: ro,
+		db: db,
+		tx: tx,
 	}, nil
 }
 
@@ -425,16 +439,6 @@ func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
 }
 
-// Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *MdbxTx) Cmp(bucket string, a, b []byte) int {
-	return tx.tx.Cmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
-// DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
-	return tx.tx.DCmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
 // All buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string
@@ -461,7 +465,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx, RO)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -470,14 +474,14 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
 		return ErrDBClosed
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	tx, err := db.Begin(ctx, RW)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -631,7 +635,9 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 
@@ -672,7 +678,9 @@ func (tx *MdbxTx) Rollback() {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 	tx.printDebugInfo()
@@ -734,7 +742,7 @@ func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 			return nil, err
 		}
 		defer c.Close()
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil
@@ -766,7 +774,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 			return false, err
 		}
 		defer c.Close()
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return false, nil
@@ -785,10 +793,29 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	}
 }
 
-func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
-	// non-native for now
-	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
+	c := tx.RwCursor(dbutils.Sequence)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !mdbx.IsNotFound(err) {
+		return 0, err
+	}
 
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	err = c.Put([]byte(bucket), newVBytes)
+	if err != nil {
+		return 0, err
+	}
+	return currentV, nil
+}
+
+func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
 	c := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
@@ -801,16 +828,6 @@ func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
 		currentV = binary.BigEndian.Uint64(v)
 	}
 
-	if amount == 0 {
-		return currentV, nil
-	}
-
-	newVBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
-	err = c.Put([]byte(bucket), newVBytes)
-	if err != nil {
-		return 0, err
-	}
 	return currentV, nil
 }
 
@@ -836,27 +853,35 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	return st, nil
 }
 
-func (tx *MdbxTx) Cursor(bucket string) Cursor {
+func (tx *MdbxTx) RwCursor(bucket string) RwCursor {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)
 	}
 
 	if b.Flags&dbutils.DupSort != 0 {
-		return tx.CursorDupSort(bucket)
+		return tx.RwCursorDupSort(bucket)
 	}
 
 	return tx.stdCursor(bucket)
 }
 
-func (tx *MdbxTx) stdCursor(bucket string) Cursor {
+func (tx *MdbxTx) Cursor(bucket string) Cursor {
+	return tx.RwCursor(bucket)
+}
+
+func (tx *MdbxTx) stdCursor(bucket string) RwCursor {
 	b := tx.db.buckets[bucket]
 	return &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
 }
 
-func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
+func (tx *MdbxTx) RwCursorDupSort(bucket string) RwCursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*MdbxCursor)
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor}
+}
+
+func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
+	return tx.RwCursorDupSort(bucket)
 }
 
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
@@ -864,40 +889,41 @@ func (tx *MdbxTx) CHandle() unsafe.Pointer {
 }
 
 // methods here help to see better pprof picture
-func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error)    { return c.c.Get(k, nil, mdbx.Set) }
-func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) first() ([]byte, []byte, error)          { return c.c.Get(nil, nil, mdbx.First) }
-func (c *MdbxCursor) next() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Next) }
-func (c *MdbxCursor) nextDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.NextDup) }
-func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.NextNoDup) }
-func (c *MdbxCursor) prev() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Prev) }
-func (c *MdbxCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.PrevDup) }
-func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
-func (c *MdbxCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(mdbx.Current) }
-func (c *MdbxCursor) delNoDupData() error                     { return c.c.Del(mdbx.NoDupData) }
-func (c *MdbxCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, mdbx.Current) }
-func (c *MdbxCursor) putNoOverwrite(k, v []byte) error        { return c.c.Put(k, v, mdbx.NoOverwrite) }
-func (c *MdbxCursor) putNoDupData(k, v []byte) error          { return c.c.Put(k, v, mdbx.NoDupData) }
-func (c *MdbxCursor) append(k, v []byte) error                { return c.c.Put(k, v, mdbx.Append) }
-func (c *MdbxCursor) appendDup(k, v []byte) error             { return c.c.Put(k, v, mdbx.AppendDup) }
-func (c *MdbxCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
-func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, v, mdbx.GetBoth)
+func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
+func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
+func (c *MdbxCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, mdbx.First) }
+func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
+func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
+func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
+func (c *MdbxCursor) prev() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Prev) }
+func (c *MdbxCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.PrevDup) }
+func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
+func (c *MdbxCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Last) }
+func (c *MdbxCursor) delCurrent() error                    { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) delNoDupData() error                  { return c.c.Del(mdbx.NoDupData) }
+func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
+func (c *MdbxCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, mdbx.Current) }
+func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
+func (c *MdbxCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, mdbx.NoDupData) }
+func (c *MdbxCursor) append(k, v []byte) error             { return c.c.Put(k, v, mdbx.Append) }
+func (c *MdbxCursor) appendDup(k, v []byte) error          { return c.c.Put(k, v, mdbx.AppendDup) }
+func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
+	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
+	return v, err
 }
 func (c *MdbxCursor) setRange(k []byte) ([]byte, []byte, error) {
 	return c.c.Get(k, nil, mdbx.SetRange)
 }
-func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, v, mdbx.GetBothRange)
+func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
+	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
+	return v, err
 }
 func (c *MdbxCursor) firstDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
 	return v, err
 }
-func (c *MdbxCursor) lastDup(k []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, nil, mdbx.LastDup)
+func (c *MdbxCursor) lastDup() ([]byte, error) {
+	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
 }
 
@@ -1039,7 +1065,7 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	}
 
 	if seek2 != nil && bytes.Equal(seek1, k) {
-		k, v, err = c.getBothRange(seek1, seek2)
+		v, err = c.getBothRange(seek1, seek2)
 		if err != nil && mdbx.IsNotFound(err) {
 			k, v, err = c.next()
 			if err != nil {
@@ -1165,7 +1191,7 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 	}
 
 	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		_, _, err := c.getBoth(k, v)
+		_, err := c.getBoth(k, v)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil
@@ -1201,16 +1227,6 @@ func (c *MdbxCursor) DeleteCurrent() error {
 	return c.delCurrent()
 }
 
-func (c *MdbxCursor) Reserve(k []byte, n int) ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-
-	return c.reserve(k, n)
-}
-
 func (c *MdbxCursor) deleteDupSort(key []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
@@ -1219,7 +1235,7 @@ func (c *MdbxCursor) deleteDupSort(key []byte) error {
 	}
 
 	if len(key) == from {
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil { // if key not found, or found another one - then nothing to delete
 			if mdbx.IsNotFound(err) {
 				return nil
@@ -1303,7 +1319,7 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 
 	value = append(key[to:], value...)
 	key = key[:to]
-	_, v, err := c.getBothRange(key, value[:from-to])
+	v, err := c.getBothRange(key, value[:from-to])
 	if err != nil { // if key not found, or found another one - then just insert
 		if mdbx.IsNotFound(err) {
 			return c.put(key, value)
@@ -1324,25 +1340,6 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	return c.put(key, value)
 }
 
-func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("mdbx doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		value = append(key[b.DupToLen:], value...)
-		key = key[:b.DupToLen]
-	}
-
-	return c.putCurrent(key, value)
-}
-
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
@@ -1353,7 +1350,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		k, v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1363,7 +1360,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		if !bytes.Equal(key[to:], v[:from-to]) {
 			return nil, nil, nil
 		}
-		return k, v[from-to:], nil
+		return key[:to], v[from-to:], nil
 	}
 
 	k, v, err := c.set(key)
@@ -1418,8 +1415,13 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
+		l := len(c.tx.cursors)
+		if l == 0 {
+			c.c = nil
+			return
+		}
 		//TODO: Find a better solution to avoid the leak?
-		newCursors := make([]*mdbx.Cursor, len(c.tx.cursors)-1)
+		newCursors := make([]*mdbx.Cursor, l-1)
 		i := 0
 		for _, cc := range c.tx.cursors {
 			if cc != c.c {
@@ -1448,16 +1450,6 @@ func (c *MdbxDupSortCursor) initCursor() error {
 	return c.MdbxCursor.initCursor()
 }
 
-// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
-//	The key parameter must still be provided, and must match it.
-//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
-//	sort into the same place. This is intended to be used when the
-//	new data is the same size as the old. Otherwise it will simply
-//	perform a delete of the old record followed by an insert.
-func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
-	panic("method is too dangerous, read docs")
-}
-
 // DeleteExact - does delete
 func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
 	if c.c == nil {
@@ -1466,7 +1458,7 @@ func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
 		}
 	}
 
-	_, _, err := c.getBoth(k1, k2)
+	_, err := c.getBoth(k1, k2)
 	if err != nil { // if key not found, or found another one - then nothing to delete
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -1483,31 +1475,31 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 		}
 	}
 
-	k, v, err := c.getBoth(key, value)
+	v, err := c.getBoth(key, value)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("in SeekBothExact: %w", err)
 	}
-	return k, v, nil
+	return key, v, nil
 }
 
-func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
+			return nil, err
 		}
 	}
 
-	k, v, err := c.getBothRange(key, value)
+	v, err := c.getBothRange(key, value)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
+			return nil, nil
 		}
-		return []byte{}, nil, fmt.Errorf("in SeekBothRange: %w", err)
+		return nil, fmt.Errorf("in SeekBothRange: %w", err)
 	}
-	return k, v, nil
+	return v, nil
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
@@ -1597,14 +1589,14 @@ func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *MdbxDupSortCursor) LastDup(k []byte) ([]byte, error) {
+func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
 	}
 
-	v, err := c.lastDup(k)
+	v, err := c.lastDup()
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil

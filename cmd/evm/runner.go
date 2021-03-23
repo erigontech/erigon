@@ -139,8 +139,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
-		_, _, tds, _ := gen.ToBlock(db, false /* history */)
-		statedb = state.New(tds)
+		_, statedb, _ = gen.ToBlock(db, false /* history */)
 		chainConfig = gen.Config
 	} else {
 		tds := state.NewTrieDbState(common.Hash{}, db, 0)
@@ -281,7 +280,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		tx, err1 := db.KV().Begin(context.Background(), ethdb.RO)
+		tx, err1 := db.KV().Begin(context.Background())
 		if err1 != nil {
 			return fmt.Errorf("transition cannot open tx: %v", err1)
 		}

@@ -63,8 +63,8 @@ func (stagedSync *StagedSync) Prepare(
 	headersFetchers []func() error,
 	txPool *core.TxPool,
 	poolStart func() error,
-	changeSetHook ChangeSetHook,
 	initialCycle bool,
+	miningConfig *MiningStagesParameters,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -95,15 +95,15 @@ func (stagedSync *StagedSync) Prepare(
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,
 			poolStart:             poolStart,
-			changeSetHook:         changeSetHook,
 			cache:                 cache,
-			batchSize:             batchSize,
+			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
 			stateWriterBuilder:    writerBuilder,
 			notifier:              stagedSync.Notifier,
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
+			mining:                miningConfig,
 		},
 	)
 	state := NewState(stages)

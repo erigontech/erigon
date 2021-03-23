@@ -51044,4 +51044,5 @@ var ropstenPreverifiedHashes = []string{
 	"42d46286ad753f0fe383038cc1eb0df8e27c46738153103899c9c20ebffd2dce",
 	"8cf8e767cfbd6788f790795809d0ab847b98fa199c280f76f2414343fa0455fd",
 }
+
 const ropstenPreverifiedHeight uint64 = 9799872

@@ -1037,12 +1037,12 @@ enum MDBX_env_flags_t {
    */
   MDBX_NORDAHEAD = UINT32_C(0x800000),
 
-  /** Don't initialize malloc'd memory before writing to datafile.
+  /** Don't initialize malloc'ed memory before writing to datafile.
    *
-   * Don't initialize malloc'd memory before writing to unused spaces in the
+   * Don't initialize malloc'ed memory before writing to unused spaces in the
    * data file. By default, memory for pages written to the data file is
    * obtained using malloc. While these pages may be reused in subsequent
-   * transactions, freshly malloc'd pages will be initialized to zeroes before
+   * transactions, freshly malloc'ed pages will be initialized to zeroes before
    * use. This avoids persisting leftover data from other code (that used the
    * heap and subsequently freed the memory) into the data file.
    *
@@ -1452,7 +1452,7 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_copy_flags_t)
 /** \brief Cursor operations
  * \ingroup c_cursors
  * This is the set of all operations for retrieving data using a cursor.
- * \see mdbx_cursor_set() */
+ * \see mdbx_cursor_get() */
 enum MDBX_cursor_op {
   /** Position at first key/data item */
   MDBX_FIRST,

@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/evmc/v7/bindings/go/evmc"
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -49,8 +48,8 @@ type (
 // configuration
 func (evm *EVM) ActivePrecompiles() []common.Address {
 	switch {
-	case evm.chainRules.IsYoloV2:
-		return PrecompiledAddressesYoloV2
+	case evm.chainRules.IsBerlin:
+		return PrecompiledAddressesBerlin
 	case evm.chainRules.IsIstanbul:
 		return PrecompiledAddressesIstanbul
 	case evm.chainRules.IsByzantium:
@@ -63,8 +62,8 @@ func (evm *EVM) ActivePrecompiles() []common.Address {
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsYoloV2:
-		precompiles = PrecompiledContractsYoloV2
+	case evm.chainRules.IsBerlin:
+		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsIstanbul:
 		precompiles = PrecompiledContractsIstanbul
 	case evm.chainRules.IsByzantium:
@@ -94,9 +93,9 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	return nil, errors.New("no compatible interpreter")
 }
 
-// Context provides the EVM with auxiliary information. Once provided
+// BlockContext provides the EVM with auxiliary information. Once provided
 // it shouldn't be modified.
-type Context struct {
+type BlockContext struct {
 	// CanTransfer returns whether the account contains
 	// sufficient ether to transfer the value
 	CanTransfer CanTransferFunc
@@ -105,17 +104,21 @@ type Context struct {
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
 
-	// Message information
-	Origin   common.Address // Provides information for ORIGIN
-	GasPrice *big.Int       // Provides information for GASPRICE
-
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
 	GasLimit    uint64         // Provides information for GASLIMIT
 	BlockNumber *big.Int       // Provides information for NUMBER
 	Time        *big.Int       // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
-	TxHash      common.Hash
+}
+
+// TxContext provides the EVM with information about a transaction.
+// All fields can change between transactions.
+type TxContext struct {
+	// Message information
+	TxHash   common.Hash
+	Origin   common.Address // Provides information for ORIGIN
+	GasPrice *big.Int       // Provides information for GASPRICE
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -129,7 +132,8 @@ type Context struct {
 // The EVM should never be reused and is not thread safe.
 type EVM struct {
 	// Context provides auxiliary blockchain related information
-	Context
+	Context BlockContext
+	TxContext
 	// IntraBlockState gives access to the underlying state
 	IntraBlockState IntraBlockState
 	// Depth is the current call stack
@@ -157,17 +161,18 @@ type EVM struct {
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
 	evm := &EVM{
-		Context:         ctx,
+		Context:         blockCtx,
+		TxContext:       txCtx,
 		IntraBlockState: state,
 		vmConfig:        vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(ctx.BlockNumber),
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber),
 		interpreters:    make([]Interpreter, 0, 1),
 	}
 
-	if chainConfig.IsEWASM(ctx.BlockNumber) {
+	if chainConfig.IsEWASM(blockCtx.BlockNumber) {
 		// to be implemented by EVM-C and Wagon PRs.
 		// if vmConfig.EWASMInterpreter != "" {
 		//  extIntOpts := strings.Split(vmConfig.EWASMInterpreter, ":")
@@ -183,16 +188,17 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 		panic("No supported ewasm interpreter yet.")
 	}
 
-	if vmConfig.EVMInterpreter != "" {
-		InitEVMCEVM(vmConfig.EVMInterpreter)
-		evm.interpreters = append(evm.interpreters, &EVMC{evmModule, evm, evmc.CapabilityEVM1, false})
-	} else {
-		evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
-	}
-
+	evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
 	evm.interpreter = evm.interpreters[0]
 
 	return evm
+}
+
+// Reset resets the EVM with a new transaction context.Reset
+// This is not threadsafe and should only be done very cautiously.
+func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
+	evm.TxContext = txCtx
+	evm.IntraBlockState = ibs
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
@@ -246,7 +252,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
 	}
-	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value, bailout)
+	evm.Context.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value, bailout)
 
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
@@ -308,7 +314,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	// Note although it's noop to transfer X ether to caller itself. But
 	// if caller doesn't have enough balance, it would be an error to allow
 	// over-charging itself. So the check here is necessary.
-	if !evm.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
+	if !evm.Context.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
 		return nil, gas, ErrInsufficientBalance
 	}
 	var (
@@ -468,14 +474,14 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, common.Address{}, gas, ErrDepth
 	}
-	if !evm.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
+	if !evm.Context.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 	nonce := evm.IntraBlockState.GetNonce(caller.Address())
 	evm.IntraBlockState.SetNonce(caller.Address(), nonce+1)
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
-	if evm.chainRules.IsYoloV2 {
+	if evm.chainRules.IsBerlin {
 		evm.IntraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
@@ -489,7 +495,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.chainRules.IsEIP158 {
 		evm.IntraBlockState.SetNonce(address, 1)
 	}
-	evm.Transfer(evm.IntraBlockState, caller.Address(), address, value, false /* bailout */)
+	evm.Context.Transfer(evm.IntraBlockState, caller.Address(), address, value, false /* bailout */)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.

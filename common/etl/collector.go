@@ -259,7 +259,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 	}
 	commitTimer := time.Now()
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

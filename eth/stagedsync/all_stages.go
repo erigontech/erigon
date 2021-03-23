@@ -93,8 +93,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
-								BatchSize:             world.batchSize,
-								ChangeSetHook:         world.changeSetHook,
+								BatchSize:             world.BatchSize,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -104,8 +103,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
-							BatchSize:             world.batchSize,
-							ChangeSetHook:         world.changeSetHook,
+							BatchSize:             world.BatchSize,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
 							SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -153,6 +151,8 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 								}
 							}
 							c.Close()
+						*/
+						/*
 							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
 							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 								if err != nil {
@@ -169,7 +169,8 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							}
 							c.Close()
 						*/
-						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
@@ -240,14 +241,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
-								BatchSize: world.batchSize,
+								BatchSize: world.BatchSize,
 							})
 					},
 				}
@@ -339,8 +340,8 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		nil,
 		nil,
 		nil,
-		nil,
 		false,
+		nil,
 	)
 	if err1 != nil {
 		return err1
@@ -397,7 +398,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
-		if _, err1 = tx.Commit(); err1 != nil {
+		if err1 = tx.Commit(); err1 != nil {
 			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 		}
 		return false, nil // No change of the chain
@@ -428,8 +429,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		nil,
-		nil,
 		false,
+		nil,
 	)
 	if err2 != nil {
 		return false, err2
@@ -444,8 +445,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-
-	if _, err = tx.Commit(); err != nil {
+	if err1 = tx.Commit(); err1 != nil {
 		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 	}
 	return true, nil

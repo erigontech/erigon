@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"os/signal"
@@ -20,12 +19,14 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
+	proto_types "github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -60,17 +61,6 @@ func nodeKey() *ecdsa.PrivateKey {
 type SentryMsg struct {
 	sentryId  int
 	requestId int
-}
-
-// NewBlockFromSentry is a type of message sent from sentry to the downloader as a result of NewBlockMsg
-type NewBlockFromSentry struct {
-	SentryMsg
-	eth.NewBlockData
-}
-
-type NewBlockHashFromSentry struct {
-	SentryMsg
-	eth.NewBlockHashesData
 }
 
 type BlockHeadersFromSentry struct {
@@ -139,8 +129,8 @@ func makeP2PServer(
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
 			Name:           eth.ProtocolName,
-			Version:        eth.ProtocolVersions[0],
-			Length:         eth.ProtocolLengths[eth.ProtocolVersions[0]],
+			Version:        eth.ProtocolVersions[1],
+			Length:         17,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.ID().String()
@@ -153,8 +143,8 @@ func makeP2PServer(
 					peerRwMap,
 					peer,
 					rw,
-					eth.ProtocolVersions[0], // version == eth65
-					eth.ProtocolVersions[1], // minVersion == eth64
+					eth.ProtocolVersions[1], // version == eth65
+					eth.ProtocolVersions[2], // minVersion == eth64
 					ss,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
@@ -194,12 +184,12 @@ func runPeer(
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
 	// Convert proto status data into the one required by devp2p
-	genesisHash := common.BytesToHash(protoStatusData.ForkData.Genesis)
-	statusData := &eth.StatusData{
+	genesisHash := gointerfaces.ConvertH256ToHash(protoStatusData.ForkData.Genesis)
+	statusData := &eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       protoStatusData.NetworkId,
-		TD:              new(big.Int).SetBytes(protoStatusData.TotalDifficulty),
-		Head:            common.BytesToHash(protoStatusData.BestHash),
+		TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
+		Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash),
 	}
@@ -216,30 +206,30 @@ func runPeer(
 
 	if msg.Code != eth.StatusMsg {
 		msg.Discard()
-		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
+		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
 	}
 	if msg.Size > eth.ProtocolMaxMsgSize {
 		msg.Discard()
-		return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
+		return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
-	var status eth.StatusData
+	var status eth.StatusPacket
 	if err = msg.Decode(&status); err != nil {
 		msg.Discard()
-		return errResp(eth.ErrDecode, "decode message %v: %v", msg, err)
+		return fmt.Errorf("decode message %v: %v", msg, err)
 	}
 	msg.Discard()
 	if status.NetworkID != networkID {
-		return errResp(eth.ErrNetworkIDMismatch, "network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
+		return fmt.Errorf("network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
 	}
 	if uint(status.ProtocolVersion) < minVersion {
-		return errResp(eth.ErrProtocolVersionMismatch, "version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
+		return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
 	}
 	if status.Genesis != genesisHash {
-		return errResp(eth.ErrGenesisMismatch, "genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
+		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
 	if err = forkFilter(status.ForkID); err != nil {
-		return errResp(eth.ErrForkIDRejected, "%v", err)
+		return fmt.Errorf("%v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
@@ -253,13 +243,13 @@ func runPeer(
 		}
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
-			return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
+			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 		}
 		switch msg.Code {
 		case eth.StatusMsg:
 			msg.Discard()
 			// Status messages should never arrive after the handshake
-			return errResp(eth.ErrExtraStatusMsg, "uncontrolled status message")
+			return fmt.Errorf("uncontrolled status message")
 		case eth.GetBlockHeadersMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
@@ -309,7 +299,7 @@ func runPeer(
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
 			if err := msg.Decode(&hashes); err != nil {
-				return errResp(eth.ErrDecode, "decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+				return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
 			}
 			var hashesStr strings.Builder
 			for _, hash := range hashes {
@@ -321,10 +311,10 @@ func runPeer(
 			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peerID, hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
 			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
-		case eth.TransactionMsg:
+		case eth.TransactionsMsg:
 			var txs []*types.Transaction
 			if err := msg.Decode(&txs); err != nil {
-				return errResp(eth.ErrDecode, "decode TransactionMsg %v: %v", msg, err)
+				return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
 			}
 			var hashesStr strings.Builder
 			for _, tx := range txs {
@@ -495,14 +485,15 @@ type SentryServerImpl struct {
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
-	ss.peerRwMap.Delete(string(req.PeerId))
-	ss.peerTimeMap.Delete(string(req.PeerId))
-	ss.peerHeightMap.Delete(string(req.PeerId))
+	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
+	ss.peerRwMap.Delete(strId)
+	ss.peerTimeMap.Delete(strId)
+	ss.peerHeightMap.Delete(strId)
 	return &empty.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*empty.Empty, error) {
-	peerID := string(req.PeerId)
+	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	x, _ := ss.peerHeightMap.Load(peerID)
 	highestBlock, _ := x.(uint64)
 	if req.MinBlock > highestBlock {
@@ -562,11 +553,11 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
-	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
-	peerID := string(inreq.PeerId)
+	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	rwRaw, ok := ss.peerRwMap.Load(peerID)
 	if !ok {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", inreq.PeerId)
@@ -589,7 +580,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
-	return &proto_sentry.SentPeers{Peers: [][]byte{inreq.PeerId}}, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
@@ -606,7 +597,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		genesisHash := common.BytesToHash(statusData.ForkData.Genesis)
+		genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
 		if err != nil {
 			return &empty.Empty{}, err
@@ -648,7 +639,7 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	ss.recreateReceive()
 	for streamMsg := range ss.receiveCh {
 		outreq := proto_sentry.InboundMessage{
-			PeerId: []byte(streamMsg.peerID),
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 			Id:     streamMsg.msgId,
 			Data:   streamMsg.b,
 		}
@@ -685,7 +676,7 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 	ss.recreateReceiveUpload()
 	for streamMsg := range ss.receiveUploadCh {
 		outreq := proto_sentry.InboundMessage{
-			PeerId: []byte(streamMsg.peerID),
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 			Id:     streamMsg.msgId,
 			Data:   streamMsg.b,
 		}

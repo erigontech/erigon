@@ -53,14 +53,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
-		}
-
-		// Skip non relevant records
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
 		}
 
 		if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
@@ -117,7 +112,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			k := make([]byte, 4)
 			binary.BigEndian.PutUint32(k, uint32(j.index))
-			if err := collectorSenders.Collect(k, j.senders); err != nil {
+			index := int(binary.BigEndian.Uint32(k))
+			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
 				errCh <- j.err
 				return
 			}
@@ -163,14 +159,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}
 
-	loadFunc := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		index := int(binary.BigEndian.Uint32(k))
-		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
-	}
-
 	if err := collectorSenders.Load(logPrefix, db,
 		dbutils.Senders,
-		loadFunc,
+		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quitCh,
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
@@ -207,8 +198,8 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
 				break
 			}
-			if tx.Protected() && tx.ChainID().Cmp(signer.ChainID()) != 0 {
-				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainID(), signer.ChainID())
+			if tx.Protected() && tx.ChainId().Cmp(signer.ChainID()) != 0 {
+				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainId(), signer.ChainID())
 				break
 			}
 			copy(job.senders[i*common.AddressLength:], from[:])
@@ -234,7 +225,7 @@ func UnwindSendersStage(u *UnwindState, s *StageState, stateDB ethdb.Database) e
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
-	_, err = mutation.Commit()
+	err = mutation.Commit()
 	if err != nil {
 		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 	}

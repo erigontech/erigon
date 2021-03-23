@@ -2,7 +2,7 @@ version: 2.1
 jobs:
   build:
     docker:
-      - image: circleci/golang:1.15
+      - image: circleci/golang:1.16
     resource_class: medium
 
     working_directory: /go/src/github.com/ledgerwatch/turbo-geth
@@ -43,7 +43,7 @@ jobs:
           command: |
             trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
             make test | tee ${TEST_RESULTS}/go-test.out
-          no_output_timeout: 10m
+          no_output_timeout: 20m
 
       - save_cache:
           key: v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}

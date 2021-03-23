@@ -98,6 +98,9 @@ type Config struct {
 	// NoUSB disables hardware wallet monitoring and connectivity.
 	NoUSB bool `toml:",omitempty"`
 
+	// USB enables hardware wallet monitoring and connectivity.
+	USB bool `toml:",omitempty"`
+
 	// SmartCardDaemonPath is the path to the smartcard daemon's socket
 	SmartCardDaemonPath string `toml:",omitempty"`
 
@@ -139,6 +142,9 @@ type Config struct {
 	// interface.
 	HTTPTimeouts rpc.HTTPTimeouts
 
+	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.
+	HTTPPathPrefix string `toml:",omitempty"`
+
 	// WSHost is the host interface on which to start the websocket RPC server. If
 	// this field is empty, no websocket API endpoint will be started.
 	WSHost string
@@ -147,6 +153,9 @@ type Config struct {
 	// default zero value is/ valid and will pick a port number randomly (useful for
 	// ephemeral nodes).
 	WSPort int `toml:",omitempty"`
+
+	// WSPathPrefix specifies a path prefix on which ws-rpc is to be served.
+	WSPathPrefix string `toml:",omitempty"`
 
 	// WSOrigins is the list of domain to accept websocket requests from. Please be
 	// aware that the server can only act upon the HTTP request the client sends and
@@ -190,7 +199,8 @@ type Config struct {
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
-	PrivateApiAddr string
+	PrivateApiAddr      string
+	PrivateApiRateLimit uint32
 
 	staticNodesWarning     bool
 	trustedNodesWarning    bool
@@ -198,8 +208,10 @@ type Config struct {
 
 	TLSConnection bool
 	TLSCertFile   string
-	TLSKeyFile    string
-	TLSCACert     string
+	// AllowUnprotectedTxs allows non EIP-155 protected transactions to be send over RPC.
+	AllowUnprotectedTxs bool `toml:",omitempty"`
+	TLSKeyFile          string
+	TLSCACert           string
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
@@ -420,8 +432,18 @@ func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 	return nodes
 }
 
+type AccountManagerConfig struct {
+	ScryptN               int
+	ScryptP               int
+	Keydir                string
+	ExternalSigner        string
+	SmartCardDaemonPath   string
+	InsecureUnlockAllowed bool
+	USB                   bool
+}
+
 // AccountConfig determines the settings for scrypt and keydirectory
-func (c *Config) AccountConfig() (int, int, string, error) {
+func (c *Config) AccountConfig() (AccountManagerConfig, error) {
 	scryptN := keystore.StandardScryptN
 	scryptP := keystore.StandardScryptP
 	if c.UseLightweightKDF {
@@ -445,20 +467,20 @@ func (c *Config) AccountConfig() (int, int, string, error) {
 	case c.KeyStoreDir != "":
 		keydir, err = filepath.Abs(c.KeyStoreDir)
 	}
-	return scryptN, scryptP, keydir, err
+	return AccountManagerConfig{ScryptN: scryptN, ScryptP: scryptP, Keydir: keydir, ExternalSigner: c.ExternalSigner, SmartCardDaemonPath: c.SmartCardDaemonPath, InsecureUnlockAllowed: c.InsecureUnlockAllowed, USB: c.USB}, err
 }
 
-func makeAccountManager(conf *Config) (*accounts.Manager, string, error) {
-	scryptN, scryptP, keydir, err := conf.AccountConfig()
+func MakeAccountManager(conf AccountManagerConfig) (*accounts.Manager, string, error) {
+	scryptN, scryptP, keydir := conf.ScryptN, conf.ScryptP, conf.Keydir
 	var ephemeral string
 	if keydir == "" {
 		// There is no datadir.
+		var err error
 		keydir, err = ioutil.TempDir("", "go-ethereum-keystore")
+		if err != nil {
+			return nil, "", err
+		}
 		ephemeral = keydir
-	}
-
-	if err != nil {
-		return nil, "", err
 	}
 	if err := os.MkdirAll(keydir, 0700); err != nil {
 		return nil, "", err
@@ -479,7 +501,7 @@ func makeAccountManager(conf *Config) (*accounts.Manager, string, error) {
 		// we can have both, but it's very confusing for the user to see the same
 		// accounts in both externally and locally, plus very racey.
 		backends = append(backends, keystore.NewKeyStore(keydir, scryptN, scryptP))
-		if !conf.NoUSB {
+		if conf.USB {
 			// Start a USB hub for Ledger hardware wallets
 			if ledgerhub, err := usbwallet.NewLedgerHub(); err != nil {
 				log.Warn(fmt.Sprintf("Failed to start Ledger hub, disabling: %v", err))

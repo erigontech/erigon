@@ -37,11 +37,11 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
@@ -76,11 +76,11 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
@@ -116,11 +116,11 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	_, err = tx1.Commit()
+	err = tx1.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	_, err = tx2.Commit()
+	err = tx2.Commit()
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}

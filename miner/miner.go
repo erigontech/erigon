@@ -19,12 +19,10 @@ package miner
 
 import (
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -42,18 +40,6 @@ type Backend interface {
 	TxPool() *core.TxPool
 }
 
-// Config is the configuration parameters of mining.
-type Config struct {
-	Etherbase common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
-	Notify    []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
-	ExtraData hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasFloor  uint64         // Target gas floor for mined blocks.
-	GasCeil   uint64         // Target gas ceiling for mined blocks.
-	GasPrice  *big.Int       // Minimum gas price for mining a transaction
-	Recommit  time.Duration  // The time interval for miner to re-create mining work.
-	Noverify  bool           // Disable remote mining solution verification(only useful in ethash).
-}
-
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
 	mux        *event.TypeMux
@@ -67,7 +53,7 @@ type Miner struct {
 	stopCh     chan struct{}
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine *process.RemoteEngine, isLocalBlock func(block *types.Block) bool) *Miner {
+func New(eth Backend, config *params.MiningConfig, chainConfig *params.ChainConfig, mux *event.TypeMux, engine *process.RemoteEngine, isLocalBlock func(block *types.Block) bool) *Miner {
 	miner := &Miner{
 		eth:     eth,
 		mux:     mux,

@@ -232,7 +232,7 @@ func waitForMiningState(t *testing.T, m *Miner, mining bool) {
 
 func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	// Create Ethash config
-	config := Config{
+	config := params.MiningConfig{
 		Etherbase: common.HexToAddress("123456789"),
 	}
 	// Create chainConfig

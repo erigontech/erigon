@@ -110,7 +110,7 @@ hasHash - mark prefixes which hashes are saved in current trie_account record (a
         v                    v                              v                         v                  v
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
 | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-| 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x050304...   |
+| 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
 | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
                            |                |
@@ -147,10 +147,12 @@ var (
 	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefix       = "h"         // block_num_u64 + hash -> header
-	HeaderTDSuffix     = []byte("t") // block_num_u64 + hash + headerTDSuffix -> td
-	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
-	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
+	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
+
+	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
+	HeadersBucket         = "headers"           // block_num_u64 + hash -> header (RLP)
+	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash -> td (RLP)
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
@@ -206,12 +208,16 @@ var (
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	HeadFastBlockKey = "LastFast"
 
+	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
+	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
+
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
 
 	Sequence = "sequence" // tbl_name -> seq_u64
+
 )
 
 // Keys
@@ -252,8 +258,7 @@ var Buckets = []string{
 	CodeBucket,
 	ContractCodeBucket,
 	DatabaseVerisionKey,
-	HeaderPrefix,
-	HeaderNumberPrefix,
+	HeaderNumberBucket,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
 	TxLookupPrefix,
@@ -294,6 +299,10 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
+
+	HeaderCanonicalBucket,
+	HeadersBucket,
+	HeaderTDBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -303,6 +312,7 @@ var DeprecatedBuckets = []string{
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
+	HeaderPrefixOld,
 }
 
 type CustomComparator string
@@ -386,6 +396,7 @@ var BucketsConfigs = BucketsCfg{
 		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
 	},
+	InvalidBlock: {},
 }
 
 func sortBuckets() {

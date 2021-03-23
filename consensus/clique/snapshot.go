@@ -558,7 +558,7 @@ func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool
 		}
 		debugLog("to-save-2.1.5", number)
 
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			log.Error("can't commit snapshot transaction", "block", number, "hash", hash, "err", err)
 			debugLog("to-save-2.8", number, err)
 			return err
@@ -628,7 +628,7 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 		}
 	}
 
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		debugLog("save-snap-ch-7", err)
 		log.Error("can't store snapshots", "blockFrom", snaps[0].number, "blockTo", snaps[len(snaps)-1].number, "err", err)
 		return

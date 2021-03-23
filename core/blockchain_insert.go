@@ -258,7 +258,7 @@ func InsertBodies(
 	if newCanonical {
 		rawdb.WriteHeadBlockHash(batch, chain[len(chain)-1].Hash())
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return true, fmt.Errorf("commit inserting bodies: %w", err)
 	}
 	return false, nil

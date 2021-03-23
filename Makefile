@@ -20,7 +20,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack tester rpctest state pics rpcdaemon integration db-tools
+all: tg hack rpctest state pics rpcdaemon integration db-tools
 
 docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
@@ -42,11 +42,6 @@ hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
-
-tester:
-	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
 	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
@@ -99,13 +94,14 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
+		&& echo '#define MDBX_ENABLE_MADVISE 0' >> config.h \
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: mdbx
-	$(GOTEST)
+	$(GOTEST) --timeout 15m
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
@@ -123,21 +119,6 @@ lintci: mdbx
 		--build-tags="mdbx" \
 	    --config ./.golangci/step1.yml \
 	    --exclude "which can be annoying to use"
-
-	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step2.yml
-
-	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step3.yml
-
-	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step4.yml
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
@@ -161,14 +142,12 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	PATH=$(GOBIN):$(PATH) go generate ./common
 	PATH=$(GOBIN):$(PATH) go generate ./core/types
-	PATH=$(GOBIN):$(PATH) go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./cmd/tester/contracts/
 	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
 grpc:
@@ -178,19 +157,17 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.14.0/protoc-3.14.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.6/protoc-3.15.6-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	PATH=$(GOBIN):$(PATH) go generate ./ethdb
-	PATH=$(GOBIN):$(PATH) go generate ./cmd/headers
-	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
-	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotsync
-
-
-simulator-genesis:
-	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
+	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
+		types/types.proto \
+		p2psentry/sentry.proto \
+		remote/kv.proto remote/db.proto remote/ethbackend.proto \
+		snapshot_downloader/external_downloader.proto
 
 prometheus:
 	docker-compose up prometheus grafana

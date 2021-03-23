@@ -95,7 +95,7 @@ var transactionsTable = Migration{
 
 			txIds := make([]uint64, len(body.Transactions))
 			var baseTxId uint64
-			baseTxId, err = db.Sequence(dbutils.EthTx, uint64(len(body.Transactions)))
+			baseTxId, err = db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
 			if err != nil {
 				return false, nil
 			}

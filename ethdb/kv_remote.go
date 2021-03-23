@@ -14,9 +14,8 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -87,14 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-type RemoteBackend struct {
-	opts             remoteOpts
-	remoteEthBackend remote.ETHBACKENDClient
-	conn             *grpc.ClientConn
-	log              log.Logger
-}
-
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -110,19 +102,19 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 			creds, err = credentials.NewClientTLSFromFile(certFile, "")
 
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		} else {
 			// load peer cert/key, ca cert
 			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
 				log.Error("load peer cert/key error:%v", err)
-				return nil, nil, err
+				return nil, err
 			}
 			caCert, err := ioutil.ReadFile(caCert)
 			if err != nil {
 				log.Error("read ca cert file error:%v", err)
-				return nil, nil, err
+				return nil, err
 			}
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
@@ -149,7 +141,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 
 	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	db := &RemoteKV{
@@ -165,22 +157,15 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 		db.buckets[name] = cfg
 	}
 
-	eth := &RemoteBackend{
-		opts:             opts,
-		remoteEthBackend: remote.NewETHBACKENDClient(conn),
-		conn:             conn,
-		log:              log.New("remote_db", opts.DialAddress),
-	}
-
-	return db, eth, nil
+	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() (KV, Backend) {
-	db, txPool, err := opts.Open("", "", "")
+func (opts remoteOpts) MustOpen() KV {
+	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
 	}
-	return db, txPool
+	return db
 }
 
 func NewRemote() remoteOpts {
@@ -189,6 +174,10 @@ func NewRemote() remoteOpts {
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
+}
+
+func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
+	return db.conn
 }
 
 // Close
@@ -214,7 +203,7 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 
 func (db *RemoteKV) CollectMetrics() {}
 
-func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -224,8 +213,12 @@ func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
 }
 
+func (db *RemoteKV) BeginRw(ctx context.Context) (RwTx, error) {
+	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
+}
+
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx, RO)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -234,16 +227,17 @@ func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
 func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
-func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
-func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
 func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
 
-func (tx *remoteTx) Sequence(bucket string, amount uint64) (uint64, error) {
+func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
+	panic("not implemented yet")
+}
+func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
 
@@ -330,12 +324,10 @@ func (c *remoteCursor) initCursor() error {
 
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
-func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
 func (c *remoteCursor) Delete(k, v []byte) error                      { panic("not supported") }
 func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
-func (c *remoteCursor) Reserve(k []byte, n int) ([]byte, error)       { panic("not supported") }
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
@@ -438,15 +430,15 @@ func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
 	pair, err := c.stream.Recv()
 	if err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
-	return pair.K, pair.V, nil
+	return pair.V, nil
 }
 func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
@@ -468,8 +460,8 @@ func (c *remoteCursor) firstDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remoteCursor) lastDup(k []byte) ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP, K: k}); err != nil {
+func (c *remoteCursor) lastDup() ([]byte, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP}); err != nil {
 		return nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -592,9 +584,9 @@ func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, 
 	return c.seekBothExact(key, value)
 }
 
-func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
 	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
+		return nil, err
 	}
 	return c.getBothRange(key, value)
 }
@@ -635,55 +627,9 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
 	}
 	return c.prevNoDup()
 }
-func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error) {
+func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
-	return c.lastDup(k)
-}
-
-func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
-	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
-	if err != nil {
-		return common.Hash{}.Bytes(), err
-	}
-	return res.Hash, nil
-}
-
-func (back *RemoteBackend) Etherbase() (common.Address, error) {
-	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	return common.BytesToAddress(res.Hash), nil
-}
-
-func (back *RemoteBackend) NetVersion() (uint64, error) {
-	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
-	if err != nil {
-		return 0, err
-	}
-
-	return res.Id, nil
-}
-
-func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) error {
-	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), &remote.SubscribeRequest{})
-	if err != nil {
-		return err
-	}
-	for {
-		event, err := subscription.Recv()
-		if err == io.EOF {
-			log.Info("rpcdaemon: the subscription channel was closed")
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		onNewEvent(event)
-	}
-	return nil
+	return c.lastDup()
 }

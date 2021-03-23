@@ -141,9 +141,9 @@ func TestEnv_Flags(t *testing.T) {
 	if flags&NoTLS == 0 {
 		t.Errorf("NoTLS is not set")
 	}
-	if flags&SafeNoSync != 0 {
-		t.Errorf("NoSync is set")
-	}
+	//if flags&SafeNoSync != 0 {
+	//	t.Errorf("UtterlyNoSync is set")
+	//}
 
 	err = env.SetFlags(SafeNoSync)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestEnv_Flags(t *testing.T) {
 		t.Error(err)
 	}
 	if flags&SafeNoSync == 0 {
-		t.Error("NoSync is not set")
+		t.Error("UtterlyNoSync is not set")
 	}
 
 	err = env.UnsetFlags(SafeNoSync)
@@ -168,7 +168,7 @@ func TestEnv_Flags(t *testing.T) {
 		t.Error(err)
 	}
 	if flags&SafeNoSync != 0 {
-		t.Error("NoSync is set")
+		t.Error("UtterlyNoSync is set")
 	}
 }
 
@@ -538,15 +538,15 @@ func setupFlags(t T, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("mkdir: %s", path)
 	}
-	err = env.SetMaxDBs(64 << 10)
-	if err == nil {
-		t.Fatalf("expecting error")
-	}
 	err = env.SetMaxDBs(1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= LifoReclaim
+	err = env.SetGeometry(-1, -1, 10*1024*1024, -1, -1, 4096)
+	if err != nil {
+		t.Fatalf("setmaxdbs: %v", err)
+	}
+	flags |= UtterlyNoSync | NoMetaSync
 	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)

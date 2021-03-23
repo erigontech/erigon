@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -12,8 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/spf13/cobra"
-	"os"
-	"time"
 )
 
 func init() {
@@ -71,11 +72,11 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	sndb := ethdb.NewObjectDatabase(snkv)
 	mt := sndb.NewBatch()
 
-	tx, err := kv.Begin(context.Background(), ethdb.RO)
+	tx, err := kv.Begin(context.Background())
 	if err != nil {
 		return err
 	}
-	tx2, err := kv.Begin(context.Background(), ethdb.RO)
+	tx2, err := kv.Begin(context.Background())
 	if err != nil {
 		return err
 	}
@@ -84,6 +85,9 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	i := 0
 	t := time.Now()
 	tt := time.Now()
+	commitEvery := time.NewTicker(30 * time.Second)
+	defer commitEvery.Stop()
+
 	err = state.WalkAsOfAccounts(tx, common.Address{}, toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
 		if i%100000 == 0 {
@@ -92,8 +96,14 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			select {
 			case <-ctx.Done():
 				return false, errors.New("interrupted")
+			case <-commitEvery.C:
+				ttt := time.Now()
+				innerErr := mt.CommitAndBegin(context.Background())
+				if innerErr != nil {
+					return false, innerErr
+				}
+				fmt.Println("Committed", time.Since(ttt))
 			default:
-
 			}
 		}
 		if len(k) != 20 {
@@ -154,20 +164,12 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			return false, innerErr
 		}
 
-		if mt.BatchSize() >= mt.IdealBatchSize() {
-			ttt := time.Now()
-			innerErr = mt.CommitAndBegin(context.Background())
-			if innerErr != nil {
-				return false, innerErr
-			}
-			fmt.Println("Committed", time.Since(ttt))
-		}
 		return true, nil
 	})
 	if err != nil {
 		return err
 	}
-	_, err = mt.Commit()
+	err = mt.Commit()
 	if err != nil {
 		return err
 	}

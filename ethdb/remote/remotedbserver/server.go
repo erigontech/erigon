@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"google.golang.org/grpc"
@@ -29,7 +29,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -38,7 +38,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 
 	kv2Srv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events)
+	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -50,12 +50,12 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
-	cpus := uint32(runtime.GOMAXPROCS(-1))
+	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(200), // to force clients reduce concurrency level
+		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
@@ -93,7 +93,7 @@ func NewKvServer(kv ethdb.KV) *KvServer {
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
-	tx, errBegin := s.kv.Begin(stream.Context(), ethdb.RO)
+	tx, errBegin := s.kv.Begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
@@ -137,7 +137,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 
 			tx.Rollback()
-			tx, errBegin = s.kv.Begin(stream.Context(), ethdb.RO)
+			tx, errBegin = s.kv.Begin(stream.Context())
 			if errBegin != nil {
 				return fmt.Errorf("server-side error: %w", errBegin)
 			}
@@ -146,11 +146,11 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				c.c = tx.Cursor(c.bucket)
 				switch casted := c.c.(type) {
 				case ethdb.CursorDupSort:
-					k, _, err := casted.SeekBothRange(c.k, c.v)
+					v, err := casted.SeekBothRange(c.k, c.v)
 					if err != nil {
 						return fmt.Errorf("server-side error: %w", err)
 					}
-					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+					if v == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
 						_, _, err = casted.Next()
 						if err != nil {
 							return fmt.Errorf("server-side error: %w", err)
@@ -215,13 +215,13 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	case remote.Op_SEEK:
 		k, v, err = c.Seek(in.K)
 	case remote.Op_SEEK_BOTH:
-		k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
+		v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
 	case remote.Op_CURRENT:
 		k, v, err = c.Current()
 	case remote.Op_LAST:
 		k, v, err = c.Last()
 	case remote.Op_LAST_DUP:
-		v, err = c.(ethdb.CursorDupSort).LastDup(in.K)
+		v, err = c.(ethdb.CursorDupSort).LastDup()
 	case remote.Op_NEXT:
 		k, v, err = c.Next()
 	case remote.Op_NEXT_DUP:

@@ -49,7 +49,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 
 	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig)
 
-	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, eng)
+	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, nil, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, eng)
 	//tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetBatchSize(0 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetStagedSync(
@@ -73,7 +73,7 @@ func (st *stagedSyncTester) newPeer(id string, version int, chain *testChain) er
 
 	peer := &stagedSyncTesterPeer{st: st, id: id, chain: chain}
 	st.peers[id] = peer
-	return st.downloader.RegisterPeer(id, version, peer)
+	return st.downloader.RegisterPeer(id, uint(version), peer)
 }
 
 func (st *stagedSyncTester) SetHead(_ uint64) error {

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -27,6 +28,7 @@ func HeadersForward(
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	initialCycle bool,
 	wakeUpChan chan struct{},
+	batchSize datasize.ByteSize,
 ) error {
 	var headerProgress uint64
 	var err error
@@ -58,7 +60,7 @@ func HeadersForward(
 			return err
 		}
 		if !useExternalTx {
-			if _, err = tx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				return err
 			}
 		}
@@ -115,7 +117,7 @@ func HeadersForward(
 		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
-		if batch.BatchSize() >= batch.IdealBatchSize() {
+		if batch.BatchSize() >= int(batchSize) {
 			if err = batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
@@ -160,23 +162,28 @@ func HeadersForward(
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 		if !stopped {
-			// Do not switch to the next stage if the headers stage was interrupted
 			s.Done()
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
 	log.Info("Processed", "highest", headerInserter.GetHighest())
+	if stopped {
+		return fmt.Errorf("interrupted")
+	}
 	return nil
 }
 
 func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+	if height == 0 {
+		return nil
+	}
 	ancestorHash := hash
 	ancestorHeight := height
 	var ch common.Hash
@@ -227,7 +234,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
 		return err
 	}
 	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
