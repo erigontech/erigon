@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -89,7 +90,7 @@ var (
 	}
 	keystoreFlag = cli.StringFlag{
 		Name:  "keystore",
-		Value: filepath.Join(node.DefaultDataDir(), "keystore"),
+		Value: filepath.Join(paths.DefaultDataDir(), "keystore"),
 		Usage: "Directory for the keystore",
 	}
 	configdirFlag = cli.StringFlag{
