@@ -652,7 +652,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 
 			commitStart := time.Now()
-			if _, errTx := tx.Commit(); errTx != nil {
+			if errTx := tx.Commit(); errTx != nil {
 				return errTx
 			}
 			log.Info("Commit cycle", "in", time.Since(commitStart))
