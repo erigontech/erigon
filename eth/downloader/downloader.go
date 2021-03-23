@@ -125,9 +125,10 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
-	chainConfig *params.ChainConfig
-	lightchain  LightChain
-	blockchain  BlockChain
+	chainConfig  *params.ChainConfig
+	miningConfig *params.MiningConfig
+	lightchain   LightChain
+	blockchain   BlockChain
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -178,7 +179,9 @@ type Downloader struct {
 	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSyncState *stagedsync.State
+	miningState     *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
+	mining          *stagedsync.StagedSync
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -249,7 +252,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -262,6 +265,7 @@ func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainCon
 		rttEstimate:   uint64(rttMaxEstimate),
 		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
+		miningConfig:  miningConfig,
 		blockchain:    chain,
 		lightchain:    lightchain,
 		dropPeer:      dropPeer,
@@ -281,6 +285,11 @@ func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainCon
 // SetStagedSync sets the staged sync instance (by protocol manager)
 func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	d.stagedSync = stagedSync
+}
+
+// SetStagedSync sets the staged sync instance (by protocol manager)
+func (d *Downloader) SetMining(mining *stagedsync.StagedSync) {
+	d.mining = mining
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
@@ -547,6 +556,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 
 		canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
+		syncCycleStart := time.Now()
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -586,8 +596,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			fetchers,
 			txPool,
 			poolStart,
-			nil,
 			false,
+			nil,
 		)
 		if err != nil {
 			return err
@@ -642,13 +652,57 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 
 			commitStart := time.Now()
-			errTx := tx.Commit()
-			if errTx == nil {
-				log.Info("Commit cycle", "in", time.Since(commitStart))
+			if errTx := tx.Commit(); errTx != nil {
+				return errTx
 			}
-			return errTx
+			log.Info("Commit cycle", "in", time.Since(commitStart))
 		}
 
+		// heuristic - run mining only if we are on top of chain
+		canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
+
+		if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
+			return nil
+		}
+		if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		cc.SetDB(tx)
+		cc.SetEngine(d.blockchain.Engine())
+
+		// Fill the block with all available pending transactions.
+		pending, err := txPool.Pending()
+		if err != nil {
+			return fmt.Errorf("failed to fetch pending transactions: %w", err)
+		}
+
+		if d.miningState, err = d.mining.Prepare(
+			d,
+			d.chainConfig,
+			cc,
+			d.blockchain.GetVMConfig(),
+			nil,
+			tx,
+			p.id,
+			d.storageMode,
+			d.tmpdir,
+			cache,
+			d.batchSize,
+			d.quitCh,
+			fetchers,
+			txPool,
+			poolStart,
+			false,
+			stagedsync.NewMiningStagesParameters(d.miningConfig, true, pending, txPool.Locals()),
+		); err != nil {
+			return err
+		}
+		if err = d.miningState.Run(tx, tx); err != nil {
+			return err
+		}
+		tx.Rollback()
 		return nil
 	}
 

@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/migrations"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,7 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
+func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapshotMode snapshotsync.SnapshotMode) *ethdb.ObjectDatabase {
 	db := ethdb.NewObjectDatabase(openKV(path, false))
 	if applyMigrations {
 		has, err := migrations.NewMigrator().HasPendingMigrations(db)
@@ -52,6 +53,14 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 		panic(err)
 	}
 	return db
+}
+
+func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
+	mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+	return openDatabase2(path, applyMigrations, snapshotDir, mode)
 }
 
 func openKV(path string, exclusive bool) ethdb.KV {

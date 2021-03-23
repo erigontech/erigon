@@ -378,6 +378,505 @@ func (x *SubscribeReply) GetData() []byte {
 	return nil
 }
 
+type GetWorkRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetWorkRequest) Reset() {
+	*x = GetWorkRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[8]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetWorkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWorkRequest) ProtoMessage() {}
+
+func (x *GetWorkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[8]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWorkRequest.ProtoReflect.Descriptor instead.
+func (*GetWorkRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{8}
+}
+
+type GetWorkReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	HeaderHash  string `protobuf:"bytes,1,opt,name=headerHash,proto3" json:"headerHash,omitempty"`   // 32 bytes hex encoded current block header pow-hash
+	SeedHash    string `protobuf:"bytes,2,opt,name=seedHash,proto3" json:"seedHash,omitempty"`       // 32 bytes hex encoded seed hash used for DAG
+	Target      string `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`           // 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+	BlockNumber string `protobuf:"bytes,4,opt,name=blockNumber,proto3" json:"blockNumber,omitempty"` // hex encoded block number
+}
+
+func (x *GetWorkReply) Reset() {
+	*x = GetWorkReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[9]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetWorkReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWorkReply) ProtoMessage() {}
+
+func (x *GetWorkReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[9]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWorkReply.ProtoReflect.Descriptor instead.
+func (*GetWorkReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetWorkReply) GetHeaderHash() string {
+	if x != nil {
+		return x.HeaderHash
+	}
+	return ""
+}
+
+func (x *GetWorkReply) GetSeedHash() string {
+	if x != nil {
+		return x.SeedHash
+	}
+	return ""
+}
+
+func (x *GetWorkReply) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *GetWorkReply) GetBlockNumber() string {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return ""
+}
+
+type SubmitWorkRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	BlockNonce []byte `protobuf:"bytes,1,opt,name=blockNonce,proto3" json:"blockNonce,omitempty"`
+	PowHash    []byte `protobuf:"bytes,2,opt,name=powHash,proto3" json:"powHash,omitempty"`
+	Digest     []byte `protobuf:"bytes,3,opt,name=digest,proto3" json:"digest,omitempty"`
+}
+
+func (x *SubmitWorkRequest) Reset() {
+	*x = SubmitWorkRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[10]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SubmitWorkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitWorkRequest) ProtoMessage() {}
+
+func (x *SubmitWorkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[10]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitWorkRequest.ProtoReflect.Descriptor instead.
+func (*SubmitWorkRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SubmitWorkRequest) GetBlockNonce() []byte {
+	if x != nil {
+		return x.BlockNonce
+	}
+	return nil
+}
+
+func (x *SubmitWorkRequest) GetPowHash() []byte {
+	if x != nil {
+		return x.PowHash
+	}
+	return nil
+}
+
+func (x *SubmitWorkRequest) GetDigest() []byte {
+	if x != nil {
+		return x.Digest
+	}
+	return nil
+}
+
+type SubmitWorkReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Ok bool `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+}
+
+func (x *SubmitWorkReply) Reset() {
+	*x = SubmitWorkReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[11]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SubmitWorkReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitWorkReply) ProtoMessage() {}
+
+func (x *SubmitWorkReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[11]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitWorkReply.ProtoReflect.Descriptor instead.
+func (*SubmitWorkReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SubmitWorkReply) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type SubmitHashRateRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Rate uint64 `protobuf:"varint,1,opt,name=rate,proto3" json:"rate,omitempty"`
+	Id   []byte `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+}
+
+func (x *SubmitHashRateRequest) Reset() {
+	*x = SubmitHashRateRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[12]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SubmitHashRateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitHashRateRequest) ProtoMessage() {}
+
+func (x *SubmitHashRateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[12]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitHashRateRequest.ProtoReflect.Descriptor instead.
+func (*SubmitHashRateRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SubmitHashRateRequest) GetRate() uint64 {
+	if x != nil {
+		return x.Rate
+	}
+	return 0
+}
+
+func (x *SubmitHashRateRequest) GetId() []byte {
+	if x != nil {
+		return x.Id
+	}
+	return nil
+}
+
+type SubmitHashRateReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Ok bool `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+}
+
+func (x *SubmitHashRateReply) Reset() {
+	*x = SubmitHashRateReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[13]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SubmitHashRateReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitHashRateReply) ProtoMessage() {}
+
+func (x *SubmitHashRateReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[13]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitHashRateReply.ProtoReflect.Descriptor instead.
+func (*SubmitHashRateReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SubmitHashRateReply) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type GetHashRateRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetHashRateRequest) Reset() {
+	*x = GetHashRateRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[14]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetHashRateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHashRateRequest) ProtoMessage() {}
+
+func (x *GetHashRateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[14]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHashRateRequest.ProtoReflect.Descriptor instead.
+func (*GetHashRateRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{14}
+}
+
+type GetHashRateReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	HashRate uint64 `protobuf:"varint,1,opt,name=hashRate,proto3" json:"hashRate,omitempty"`
+}
+
+func (x *GetHashRateReply) Reset() {
+	*x = GetHashRateReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[15]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetHashRateReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHashRateReply) ProtoMessage() {}
+
+func (x *GetHashRateReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[15]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHashRateReply.ProtoReflect.Descriptor instead.
+func (*GetHashRateReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetHashRateReply) GetHashRate() uint64 {
+	if x != nil {
+		return x.HashRate
+	}
+	return 0
+}
+
+type MiningRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *MiningRequest) Reset() {
+	*x = MiningRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[16]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *MiningRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MiningRequest) ProtoMessage() {}
+
+func (x *MiningRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[16]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MiningRequest.ProtoReflect.Descriptor instead.
+func (*MiningRequest) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{16}
+}
+
+type MiningReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Enabled bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Running bool `protobuf:"varint,2,opt,name=running,proto3" json:"running,omitempty"`
+}
+
+func (x *MiningReply) Reset() {
+	*x = MiningReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_remote_ethbackend_proto_msgTypes[17]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *MiningReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MiningReply) ProtoMessage() {}
+
+func (x *MiningReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_ethbackend_proto_msgTypes[17]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MiningReply.ProtoReflect.Descriptor instead.
+func (*MiningReply) Descriptor() ([]byte, []int) {
+	return file_remote_ethbackend_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *MiningReply) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *MiningReply) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
 var File_remote_ethbackend_proto protoreflect.FileDescriptor
 
 var file_remote_ethbackend_proto_rawDesc = []byte{
@@ -402,27 +901,81 @@ var file_remote_ethbackend_proto_rawDesc = []byte{
 	0x65, 0x73, 0x74, 0x22, 0x38, 0x0a, 0x0e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65,
 	0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18, 0x01, 0x20,
 	0x01, 0x28, 0x04, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x64, 0x61, 0x74,
-	0x61, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x64, 0x61, 0x74, 0x61, 0x32, 0xfa, 0x01,
-	0x0a, 0x0a, 0x45, 0x54, 0x48, 0x42, 0x41, 0x43, 0x4b, 0x45, 0x4e, 0x44, 0x12, 0x2a, 0x0a, 0x03,
-	0x41, 0x64, 0x64, 0x12, 0x11, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x54, 0x78, 0x52,
-	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e,
-	0x41, 0x64, 0x64, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x3d, 0x0a, 0x09, 0x45, 0x74, 0x68, 0x65,
-	0x72, 0x62, 0x61, 0x73, 0x65, 0x12, 0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x45,
-	0x74, 0x68, 0x65, 0x72, 0x62, 0x61, 0x73, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x16, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x45, 0x74, 0x68, 0x65, 0x72, 0x62, 0x61,
-	0x73, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x40, 0x0a, 0x0a, 0x4e, 0x65, 0x74, 0x56, 0x65,
-	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x19, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x4e,
-	0x65, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x17, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x4e, 0x65, 0x74, 0x56, 0x65, 0x72,
-	0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x3f, 0x0a, 0x09, 0x53, 0x75, 0x62,
-	0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x12, 0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e,
-	0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x16, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72,
-	0x69, 0x62, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x30, 0x01, 0x42, 0x31, 0x0a, 0x10, 0x69, 0x6f,
-	0x2e, 0x74, 0x75, 0x72, 0x62, 0x6f, 0x2d, 0x67, 0x65, 0x74, 0x68, 0x2e, 0x64, 0x62, 0x42, 0x0a,
-	0x45, 0x54, 0x48, 0x42, 0x41, 0x43, 0x4b, 0x45, 0x4e, 0x44, 0x50, 0x01, 0x5a, 0x0f, 0x2e, 0x2f,
-	0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x3b, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x61, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x64, 0x61, 0x74, 0x61, 0x22, 0x10, 0x0a,
+	0x0e, 0x47, 0x65, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22,
+	0x84, 0x01, 0x0a, 0x0c, 0x47, 0x65, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79,
+	0x12, 0x1e, 0x0a, 0x0a, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x48, 0x61, 0x73, 0x68, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x48, 0x61, 0x73, 0x68,
+	0x12, 0x1a, 0x0a, 0x08, 0x73, 0x65, 0x65, 0x64, 0x48, 0x61, 0x73, 0x68, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x08, 0x73, 0x65, 0x65, 0x64, 0x48, 0x61, 0x73, 0x68, 0x12, 0x16, 0x0a, 0x06,
+	0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x74, 0x61,
+	0x72, 0x67, 0x65, 0x74, 0x12, 0x20, 0x0a, 0x0b, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x4e, 0x75, 0x6d,
+	0x62, 0x65, 0x72, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x62, 0x6c, 0x6f, 0x63, 0x6b,
+	0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x22, 0x65, 0x0a, 0x11, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74,
+	0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1e, 0x0a, 0x0a, 0x62,
+	0x6c, 0x6f, 0x63, 0x6b, 0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52,
+	0x0a, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x4e, 0x6f, 0x6e, 0x63, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x70,
+	0x6f, 0x77, 0x48, 0x61, 0x73, 0x68, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x07, 0x70, 0x6f,
+	0x77, 0x48, 0x61, 0x73, 0x68, 0x12, 0x16, 0x0a, 0x06, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x06, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x22, 0x21, 0x0a,
+	0x0f, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79,
+	0x12, 0x0e, 0x0a, 0x02, 0x6f, 0x6b, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x02, 0x6f, 0x6b,
+	0x22, 0x3b, 0x0a, 0x15, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52, 0x61,
+	0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x12, 0x0a, 0x04, 0x72, 0x61, 0x74,
+	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x04, 0x72, 0x61, 0x74, 0x65, 0x12, 0x0e, 0x0a,
+	0x02, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x02, 0x69, 0x64, 0x22, 0x25, 0x0a,
+	0x13, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x52,
+	0x65, 0x70, 0x6c, 0x79, 0x12, 0x0e, 0x0a, 0x02, 0x6f, 0x6b, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08,
+	0x52, 0x02, 0x6f, 0x6b, 0x22, 0x14, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52,
+	0x61, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x2e, 0x0a, 0x10, 0x47, 0x65,
+	0x74, 0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x1a,
+	0x0a, 0x08, 0x68, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04,
+	0x52, 0x08, 0x68, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x22, 0x0f, 0x0a, 0x0d, 0x4d, 0x69,
+	0x6e, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x41, 0x0a, 0x0b, 0x4d,
+	0x69, 0x6e, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x18, 0x0a, 0x07, 0x65, 0x6e,
+	0x61, 0x62, 0x6c, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x65, 0x6e, 0x61,
+	0x62, 0x6c, 0x65, 0x64, 0x12, 0x18, 0x0a, 0x07, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x32, 0xbe,
+	0x04, 0x0a, 0x0a, 0x45, 0x54, 0x48, 0x42, 0x41, 0x43, 0x4b, 0x45, 0x4e, 0x44, 0x12, 0x2a, 0x0a,
+	0x03, 0x41, 0x64, 0x64, 0x12, 0x11, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x54, 0x78,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x10, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65,
+	0x2e, 0x41, 0x64, 0x64, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x3d, 0x0a, 0x09, 0x45, 0x74, 0x68,
+	0x65, 0x72, 0x62, 0x61, 0x73, 0x65, 0x12, 0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e,
+	0x45, 0x74, 0x68, 0x65, 0x72, 0x62, 0x61, 0x73, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x16, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x45, 0x74, 0x68, 0x65, 0x72, 0x62,
+	0x61, 0x73, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x40, 0x0a, 0x0a, 0x4e, 0x65, 0x74, 0x56,
+	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x19, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e,
+	0x4e, 0x65, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x1a, 0x17, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x4e, 0x65, 0x74, 0x56, 0x65,
+	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x3f, 0x0a, 0x09, 0x53, 0x75,
+	0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x12, 0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65,
+	0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x1a, 0x16, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x53, 0x75, 0x62, 0x73, 0x63,
+	0x72, 0x69, 0x62, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x30, 0x01, 0x12, 0x37, 0x0a, 0x07, 0x47,
+	0x65, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x12, 0x16, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e,
+	0x47, 0x65, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x14,
+	0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x47, 0x65, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52,
+	0x65, 0x70, 0x6c, 0x79, 0x12, 0x40, 0x0a, 0x0a, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x57, 0x6f,
+	0x72, 0x6b, 0x12, 0x19, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x53, 0x75, 0x62, 0x6d,
+	0x69, 0x74, 0x57, 0x6f, 0x72, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x17, 0x2e,
+	0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x57, 0x6f, 0x72,
+	0x6b, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x4c, 0x0a, 0x0e, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74,
+	0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x12, 0x1d, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74,
+	0x65, 0x2e, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65,
+	0x2e, 0x53, 0x75, 0x62, 0x6d, 0x69, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x52,
+	0x65, 0x70, 0x6c, 0x79, 0x12, 0x43, 0x0a, 0x0b, 0x47, 0x65, 0x74, 0x48, 0x61, 0x73, 0x68, 0x52,
+	0x61, 0x74, 0x65, 0x12, 0x1a, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x47, 0x65, 0x74,
+	0x48, 0x61, 0x73, 0x68, 0x52, 0x61, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x18, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x47, 0x65, 0x74, 0x48, 0x61, 0x73, 0x68,
+	0x52, 0x61, 0x74, 0x65, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x34, 0x0a, 0x06, 0x4d, 0x69, 0x6e,
+	0x69, 0x6e, 0x67, 0x12, 0x15, 0x2e, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x2e, 0x4d, 0x69, 0x6e,
+	0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x13, 0x2e, 0x72, 0x65, 0x6d,
+	0x6f, 0x74, 0x65, 0x2e, 0x4d, 0x69, 0x6e, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x42,
+	0x31, 0x0a, 0x10, 0x69, 0x6f, 0x2e, 0x74, 0x75, 0x72, 0x62, 0x6f, 0x2d, 0x67, 0x65, 0x74, 0x68,
+	0x2e, 0x64, 0x62, 0x42, 0x0a, 0x45, 0x54, 0x48, 0x42, 0x41, 0x43, 0x4b, 0x45, 0x4e, 0x44, 0x50,
+	0x01, 0x5a, 0x0f, 0x2e, 0x2f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x3b, 0x72, 0x65, 0x6d, 0x6f,
+	0x74, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -437,35 +990,55 @@ func file_remote_ethbackend_proto_rawDescGZIP() []byte {
 	return file_remote_ethbackend_proto_rawDescData
 }
 
-var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_remote_ethbackend_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_remote_ethbackend_proto_goTypes = []interface{}{
-	(*TxRequest)(nil),         // 0: remote.TxRequest
-	(*AddReply)(nil),          // 1: remote.AddReply
-	(*EtherbaseRequest)(nil),  // 2: remote.EtherbaseRequest
-	(*EtherbaseReply)(nil),    // 3: remote.EtherbaseReply
-	(*NetVersionRequest)(nil), // 4: remote.NetVersionRequest
-	(*NetVersionReply)(nil),   // 5: remote.NetVersionReply
-	(*SubscribeRequest)(nil),  // 6: remote.SubscribeRequest
-	(*SubscribeReply)(nil),    // 7: remote.SubscribeReply
-	(*types.H256)(nil),        // 8: types.H256
-	(*types.H160)(nil),        // 9: types.H160
+	(*TxRequest)(nil),             // 0: remote.TxRequest
+	(*AddReply)(nil),              // 1: remote.AddReply
+	(*EtherbaseRequest)(nil),      // 2: remote.EtherbaseRequest
+	(*EtherbaseReply)(nil),        // 3: remote.EtherbaseReply
+	(*NetVersionRequest)(nil),     // 4: remote.NetVersionRequest
+	(*NetVersionReply)(nil),       // 5: remote.NetVersionReply
+	(*SubscribeRequest)(nil),      // 6: remote.SubscribeRequest
+	(*SubscribeReply)(nil),        // 7: remote.SubscribeReply
+	(*GetWorkRequest)(nil),        // 8: remote.GetWorkRequest
+	(*GetWorkReply)(nil),          // 9: remote.GetWorkReply
+	(*SubmitWorkRequest)(nil),     // 10: remote.SubmitWorkRequest
+	(*SubmitWorkReply)(nil),       // 11: remote.SubmitWorkReply
+	(*SubmitHashRateRequest)(nil), // 12: remote.SubmitHashRateRequest
+	(*SubmitHashRateReply)(nil),   // 13: remote.SubmitHashRateReply
+	(*GetHashRateRequest)(nil),    // 14: remote.GetHashRateRequest
+	(*GetHashRateReply)(nil),      // 15: remote.GetHashRateReply
+	(*MiningRequest)(nil),         // 16: remote.MiningRequest
+	(*MiningReply)(nil),           // 17: remote.MiningReply
+	(*types.H256)(nil),            // 18: types.H256
+	(*types.H160)(nil),            // 19: types.H160
 }
 var file_remote_ethbackend_proto_depIdxs = []int32{
-	8, // 0: remote.AddReply.hash:type_name -> types.H256
-	9, // 1: remote.EtherbaseReply.address:type_name -> types.H160
-	0, // 2: remote.ETHBACKEND.Add:input_type -> remote.TxRequest
-	2, // 3: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
-	4, // 4: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
-	6, // 5: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
-	1, // 6: remote.ETHBACKEND.Add:output_type -> remote.AddReply
-	3, // 7: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
-	5, // 8: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
-	7, // 9: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	18, // 0: remote.AddReply.hash:type_name -> types.H256
+	19, // 1: remote.EtherbaseReply.address:type_name -> types.H160
+	0,  // 2: remote.ETHBACKEND.Add:input_type -> remote.TxRequest
+	2,  // 3: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
+	4,  // 4: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
+	6,  // 5: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
+	8,  // 6: remote.ETHBACKEND.GetWork:input_type -> remote.GetWorkRequest
+	10, // 7: remote.ETHBACKEND.SubmitWork:input_type -> remote.SubmitWorkRequest
+	12, // 8: remote.ETHBACKEND.SubmitHashRate:input_type -> remote.SubmitHashRateRequest
+	14, // 9: remote.ETHBACKEND.GetHashRate:input_type -> remote.GetHashRateRequest
+	16, // 10: remote.ETHBACKEND.Mining:input_type -> remote.MiningRequest
+	1,  // 11: remote.ETHBACKEND.Add:output_type -> remote.AddReply
+	3,  // 12: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
+	5,  // 13: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
+	7,  // 14: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
+	9,  // 15: remote.ETHBACKEND.GetWork:output_type -> remote.GetWorkReply
+	11, // 16: remote.ETHBACKEND.SubmitWork:output_type -> remote.SubmitWorkReply
+	13, // 17: remote.ETHBACKEND.SubmitHashRate:output_type -> remote.SubmitHashRateReply
+	15, // 18: remote.ETHBACKEND.GetHashRate:output_type -> remote.GetHashRateReply
+	17, // 19: remote.ETHBACKEND.Mining:output_type -> remote.MiningReply
+	11, // [11:20] is the sub-list for method output_type
+	2,  // [2:11] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_remote_ethbackend_proto_init() }
@@ -570,6 +1143,126 @@ func file_remote_ethbackend_proto_init() {
 				return nil
 			}
 		}
+		file_remote_ethbackend_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetWorkRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetWorkReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SubmitWorkRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SubmitWorkReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SubmitHashRateRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SubmitHashRateReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetHashRateRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetHashRateReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*MiningRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_remote_ethbackend_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*MiningReply); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -577,7 +1270,7 @@ func file_remote_ethbackend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_remote_ethbackend_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

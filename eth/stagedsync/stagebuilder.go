@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -44,13 +45,35 @@ type StageParameters struct {
 	headersFetchers       []func() error
 	txPool                *core.TxPool
 	poolStart             func() error
-	changeSetHook         ChangeSetHook
 	prefetchedBlocks      *PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
+	mining                *MiningStagesParameters
+}
+
+type MiningStagesParameters struct {
+	// configs
+	*params.MiningConfig
+
+	// noempty is the flag used to control whether the feature of pre-seal empty
+	// block is enabled. The default value is false(pre-seal is enabled by default).
+	// But in some special scenario the consensus engine will seal blocks instantaneously,
+	// in this case this feature will add all empty blocks into canonical chain
+	// non-stop and no real transaction will be included.
+	noempty      bool
+	pendingTxs   map[common.Address]types.Transactions
+	txPoolLocals []common.Address
+
+	// runtime dat
+	Block *miningBlock
+}
+
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, Block: &miningBlock{}}
+
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -185,7 +208,6 @@ func DefaultStages() StageBuilders {
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
 								BatchSize:             world.BatchSize,
-								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -196,7 +218,6 @@ func DefaultStages() StageBuilders {
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
 							BatchSize:             world.BatchSize,
-							ChangeSetHook:         world.changeSetHook,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
 							SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -227,7 +248,8 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
@@ -379,6 +401,104 @@ func DefaultStages() StageBuilders {
 	}
 }
 
+func MiningStages() StageBuilders {
+	return []StageBuilder{
+		{
+			ID: stages.MiningCreateBlock,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningCreateBlock,
+					Description: "Mining: construct new block from tx pool",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningCreateBlockStage(s, world.TX,
+							world.mining.Block,
+							world.ChainConfig,
+							world.chainContext.Engine(),
+							world.mining.ExtraData,
+							world.mining.GasFloor,
+							world.mining.GasCeil,
+							world.mining.Etherbase,
+							world.mining.txPoolLocals,
+							world.mining.pendingTxs,
+							world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.MiningExecution,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningExecution,
+					Description: "Mining: construct new block from tx pool",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningExecStage(s, world.TX,
+							world.mining.Block,
+							world.ChainConfig,
+							world.vmConfig,
+							world.chainContext,
+							world.mining.Block.localTxs,
+							world.mining.Block.remoteTxs,
+							world.mining.Etherbase,
+							world.mining.noempty,
+							world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.HashState,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.HashState,
+					Description: "Hash the key in the state",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnHashStateStage(s, world.TX, world.cache, world.TmpDir, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.IntermediateHashes,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.IntermediateHashes,
+					Description: "Generate intermediate hashes and computing state root",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, false /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						if err != nil {
+							return err
+						}
+						world.mining.Block.header.Root = stateRoot
+						return nil
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.MiningFinish,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningFinish,
+					Description: "Mining: create and propagate valid block",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						_, err := SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
+						if err != nil {
+							return err
+						}
+						return nil
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+	}
+}
+
 // UnwindOrder represents the order in which the stages needs to be unwound.
 // Currently it is using indexes of stages, 0-based.
 // The unwind order is important and not always just stages going backwards.
@@ -399,4 +519,8 @@ func DefaultUnwindOrder() UnwindOrder {
 		6, 5,
 		7, 8, 9, 10, 11,
 	}
+}
+
+func MiningUnwindOrder() UnwindOrder {
+	return []int{0, 1, 2, 3, 4}
 }

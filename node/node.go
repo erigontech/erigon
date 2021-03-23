@@ -115,9 +115,14 @@ func New(conf *Config) (*Node, error) {
 	if err := node.openDataDir(); err != nil {
 		return nil, err
 	}
+
 	// Ensure that the AccountManager method works before the node has started. We rely on
 	// this in cmd/geth.
-	am, ephemeralKeystore, err := makeAccountManager(conf)
+	accManagerConf, err := conf.AccountConfig()
+	if err != nil {
+		return nil, err
+	}
+	am, ephemeralKeystore, err := MakeAccountManager(accManagerConf)
 	if err != nil {
 		return nil, err
 	}

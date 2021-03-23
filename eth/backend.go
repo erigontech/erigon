@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -48,6 +49,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -381,6 +383,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
+
+	var ethashApi *ethash.API
+	if casted, ok := eth.Engine().(*ethash.Ethash); ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
 			// load peer cert/key, ca cert
@@ -413,12 +421,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
 			if err != nil {
 				return nil, err
 			}
@@ -428,6 +436,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	checkpoint := config.Checkpoint
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
+	}
+	if config.SyncMode == downloader.StagedSync {
+		config.Miner.ExtraData = makeExtraData(config.Miner.ExtraData)
 	}
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:   chainDb,
@@ -439,13 +450,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Checkpoint: checkpoint,
 
 		Whitelist: config.Whitelist,
+		Mining:    &config.Miner,
 	}); err != nil {
 		return nil, err
 	}
-	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	if config.SyncMode != downloader.StagedSync {
+		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+	}
+	eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 	eth.handler.SetStagedSync(stagedSync)
+	eth.handler.SetMining(mining)
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
@@ -456,11 +473,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
-	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-		eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	}
 
 	if config.SyncMode != downloader.StagedSync {
@@ -493,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	return eth, nil
 }
 
-func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
+func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheConfig) {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
@@ -544,7 +556,7 @@ func (s *Ethereum) APIs() []rpc.API {
 	apis := ethapi.GetAPIs(s.APIBackend)
 
 	// Append any APIs exposed explicitly by the consensus engine
-	apis = append(apis, s.engine.APIs(s.BlockChain())...)
+	//apis = append(apis, s.engine.APIs(s.BlockChain())...)
 
 	// Append all the local APIs and return
 	return append(apis, []rpc.API{
@@ -635,26 +647,10 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
 func (s *Ethereum) isLocalBlock(block *types.Block) bool {
-	author, err := s.engine.Author(block.Header())
-	if err != nil {
-		log.Warn("Failed to retrieve block author", "number", block.NumberU64(), "hash", block.Hash(), "err", err)
-		return false
-	}
-	// Check whether the given address is etherbase.
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
-	if author == etherbase {
-		return true
-	}
-	// Check whether the given address is specified by `txpool.local`
-	// CLI flag.
-	for _, account := range s.config.TxPool.Locals {
-		if account == author {
-			return true
-		}
-	}
-	return false
+	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
 }
 
 // shouldPreserve checks whether we should preserve the given block
@@ -708,7 +704,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		th.SetThreads(threads)
 	}
 	// If the miner was not running, initialize it
-	if !s.IsMining() {
+	if s.config.SyncMode == downloader.StagedSync || !s.IsMining() {
 		// Propagate the initial price point to the transaction pool
 		s.lock.RLock()
 		price := s.gasPrice
@@ -732,8 +728,9 @@ func (s *Ethereum) StartMining(threads int) error {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
-
-		go s.miner.Start(eb)
+		if s.config.SyncMode != downloader.StagedSync {
+			go s.miner.Start(eb)
+		}
 	}
 	return nil
 }
@@ -749,10 +746,12 @@ func (s *Ethereum) StopMining() {
 		th.SetThreads(-1)
 	}
 	// Stop the block creating itself
-	s.miner.Stop()
+	if s.config.SyncMode != downloader.StagedSync {
+		s.miner.Stop()
+	}
 }
 
-func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
+func (s *Ethereum) IsMining() bool      { return s.config.Miner.Enabled }
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
 func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
@@ -809,7 +808,9 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	s.miner.Stop()
+	if s.config.SyncMode != downloader.StagedSync {
+		s.miner.Stop()
+	}
 	s.blockchain.Stop()
 	s.engine.Close()
 	s.eventMux.Stop()

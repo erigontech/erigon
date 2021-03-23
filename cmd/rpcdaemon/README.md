@@ -148,12 +148,12 @@ The following table shows the current implementation status of turbo-geth's RPC 
 |                                         |         |                                            |
 | eth_getProof                            | -       | not yet implemented                        |
 |                                         |         |                                            |
-| eth_mining                              | Yes     | mining not yet implemented (always false)  |
-| eth_coinbase                            | -       |                                            |
-| eth_hashrate                            | -       |                                            |
-| eth_submitHashrate                      | -       |                                            |
-| eth_getWork                             | -       |                                            |
-| eth_submitWork                          | -       |                                            |
+| eth_mining                              | Yes     | returns true if --mine flag provided       |
+| eth_coinbase                            | Yes     |                                            |
+| eth_hashrate                            | Yes     |                                            |
+| eth_submitHashrate                      | Yes     |                                            |
+| eth_getWork                             | Yes     |                                            |
+| eth_submitWork                          | Yes     |                                            |
 |                                         |         |                                            |
 | eth_subscribe                           | Limited | Websock Only - newHeads                    |
 | eth_unsubscribe                         | Yes     | Websock Only                               |

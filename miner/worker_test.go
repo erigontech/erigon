@@ -67,7 +67,7 @@ var (
 	pendingTxs []*types.Transaction
 	newTxs     []*types.Transaction
 
-	testConfig = &Config{
+	testConfig = &params.MiningConfig{
 		Recommit: time.Second,
 		GasFloor: params.GenesisGasLimit,
 		GasCeil:  params.GenesisGasLimit,

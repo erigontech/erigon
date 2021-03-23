@@ -7,11 +7,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 )
 
@@ -116,7 +117,7 @@ var (
 	}
 )
 
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -156,6 +157,53 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
+}
+func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
+	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
+		mode, err := ethdb.StorageModeFromString(*v)
+		if err != nil {
+			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+		}
+		cfg.StorageMode = mode
+	}
+	if v := f.String(SnapshotModeFlag.Name, SnapshotModeFlag.Value, SnapshotModeFlag.Usage); v != nil {
+		snMode, err := snapshotsync.SnapshotModeFromString(*v)
+		if err != nil {
+			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+		}
+		cfg.SnapshotMode = snMode
+	}
+	if v := f.Bool(SeedSnapshotsFlag.Name, false, SeedSnapshotsFlag.Usage); v != nil {
+		cfg.SnapshotSeeding = *v
+	}
+	if v := f.String(CacheSizeFlag.Name, CacheSizeFlag.Value, CacheSizeFlag.Usage); v != nil {
+		err := cfg.CacheSize.UnmarshalText([]byte(*v))
+		if err != nil {
+			utils.Fatalf("Invalid cacheSize provided: %v", err)
+		}
+	}
+	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
+		err := cfg.BatchSize.UnmarshalText([]byte(*v))
+		if err != nil {
+			utils.Fatalf("Invalid batchSize provided: %v", err)
+		}
+	}
+	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
+		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
+	}
+	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
+		sizeVal := datasize.ByteSize(0)
+		size := &sizeVal
+		err := size.UnmarshalText([]byte(*v))
+		if err != nil {
+			utils.Fatalf("Invalid batchSize provided: %v", err)
+		}
+		etl.BufferOptimalSize = *size
+	}
+
+	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
+		cfg.ExternalSnapshotDownloaderAddr = *v
+	}
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {

@@ -431,8 +431,18 @@ func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 	return nodes
 }
 
+type AccountManagerConfig struct {
+	ScryptN               int
+	ScryptP               int
+	Keydir                string
+	ExternalSigner        string
+	SmartCardDaemonPath   string
+	InsecureUnlockAllowed bool
+	USB                   bool
+}
+
 // AccountConfig determines the settings for scrypt and keydirectory
-func (c *Config) AccountConfig() (int, int, string, error) {
+func (c *Config) AccountConfig() (AccountManagerConfig, error) {
 	scryptN := keystore.StandardScryptN
 	scryptP := keystore.StandardScryptP
 	if c.UseLightweightKDF {
@@ -456,20 +466,20 @@ func (c *Config) AccountConfig() (int, int, string, error) {
 	case c.KeyStoreDir != "":
 		keydir, err = filepath.Abs(c.KeyStoreDir)
 	}
-	return scryptN, scryptP, keydir, err
+	return AccountManagerConfig{ScryptN: scryptN, ScryptP: scryptP, Keydir: keydir, ExternalSigner: c.ExternalSigner, SmartCardDaemonPath: c.SmartCardDaemonPath, InsecureUnlockAllowed: c.InsecureUnlockAllowed, USB: c.USB}, err
 }
 
-func makeAccountManager(conf *Config) (*accounts.Manager, string, error) {
-	scryptN, scryptP, keydir, err := conf.AccountConfig()
+func MakeAccountManager(conf AccountManagerConfig) (*accounts.Manager, string, error) {
+	scryptN, scryptP, keydir := conf.ScryptN, conf.ScryptP, conf.Keydir
 	var ephemeral string
 	if keydir == "" {
 		// There is no datadir.
+		var err error
 		keydir, err = ioutil.TempDir("", "go-ethereum-keystore")
+		if err != nil {
+			return nil, "", err
+		}
 		ephemeral = keydir
-	}
-
-	if err != nil {
-		return nil, "", err
 	}
 	if err := os.MkdirAll(keydir, 0700); err != nil {
 		return nil, "", err

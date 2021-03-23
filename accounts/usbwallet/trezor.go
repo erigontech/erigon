@@ -27,7 +27,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto" //nolint
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/usbwallet/trezor"
 	"github.com/ledgerwatch/turbo-geth/common"

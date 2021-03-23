@@ -1231,7 +1231,8 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	tool.Check(stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil))
+	_, err = stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil)
+	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
 }

@@ -94,7 +94,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 								WriteReceipts:         world.storageMode.Receipts,
 								Cache:                 world.cache,
 								BatchSize:             world.BatchSize,
-								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
 								WriterBuilder:         world.stateWriterBuilder,
 								SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -105,7 +104,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
 							BatchSize:             world.BatchSize,
-							ChangeSetHook:         world.changeSetHook,
 							ReaderBuilder:         world.stateReaderBuilder,
 							WriterBuilder:         world.stateWriterBuilder,
 							SilkwormExecutionFunc: world.silkwormExecutionFunc,
@@ -171,7 +169,8 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							}
 							c.Close()
 						*/
-						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
@@ -341,8 +340,8 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		nil,
 		nil,
 		nil,
-		nil,
 		false,
+		nil,
 	)
 	if err1 != nil {
 		return err1
@@ -430,8 +429,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		nil,
-		nil,
 		false,
+		nil,
 	)
 	if err2 != nil {
 		return false, err2

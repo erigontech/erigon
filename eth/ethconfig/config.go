@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
@@ -77,7 +76,7 @@ var Defaults = Config{
 	TrieDirtyCache:          256,
 	TrieTimeout:             60 * time.Minute,
 	StorageMode:             ethdb.DefaultStorageMode,
-	Miner: miner.Config{
+	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
 		GasPrice: big.NewInt(params.GWei),
@@ -184,7 +183,7 @@ type Config struct {
 	Preimages               bool
 
 	// Mining options
-	Miner miner.Config
+	Miner params.MiningConfig
 
 	// Ethash options
 	Ethash ethash.Config

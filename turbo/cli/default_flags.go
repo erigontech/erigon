@@ -64,4 +64,11 @@ var DefaultFlags = []cli.Flag{
 	utils.MetricsPortFlag,
 	utils.IdentityFlag,
 	SilkwormFlag,
+	utils.MiningEnabledFlag,
+	utils.MinerNotifyFlag,
+	utils.MinerGasTargetFlag,
+	utils.MinerGasLimitFlag,
+	utils.MinerEtherbaseFlag,
+	utils.MinerExtraDataFlag,
+	utils.MinerNoVerfiyFlag,
 }

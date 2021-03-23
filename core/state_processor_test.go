@@ -125,7 +125,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		Coinbase:   parent.Coinbase(),
 		Difficulty: engine.CalcDifficulty(&fakeChainReader{params.TestChainConfig}, parent.Time()+10,
 			parent.Time(), parent.Difficulty(), parent.Number(), parent.Hash(), parent.UncleHash()),
-		GasLimit:  CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
+		GasLimit:  CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:    new(big.Int).Add(parent.Number(), common.Big1),
 		Time:      parent.Time() + 10,
 		UncleHash: types.EmptyUncleHash,

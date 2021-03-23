@@ -5,9 +5,7 @@ import (
 	"errors"
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -208,11 +206,4 @@ type RwCursorDupSort interface {
 
 type HasStats interface {
 	DiskSize(context.Context) (uint64, error) // db size
-}
-
-type Backend interface {
-	AddLocal([]byte) ([]byte, error)
-	Etherbase() (common.Address, error)
-	NetVersion() (uint64, error)
-	Subscribe(func(*remote.SubscribeReply)) error
 }

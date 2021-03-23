@@ -2077,7 +2077,7 @@ func ExecuteBlockEphemerally(
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 	defer blockExecutionNumber.Update(block.Number().Int64())
-
+	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
 	var receipts types.Receipts
@@ -2110,16 +2110,8 @@ func ExecuteBlockEphemerally(
 	}
 
 	if !vmConfig.ReadOnly {
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
-
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-		}
-
-		if err := stateWriter.WriteChangeSets(); err != nil {
-			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+			return nil, err
 		}
 	}
 	if *usedGas != header.GasUsed {
@@ -2133,4 +2125,19 @@ func ExecuteBlockEphemerally(
 	}
 
 	return receipts, nil
+}
+
+func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	engine.Finalize(cc, header, ibs, txs, uncles)
+
+	ctx := cc.WithEIPsFlags(context.Background(), header.Number)
+	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
+	}
+
+	if err := stateWriter.WriteChangeSets(); err != nil {
+		return fmt.Errorf("writing changesets for block %d failed: %v", header.Number.Uint64(), err)
+	}
+	return nil
 }

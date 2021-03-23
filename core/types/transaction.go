@@ -456,6 +456,10 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs map[common.Address]Transa
 	}
 }
 
+func (t *TransactionsByPriceAndNonce) Empty() bool {
+	return len(t.txs) == 0
+}
+
 // Peek returns the next transaction by price.
 func (t *TransactionsByPriceAndNonce) Peek() *Transaction {
 	if len(t.heads) == 0 {

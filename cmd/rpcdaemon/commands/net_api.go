@@ -6,8 +6,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/core"
 )
 
 // NetAPI the interface for the net_ RPC commands
@@ -19,11 +18,11 @@ type NetAPI interface {
 
 // NetAPIImpl data structure to store things needed for net_ commands
 type NetAPIImpl struct {
-	ethBackend ethdb.Backend
+	ethBackend core.ApiBackend
 }
 
 // NewNetAPIImpl returns NetAPIImplImpl instance
-func NewNetAPIImpl(eth ethdb.Backend) *NetAPIImpl {
+func NewNetAPIImpl(eth core.ApiBackend) *NetAPIImpl {
 	return &NetAPIImpl{
 		ethBackend: eth,
 	}
@@ -36,13 +35,13 @@ func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
 }
 
 // Version implements net_version. Returns the current network id.
-func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
+func (api *NetAPIImpl) Version(ctx context.Context) (string, error) {
 	if api.ethBackend == nil {
 		// We're running in --chaindata mode or otherwise cannot get the backend
 		return "", fmt.Errorf(NotAvailableChainData, "net_version")
 	}
 
-	res, err := api.ethBackend.NetVersion()
+	res, err := api.ethBackend.NetVersion(ctx)
 	if err != nil {
 		return "", err
 	}

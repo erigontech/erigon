@@ -69,7 +69,7 @@ func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
 	return block, nil
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig,
+func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig,
 	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
 
 	blockNum := block.NumberU64()

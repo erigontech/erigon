@@ -36,6 +36,7 @@ import (
 	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/spf13/pflag"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
@@ -55,7 +56,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -832,6 +832,11 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 		cfg.UserIdent = identity
 	}
 }
+func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
+	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
+		cfg.UserIdent = *identity
+	}
+}
 
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
@@ -1173,6 +1178,32 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	}
 
 }
+func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
+	flags := cmd.Flags()
+	//SetP2PConfig(ctx, &cfg.P2P)
+	setNodeUserIdentCobra(flags, cfg)
+	setDataDirCobra(flags, cfg)
+	setSmartCardCobra(flags, cfg)
+
+	if v := flags.String(ExternalSignerFlag.Name, ExternalSignerFlag.Value, ExternalSignerFlag.Usage); v != nil {
+		cfg.ExternalSigner = *v
+	}
+	if v := flags.String(KeyStoreDirFlag.Name, KeyStoreDirFlag.Value.String(), KeyStoreDirFlag.Usage); v != nil {
+		cfg.KeyStoreDir = *v
+	}
+	if v := flags.Bool(LightKDFFlag.Name, false, LightKDFFlag.Usage); v != nil {
+		cfg.UseLightweightKDF = *v
+	}
+	if v := flags.Bool(NoUSBFlag.Name, false, NoUSBFlag.Usage); v != nil || cfg.NoUSB {
+		log.Warn("Option nousb is deprecated and USB is deactivated by default. Use --usb to enable")
+	}
+	if v := flags.Bool(USBFlag.Name, false, USBFlag.Usage); v != nil {
+		cfg.USB = *v
+	}
+	if v := flags.Bool(InsecureUnlockAllowedFlag.Name, false, InsecureUnlockAllowedFlag.Usage); v != nil {
+		cfg.InsecureUnlockAllowed = *v
+	}
+}
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
 	// Skip enabling smartcards if no path is set
@@ -1193,6 +1224,25 @@ func setSmartCard(ctx *cli.Context, cfg *node.Config) {
 	// Smartcard daemon path exists and is a socket, enable it
 	cfg.SmartCardDaemonPath = path
 }
+func setSmartCardCobra(f *pflag.FlagSet, cfg *node.Config) {
+	// Skip enabling smartcards if no path is set
+	path := f.String(SmartCardDaemonPathFlag.Name, SmartCardDaemonPathFlag.Value, SmartCardDaemonPathFlag.Usage)
+	if path == nil || *path == "" {
+		return
+	}
+	// Sanity check that the smartcard path is valid
+	fi, err := os.Stat(*path)
+	if err != nil {
+		log.Info("Smartcard socket not found, disabling", "err", err)
+		return
+	}
+	if fi.Mode()&os.ModeType != os.ModeSocket {
+		log.Error("Invalid smartcard daemon path", "path", *path, "type", fi.Mode().String())
+		return
+	}
+	// Smartcard daemon path exists and is a socket, enable it
+	cfg.SmartCardDaemonPath = *path
+}
 
 func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	switch {
@@ -1205,6 +1255,28 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	case ctx.GlobalBool(GoerliFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
 	case ctx.GlobalBool(YoloV3Flag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
+	}
+}
+func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
+	dirname, err := f.GetString(DataDirFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	dev := f.Bool(DeveloperFlag.Name, false, DeveloperFlag.Usage)
+	rinkeby := f.Bool(RinkebyFlag.Name, false, RinkebyFlag.Usage)
+	goerli := f.Bool(GoerliFlag.Name, false, GoerliFlag.Usage)
+	yolov3 := f.Bool(YoloV3Flag.Name, false, YoloV3Flag.Usage)
+	switch {
+	case dirname != "":
+		cfg.DataDir = dirname
+	case dev != nil:
+		cfg.DataDir = "" // unless explicitly requested, use memory databases
+	case rinkeby != nil && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
+	case goerli != nil && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
+	case yolov3 != nil && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
 	}
 }
@@ -1226,6 +1298,19 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 	}
 	if ctx.GlobalIsSet(GpoMaxGasPriceFlag.Name) {
 		cfg.MaxPrice = big.NewInt(ctx.GlobalInt64(GpoMaxGasPriceFlag.Name))
+	}
+}
+
+//nolint
+func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config, light bool) {
+	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
+		cfg.Blocks = *v
+	}
+	if v := f.Int(GpoPercentileFlag.Name, GpoPercentileFlag.Value, GpoPercentileFlag.Usage); v != nil {
+		cfg.Percentile = *v
+	}
+	if v := f.Int64(GpoMaxGasPriceFlag.Name, GpoMaxGasPriceFlag.Value, GpoMaxGasPriceFlag.Usage); v != nil {
+		cfg.MaxPrice = big.NewInt(*v)
 	}
 }
 
@@ -1290,7 +1375,75 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
-func setMiner(ctx *cli.Context, cfg *miner.Config) {
+func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.MiningConfig) {
+	flags := cmd.Flags()
+	var err error
+	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	extraDataStr, err := flags.GetString(MinerExtraDataFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.ExtraData = []byte(extraDataStr)
+	cfg.GasFloor, err = flags.GetUint64(MinerGasTargetFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.GasCeil, err = flags.GetUint64(MinerGasLimitFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	price, err := flags.GetInt64(MinerGasPriceFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.GasPrice = big.NewInt(price)
+	cfg.Recommit, err = flags.GetDuration(MinerRecommitIntervalFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Noverify, err = flags.GetBool(MinerNoVerfiyFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+
+	// Extract the current etherbase, new flag overriding legacy one
+	var etherbase string
+	etherbase, err = flags.GetString(MinerEtherbaseFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+
+	var ks *keystore.KeyStore
+	if keystores := am.Backends(keystore.KeyStoreType); len(keystores) > 0 {
+		ks = keystores[0].(*keystore.KeyStore)
+	}
+
+	// Convert the etherbase into an address and configure it
+	if etherbase != "" {
+		if ks != nil {
+			account, err := MakeAddress(ks, etherbase)
+			if err != nil {
+				Fatalf("Invalid miner etherbase: %v", err)
+			}
+			cfg.Etherbase = account.Address
+		} else {
+			Fatalf("No etherbase configured")
+		}
+	}
+	cfg.Etherbase = common.HexToAddress(etherbase)
+}
+
+func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.Enabled = true
+	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
 	}
@@ -1379,7 +1532,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 }
 
 // SetEthConfig applies eth-related command line flags to the config.
-func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
+func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
 	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, YoloV3Flag)
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer

@@ -59,6 +59,7 @@ require (
 	github.com/rs/cors v1.7.0
 	github.com/shirou/gopsutil/v3 v3.21.1
 	github.com/spf13/cobra v1.1.1
+	github.com/spf13/pflag v1.0.5
 	github.com/status-im/keycard-go v0.0.0-20200402102358-957c09536969
 	github.com/stretchr/testify v1.7.0
 	github.com/tyler-smith/go-bip39 v1.0.2
