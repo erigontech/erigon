@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -24,7 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -172,8 +170,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	defer tx.Rollback()
 
 	sm, cc, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
-	mux := new(event.TypeMux)
-	minedBlockSub := mux.Subscribe(core.NewMinedBlockEvent{})
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
@@ -213,14 +209,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	} else if backward {
 		stopAt = 1
 	}
-
-	var minedBlock *types.Block
-	minedBlocks := make(chan *types.Block, 1) // convert to non-blocking channel
-	go func() {
-		for msg := range minedBlockSub.Chan() {
-			minedBlocks <- msg.Data.(core.NewMinedBlockEvent).Block
-		}
-	}()
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -292,15 +280,20 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
+			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, unordered, nil)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
-				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered, nil),
-			)
+			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
 			if err != nil {
 				panic(err)
 			}
+			var minedBlock *types.Block
+			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				var err error
+				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
+				return err
+			})
 
 			if err := miningStages.Run(db, tx); err != nil {
 				return err
@@ -308,7 +301,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			minedBlock = <-minedBlocks
 			checkMinedBlock(nextBlock, minedBlock)
 		}
 

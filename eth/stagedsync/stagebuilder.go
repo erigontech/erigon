@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
@@ -68,14 +67,12 @@ type MiningStagesParameters struct {
 	pendingTxs   map[common.Address]types.Transactions
 	txPoolLocals []common.Address
 
-	mux *event.TypeMux // Event multiplexer to announce sync operation events
-
 	// runtime dat
-	block *miningBlock
+	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, mux *event.TypeMux, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, mux: mux, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, Block: &miningBlock{}}
 
 }
 
@@ -414,7 +411,7 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningCreateBlockStage(s, world.TX,
-							world.mining.block,
+							world.mining.Block,
 							world.ChainConfig,
 							world.chainContext.Engine(),
 							world.mining.ExtraData,
@@ -437,12 +434,12 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnMiningExecStage(s, world.TX,
-							world.mining.block,
+							world.mining.Block,
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.mining.block.localTxs,
-							world.mining.block.remoteTxs,
+							world.mining.Block.localTxs,
+							world.mining.Block.remoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.QuitCh)
@@ -475,7 +472,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.mining.block.header.Root = stateRoot
+						world.mining.Block.header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -489,7 +486,11 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinishStage(s, world.TX, world.mining.block, world.mining.mux, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
+						_, err := SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
+						if err != nil {
+							return err
+						}
+						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
