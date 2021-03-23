@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
+const ReadersLimit = 2000 // MDBX_READERS_LIMIT on 64bit system
+
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")

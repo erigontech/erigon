@@ -1,3 +1,18 @@
+- [Introduction](#introduction)
+- [Getting Started](#getting-started)
+    * [Running locally](#running-locally)
+    * [Running remotely](#running-remotely)
+    * [Running in dual mode](#running-in-dual-mode)
+- [Testing](#testing)
+- [Open / Known Issues](#open---known-issues)
+- [RPC Implementation Status](#rpc-implementation-status)
+- [Securing the communication between RPC daemon and TG instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-tg-instance-via-tls-and-authentication)
+- [Ethstats](#ethstats)
+- [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+- [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+- [For Developers](#for-developers)
+    * [Code generation](#code-generation)
+
 ## Introduction
 
 turbo-geth's `rpcdaemon` runs in its own seperate process.
@@ -339,11 +354,19 @@ and hide others. That is possible with `rpc.accessList` flag.
 
 Now only these two methods are available.
 
+## Clients getting timeout, but server load is low
+
+In this case: increase default rate-limit - 
+amount of requests server handle simultaneously - requests over this limit will wait. 
+Increase it - if your 'hot data' is small or have much RAM or see "request timeout" while server load is low.
+
+
+```
+./build/bin/tg --private.api.addr=localhost:9090 --private.api.ratelimit=1024
+```
 
 ## For Developers
 
 ### Code generation
 
-`go.mod` stores right version of generators, use `make grpc` to install it and generate code.
-
-Recommended `protoc` version is 3.x. [Installation instructions](https://grpc.io/docs/protoc-installation/)
+`go.mod` stores right version of generators, use `make grpc` to install it and generate code (it also installs protoc into ./build/bin folder).
