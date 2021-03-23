@@ -20,8 +20,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"path"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -248,7 +250,7 @@ var (
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}}
-	CliqueSnapshot           = &SnapshotConfig{10, 1024, 16384}
+	CliqueSnapshot           = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil}
 	TestRules       = TestChainConfig.Rules(new(big.Int))
@@ -382,6 +384,24 @@ type SnapshotConfig struct {
 	CheckpointInterval uint64 // Number of blocks after which to save the vote snapshot to the database
 	InmemorySnapshots  int    // Number of recent vote snapshots to keep in memory
 	InmemorySignatures int    // Number of recent block signatures to keep in memory
+	DBPath             string
+	InMemory           bool
+}
+
+const cliquePath = "clique"
+
+func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *SnapshotConfig {
+	if len(dbPath) == 0 {
+		dbPath = paths.DefaultDataDir()
+	}
+
+	return &SnapshotConfig{
+		checkpointInterval,
+		inmemorySnapshots,
+		inmemorySignatures,
+		path.Join(dbPath, cliquePath),
+		inmemory,
+	}
 }
 
 // IsHomestead returns whether num is either equal to the homestead block or greater.

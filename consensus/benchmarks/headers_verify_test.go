@@ -57,8 +57,17 @@ func TestVerifyHeadersEthash1024(t *testing.T) {
 	testVerifyHandlersEthash(t, toVerify)
 }
 
+func TestVerifyHeadersEthash65536(t *testing.T) {
+	const toVerify = 65536
+
+	testVerifyHandlersEthash(t, toVerify)
+}
+
 func testVerifyHandlersEthash(t *testing.T, toVerify int) {
-	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersEthash[:toVerify])
+	hardTips, err := headerdownload.DecodeTips(ethashHardCodedHeaders[:toVerify])
+	if err != nil {
+		t.Fatal("while getting tips", err)
+	}
 	headers := toHeaders(hardTips)
 
 	const threshold = 15 // percent
@@ -146,11 +155,14 @@ func TestVerifyHeadersCliqueOnly65536(t *testing.T) {
 }
 
 func testVerifyHeadersClique(t *testing.T, toVerify int) {
-	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique[:toVerify])
+	hardTips, err := headerdownload.DecodeTips(cliqueHardCodedHeaders[:toVerify])
+	if err != nil {
+		t.Fatal("while getting tips", err)
+	}
 	headers := toHeaders(hardTips)
 
 	const threshold = 10 // percent
-	const repeats = 5
+	const repeats = 20
 
 	results := make([]result, repeats)
 
@@ -170,7 +182,10 @@ func testVerifyHeadersClique(t *testing.T, toVerify int) {
 }
 
 func testVerifyHeadersCliqueOnly(t *testing.T, toVerify int) {
-	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique[:toVerify])
+	hardTips, err := headerdownload.DecodeTips(cliqueHardCodedHeaders[:toVerify])
+	if err != nil {
+		t.Fatal("while getting tips", err)
+	}
 	headers := toHeaders(hardTips)
 
 	const repeats = 1
@@ -189,6 +204,7 @@ type engineConstructor func(db ethdb.Database) consensus.Engine
 
 func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis, engineConstr engineConstructor) time.Duration {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 
 	engine := engineConstr(db)
 	defer engine.Close()
@@ -264,13 +280,14 @@ loop:
 
 func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.Genesis, consensusConfig interface{}) time.Duration {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
 
 	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
 	if err != nil {
 		t.Errorf("setting up genensis block: %v", err)
 	}
 
-	engine := eth.CreateConsensusEngine(config, consensusConfig, nil, false, db)
+	engine := eth.CreateConsensusEngine(config, consensusConfig, nil, false)
 	defer engine.Close()
 
 	var done int

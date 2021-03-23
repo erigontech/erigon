@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -48,7 +50,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
@@ -864,7 +865,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
 		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
@@ -911,7 +912,7 @@ func preimage(chaindata string, image common.Hash) {
 
 func printBranches(block uint64) {
 	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/testnet/geth/chaindata")
+	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/testnet/geth/chaindata")
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
 	{
@@ -1054,7 +1055,7 @@ func repairCurrent() {
 }
 
 func dumpStorage() {
-	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	db := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.StorageHistoryBucket)
@@ -1699,6 +1700,7 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
 
 	b := uint64(0)
+	i := 0
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
 		if err != nil {
@@ -1714,13 +1716,25 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 		fmt.Fprintf(w, "	\"")
 
 		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
-		if err = rlp.Encode(base64writer, h); err != nil {
+		gz, err := gzip.NewWriterLevel(base64writer, gzip.BestCompression)
+		if err != nil {
+			base64writer.Close()
 			return err
 		}
+
+		//gz.Name = strconv.Itoa(i)
+
+		if err = rlp.Encode(gz, h); err != nil {
+			base64writer.Close()
+			gz.Close()
+			return err
+		}
+		gz.Close()
 		base64writer.Close()
 
 		fmt.Fprintf(w, "\",\n")
 		b += blockStep
+		i++
 
 		if b > blockTotal {
 			break

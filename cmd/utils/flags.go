@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -107,7 +108,7 @@ var (
 	DataDirFlag = DirectoryFlag{
 		Name:  "datadir",
 		Usage: "Data directory for the databases and keystore",
-		Value: DirectoryString(node.DefaultDataDir()),
+		Value: DirectoryString(paths.DefaultDataDir()),
 	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
@@ -762,6 +763,11 @@ var (
 		Usage: "number of recent block signatures to keep in memory",
 		Value: 16384,
 	}
+	CliqueDataDirFlag = DirectoryFlag{
+		Name:  "clique.datadir",
+		Usage: "a path to clique db folder",
+		Value: DirectoryString(paths.DefaultDataDir()),
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1257,22 +1263,22 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	case ctx.GlobalBool(DeveloperFlag.Name):
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
-	case (ctx.GlobalBool(LegacyTestnetFlag.Name) || ctx.GlobalBool(RopstenFlag.Name)) && cfg.DataDir == node.DefaultDataDir():
+	case (ctx.GlobalBool(LegacyTestnetFlag.Name) || ctx.GlobalBool(RopstenFlag.Name)) && cfg.DataDir == paths.DefaultDataDir():
 		// Maintain compatibility with older Geth configurations storing the
 		// Ropsten database in `testnet` instead of `ropsten`.
-		legacyPath := filepath.Join(node.DefaultDataDir(), "testnet")
+		legacyPath := filepath.Join(paths.DefaultDataDir(), "testnet")
 		if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
 			log.Warn("Using the deprecated `testnet` datadir. Future versions will store the Ropsten chain in `ropsten`.")
 			cfg.DataDir = legacyPath
 		} else {
-			cfg.DataDir = filepath.Join(node.DefaultDataDir(), "ropsten")
+			cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "ropsten")
 		}
-	case ctx.GlobalBool(RinkebyFlag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
-	case ctx.GlobalBool(GoerliFlag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
-	case ctx.GlobalBool(YoloV2Flag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v2")
+	case ctx.GlobalBool(RinkebyFlag.Name) && cfg.DataDir == paths.DefaultDataDir():
+		cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "rinkeby")
+	case ctx.GlobalBool(GoerliFlag.Name) && cfg.DataDir == paths.DefaultDataDir():
+		cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "goerli")
+	case ctx.GlobalBool(YoloV2Flag.Name) && cfg.DataDir == paths.DefaultDataDir():
+		cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "yolo-v2")
 	}
 }
 
@@ -1775,11 +1781,13 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *
 	}
 	var engine consensus.Engine
 	if config.Clique != nil {
-		snapshotConfig := &params.SnapshotConfig{
-			CheckpointInterval: ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name),
-			InmemorySnapshots:  ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name),
-			InmemorySignatures: ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name),
-		}
+		snapshotConfig := params.NewSnapshotConfig(
+			ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name),
+			ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name),
+			ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name),
+			false,
+			ctx.GlobalString(CliqueDataDirFlag.Name),
+		)
 
 		engine = clique.New(config.Clique, snapshotConfig, chainDb)
 	} else {

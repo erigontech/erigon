@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/consensus/db"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -298,7 +299,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		consensusConfig = &config.Ethash
 	}
 
-	eth.engine = CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, chainDb)
+	eth.engine = CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
 
@@ -526,7 +527,7 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) *process.RemoteEngine {
 	var eng consensus.Engine
 	// Otherwise assume proof-of-work
 
@@ -556,7 +557,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.SnapshotConfig:
 		if chainConfig.Clique != nil {
-			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db))
+			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory)))
 		}
 	}
 

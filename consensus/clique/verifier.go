@@ -282,7 +282,13 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 	t = time.Now()
 
 	if snap == nil {
-		return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
+		if len(parents) > 0 {
+			if i < 0 {
+				i = 0
+			}
+			return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
+		}
+		return nil, fmt.Errorf("a nil snap for %d ancestors: %w", len(parents), consensus.ErrUnknownAncestor)
 	}
 
 	if len(parents) > 0 {
@@ -418,11 +424,11 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 	)
 
 	/*
-	n = sort.Search(int(highest)+1, func(blockNum int) bool {
-		_, ok = c.recentsNum.Get(uint64(blockNum))
-		debugLog("lastSnapshot-555", c.recents.Len())
-		return ok
-	})
+		n = sort.Search(int(highest)+1, func(blockNum int) bool {
+			_, ok = c.recentsNum.Get(uint64(blockNum))
+			debugLog("lastSnapshot-555", c.recents.Len())
+			return ok
+		})
 	*/
 	for n = int(highest); n >= 0; n-- {
 		_, ok = c.recentsNum.Get(uint64(n))
@@ -446,10 +452,10 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 		*/
 
 		/*
-		n = Search(int(highest)+1, func(currentN int) bool {
-			return !c.checkClosestSnapshot(uint64(currentN), hash, parentHash, num, snapID)
-		})
-		 */
+			n = Search(int(highest)+1, func(currentN int) bool {
+				return !c.checkClosestSnapshot(uint64(currentN), hash, parentHash, num, snapID)
+			})
+		*/
 
 		for n = int(highest); n >= 0; n-- {
 			ok = c.checkClosestSnapshot(uint64(n), hash, parentHash, num, snapID)

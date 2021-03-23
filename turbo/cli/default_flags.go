@@ -66,5 +66,6 @@ var DefaultFlags = []cli.Flag{
 	utils.CliqueSnapshotCheckpointIntervalFlag,
 	utils.CliqueSnapshotInmemorySnapshotsFlag,
 	utils.CliqueSnapshotInmemorySignaturesFlag,
+	utils.CliqueDataDirFlag,
 	SilkwormFlag,
 }

@@ -70,21 +70,6 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-// CliqueSnapshotFullKey = CliqueSnapshotBucket + num (uint64 big endian) + hash
-func CliqueSnapshotFullKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
-}
-
-// CliqueSnapshotKey = CliqueSnapshotBucket + num (uint64 big endian)
-func CliqueSnapshotKey(number uint64) []byte {
-	return EncodeBlockNumber(number)
-}
-
-// CliqueSnapshotKey = CliqueSnapshotBucket + '0'
-func CliqueLastSnapshotKey() []byte {
-	return []byte{0}
-}
-
 // ReceiptsKey = blockN (uint64 big endian)
 func ReceiptsKey(blockNumber uint64) []byte {
 	newK := make([]byte, 8)

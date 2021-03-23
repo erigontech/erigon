@@ -76,6 +76,10 @@ var migrations = []Migration{
 	deleteExtensionHashesFromTrieBucket,
 }
 
+var cliqueMigrations = []Migration{
+	cliqueDB,
+}
+
 type Migration struct {
 	Name string
 	Up   func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommitOnLoadCommit etl.LoadCommitHandler) error

@@ -122,21 +122,21 @@ func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, e
 }
 
 func getSnapshotData(db ethdb.Database, num uint64, hash common.Hash) ([]byte, error) {
-	return db.Get(dbutils.CliqueBucket, dbutils.CliqueSnapshotFullKey(num, hash))
+	return db.Get(dbutils.CliqueBucket, SnapshotFullKey(num, hash))
 }
 
 func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, error) {
-	return db.Has(dbutils.CliqueBucket, dbutils.CliqueSnapshotFullKey(num, hash))
+	return db.Has(dbutils.CliqueBucket, SnapshotFullKey(num, hash))
 }
 
 func hasSnapshot(db ethdb.Database, num uint64) (bool, error) {
-	return db.Has(dbutils.CliqueSnapshotBucket, dbutils.CliqueSnapshotKey(num))
+	return db.Has(dbutils.CliqueSnapshotBucket, SnapshotKey(num))
 }
 
 var ErrNotFound = errors.New("not found")
 
 func lastSnapshot(db ethdb.Database) (uint64, error) {
-	lastEnc, err := db.Get(dbutils.CliqueLastSnapshotBucket, dbutils.CliqueLastSnapshotKey())
+	lastEnc, err := db.Get(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
 	if err != nil {
 		log.Error("can't check last snapshot", "err", err)
 		debugLog("lastSnapshot-1", err)
@@ -533,14 +533,14 @@ func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool
 		debugLog("to-save-2.1.2", number)
 		defer tx.Rollback()
 
-		if err := tx.Put(dbutils.CliqueBucket, dbutils.CliqueSnapshotFullKey(number, hash), blob); err != nil {
+		if err := tx.Put(dbutils.CliqueBucket, SnapshotFullKey(number, hash), blob); err != nil {
 			log.Error("can't store a snapshot", "block", number, "hash", hash, "err", err)
 			debugLog("to-save-2.4", number, err)
 			return err
 		}
 		debugLog("to-save-2.1.3", number)
 
-		if err := tx.Put(dbutils.CliqueSnapshotBucket, dbutils.CliqueSnapshotKey(number), []byte{0}); err != nil {
+		if err := tx.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(number), []byte{0}); err != nil {
 			log.Error("can't store a snapshot number", "block", number, "hash", hash, "err", err)
 			debugLog("to-save-2.5", number, err)
 			return err
@@ -550,7 +550,7 @@ func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool
 		lastSnap, err := lastSnapshot(tx)
 		if lastSnap < number || errors.Is(err, ErrNotFound) {
 			debugLog("to-save-2.6", number, err)
-			if err := tx.Put(dbutils.CliqueLastSnapshotBucket, dbutils.CliqueLastSnapshotKey(), dbutils.EncodeBlockNumber(number)); err != nil {
+			if err := tx.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(number)); err != nil {
 				log.Error("can't store a snapshot number", "block", number, "hash", hash, "err", err)
 				debugLog("to-save-2.7", number, err)
 				return err
@@ -608,12 +608,12 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 			continue
 		}
 
-		if err := batch.Put(dbutils.CliqueBucket, dbutils.CliqueSnapshotFullKey(snap.number, snap.hash), blob); err != nil {
+		if err := batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blob); err != nil {
 			debugLog("save-snap-ch-3", snap.number, err)
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 
-		if err := batch.Put(dbutils.CliqueSnapshotBucket, dbutils.CliqueSnapshotKey(snap.number), []byte{0}); err != nil {
+		if err := batch.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(snap.number), []byte{0}); err != nil {
 			debugLog("save-snap-ch-4", snap.number, err)
 			log.Error("can't store a snapshot number", "block", snap.number, "hash", snap.hash, "err", err)
 		}
@@ -621,7 +621,7 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 		lastSnap, err := lastSnapshot(batch)
 		if lastSnap < snap.number || errors.Is(err, ErrNotFound) {
 			debugLog("save-snap-ch-5", snap.number, err)
-			if err := batch.Put(dbutils.CliqueLastSnapshotBucket, dbutils.CliqueLastSnapshotKey(), dbutils.EncodeBlockNumber(snap.number)); err != nil {
+			if err := batch.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(snap.number)); err != nil {
 				debugLog("save-snap-ch-6", snap.number, err)
 				log.Error("can't store a snapshot number", "block", snap.number, "hash", snap.hash, "err", err)
 			}
@@ -643,6 +643,7 @@ func (st *storage) Close() {
 	}
 
 	<-st.exitDone
+	st.db.Close()
 }
 
 func (st *storage) shallAppend(snap *snapObj) bool {
