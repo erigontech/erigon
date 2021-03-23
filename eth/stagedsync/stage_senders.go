@@ -112,7 +112,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 			k := make([]byte, 4)
 			binary.BigEndian.PutUint32(k, uint32(j.index))
-			if err := collectorSenders.Collect(k, j.senders); err != nil {
+			index := int(binary.BigEndian.Uint32(k))
+			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
 				errCh <- j.err
 				return
 			}
@@ -158,14 +159,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}
 
-	loadFunc := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		index := int(binary.BigEndian.Uint32(k))
-		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
-	}
-
 	if err := collectorSenders.Load(logPrefix, db,
 		dbutils.Senders,
-		loadFunc,
+		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quitCh,
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
