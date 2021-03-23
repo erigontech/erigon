@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -194,14 +193,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 	}
 
-	var stateHash common.Hash
-	execTrieFunc := func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-		var err error
-		stateHash, err = stagedsync.SpawnIntermediateHashesStage(s, tx, true /* checkRoot */, cache, "", quit)
-		fmt.Printf("got: %x\n", stateHash)
-		return err
-	}
-
 	var err1 error
 	tx, err1 = tx.Begin(ctx, ethdb.RW)
 	if err1 != nil {
@@ -268,8 +259,27 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
+		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
+		//stateStages.MockExecFunc(stages.IntermediateHashes, execTrieFunc)
+		_ = stateStages.SetCurrentStage(stages.Execution)
+		if err := stateStages.Run(db, tx); err != nil {
+			return err
+		}
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
+		execAtBlock = progress(tx, stages.Execution)
+		if execAtBlock == stopAt {
+			break
+		}
+
 		if miningConfig.Enabled {
-			unordered, ordered := miningTransactions(tx, execToBlock)
+			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execToBlock+1)
+			if err != nil {
+				panic(err)
+			}
+
+			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
 				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered),
@@ -278,22 +288,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				panic(err)
 			}
 
-			// set block limit of execute state
-			stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock-1))
-			if err := stateStages.Run(db, tx); err != nil {
-				return err
-			}
-
-			if integrityFast {
-				if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
-					return err
-				}
-				integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
-			}
-
-			if err := tx.CommitAndBegin(context.Background()); err != nil {
-				return err
-			}
 			if err := miningStages.Run(db, tx); err != nil {
 				return err
 			}
@@ -302,25 +296,10 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 
 			minedBlock = <-minedBlocks
-		}
 
-		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
-		stateStages.MockExecFunc(stages.IntermediateHashes, execTrieFunc)
-		_ = stateStages.SetCurrentStage(stages.Execution)
-		if err := stateStages.Run(db, tx); err != nil {
-			return err
-		}
-		if err := tx.CommitAndBegin(context.Background()); err != nil {
-			return err
-		}
-		if miningConfig.Enabled {
-			if stateHash != minedBlock.Header().Hash() {
-				panic(fmt.Errorf("state hash: %x, mined hash: %x", stateHash, minedBlock.Header().Hash()))
+			if nextBlock.Header().Hash() != minedBlock.Header().Hash() {
+				panic(fmt.Errorf("state hash: %x, mined hash: %x", nextBlock.Header().Hash(), minedBlock.Header().Hash()))
 			}
-		}
-		execAtBlock = progress(tx, stages.Execution)
-		if execAtBlock == stopAt {
-			break
 		}
 
 		// Unwind all stages to `execStage - unwind` block
@@ -361,11 +340,7 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func miningTransactions(tx ethdb.Getter, blockNum uint64) (map[common.Address]types.Transactions, types.Transactions) {
-	nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		panic(err)
-	}
+func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transactions, types.Transactions) {
 	localTxs := make(map[common.Address]types.Transactions, nextBlock.Transactions().Len())
 	senders := nextBlock.Body().SendersFromTxs()
 	for i, txn := range nextBlock.Transactions() {
