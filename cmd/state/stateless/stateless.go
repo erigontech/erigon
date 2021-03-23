@@ -38,41 +38,6 @@ var chartColors = []drawing.Color{
 	chart.ColorGreen,
 }
 
-func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
-	header := block.Header()
-	vmConfig.TraceJumpDest = true
-	engine := ethash.NewFullFaker()
-	gp := new(core.GasPool).AddGas(block.GasLimit())
-	usedGas := new(uint64)
-	var receipts types.Receipts
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
-		if err != nil {
-			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
-		}
-		receipts = append(receipts, receipt)
-	}
-
-	if !vmConfig.ReadOnly {
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
-		}
-
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-		}
-	}
-
-	return receipts, nil
-}
-
 func statePicture(t *trie.Trie, number uint64) error {
 	filename := fmt.Sprintf("state_%d.dot", number)
 	f, err := os.Create(filename)

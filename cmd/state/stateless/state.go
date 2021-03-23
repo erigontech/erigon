@@ -47,12 +47,6 @@ const (
 	CursorBatchSize    = uint(10_000)
 )
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
 // Implements sort.Interface
 type TimeSorterInt struct {
 	length     int
