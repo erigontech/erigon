@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -22,7 +21,7 @@ import (
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs *types.TransactionsByPriceAndNonce, coinbase common.Address, noempty bool, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
-	logPrefix := s.state.LogPrefix()
+	//logPrefix := s.state.LogPrefix()
 
 	batch := tx.NewBatch()
 	defer batch.Rollback()
@@ -46,9 +45,9 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			batch.Rollback()
 			return nil, err
 		}
-		if !chainConfig.IsByzantium(header.Number) {
-			batch.Rollback()
-		}
+		//if !chainConfig.IsByzantium(header.Number) {
+		//	batch.Rollback()
+		//}
 		if err = batch.CommitAndBegin(context.Background()); err != nil {
 			return nil, err
 		}
@@ -181,29 +180,24 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
-	if localTxs.Empty() && remoteTxs.Empty() && !noempty {
-		s.Done()
-		return nil
-	}
-
-	if !localTxs.Empty() {
-		if commitTransactions(current, localTxs, coinbase) {
-			return common.ErrStopped
+	if !(localTxs.Empty() && remoteTxs.Empty() && !noempty) {
+		if !localTxs.Empty() {
+			if commitTransactions(current, localTxs, coinbase) {
+				return common.ErrStopped
+			}
 		}
-	}
-	if !remoteTxs.Empty() {
-		if commitTransactions(current, remoteTxs, coinbase) {
-			return common.ErrStopped
+		if !remoteTxs.Empty() {
+			if commitTransactions(current, remoteTxs, coinbase) {
+				return common.ErrStopped
+			}
 		}
 	}
 
-	engine.Finalize(chainConfig, current.header, ibs, current.txs, current.uncles)
-	ctx := chainConfig.WithEIPsFlags(context.Background(), current.header.Number)
-	if err := ibs.FinalizeTx(ctx, stateWriter); err != nil {
+	if err := core.FinalizeBlockExecution(engine, current.header, current.txs, current.uncles, stateWriter, chainConfig, ibs); err != nil {
 		return err
 	}
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("[%s]: writing changesets for block %d failed: %v", logPrefix, current.header.Number.Uint64(), err)
+	if err := batch.Commit(); err != nil {
+		return err
 	}
 
 	/*

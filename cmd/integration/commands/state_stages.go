@@ -261,7 +261,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
-		//stateStages.MockExecFunc(stages.IntermediateHashes, execTrieFunc)
 		_ = stateStages.SetCurrentStage(stages.Execution)
 		if err := stateStages.Run(db, tx); err != nil {
 			return err
@@ -274,6 +273,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
 
+		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
+		//	return err
+		//}
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -283,13 +285,16 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 
 		if miningConfig.Enabled {
-			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execToBlock+1)
+			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
 			if err != nil {
 				panic(err)
 			}
 
 			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
+
+			miningConfig.Etherbase = nextBlock.Header().Coinbase
+			miningConfig.ExtraData = nextBlock.Header().Extra
 			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false,
 				stagedsync.NewMiningStagesParameters(miningConfig, mux, true, unordered),
 			)
@@ -303,13 +308,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-
 			minedBlock = <-minedBlocks
-
-			if minedBlock.Header().Root != nextBlock.Header().Root {
-				printBlocks(minedBlock, nextBlock)
-				panic(fmt.Errorf("state hash: %x, mined hash: %x", nextBlock.Header().Hash(), minedBlock.Header().Hash()))
-			}
+			checkMinedBlock(nextBlock, minedBlock)
 		}
 
 		// Unwind all stages to `execStage - unwind` block
@@ -358,6 +358,22 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 	}
 	return localTxs, nextBlock.Transactions()
 }
+
+func checkMinedBlock(b1, b2 *types.Block) {
+	h1 := b1.Header()
+	h2 := b2.Header()
+	if h1.Root != h2.Root ||
+		h1.ReceiptHash != h2.ReceiptHash ||
+		h1.TxHash != h2.TxHash ||
+		h1.ParentHash != h2.ParentHash ||
+		h1.UncleHash != h2.UncleHash ||
+		h1.GasUsed != h2.GasUsed ||
+		!bytes.Equal(h1.Extra, h2.Extra) {
+		printBlocks(b1, b2)
+		panic("blocks are not same")
+	}
+}
+
 func printBlocks(b1, b2 *types.Block) {
 	h1 := b1.Header()
 	h2 := b2.Header()

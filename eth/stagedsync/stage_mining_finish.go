@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-var prev common.Hash
+//var prev common.Hash
 
 func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlock, mux *event.TypeMux, engine consensus.Engine, chainConfig *params.ChainConfig, quit <-chan struct{}) error {
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -21,22 +21,30 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 
 	block := types.NewBlock(current.header, current.txs, current.uncles, current.receipts)
 
-	sealHash := engine.SealHash(block.Header())
+	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
-	if sealHash == prev {
-		return nil
-	}
-	prev = sealHash
+	//if sealHash == prev {
+	//	s.Done()
+	//	return nil
+	//}
+	//prev = sealHash
 
 	chain := ChainReader{chainConfig, tx}
 	ctx := consensus.NewCancel()
 	resultCh := make(chan consensus.ResultWithContext, 1)
-	//TODO: how abut quit channel?
 	if err := engine.Seal(ctx, chain, block, resultCh, ctx.Done()); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
 
-	//TODO: why worker.go does insert new block to chain?
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-quit:
+		ctx.CancelFunc()
+		return common.ErrStopped
+	case result := <-resultCh:
+		block = result.Block
+	}
 
 	log.Info("mined block", "txs", block.Transactions().Len())
 	// Broadcast the block and announce chain insertion event
