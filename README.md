@@ -2,20 +2,26 @@
 
 Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
 
-Table of contents
-=================
-
 <!--ts-->
-   * [System Requirements](#system-requirements)
-   * [Usage](#usage)
-   * [Windows](#windows)
-   * [Key features](#key-features)
-   * [Getting in touch](#getting-in-touch)
-   * [Team](#team)
-   * [Known issues](#known-issues)
-   * [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+- [System Requirements](#system-requirements)
+- [Usage](#usage)
+    + [Getting Started](#getting-started)
+    + [Testnets](#testnets)
+    + [Windows](#windows)
+    + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+- [Key features](#key-features)
+  - [More Efficient State Storage](#more-efficient-state-storage)
+  - [Faster Initial Sync](#faster-initial-sync)
+  - [JSON-RPC daemon](#json-rpc-daemon)
+  - [Run all components by docker-compose](#run-all-components-by-docker-compose)
+  - [Grafana dashboard](#grafana-dashboard)
+- [Getting in touch](#getting-in-touch)
+  - [Turbo-Geth Discord Server](#turbo-geth-discord-server)
+  - [Reporting security issues/concerns](#reporting-security-issues-concerns)
+- [Team](#team)
+- [Known issues](#known-issues)
+    + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage)
 <!--te-->
-
 
 
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
@@ -26,7 +32,7 @@ Things can and will break.**
 
 
 
-The current version is currently based on Go-Ethereum 1.9.24
+The current version is currently based on Go-Ethereum 1.10.1
 
 System Requirements
 ===================
@@ -40,6 +46,8 @@ RAM: 16GB, 64-bit architecture, (Golang version >= 1.15.6](https://golang.org/do
 Usage
 =====
 
+### Getting Started
+
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
 > cd turbo-geth
@@ -47,8 +55,8 @@ Usage
 > ./build/bin/tg
 ```
 
-Usage for testnets
-==================
+### Testnets
+
 If you would like to give turbo-geth a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
@@ -59,8 +67,7 @@ If you would like to give turbo-geth a try, but do not have spare 2Tb on your dr
 
 Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory.
 
-Windows
-=======
+### Windows
 
 Windows users may run turbo-geth in 3 possible ways:
 
@@ -175,11 +182,7 @@ Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./
 
 For a details on the implementation status of each command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
-#### Grafana dashboard:
-
-`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
-
-#### Or run all components by docker-compose
+#### Run all components by docker-compose
 
 Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
@@ -187,6 +190,10 @@ Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, 
 docker-compose build
 XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
+
+#### Grafana dashboard
+
+`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
 Getting in touch
 ================
@@ -201,8 +208,7 @@ a brief explanation of why you want to join the Discord, and how you heard about
 
 Send an email to `security [at] torquem.ch`.
 
-Team
-=======
+### Team
 
 Core contributors:
 
@@ -235,7 +241,7 @@ Happy testing! 🥤
 Known issues
 ============
 
-## 1. `htop` shows incorrect memory usage
+### `htop` shows incorrect memory usage
 
 TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
@@ -259,3 +265,4 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
+
