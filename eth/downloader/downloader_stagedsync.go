@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 // externsions for downloader needed for staged sync
@@ -19,7 +20,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	id string,
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
-	prefetchedBlocks *stagedsync.PrefetchedBlocks,
+	prefetchedBlocks *bodydownload.PrefetchedBlocks,
 ) (bool, error) {
 	d.bodiesState = s
 	d.bodiesUnwinder = u

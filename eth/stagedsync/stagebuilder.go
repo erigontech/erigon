@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 type ChainEventNotifier interface {
@@ -45,7 +46,7 @@ type StageParameters struct {
 	headersFetchers       []func() error
 	txPool                *core.TxPool
 	poolStart             func() error
-	prefetchedBlocks      *PrefetchedBlocks
+	prefetchedBlocks      *bodydownload.PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier

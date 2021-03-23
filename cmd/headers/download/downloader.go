@@ -484,6 +484,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
+	cs.bd.AddToPrefetch(request.Block)
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
