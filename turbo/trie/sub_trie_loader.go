@@ -73,10 +73,3 @@ func (stl *SubTrieLoader) LoadFromFlatDB(db ethdb.Database, rl RetainDecider, hc
 	}
 	return subTries, nil
 }
-
-// LoadFromWitnessDb loads subtries from a witnesses database instead of a state DB.
-func (stl *SubTrieLoader) LoadFromWitnessDb(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64, count int) (SubTries, int64, error) {
-	loader := NewWitnessDbSubTrieLoader()
-	// we expect CodeNodes to be already attached to the trie when loading from witness db
-	return loader.LoadSubTries(db, blockNr, trieLimit, startPos, count)
-}
