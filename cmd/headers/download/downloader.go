@@ -503,8 +503,11 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage) err
 		return fmt.Errorf("decode BlockBodies: %v", err)
 	}
 	delivered, undelivered := cs.bd.DeliverBodies(request)
-	// Approximate numbers
-	cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
+	total := delivered + undelivered
+	if total > 0 {
+		// Approximate numbers
+		cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
+	}
 	return nil
 }
 
