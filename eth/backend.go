@@ -454,10 +454,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-	}
+	//if config.SyncMode != downloader.StagedSync {
+	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+	//}
 	eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
