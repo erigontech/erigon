@@ -97,7 +97,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 	if err != nil {
 		return nil, err
 	}
-	err = env.SetMaxReaders(256)
+	err = env.SetMaxReaders(ReadersLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +364,6 @@ func (db *LmdbKV) Begin(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
 			db.wg.Add(1)
@@ -373,7 +372,6 @@ func (db *LmdbKV) Begin(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, lmdb.Readonly)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
@@ -623,7 +621,9 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 
@@ -659,7 +659,9 @@ func (tx *lmdbTx) Rollback() {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 	tx.tx.Abort()

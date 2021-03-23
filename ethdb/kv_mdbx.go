@@ -104,7 +104,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if err = env.SetMaxDBs(100); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, 256); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, ReadersLimit); err != nil {
 		return nil, err
 	}
 
@@ -352,7 +352,6 @@ func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
 			db.wg.Add(1)
@@ -361,7 +360,6 @@ func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
@@ -629,7 +627,9 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 
@@ -670,7 +670,9 @@ func (tx *MdbxTx) Rollback() {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		runtime.UnlockOSThread()
+		if !tx.readOnly {
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 	tx.printDebugInfo()

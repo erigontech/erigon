@@ -43,6 +43,12 @@ var (
 		Value: "",
 	}
 
+	PrivateApiRateLimit = cli.IntFlag{
+		Name:  "private.api.ratelimit",
+		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
+		Value: 500,
+	}
+
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -191,6 +197,12 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 // read-only interface to the databae
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
+	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
+	maxRateLimit := uint32(ethdb.ReadersLimit - 16)
+	if cfg.PrivateApiRateLimit > maxRateLimit {
+		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
+		cfg.PrivateApiRateLimit = maxRateLimit
+	}
 	if ctx.GlobalBool(TLSFlag.Name) {
 		certFile := ctx.GlobalString(TLSCertFlag.Name)
 		keyFile := ctx.GlobalString(TLSKeyFlag.Name)

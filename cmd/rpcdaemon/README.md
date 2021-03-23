@@ -1,3 +1,21 @@
+- [Introduction](#introduction)
+- [Getting Started](#getting-started)
+    * [Running locally](#running-locally)
+    * [Running remotely](#running-remotely)
+    * [Running in dual mode](#running-in-dual-mode)
+    * [Testing](#testing)
+- [FAQ](#faq)
+    * [RPC Implementation Status](#rpc-implementation-status)
+    * [Securing the communication between RPC daemon and TG instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-tg-instance-via-tls-and-authentication)
+    * [Ethstats](#ethstats)
+    * [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+    * [Trace transactions progress](#trace-transactions-progress)
+    * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+    * [Server load too high](#server-load-too-high)
+- [For Developers](#for-developers)
+    * [Code generation](#code-generation)
+
+
 ## Introduction
 
 turbo-geth's `rpcdaemon` runs in its own seperate process.
@@ -50,7 +68,7 @@ INFO [date-time] HTTP endpoint opened url=localhost:8545...
 
 If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
-## Testing
+### Testing
 
 By default, the `rpcdaemon` serves data from `localhost:8545`. You may send `curl` commands to see if things are working.
 
@@ -72,11 +90,9 @@ This should return something along the lines of this (depending on how far your 
 
 Also, there are [extensive instructions for using Postman](https://github.com/ledgerwatch/turbo-geth/wiki/Using-Postman-to-Test-TurboGeth-RPC) to test the RPC.
 
-## Open / Known Issues
+## FAQ
 
-There are still many open issues with the TurboGeth tracing routines. Please see [this issue](https://github.com/ledgerwatch/turbo-geth/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
-
-## RPC Implementation Status
+### RPC Implementation Status
 
 The following table shows the current implementation status of turbo-geth's RPC daemon.
 
@@ -188,7 +204,7 @@ The following table shows the current implementation status of turbo-geth's RPC 
 
 This table is constantly updated. Please visit again.
 
-## Securing the communication between RPC daemon and TG instance via TLS and authentication
+### Securing the communication between RPC daemon and TG instance via TLS and authentication
 
 In some cases, it is useful to run Turbo-Geth nodes in a different network (for example, in a Public cloud), but RPC daemon locally. To ensure
 the integrity of communication and access control to the Turbo-Geth node, TLS authentication can be enabled.
@@ -267,7 +283,7 @@ On the RPC daemon machine, these three files need to be placed: `CA-cert.pem`, `
 
 When running turbo-geth instance in the Google Cloud, for example, you need to specify the **Internal IP** in the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection to the turbo-geth instances can be made.
 
-## Ethstats
+### Ethstats
 
 This version of the RPC daemon is compatible with [ethstats-client](https://github.com/goerli/ethstats-client).
 
@@ -313,7 +329,7 @@ WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.
 WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59754 method=eth_newPendingTransactionFilter reqid=6 t="9.053µs"  err="the method eth_newPendingTransactionFilter does not exist/is not available"
 ```
 
-## Allowing only specific methods (Allowlist)
+### Allowing only specific methods (Allowlist)
 
 In some cases you might want to only allow certain methods in the namespaces
 and hide others. That is possible with `rpc.accessList` flag.
@@ -339,11 +355,27 @@ and hide others. That is possible with `rpc.accessList` flag.
 
 Now only these two methods are available.
 
+### Trace transactions progress
+
+There are still many open issues with the TurboGeth tracing routines. Please see [this issue](https://github.com/ledgerwatch/turbo-geth/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
+
+### Clients getting timeout, but server load is low
+
+In this case: increase default rate-limit - 
+amount of requests server handle simultaneously - requests over this limit will wait. 
+Increase it - if your 'hot data' is small or have much RAM or see "request timeout" while server load is low.
+
+
+```
+./build/bin/tg --private.api.addr=localhost:9090 --private.api.ratelimit=1024
+```
+
+### Server load too high 
+
+Reduce `--private.api.ratelimit` 
 
 ## For Developers
 
 ### Code generation
 
-`go.mod` stores right version of generators, use `make grpc` to install it and generate code.
-
-Recommended `protoc` version is 3.x. [Installation instructions](https://grpc.io/docs/protoc-installation/)
+`go.mod` stores right version of generators, use `make grpc` to install it and generate code (it also installs protoc into ./build/bin folder).
