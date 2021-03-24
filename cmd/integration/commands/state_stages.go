@@ -272,12 +272,12 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			break
 		}
 
-		if miningConfig.Enabled {
-			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
-			if err != nil {
-				panic(err)
-			}
+		nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
+		if err != nil {
+			panic(err)
+		}
 
+		if miningConfig.Enabled && nextBlock.Header().Coinbase != (common.Address{}) {
 			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
 			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, unordered, nil)
