@@ -273,14 +273,6 @@ func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
 	}
 }
 
-// deleteHeaderWithoutNumber removes only the block header but does not remove
-// the hash to number mapping.
-func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
-		log.Crit("Failed to delete header", "err", err)
-	}
-}
-
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.RawValue {
 	body := ReadBody(db, hash, number)
@@ -751,20 +743,6 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 		return err
 	}
 	DeleteHeader(db, hash, number)
-	DeleteBody(db, hash, number)
-	if err := DeleteTd(db, hash, number); err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteBlockWithoutNumber removes all block data associated with a hash, except
-// the hash to number mapping.
-func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
-	if err := DeleteReceipts(db, number); err != nil {
-		return err
-	}
-	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {
 		return err
