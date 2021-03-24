@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +30,7 @@ func main() {
 			log.Info("filters are not supported in chaindata mode")
 		}
 
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), ethdb.NewObjectDatabase(db), backend, ff, *cfg, nil)); err != nil {
+		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, ff, *cfg, nil)); err != nil {
 			log.Error(err.Error())
 			return nil
 		}

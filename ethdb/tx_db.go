@@ -11,6 +11,42 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
+// Implements ethdb.Getter for Tx
+type RoTxDb struct {
+	tx Tx
+}
+
+func NewRoTxDb(tx Tx) *RoTxDb {
+	return &RoTxDb{tx}
+}
+
+func (m *RoTxDb) Get(bucket string, key []byte) ([]byte, error) {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	_, v, err := c.SeekExact(key)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, ErrKeyNotFound
+	}
+	return v, nil
+}
+
+func (m *RoTxDb) Has(bucket string, key []byte) (bool, error) {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	_, v, err := c.SeekExact(key)
+
+	return v != nil, err
+}
+
+func (m *RoTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	return Walk(c, startkey, fixedbits, walker)
+}
+
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
