@@ -558,20 +558,6 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
-	GraphQLEnabledFlag = cli.BoolFlag{
-		Name:  "graphql",
-		Usage: "Enable GraphQL on the HTTP-RPC server. Note that GraphQL can only be started if an HTTP server is started as well.",
-	}
-	GraphQLCORSDomainFlag = cli.StringFlag{
-		Name:  "graphql.corsdomain",
-		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
-		Value: "",
-	}
-	GraphQLVirtualHostsFlag = cli.StringFlag{
-		Name:  "graphql.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
-		Value: strings.Join(node.DefaultConfig.GraphQLVirtualHosts, ","),
-	}
 	WSEnabledFlag = cli.BoolFlag{
 		Name:  "ws",
 		Usage: "Enable the WS-RPC server",
@@ -600,16 +586,6 @@ var (
 		Name:  "ws.rpcprefix",
 		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
-	}
-	GraphQLListenAddrFlag = cli.StringFlag{
-		Name:  "graphql.addr",
-		Usage: "GraphQL server listening interface",
-		Value: node.DefaultGraphQLHost,
-	}
-	GraphQLPortFlag = cli.IntFlag{
-		Name:  "graphql.port",
-		Usage: "GraphQL server listening port",
-		Value: node.DefaultGraphQLPort,
 	}
 	ExecFlag = cli.StringFlag{
 		Name:  "exec",
@@ -940,71 +916,6 @@ func SplitAndTrim(input string) (ret []string) {
 	return ret
 }
 
-// setGraphQL creates the GraphQL listener interface string from the set
-// command line flags, returning empty if the GraphQL endpoint is disabled.
-//func setGraphQL(ctx *cli.Context, cfg *node.Config) {
-//	if ctx.GlobalIsSet(GraphQLCORSDomainFlag.Name) {
-//		cfg.GraphQLCors = splitAndTrim(ctx.GlobalString(GraphQLCORSDomainFlag.Name))
-//	}
-//	if ctx.GlobalIsSet(GraphQLVirtualHostsFlag.Name) {
-//		cfg.GraphQLVirtualHosts = splitAndTrim(ctx.GlobalString(GraphQLVirtualHostsFlag.Name))
-//	}
-//}
-
-// setWS creates the WebSocket RPC listener interface string from the set
-// command line flags, returning empty if the HTTP endpoint is disabled.
-//func setWS(ctx *cli.Context, cfg *node.Config) {
-//	if ctx.GlobalBool(WSEnabledFlag.Name) && cfg.WSHost == "" {
-//		cfg.WSHost = localhost
-//		if ctx.GlobalIsSet(LegacyWSListenAddrFlag.Name) {
-//			cfg.WSHost = ctx.GlobalString(LegacyWSListenAddrFlag.Name)
-//			log.Warn("The flag --wsaddr is deprecated and will be removed in the future, please use --ws.addr")
-//		}
-//		if ctx.GlobalIsSet(WSListenAddrFlag.Name) {
-//			cfg.WSHost = ctx.GlobalString(WSListenAddrFlag.Name)
-//		}
-//	}
-//	if ctx.GlobalIsSet(LegacyWSPortFlag.Name) {
-//		cfg.WSPort = ctx.GlobalInt(LegacyWSPortFlag.Name)
-//		log.Warn("The flag --wsport is deprecated and will be removed in the future, please use --ws.port")
-//	}
-//	if ctx.GlobalIsSet(WSPortFlag.Name) {
-//		cfg.WSPort = ctx.GlobalInt(WSPortFlag.Name)
-//	}
-//
-//	if ctx.GlobalIsSet(LegacyWSAllowedOriginsFlag.Name) {
-//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(LegacyWSAllowedOriginsFlag.Name))
-//		log.Warn("The flag --wsorigins is deprecated and will be removed in the future, please use --ws.origins")
-//	}
-//	if ctx.GlobalIsSet(WSAllowedOriginsFlag.Name) {
-//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(WSAllowedOriginsFlag.Name))
-//	}
-//
-//	if ctx.GlobalIsSet(LegacyWSApiFlag.Name) {
-//		cfg.WSModules = splitAndTrim(ctx.GlobalString(LegacyWSApiFlag.Name))
-//		log.Warn("The flag --wsapi is deprecated and will be removed in the future, please use --ws.api")
-//	}
-//	if ctx.GlobalIsSet(WSApiFlag.Name) {
-//		cfg.WSModules = splitAndTrim(ctx.GlobalString(WSApiFlag.Name))
-//	}
-//
-//	if ctx.GlobalIsSet(WSPathPrefixFlag.Name) {
-//		cfg.WSPathPrefix = ctx.GlobalString(WSPathPrefixFlag.Name)
-//	}
-//}
-
-// setIPC creates an IPC path configuration from the set command line flags,
-// returning an empty string if IPC was explicitly disabled, or the set path.
-//func setIPC(ctx *cli.Context, cfg *node.Config) {
-//	CheckExclusive(ctx, IPCDisabledFlag, IPCPathFlag)
-//	switch {
-//	case ctx.GlobalBool(IPCDisabledFlag.Name):
-//		cfg.IPCPath = ""
-//	case ctx.GlobalIsSet(IPCPathFlag.Name):
-//		cfg.IPCPath = ctx.GlobalString(IPCPathFlag.Name)
-//	}
-//}
-
 // makeDatabaseHandles raises out the number of allowed file handles per process
 // for Geth and returns half of the allowance to assign to the database.
 func makeDatabaseHandles() int {
@@ -1135,26 +1046,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 // SetNodeConfig applies node-related command line flags to the config.
 func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
-	//setIPC(ctx, cfg)
-	//setGraphQL(ctx, cfg)
-	//setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
-
-	//if ctx.GlobalBool(LegacyRPCEnabledFlag.Name) ||
-	//	ctx.GlobalBool(HTTPEnabledFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCPortFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPPortFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCCORSDomainFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCApiFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPApiFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCVirtualHostsFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPVirtualHostsFlag.Name) &&
-	//		cfg.HTTPHost == "" {
-	//	Fatalf("Turbo-Geth does not support native rpc. Use instead rpcdaemon.")
-	//}
 
 	if ctx.GlobalIsSet(ExternalSignerFlag.Name) {
 		cfg.ExternalSigner = ctx.GlobalString(ExternalSignerFlag.Name)
