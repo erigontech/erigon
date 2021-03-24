@@ -90,6 +90,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		var hash common.Hash
 		var header *types.Header
 		var err error
+		request := true
 		if bd.deliveries[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveries[blockNum-bd.requestedLow].Header()
@@ -105,6 +106,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 				if block := bd.prefetchedBlocks.Pop(hash); block != nil {
 					// Block is prefetched, no need to request
 					bd.deliveries[blockNum-bd.requestedLow] = block
+					request = false
 				} else {
 					bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
 					if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
@@ -112,6 +114,8 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 						copy(doubleHash[:], header.UncleHash.Bytes())
 						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
 						bd.requestedMap[doubleHash] = blockNum
+					} else {
+						request = false
 					}
 				}
 			}
@@ -119,11 +123,11 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		if header == nil {
 			log.Error("Header not found", "block number", blockNum)
 			panic("")
-		} else if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+		} else if request {
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
-			// Both uncleHash and txHash are empty, no need to request
+			// Both uncleHash and txHash are empty (or block is prefetched), no need to request
 			bd.delivered.Add(blockNum)
 		}
 	}
