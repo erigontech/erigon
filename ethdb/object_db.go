@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -419,29 +418,4 @@ func InspectDatabase(db Database) error {
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
-}
-
-func WarmUp(tx Tx, bucket string, logEvery *time.Ticker, quit <-chan struct{}) error {
-	count := 0
-	c := tx.Cursor(bucket)
-	totalKeys, errCount := c.Count()
-	if errCount != nil {
-		return errCount
-	}
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		count++
-
-		select {
-		default:
-		case <-quit:
-			return common.ErrStopped
-		case <-logEvery.C:
-			log.Info("Warmed up state", "progress", fmt.Sprintf("%.2fM/%.2fM", float64(count)/1_000_000, float64(totalKeys)/1_000_000))
-		}
-	}
-
-	return nil
 }
