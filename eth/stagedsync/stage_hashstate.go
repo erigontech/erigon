@@ -245,7 +245,6 @@ func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket s
 		if err != nil {
 			return err
 		}
-
 		if cache != nil {
 			if len(k) == 20 {
 				_, inCache := cache.GetAccount(k)

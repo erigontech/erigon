@@ -2135,7 +2135,6 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs t
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
 	}
-
 	if err := stateWriter.WriteChangeSets(); err != nil {
 		return fmt.Errorf("writing changesets for block %d failed: %v", header.Number.Uint64(), err)
 	}
