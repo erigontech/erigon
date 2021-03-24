@@ -55,12 +55,16 @@ type Filter func(id ID) error
 
 // NewID calculates the Ethereum fork ID from the chain config, genesis hash, and head.
 func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
+	return NewIDFromForks(GatherForks(config), genesis, head)
+}
+
+func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
 	// Calculate the current fork checksum and the next fork block
 	var next uint64
-	for _, fork := range GatherForks(config) {
+	for _, fork := range forks {
 		if fork <= head {
 			// Fork already passed, checksum the previous hash and the fork number
 			hash = checksumUpdate(hash, fork)
@@ -70,17 +74,6 @@ func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 		break
 	}
 	return ID{Hash: checksumToBytes(hash), Next: next}
-}
-
-func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
-	// Calculate the starting checksum from the genesis hash
-	hash := crc32.ChecksumIEEE(genesis[:])
-
-	// Calculate the current fork checksum and the next fork block
-	for _, fork := range forks {
-		hash = checksumUpdate(hash, fork)
-	}
-	return ID{Hash: checksumToBytes(hash), Next: 0}
 }
 
 // NewFilter creates a filter that returns if a fork ID should be rejected or notI
@@ -94,8 +87,8 @@ func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint
 	)
 }
 
-func NewFilterFromForks(forks []uint64, genesis common.Hash) Filter {
-	head := func() uint64 { return 0 }
+func NewFilterFromForks(forks []uint64, genesis common.Hash, headNumber uint64) Filter {
+	head := func() uint64 { return headNumber }
 	return newFilter(forks, genesis, head)
 }
 

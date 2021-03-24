@@ -9,12 +9,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 const prof = false // whether to profile
 
 type StagedSync struct {
-	PrefetchedBlocks *PrefetchedBlocks
+	PrefetchedBlocks *bodydownload.PrefetchedBlocks
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
 	params           OptionalParameters
@@ -40,7 +41,7 @@ type OptionalParameters struct {
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
 	return &StagedSync{
-		PrefetchedBlocks: NewPrefetchedBlocks(),
+		PrefetchedBlocks: bodydownload.NewPrefetchedBlocks(),
 		stageBuilders:    stages,
 		unwindOrder:      unwindOrder,
 		params:           params,

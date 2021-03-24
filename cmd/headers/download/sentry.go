@@ -191,9 +191,9 @@ func runPeer(
 		TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
 		Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
 		Genesis:         genesisHash,
-		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash),
+		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock),
 	}
-	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash)
+	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
 	networkID := protoStatusData.NetworkId
 	if err := p2p.Send(rw, eth.StatusMsg, statusData); err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)

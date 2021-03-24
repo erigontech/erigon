@@ -1,4 +1,4 @@
-package stagedsync
+package bodydownload
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
