@@ -575,28 +575,10 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			for j := range t.Opcodes {
 				o := &t.Opcodes[j]
 				//only print to the summary the opcodes that are interesting
-				//isRStackUsed := o.MaxRStack != 0
 				isOpFault := o.Fault != ""
-				if isOpFault { // && !isRStackUsed {
+				if isOpFault {
 					fmt.Fprintf(ot.fsumWriter, "Opcode FAULT\tb=%d taddr=%s TxF=%s opF=%s tx=%s\n", blockNum, t.TxAddr, t.Fault, t.OpcodeFault, t.TxHash.String())
 					fmt.Fprint(ot.fsumWriter, "\n")
-
-					//print the stack
-					//if l := o.StackTop.Len(); l>0 {
-					//	fmt.Fprintf(ot.summary, "\t%d:", o.MaxStack)
-					//	for i := 0; i < l; i++ {
-					//		fmt.Fprintf(ot.summary, "%x ", o.StackTop.Back(i))
-					//	}
-					//}
-
-					//print the Rstack
-					//if o.MaxRStack > 0 {
-					//	fmt.Fprintf(ot.fsumWriter, "\trs:%d:", o.MaxRStack)
-					//	//fmt.Printf("return stack used in block %d, tx %s", BlockNum)
-					//	for i := 0; i < o.MaxRStack; i++ {
-					//		fmt.Fprintf(ot.fsumWriter, "%x ", o.RetStackTop[i])
-					//	}
-					//}
 				}
 			}
 			isTxFault := t.Fault != ""

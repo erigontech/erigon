@@ -245,9 +245,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
-			//if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-			//	return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
-			//}
 			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}

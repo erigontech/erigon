@@ -413,14 +413,7 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 	if atomic.CompareAndSwapInt32(&d.notified, 0, 1) {
 		log.Info("Block synchronisation started")
 	}
-	// If we are already full syncing, but have a fast-sync bloom filter laying
-	// around, make sure it doesn't use memory any more. This is a special case
-	// when the user attempts to fast sync a new empty network.
-	//if mode == FullSync && d.stateBloom != nil {
-	//	d.stateBloom.Close()
-	// If snap sync was requested, create the snap scheduler and switch to fast
-	//}
-	// but until snap becomes prevalent, we should support both. TODO(karalabe).
+
 	// Reset the queue, peer set and wake channels to clean any internal leftover state
 	d.queue.Reset(blockCacheMaxItems, blockCacheInitialItems)
 	d.peers.Reset()
@@ -752,10 +745,6 @@ func (d *Downloader) Terminate() {
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	common.SafeClose(d.quitCh)
-
-	//if d.stateBloom != nil {
-	//	d.stateBloom.Close()
-	//}
 
 	d.quitLock.Unlock()
 

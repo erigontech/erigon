@@ -178,9 +178,6 @@ func prepare(ctx *cli.Context) {
 	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
 	debug.SetGCPercent(int(gogc))
 
-	// Start metrics export if enabled
-	utils.SetupMetrics(ctx)
-
 	// Start system runtime metrics collection
 	go metrics.CollectProcessMetrics(10 * time.Second)
 }

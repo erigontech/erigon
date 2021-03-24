@@ -2160,9 +2160,6 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 	if ancient.CurrentFastBlock().NumberU64() != previousFastBlock.NumberU64() {
 		t.Fatalf("failed to rollback ancient data, want %d, have %d", previousFastBlock.NumberU64(), ancient.CurrentFastBlock().NumberU64())
 	}
-	//if frozen, err := ancient.ChainDb().Ancients(); err != nil || frozen != 1 {
-	//	t.Fatalf("failed to truncate ancient data")
-	//}
 	ancient.TerminateInsert = nil
 	if n, err := ancient.InsertReceiptChain(blocks, receipts, uint64(3*len(blocks)/4)); err != nil {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)

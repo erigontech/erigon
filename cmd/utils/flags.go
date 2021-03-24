@@ -1706,11 +1706,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
 	}
-
-	// TODO(fjl): move trie cache generations into config
-	//if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-	//	state.MaxTrieCacheSize = uint64(gen)
-	//}
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
@@ -1732,49 +1727,6 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
 	return backend
-}
-
-// RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
-// the given node.
-//func RegisterEthStatsService(stack *node.Node, backend ethapi.Backend, url string) {
-//	if err := ethstats.New(stack, backend, backend.Engine(), url); err != nil {
-//		Fatalf("Failed to register the Ethereum Stats service: %v", err)
-//	}
-//}
-
-// RegisterGraphQLService is a utility function to construct a new service and register it against a node.
-//func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {
-//	if err := graphql.New(stack, backend, cfg.GraphQLCors, cfg.GraphQLVirtualHosts); err != nil {
-//		Fatalf("Failed to register the GraphQL service: %v", err)
-//	}
-//}
-
-func SetupMetrics(ctx *cli.Context) {
-	//if metrics.Enabled {
-	//	log.Info("Enabling metrics collection")
-	//
-	//	var (
-	//		enableExport = ctx.GlobalBool(MetricsEnableInfluxDBFlag.Name)
-	//		endpoint     = ctx.GlobalString(MetricsInfluxDBEndpointFlag.Name)
-	//		database     = ctx.GlobalString(MetricsInfluxDBDatabaseFlag.Name)
-	//		username     = ctx.GlobalString(MetricsInfluxDBUsernameFlag.Name)
-	//		password     = ctx.GlobalString(MetricsInfluxDBPasswordFlag.Name)
-	//	)
-	//
-	//	if enableExport {
-	//		tagsMap := SplitTagsFlag(ctx.GlobalString(MetricsInfluxDBTagsFlag.Name))
-	//
-	//		log.Info("Enabling metrics export to InfluxDB")
-	//
-	//		go influxdb.InfluxDBWithTags(metrics.DefaultRegistry, 10*time.Second, endpoint, database, username, password, "geth.", tagsMap)
-	//	}
-	//
-	//	if ctx.GlobalIsSet(MetricsHTTPFlag.Name) {
-	//		address := fmt.Sprintf("%s:%d", ctx.GlobalString(MetricsHTTPFlag.Name), ctx.GlobalInt(MetricsPortFlag.Name))
-	//		log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
-	//		exp.Setup(address)
-	//	}
-	//}
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {

@@ -451,30 +451,6 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, valu
 	}
 }
 
-// GetProof returns the Merkle proof for a given account
-func (sdb *IntraBlockState) GetProof(a common.Address) ([][]byte, error) {
-	//sdb.Lock()
-	//defer sdb.Unlock()
-	//var proof proofList
-	//err := sdb.trie.Prove(crypto.Keccak256(a.Bytes()), 0, &proof)
-	//return [][]byte(proof), err
-	return nil, nil
-}
-
-// GetStorageProof returns the storage proof for a given key
-func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) ([][]byte, error) {
-	//sdb.Lock()
-	//defer sdb.Unlock()
-	//var proof proofList
-	//trie := sdb.StorageTrie(a)
-	//if trie == nil {
-	//	return proof, errors.New("storage trie for requested address does not exist")
-	//}
-	//err := trie.Prove(crypto.Keccak256(key.Bytes()), 0, &proof)
-	//return [][]byte(proof), err
-	return nil, nil
-}
-
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *uint256.Int) {

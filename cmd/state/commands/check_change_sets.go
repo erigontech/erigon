@@ -174,22 +174,6 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 
 			if !match {
-				//fmt.Printf("\n\n")
-				//fmt.Printf("All in DB: ==========================\n")
-				//j := 0
-				//err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-				//	fmt.Printf("%d: 0x%x: %x\n", j, k, v)
-				//	j++
-				//	return true, nil
-				//})
-				//if err != nil {
-				//	return err
-				//}
-				//fmt.Printf("All Expected: ==========================\n")
-				//for ii, c := range accountChanges.Changes {
-				//	fmt.Printf("%d: 0x%x: %x\n", ii, c.Key, c.Value)
-				//}
-
 				return fmt.Errorf("check change set failed")
 			}
 
