@@ -31,7 +31,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
 	signer := types.NewEIP155Signer(chainConfig.ChainID)
 	ibs := state.New(state.NewPlainStateReader(batch))
-	stateWriter := state.NewPlainStateWriter(batch, batch, current.Header.Number.Uint64())
+	stateWriter := state.NewPlainStateWriter(batch, tx, current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
