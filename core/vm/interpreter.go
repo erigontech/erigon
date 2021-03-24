@@ -37,9 +37,6 @@ type Config struct {
 	NoReceipts              bool   // Do not calculate receipts
 	ReadOnly                bool   // Do no perform any block finalisation
 
-	EWASMInterpreter string // External EWASM interpreter options
-	EVMInterpreter   string // External EVM interpreter options
-
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 

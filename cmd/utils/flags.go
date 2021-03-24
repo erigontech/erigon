@@ -65,8 +65,6 @@ import (
 	"github.com/urfave/cli"
 )
 
-const localhost = "127.0.0.1"
-
 func init() {
 	cli.AppHelpTemplate = `{{.Name}} {{if .Flags}}[global options] {{end}}command{{if .Flags}} [command options]{{end}} [arguments...]
 
@@ -732,16 +730,6 @@ var (
 		Usage: "Comma-separated InfluxDB tags (key/values) attached to all measurements",
 		Value: metrics.DefaultConfig.InfluxDBTags,
 	}
-	EWASMInterpreterFlag = cli.StringFlag{
-		Name:  "vm.ewasm",
-		Usage: "External ewasm configuration (default = built-in interpreter)",
-		Value: "",
-	}
-	EVMInterpreterFlag = cli.StringFlag{
-		Name:  "vm.evm",
-		Usage: "External EVM configuration (default = built-in interpreter)",
-		Value: "",
-	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -818,12 +806,8 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
 	switch {
-	case ctx.GlobalIsSet(BootnodesFlag.Name) || ctx.GlobalIsSet(LegacyBootnodesV4Flag.Name):
-		if ctx.GlobalIsSet(LegacyBootnodesV4Flag.Name) {
-			urls = SplitAndTrim(ctx.GlobalString(LegacyBootnodesV4Flag.Name))
-		} else {
-			urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-		}
+	case ctx.GlobalIsSet(BootnodesFlag.Name):
+		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	case ctx.GlobalBool(RopstenFlag.Name):
 		urls = params.RopstenBootnodes
 	case ctx.GlobalBool(RinkebyFlag.Name):
@@ -854,12 +838,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
 	switch {
-	case ctx.GlobalIsSet(BootnodesFlag.Name) || ctx.GlobalIsSet(LegacyBootnodesV5Flag.Name):
-		if ctx.GlobalIsSet(LegacyBootnodesV5Flag.Name) {
-			urls = SplitAndTrim(ctx.GlobalString(LegacyBootnodesV5Flag.Name))
-		} else {
-			urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-		}
+	case ctx.GlobalIsSet(BootnodesFlag.Name):
+		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	case ctx.GlobalBool(RopstenFlag.Name):
 		urls = params.RopstenBootnodes
 	case ctx.GlobalBool(RinkebyFlag.Name):
@@ -1175,16 +1155,8 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
-	if ctx.GlobalIsSet(LegacyGpoBlocksFlag.Name) {
-		cfg.Blocks = ctx.GlobalInt(LegacyGpoBlocksFlag.Name)
-		log.Warn("The flag --gpoblocks is deprecated and will be removed in the future, please use --gpo.blocks")
-	}
 	if ctx.GlobalIsSet(GpoBlocksFlag.Name) {
 		cfg.Blocks = ctx.GlobalInt(GpoBlocksFlag.Name)
-	}
-	if ctx.GlobalIsSet(LegacyGpoPercentileFlag.Name) {
-		cfg.Percentile = ctx.GlobalInt(LegacyGpoPercentileFlag.Name)
-		log.Warn("The flag --gpopercentile is deprecated and will be removed in the future, please use --gpo.percentile")
 	}
 	if ctx.GlobalIsSet(GpoPercentileFlag.Name) {
 		cfg.Percentile = ctx.GlobalInt(GpoPercentileFlag.Name)
@@ -1486,13 +1458,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.GlobalBool(VMEnableDebugFlag.Name)
 	}
 
-	if ctx.GlobalIsSet(EWASMInterpreterFlag.Name) {
-		cfg.EWASMInterpreter = ctx.GlobalString(EWASMInterpreterFlag.Name)
-	}
-
-	if ctx.GlobalIsSet(EVMInterpreterFlag.Name) {
-		cfg.EVMInterpreter = ctx.GlobalString(EVMInterpreterFlag.Name)
-	}
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
 	}

@@ -18,7 +18,6 @@ package tests
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -32,12 +31,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/params"
-)
-
-// Command line flags to configure the interpreters.
-var (
-	testEVM   = flag.String("vm.evm", "", "EVM configuration")
-	testEWASM = flag.String("vm.ewasm", "", "EWASM configuration")
 )
 
 var (

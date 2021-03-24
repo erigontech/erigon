@@ -499,8 +499,6 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheCo
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
-			EWASMInterpreter:        config.EWASMInterpreter,
-			EVMInterpreter:          config.EVMInterpreter,
 			NoReceipts:              !config.StorageMode.Receipts,
 		}
 		cacheConfig = &core.CacheConfig{

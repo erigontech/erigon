@@ -55,8 +55,6 @@ var DefaultFlags = []cli.Flag{
 	utils.FakePoWFlag,
 	utils.GpoBlocksFlag,
 	utils.GpoPercentileFlag,
-	utils.EWASMInterpreterFlag,
-	utils.EVMInterpreterFlag,
 	utils.InsecureUnlockAllowedFlag,
 	utils.MetricsEnabledFlag,
 	utils.MetricsEnabledExpensiveFlag,
