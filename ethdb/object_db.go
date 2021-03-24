@@ -38,18 +38,13 @@ type DbCopier interface {
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
-	kv  KV
-	log log.Logger
-	id  uint64
+	kv KV
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
 func NewObjectDatabase(kv KV) *ObjectDatabase {
-	logger := log.New("database", "object")
 	return &ObjectDatabase{
-		kv:  kv,
-		log: logger,
-		id:  id(),
+		kv: kv,
 	}
 }
 
