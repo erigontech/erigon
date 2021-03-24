@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -102,6 +103,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	}
 	var prevK []byte
 	if err = changeset.Mapper[dbutils.PlainAccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		fmt.Printf("cs: %x,%x\n", k, v)
 		if bytes.Equal(k, prevK) {
 			if err = db.AppendDup(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
 				return err

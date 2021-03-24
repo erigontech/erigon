@@ -24,8 +24,8 @@ import (
 )
 
 type miningBlock struct {
-	header   *types.Header
-	uncles   []*types.Header
+	Header   *types.Header
+	Uncles   []*types.Header
 	txs      []*types.Transaction
 	receipts types.Receipts
 
@@ -221,8 +221,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		}
 	}
 
-	current.header = header
-	current.uncles = makeUncles(env.uncles)
+	current.Header = header
+	current.Uncles = makeUncles(env.uncles)
 
 	// Split the pending transactions into locals and remotes
 	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pendingTxs
