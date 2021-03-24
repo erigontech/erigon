@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -515,7 +514,6 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
 	sdb.Lock()
-
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}

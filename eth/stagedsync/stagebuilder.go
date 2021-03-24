@@ -64,15 +64,15 @@ type MiningStagesParameters struct {
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
 	noempty      bool
-	pendingTxs   map[common.Address]types.Transactions
-	txPoolLocals []common.Address
+	PendingTxs   map[common.Address]types.Transactions
+	TxPoolLocals []common.Address
 
 	// runtime dat
 	Block *miningBlock
 }
 
 func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, Block: &miningBlock{}}
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}}
 
 }
 
@@ -418,8 +418,8 @@ func MiningStages() StageBuilders {
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
-							world.mining.txPoolLocals,
-							world.mining.pendingTxs,
+							world.mining.TxPoolLocals,
+							world.mining.PendingTxs,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -472,7 +472,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.mining.Block.header.Root = stateRoot
+						world.mining.Block.Header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },

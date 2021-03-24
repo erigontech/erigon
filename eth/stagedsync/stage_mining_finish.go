@@ -17,7 +17,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 	//	continue
 	//}
 
-	block := types.NewBlock(current.header, current.txs, current.uncles, current.receipts)
+	block := types.NewBlock(current.Header, current.txs, current.Uncles, current.receipts)
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.

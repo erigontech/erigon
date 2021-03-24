@@ -272,12 +272,12 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			break
 		}
 
-		if miningConfig.Enabled {
-			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
-			if err != nil {
-				panic(err)
-			}
+		nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
+		if err != nil {
+			panic(err)
+		}
 
+		if miningConfig.Enabled && nextBlock.Header().Coinbase != (common.Address{}) {
 			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
 			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, unordered, nil)
@@ -289,6 +289,22 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				panic(err)
 			}
 			var minedBlock *types.Block
+			// set right uncles from nextBlock
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
+					miningWorld.Block,
+					chainConfig,
+					cc.Engine(),
+					miningWorld.ExtraData,
+					miningWorld.GasFloor,
+					miningWorld.GasCeil,
+					miningWorld.Etherbase,
+					miningWorld.TxPoolLocals,
+					miningWorld.PendingTxs,
+					quit)
+				miningWorld.Block.Uncles = nextBlock.Uncles()
+				return err
+			})
 			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				var err error
 				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)

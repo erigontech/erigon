@@ -28,16 +28,16 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 
 	engine := cc.Engine()
 	tcount := 0
-	gasPool := new(core.GasPool).AddGas(current.header.GasLimit)
+	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
 	signer := types.NewEIP155Signer(chainConfig.ChainID)
 	ibs := state.New(state.NewPlainStateReader(batch))
-	stateWriter := state.NewPlainStateWriter(batch, batch, current.header.Number.Uint64())
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.header.Number) == 0 {
+	stateWriter := state.NewPlainStateWriter(batch, tx, current.Header.Number.Uint64())
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
 	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, stateWriter state.StateWriter, current *miningBlock) ([]*types.Log, error) {
-		header := current.header
+		header := current.Header
 		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, stateWriter, header, txn, &header.GasUsed, *vmConfig)
 		// batch Rollback/CommitAndBegin methods - keeps batch object valid,
 		// means don't need re-create state reader or re-inject batch or create new batch
@@ -57,7 +57,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		return receipt.Logs, nil
 	}
 	var commitTransactions = func(current *miningBlock, txs *types.TransactionsByPriceAndNonce, coinbase common.Address /*, interrupt *int32*/) bool {
-		header := current.header
+		header := current.Header
 
 		var coalescedLogs []*types.Log
 
@@ -172,7 +172,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
-		log.Info("Commit an empty block", "number", current.header.Number)
+		log.Info("Commit an empty block", "number", current.Header.Number)
 		s.Done()
 		return nil
 	}
@@ -193,7 +193,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(engine, current.header, current.txs, current.uncles, stateWriter, chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(engine, current.Header, current.txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
 		return err
 	}
 	if err := batch.Commit(); err != nil {
@@ -229,7 +229,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	*/
 
 	// hack: pretend that we are real execution stage - next stages will rely on this progress
-	if err := stages.SaveStageProgress(tx, stages.Execution, current.header.Number.Uint64()); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Execution, current.Header.Number.Uint64()); err != nil {
 		return err
 	}
 	s.Done()
