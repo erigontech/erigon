@@ -92,7 +92,6 @@ var (
 	errInvalidChain            = errors.New("retrieved hash chain is invalid")
 	errInvalidBody             = errors.New("retrieved block body is invalid")
 	errInvalidReceipt          = errors.New("retrieved receipt is invalid")
-	errCancelStateFetch        = errors.New("state data download canceled (requested)")
 	errCancelContentProcessing = errors.New("content processing canceled (requested)")
 	errCanceled                = errors.New("syncing canceled (requested)")
 	errNoSyncActive            = errors.New("no sync active")
@@ -111,10 +110,8 @@ type Downloader struct {
 	mode uint32         // Synchronisation mode defining the strategy used (per sync cycle), use d.getMode() to get the SyncMode
 	mux  *event.TypeMux // Event multiplexer to announce sync operation events
 
-	checkpoint uint64   // Checkpoint block number to enforce head against (e.g. fast sync)
-	genesis    uint64   // Genesis block number to limit sync to (e.g. light client CHT)
-	queue      *queue   // Scheduler for selecting the hashes to download
-	peers      *peerSet // Set of active peers from which download can proceed
+	queue *queue   // Scheduler for selecting the hashes to download
+	peers *peerSet // Set of active peers from which download can proceed
 
 	stateDB ethdb.Database // Database to state sync into (and deduplicate via)
 	//stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
@@ -1895,30 +1892,6 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 		return blocks[index-1].NumberU64() + 1, nil
 	}
 	return 0, nil
-}
-
-func (d *Downloader) commitPivotBlock(result *fetchResult) error {
-	block := types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
-	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
-
-	// Commit the pivot block as the new head, will require full sync from here on
-	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, atomic.LoadUint64(&d.ancientLimit)); err != nil {
-		return err
-	}
-	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {
-		return err
-	}
-	atomic.StoreInt32(&d.committed, 1)
-
-	// If we had a bloom filter for the state sync, deallocate it now. Note, we only
-	// deallocate internally, but keep the empty wrapper. This ensures that if we do
-	// a rollback after committing the pivot and restarting fast sync, we don't end
-	// up using a nil bloom. Empty bloom is fine, it just returns that it does not
-	// have the info we need, so reach down to the database instead.
-	//if d.stateBloom != nil {
-	//	d.stateBloom.Close()
-	//}
-	return nil
 }
 
 // DeliverHeaders injects a new batch of block headers received from a remote

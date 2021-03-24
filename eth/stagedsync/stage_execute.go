@@ -479,16 +479,6 @@ func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc acco
 	return rawdb.PlainWriteAccount(db, address, acc)
 }
 
-func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
-	var addrHash common.Hash
-	copy(addrHash[:], []byte(key))
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err2 == nil {
-			copy(acc.CodeHash[:], codeHash)
-		}
-	}
-}
-
 func cleanupContractCodeBucket(
 	logPrefix string,
 	db ethdb.Database,
@@ -524,27 +514,10 @@ func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {
 	}
 }
 
-func deleteAccountHashed(db rawdb.DatabaseDeleter, key string) error {
-	var addrHash common.Hash
-	copy(addrHash[:], []byte(key))
-	return rawdb.DeleteAccount(db, addrHash)
-}
-
 func deleteAccountPlain(db ethdb.Deleter, key string) error {
 	var address common.Address
 	copy(address[:], key)
 	return rawdb.PlainDeleteAccount(db, address)
-}
-
-func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
-	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-	if err := batch.Delete(accountBucket, changeSetKey, nil); err != nil {
-		return err
-	}
-	if err := batch.Delete(storageBucket, changeSetKey, nil); err != nil {
-		return err
-	}
-	return nil
 }
 
 func min(a, b uint64) uint64 {

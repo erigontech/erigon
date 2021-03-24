@@ -108,8 +108,7 @@ type Ethereum struct {
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
 
-	p2pServer     *p2p.Server
-	txPoolStarted bool
+	p2pServer *p2p.Server
 
 	torrentClient *bittorrent.Client
 
@@ -123,9 +122,6 @@ type Ethereum struct {
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Ensure configuration values are compatible and sane
-	if config.SyncMode == downloader.LightSync {
-		return nil, errors.New("can't run eth.Ethereum in light sync mode, use les.LightEthereum")
-	}
 	if !config.SyncMode.IsValid() {
 		return nil, fmt.Errorf("invalid sync mode %d", config.SyncMode)
 	}
@@ -434,9 +430,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	checkpoint := config.Checkpoint
-	if checkpoint == nil {
-		//checkpoint = params.TrustedCheckpoints[genesisHash]
-	}
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:   chainDb,
 		Chain:      eth.blockchain,

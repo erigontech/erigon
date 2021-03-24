@@ -50,7 +50,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -1721,9 +1720,6 @@ func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 		return // already set through flags/config
 	}
 	protocol := "all"
-	if cfg.SyncMode == downloader.LightSync {
-		protocol = "les"
-	}
 	if url := params.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
