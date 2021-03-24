@@ -25,17 +25,11 @@ type SyncMode uint32
 const (
 	FullSync   SyncMode = iota // Synchronise the entire blockchain history from full blocks
 	StagedSync                 // Full sync but done in stages
-	MgrSync                    // MarryGoRound sync
-
-	// FIXME: these are kept for simplicity of rebasing
-	FastSync  // (not supported by turbo-geth)
-	LightSync // (not supported by turbo-geth)
 )
 
 const (
 	FullSyncName   = "full"
 	StagedSyncName = "staged"
-	MgrSyncName    = "mgr"
 )
 
 const MiningEnabled = true
@@ -51,8 +45,6 @@ func (mode SyncMode) String() string {
 		return FullSyncName
 	case StagedSync:
 		return StagedSyncName
-	case MgrSync:
-		return MgrSyncName
 	default:
 		return "unknown"
 	}
@@ -64,8 +56,6 @@ func (mode SyncMode) MarshalText() ([]byte, error) {
 		return []byte(FullSyncName), nil
 	case StagedSync:
 		return []byte(StagedSyncName), nil
-	case MgrSync:
-		return []byte(MgrSyncName), nil
 	default:
 		return nil, fmt.Errorf("unknown sync mode %d", mode)
 	}
@@ -77,10 +67,8 @@ func (mode *SyncMode) UnmarshalText(text []byte) error {
 		*mode = FullSync
 	case StagedSyncName:
 		*mode = StagedSync
-	case MgrSyncName:
-		*mode = MgrSync
 	default:
-		return fmt.Errorf(`unknown sync mode %q, want one of %s`, text, []string{FullSyncName, StagedSyncName, MgrSyncName})
+		return fmt.Errorf(`unknown sync mode %q, want one of %s`, text, []string{FullSyncName, StagedSyncName})
 	}
 	return nil
 }

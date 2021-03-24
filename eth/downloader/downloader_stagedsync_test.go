@@ -149,11 +149,6 @@ func (st *stagedSyncTester) HasBlock(hash common.Hash, number uint64) bool {
 	panic("")
 }
 
-// HasFastBlock is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) HasFastBlock(hash common.Hash, number uint64) bool {
-	panic("")
-}
-
 // HasHeader is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
 	return rawdb.HasHeader(st.db, hash, number)
@@ -213,10 +208,6 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RLock()
 	hash := st.peers[id].chain.headBlock().Hash()
 	number := st.peers[id].chain.headBlock().NumberU64()
-	// If no particular TD was requested, load from the peer's blockchain
-	if td == nil {
-		td = st.peers[id].chain.td(hash)
-	}
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards

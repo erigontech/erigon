@@ -144,18 +144,6 @@ func (dl *downloadTester) HasBlock(hash common.Hash, number uint64) bool {
 	return dl.GetBlockByHash(hash) != nil
 }
 
-// HasFastBlock checks if a block is present in the testers canonical chain.
-func (dl *downloadTester) HasFastBlock(hash common.Hash, number uint64) bool {
-	dl.lock.RLock()
-	defer dl.lock.RUnlock()
-
-	if _, ok := dl.ancientReceipts[hash]; ok {
-		return true
-	}
-	_, ok := dl.ownReceipts[hash]
-	return ok
-}
-
 // GetHeader retrieves a header from the testers canonical chain.
 func (dl *downloadTester) GetHeaderByHash(hash common.Hash) *types.Header {
 	dl.lock.RLock()
@@ -521,9 +509,6 @@ func assertOwnForkedChain(t *testing.T, tester *downloadTester, common int, leng
 		headers += length - common
 		blocks += length - common
 		receipts += length - common
-	}
-	if tester.downloader.getMode() == LightSync {
-		blocks, receipts = 1, 1
 	}
 	if hs := len(tester.ownHeaders) + len(tester.ancientHeaders) - 1; hs != headers {
 		t.Fatalf("synchronised headers mismatch: have %v, want %v", hs, headers)
@@ -915,13 +900,8 @@ func testEmptyShortCircuit(t *testing.T, protocol uint, mode SyncMode) {
 	// Validate the number of block bodies that should have been requested
 	bodiesNeeded, receiptsNeeded := 0, 0
 	for _, block := range chain.blockm {
-		if mode != LightSync && block != tester.genesis && (len(block.Transactions()) > 0 || len(block.Uncles()) > 0) {
+		if block != tester.genesis && (len(block.Transactions()) > 0 || len(block.Uncles()) > 0) {
 			bodiesNeeded++
-		}
-	}
-	for _, receipt := range chain.receiptm {
-		if mode == FastSync && len(receipt) > 0 {
-			receiptsNeeded++
 		}
 	}
 	if int(bodiesHave) != bodiesNeeded {
@@ -1465,10 +1445,7 @@ func testFakedSyncProgress(t *testing.T, protocol uint, mode SyncMode) {
 // This test reproduces an issue where unexpected deliveries would
 // block indefinitely if they arrived at the right time.
 func TestDeliverHeadersHang64Full(t *testing.T) { testDeliverHeadersHang(t, 64, FullSync) }
-func TestDeliverHeadersHang64Fast(t *testing.T) { testDeliverHeadersHang(t, 64, FastSync) }
 func TestDeliverHeadersHang65Full(t *testing.T) { testDeliverHeadersHang(t, 65, FullSync) }
-func TestDeliverHeadersHang65Fast(t *testing.T) { testDeliverHeadersHang(t, 65, FastSync) }
-func TestDeliverHeadersHang66Fast(t *testing.T) { testDeliverHeadersHang(t, 66, FastSync) }
 
 func testDeliverHeadersHang(t *testing.T, protocol uint, mode SyncMode) {
 	t.Skip("deadlock")
@@ -1643,17 +1620,10 @@ func testCheckpointEnforcement(t *testing.T, protocol uint, mode SyncMode) {
 	tester.newPeer("peer", protocol, chain)
 
 	var expect error
-	if mode == FastSync || mode == LightSync {
-		expect = errUnsyncedPeer
-	}
 	if err := tester.sync("peer", nil, mode); !errors.Is(err, expect) {
 		t.Fatalf("block sync error mismatch: have %v, want %v", err, expect)
 	}
-	if mode == FastSync || mode == LightSync {
-		assertOwnChain(t, tester, 1)
-	} else {
-		assertOwnChain(t, tester, chain.len())
-	}
+	assertOwnChain(t, tester, chain.len())
 }
 
 func TestDataRace(t *testing.T) {

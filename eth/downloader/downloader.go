@@ -63,11 +63,10 @@ var (
 	qosConfidenceCap = 10   // Number of peers above which not to modify RTT confidence
 	qosTuningImpact  = 0.25 // Impact that a new tuning target has on the previous value
 
-	maxQueuedHeaders            = 32 * 1024                         // [eth/62] Maximum number of headers to queue for import (DOS protection)
-	maxHeadersProcess           = 16536                             // Number of header download results to import at once into the chain
-	maxResultsProcess           = 16536                             // Number of content download results to import at once into the chain
-	fullMaxForkAncestry  uint64 = params.FullImmutabilityThreshold  // Maximum chain reorganisation (locally redeclared so tests can reduce it)
-	lightMaxForkAncestry uint64 = params.LightImmutabilityThreshold // Maximum chain reorganisation (locally redeclared so tests can reduce it)
+	maxQueuedHeaders           = 32 * 1024                        // [eth/62] Maximum number of headers to queue for import (DOS protection)
+	maxHeadersProcess          = 16536                            // Number of header download results to import at once into the chain
+	maxResultsProcess          = 16536                            // Number of content download results to import at once into the chain
+	fullMaxForkAncestry uint64 = params.FullImmutabilityThreshold // Maximum chain reorganisation (locally redeclared so tests can reduce it)
 
 	reorgProtThreshold   = 48 // Threshold number of recent blocks to disable mini reorg protection
 	reorgProtHeaderDelay = 2  // Number of headers to delay delivering to cover mini reorgs
@@ -212,9 +211,6 @@ type BlockChain interface {
 	// HasBlock verifies a block's presence in the local chain.
 	HasBlock(common.Hash, uint64) bool
 
-	// HasFastBlock verifies a fast block's presence in the local chain.
-	HasFastBlock(common.Hash, uint64) bool
-
 	// GetBlockByHash retrieves a block from the local chain.
 	GetBlockByHash(common.Hash) *types.Block
 
@@ -323,8 +319,6 @@ func (d *Downloader) Progress() ethereum.SyncProgress {
 	switch {
 	case d.blockchain != nil && mode == FullSync:
 		current = d.blockchain.CurrentBlock().NumberU64()
-	case d.blockchain != nil && mode == FastSync:
-		current = d.blockchain.CurrentFastBlock().NumberU64()
 	case d.lightchain != nil:
 		current = d.lightchain.CurrentHeader().Number.Uint64()
 	default:
@@ -709,10 +703,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
 	fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) }) // Receipts are retrieved during fast sync
 
-	if mode == FastSync {
-		// fast sync is not supported by turbo-geth
-		panic("fast sync should never be called")
-	} else if mode == FullSync {
+	if mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
 	}
 	return d.spawnSync(fetchers)
@@ -791,7 +782,6 @@ func (d *Downloader) Terminate() {
 // the total time a pending synchronisation would take.
 func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	p.log.Debug("Retrieving remote chain height")
-	mode := d.getMode()
 
 	fetch := 1
 	if d.getMode() == StagedSync {
@@ -825,9 +815,6 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			// and request. If only 1 header was returned, make sure there's no pivot
 			// or there was not one requested.
 			head := headers[0]
-			if (mode == FastSync || mode == LightSync) && head.Number.Uint64() < d.checkpoint {
-				return 0, fmt.Errorf("%w: remote head %d below checkpoint %d", errUnsyncedPeer, head.Number, d.checkpoint)
-			}
 			return head.Number.Uint64(), nil
 
 		case <-timeout:
@@ -908,8 +895,6 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	switch mode {
 	case FullSync:
 		localHeight = d.blockchain.CurrentBlock().NumberU64()
-	case FastSync:
-		localHeight = d.blockchain.CurrentFastBlock().NumberU64()
 	case StagedSync:
 		headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
 		headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
@@ -920,32 +905,10 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 	p.log.Debug("Looking for common ancestor", "local", localHeight, "remote", remoteHeight)
 
 	maxForkAncestry := fullMaxForkAncestry
-	if d.getMode() == LightSync {
-		maxForkAncestry = lightMaxForkAncestry
-	}
 	// Recap floor value for binary search
 	if localHeight >= maxForkAncestry && mode != StagedSync {
 		// We're above the max reorg threshold, find the earliest fork point
 		floor = int64(localHeight - maxForkAncestry)
-	}
-	// If we're doing a light sync, ensure the floor doesn't go below the CHT, as
-	// all headers before that point will be missing.
-	if mode == LightSync {
-		// If we don't know the current CHT position, find it
-		if d.genesis == 0 {
-			header := d.lightchain.CurrentHeader()
-			for header != nil {
-				d.genesis = header.Number.Uint64()
-				if floor >= int64(d.genesis)-1 {
-					break
-				}
-				header = d.lightchain.GetHeaderByHash(header.ParentHash)
-			}
-		}
-		// We already know the "genesis" block number, cap floor to that
-		if floor < int64(d.genesis)-1 {
-			floor = int64(d.genesis) - 1
-		}
 	}
 
 	ancestor, err := d.findAncestorSpanSearch(p, mode, remoteHeight, localHeight, floor)
@@ -1019,8 +982,6 @@ func (d *Downloader) findAncestorSpanSearch(p *peerConnection, mode SyncMode, re
 				switch mode {
 				case FullSync:
 					known = d.blockchain.HasBlock(h, n)
-				case FastSync:
-					known = d.blockchain.HasFastBlock(h, n)
 				case StagedSync:
 					known = d.blockchain.HasHeader(h, n)
 				default:
@@ -1100,8 +1061,6 @@ func (d *Downloader) findAncestorBinarySearch(p *peerConnection, mode SyncMode, 
 				switch mode {
 				case FullSync:
 					known = d.blockchain.HasBlock(h, n)
-				case FastSync:
-					known = d.blockchain.HasFastBlock(h, n)
 				case StagedSync:
 					known = d.blockchain.HasHeader(h, n)
 				default:
@@ -1299,9 +1258,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 				if n := len(headers); n > 0 {
 					// Retrieve the current head we're at
 					var head uint64
-					if mode == LightSync {
-						head = d.lightchain.CurrentHeader().Number.Uint64()
-					} else if mode == StagedSync {
+					if mode == StagedSync {
 						headHash := rawdb.ReadHeadHeaderHash(d.stateDB)
 						headNumber := rawdb.ReadHeaderNumber(d.stateDB, headHash)
 						head = *headNumber
@@ -1686,7 +1643,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 		defer func() {
 			if rollback > 0 {
 				lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
-				if mode != LightSync && mode != StagedSync {
+				if mode != StagedSync {
 					lastFastBlock = d.blockchain.CurrentFastBlock().Number()
 					lastBlock = d.blockchain.CurrentBlock().Number()
 				}
@@ -1695,7 +1652,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					log.Error("Failed to roll back chain segment", "head", rollback-1, "err", err)
 				}
 				curFastBlock, curBlock := common.Big0, common.Big0
-				if mode != LightSync && mode != StagedSync {
+				if mode != StagedSync {
 					curFastBlock = d.blockchain.CurrentFastBlock().Number()
 					curBlock = d.blockchain.CurrentBlock().Number()
 				}
@@ -1739,28 +1696,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				// L: Sync begins, and finds common ancestor at 11
 				// L: Request new headers up from 11 (R's TD was higher, it must have something)
 				// R: Nothing to give
-				if mode != LightSync && mode != StagedSync {
+				if mode != StagedSync {
 					head := d.blockchain.CurrentBlock()
 					if !gotHeaders && blockNumber > head.NumberU64() {
 						return errStallingPeer
 					}
-				}
-				if mode != StagedSync {
 					// Disable any rollback and return
 					rollback = 0
-				}
-				// If fast or light syncing, ensure promised headers are indeed delivered. This is
-				// needed to detect scenarios where an attacker feeds a bad pivot and then bails out
-				// of delivering the post-pivot blocks that would flag the invalid content.
-				//
-				// This check cannot be executed "as is" for full imports, since blocks may still be
-				// queued for processing when the header download completes. However, as long as the
-				// peer gave us something useful, we're already happy/progressed (above check).
-				if mode == FastSync || mode == LightSync {
-					head := d.lightchain.CurrentHeader()
-					if blockNumber > head.Number.Uint64() {
-						return errStallingPeer
-					}
 				}
 				return nil
 			}
@@ -1779,7 +1721,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				chunk := headers[:limit]
 
 				// In case of header only syncing, validate the chunk immediately
-				if mode == FastSync || mode == LightSync || mode == StagedSync {
+				if mode == StagedSync {
 					// If we're importing pure headers, verify based on their recentness
 					var pivot uint64
 
@@ -1821,7 +1763,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					if mode != StagedSync || err != nil {
 						// If some headers were inserted, add them too to the rollback list
-						if (mode == FastSync || frequency > 1) && n > 0 && rollback == 0 {
+						if (frequency > 1) && n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
 						}
 						log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
@@ -1839,7 +1781,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 				}
 				// Unless we're doing light chains, schedule the headers for associated content retrieval
-				if mode == FullSync || mode == FastSync {
+				if mode == FullSync {
 					// If we've reached the allowed number of pending headers, stall a bit
 					for d.queue.PendingBlocks() >= maxQueuedHeaders || d.queue.PendingReceipts() >= maxQueuedHeaders {
 						select {
