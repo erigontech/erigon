@@ -12,10 +12,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -89,17 +87,12 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
 		family    mapset.Set // family set (used for checking uncle invalidity)
 		uncles    mapset.Set // uncle set
-
-		ibs         *state.IntraBlockState // apply state changes here
-		stateWriter state.WriterWithChangeSets
 	}
 	env := &envT{
-		signer:      types.NewEIP155Signer(chainConfig.ChainID),
-		ancestors:   mapset.NewSet(),
-		family:      mapset.NewSet(),
-		uncles:      mapset.NewSet(),
-		ibs:         state.New(state.NewPlainStateReader(batch)),
-		stateWriter: state.NewPlainStateWriter(batch, batch, blockNum),
+		signer:    types.NewEIP155Signer(chainConfig.ChainID),
+		ancestors: mapset.NewSet(),
+		family:    mapset.NewSet(),
+		uncles:    mapset.NewSet(),
 	}
 
 	// re-written miner/worker.go:commitNewWork
@@ -145,9 +138,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
 		}
-	}
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(env.ibs)
 	}
 
 	// analog of miner.Worker.updateSnapshot
