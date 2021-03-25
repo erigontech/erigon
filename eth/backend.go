@@ -724,9 +724,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
-		if s.config.SyncMode != downloader.StagedSync {
-			go s.miner.Start(eb)
-		}
+		//go s.miner.Start(eb)
 	}
 	return nil
 }
@@ -804,9 +802,7 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	if s.config.SyncMode != downloader.StagedSync {
-		s.miner.Stop()
-	}
+	//s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()
 	s.eventMux.Stop()
