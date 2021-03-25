@@ -43,7 +43,6 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
-
 		ctx := utils.RootContext()
 		cfg := &node.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -63,13 +62,13 @@ Examples:
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
-			return err
+			return nil
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
 				log.Error(err.Error())
-				return err
+				return nil
 			}
 
 		}
@@ -107,7 +106,7 @@ var loopExecCmd = &cobra.Command{
 		}
 		if err := loopExec(db, ctx, unwind); err != nil {
 			log.Error("Error", "err", err)
-			return err
+			return nil
 		}
 
 		return nil

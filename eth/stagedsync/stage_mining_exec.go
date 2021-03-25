@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -23,15 +21,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	vmConfig.NoReceipts = false
 	//logPrefix := s.state.LogPrefix()
 
-	batch := tx.NewBatch()
-	defer batch.Rollback()
-
 	engine := cc.Engine()
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
 	signer := types.NewEIP155Signer(chainConfig.ChainID)
-	ibs := state.New(state.NewPlainStateReader(batch))
-	stateWriter := state.NewPlainStateWriter(batch, tx, current.Header.Number.Uint64())
+	ibs := state.New(state.NewPlainStateReader(tx))
+	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -39,18 +34,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, stateWriter state.StateWriter, current *miningBlock) ([]*types.Log, error) {
 		header := current.Header
 		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, stateWriter, header, txn, &header.GasUsed, *vmConfig)
-		// batch Rollback/CommitAndBegin methods - keeps batch object valid,
-		// means don't need re-create state reader or re-inject batch or create new batch
 		if err != nil {
-			batch.Rollback()
 			return nil, err
 		}
-		if !chainConfig.IsByzantium(header.Number) {
-			batch.Rollback()
-		}
-		if err = batch.CommitAndBegin(context.Background()); err != nil {
-			return nil, err
-		}
+		//if !chainConfig.IsByzantium(header.Number) {
+		//	batch.Rollback()
+		//}
 
 		current.txs = append(current.txs, txn)
 		current.receipts = append(current.receipts, receipt)
@@ -194,9 +183,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	}
 
 	if err := core.FinalizeBlockExecution(engine, current.Header, current.txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
-		return err
-	}
-	if err := batch.Commit(); err != nil {
 		return err
 	}
 
