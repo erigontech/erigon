@@ -44,6 +44,11 @@ service ETHBACKEND {
   rpc Mining(MiningRequest) returns (MiningReply);
 }
 
+enum Event {
+  HEADER = 0;
+  PENDING_LOG = 1;
+}
+
 message TxRequest { bytes signedtx = 1; }
 
 message AddReply { types.H256 hash = 1; }
@@ -59,7 +64,7 @@ message NetVersionReply { uint64 id = 1; }
 message SubscribeRequest {}
 
 message SubscribeReply {
-  uint64 type = 1; // type (only header at that moment)
+  Event type = 1; // type (only header at that moment)
   bytes data = 2;  //  serialized data
 }
 
@@ -100,3 +105,5 @@ message MiningReply {
   bool enabled = 1;
   bool running = 2;
 }
+
+

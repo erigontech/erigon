@@ -22,6 +22,7 @@ import (
 
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
+	OnNewPendingLogs(types.Logs)
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
@@ -381,7 +382,7 @@ func DefaultStages() StageBuilders {
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.TX)
 						if err != nil {
 							return err
 						}
@@ -443,6 +444,7 @@ func MiningStages() StageBuilders {
 							world.mining.Block.remoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
+							world.notifier,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },

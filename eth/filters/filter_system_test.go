@@ -374,6 +374,7 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 
 // TestLogFilter tests whether log filters match the correct logs that are posted to the event feed.
 func TestLogFilter(t *testing.T) {
+	t.Skip("TG doesn't have public API, move this test to RPCDaemon")
 	t.Parallel()
 
 	db := ethdb.NewMemDatabase()

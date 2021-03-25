@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/integration/commands"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"os"
 )
 
 func main() {

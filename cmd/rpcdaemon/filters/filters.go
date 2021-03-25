@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -58,7 +57,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 
-	if remotedbserver.RpcEventType(event.Type) != remotedbserver.EventTypeHeader {
+	if event.Type != remote.Event_HEADER {
 		log.Warn("rpc filters: unsupported event type", "type", event.Type)
 		return
 	}
