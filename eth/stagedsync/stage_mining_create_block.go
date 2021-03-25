@@ -35,7 +35,6 @@ type miningBlock struct {
 
 // SpawnMiningCreateBlockStage
 //TODO:
-// - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
 	const (

@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NotifyRpcDaemon(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
+func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
