@@ -25,6 +25,7 @@ jobs:
           keys:
             - v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
 
+      - run: go mod tidy && git status --porcelain
       - run: go mod tidy && test -z "$(git status --porcelain)"
       - run: go mod download
       - run: go mod verify
