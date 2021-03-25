@@ -363,24 +363,30 @@ func HasBody(db databaseReader, hash common.Hash, number uint64) bool {
 
 // ReadBody retrieves the block body corresponding to the hash.
 func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
-	data := ReadStorageBodyRLP(db, hash, number)
-	if len(data) == 0 {
-		return nil
-	}
-	bodyForStorage := new(types.BodyForStorage)
-	err := rlp.DecodeBytes(data, bodyForStorage)
-	if err != nil {
-		log.Error("Invalid block body RLP", "hash", hash, "err", err)
-		return nil
-	}
-	body := new(types.Body)
-	body.Uncles = bodyForStorage.Uncles
-	body.Transactions, err = ReadTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	var err error
+	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
 	if err != nil {
 		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
 		return nil
 	}
 	return body
+}
+
+func ReadBodyWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+	data := ReadStorageBodyRLP(db, hash, number)
+	if len(data) == 0 {
+		return nil, 0, 0
+	}
+	bodyForStorage := new(types.BodyForStorage)
+	err := rlp.DecodeBytes(data, bodyForStorage)
+	if err != nil {
+		log.Error("Invalid block body RLP", "hash", hash, "err", err)
+		return nil, 0, 0
+	}
+	body := new(types.Body)
+	body.Uncles = bodyForStorage.Uncles
+	return body, bodyForStorage.BaseTxId, bodyForStorage.TxAmount
 }
 
 func ReadSenders(db databaseReader, hash common.Hash, number uint64) ([]common.Address, error) {
@@ -682,6 +688,18 @@ func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
 func ReadBlock(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
+	header := ReadHeader(db, hash, number)
+	if header == nil {
+		return nil
+	}
+	body := ReadBody(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+}
+
+func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil

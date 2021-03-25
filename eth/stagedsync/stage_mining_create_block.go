@@ -35,6 +35,7 @@ type miningBlock struct {
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
+
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -68,7 +69,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := chain.GetBlock(hash, *number)
+			block := rawdb.ReadBlockWithoutTransactions(tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -78,9 +79,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		}
 		return
 	}
-
-	batch := tx.NewBatch()
-	defer batch.Rollback()
 
 	type envT struct {
 		signer    types.Signer
