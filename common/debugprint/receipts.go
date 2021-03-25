@@ -6,8 +6,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
+//nolint
 func Receipts(rs1, rs2 types.Receipts) {
-	fmt.Printf("==== Receips ====\n")
+	fmt.Printf("==== Receipts ====\n")
 	fmt.Printf("len(Receipts): %d, %d\n", len(rs1), len(rs2))
 	for len(rs2) < len(rs1) {
 		rs2 = append(rs2, &types.Receipt{})
@@ -34,9 +35,9 @@ func Receipts(rs1, rs2 types.Receipts) {
 		}
 		fmt.Printf(" Bloom: %x, %x\n", r1.Bloom, r1.Bloom)
 	}
-	return
 }
 
+//nolint
 func Headers(h1, h2 *types.Header) {
 	fmt.Printf("==== Header ====\n")
 	fmt.Printf("root:        %x, %x\n", h1.Root, h2.Root)
