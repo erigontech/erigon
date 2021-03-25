@@ -259,7 +259,9 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 	// warm the cache
 	snapNum, err := lastSnapshot(db)
 	if err != nil {
-		log.Error("on Clique init while getting latest snapshot", "error", err)
+		if !errors.Is(err, ErrNotFound) {
+			log.Error("on Clique init while getting latest snapshot", "error", err)
+		}
 	} else {
 		snaps, err := c.snapshots(snapNum, warmupCacheSnapshots)
 		if err != nil {
