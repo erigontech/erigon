@@ -320,7 +320,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				panic(err)
 			}
 			var minedBlock *types.Block
-			// set right uncles from nextBlock
+			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					miningWorld.Block,
