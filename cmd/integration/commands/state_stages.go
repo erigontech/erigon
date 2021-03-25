@@ -3,7 +3,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"time"
@@ -15,9 +17,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debugprint"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -210,6 +214,34 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		stopAt = 1
 	}
 
+	traceStart := func() {
+		vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+		vmConfig.Debug = true
+	}
+	traceStop := func(id int) {
+		if !vmConfig.Debug {
+			return
+		}
+		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
+		if err3 != nil {
+			panic(err3)
+		}
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent(" ", " ")
+		for _, l := range core.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs()) {
+			if err2 := encoder.Encode(l); err2 != nil {
+				panic(err2)
+			}
+		}
+		if err2 := w.Close(); err2 != nil {
+			panic(err2)
+		}
+
+		vmConfig.Tracer = nil
+		vmConfig.Debug = false
+	}
+	_, _ = traceStart, traceStop
+
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -260,6 +292,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
+		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
+
 		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
 		//	return err
 		//}
@@ -288,7 +322,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				panic(err)
 			}
 			var minedBlock *types.Block
-			// set right uncles from nextBlock
+			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					miningWorld.Block,
@@ -302,9 +336,16 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 					miningWorld.PendingTxs,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
+				miningWorld.Block.Header.Time = nextBlock.Header().Time
+				miningWorld.Block.Header.GasLimit = nextBlock.Header().GasLimit
+				miningWorld.Block.Header.Difficulty = nextBlock.Header().Difficulty
+				miningWorld.Block.Header.Nonce = nextBlock.Header().Nonce
+				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
 			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+				//debugprint.Receipts(receiptsInDB, miningWorld.Block.Receipts)
 				var err error
 				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
 				return err
@@ -361,6 +402,7 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 	localTxs := make(map[common.Address]types.Transactions, nextBlock.Transactions().Len())
 	senders := nextBlock.Body().SendersFromTxs()
 	for i, txn := range nextBlock.Transactions() {
+		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
 	}
 	return localTxs, nextBlock.Transactions()

@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -18,7 +20,7 @@ import (
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs *types.TransactionsByPriceAndNonce, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
-	//logPrefix := s.state.LogPrefix()
+	logPrefix := s.state.LogPrefix()
 
 	engine := cc.Engine()
 	ibs := state.New(state.NewPlainStateReader(tx))
@@ -48,7 +50,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(notifier, logs)
+			NotifyPendingLogs(logPrefix, notifier, logs)
 			//}
 		}
 		if !remoteTxs.Empty() {
@@ -60,12 +62,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(notifier, logs)
+			NotifyPendingLogs(logPrefix, notifier, logs)
 			//}
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(engine, current.Header, current.txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(engine, current.Header, current.Txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
 		return err
 	}
 
@@ -124,9 +126,10 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		//if !chainConfig.IsByzantium(header.Number) {
 		//	batch.Rollback()
 		//}
+		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 
-		current.txs = append(current.txs, txn)
-		current.receipts = append(current.receipts, receipt)
+		current.Txs = append(current.Txs, txn)
+		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil
 	}
 
@@ -224,7 +227,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 }
 
-func NotifyPendingLogs(notifier ChainEventNotifier, logs types.Logs) {
+func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types.Logs) {
 	if len(logs) == 0 {
 		return
 	}
@@ -239,7 +242,7 @@ func NotifyPendingLogs(notifier ChainEventNotifier, logs types.Logs) {
 	}
 
 	if notifier == nil {
-		log.Warn("rpc notifier is not set, rpc daemon won't be updated about pending logs")
+		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
