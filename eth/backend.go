@@ -19,6 +19,7 @@ package eth
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -35,7 +36,6 @@ import (
 
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
@@ -93,9 +94,8 @@ type Ethereum struct {
 	chainKV    ethdb.KV       // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
-	eventMux       *event.TypeMux
-	engine         consensus.Engine
-	accountManager *accounts.Manager
+	eventMux *event.TypeMux
+	engine   consensus.Engine
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
@@ -104,6 +104,7 @@ type Ethereum struct {
 	miner     *miner.Miner
 	gasPrice  *uint256.Int
 	etherbase common.Address
+	signer    *ecdsa.PrivateKey
 
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
@@ -282,19 +283,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	eth := &Ethereum{
-		config:         config,
-		chainDb:        chainDb,
-		chainKV:        chainDb.(ethdb.HasKV).KV(),
-		eventMux:       stack.EventMux(),
-		accountManager: stack.AccountManager(),
-		engine:         ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
-		networkID:      config.NetworkID,
-		etherbase:      config.Miner.Etherbase,
-		bloomRequests:  make(chan chan *bloombits.Retrieval),
-		p2pServer:      stack.Server(),
-		torrentClient:  torrentClient,
-		chainConfig:    chainConfig,
-		genesisHash:    genesisHash,
+		config:        config,
+		chainDb:       chainDb,
+		chainKV:       chainDb.(ethdb.HasKV).KV(),
+		eventMux:      stack.EventMux(),
+		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		networkID:     config.NetworkID,
+		etherbase:     config.Miner.Etherbase,
+		bloomRequests: make(chan chan *bloombits.Retrieval),
+		p2pServer:     stack.Server(),
+		torrentClient: torrentClient,
+		chainConfig:   chainConfig,
+		genesisHash:   genesisHash,
 	}
 	eth.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -613,18 +613,6 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	if etherbase != (common.Address{}) {
 		return etherbase, nil
 	}
-	if wallets := s.AccountManager().Wallets(); len(wallets) > 0 {
-		if accounts := wallets[0].Accounts(); len(accounts) > 0 {
-			etherbase := accounts[0].Address
-
-			s.lock.Lock()
-			s.etherbase = etherbase
-			s.lock.Unlock()
-
-			log.Info("Etherbase automatically configured", "address", etherbase)
-			return etherbase, nil
-		}
-	}
 	return common.Address{}, fmt.Errorf("etherbase must be explicitly specified")
 }
 
@@ -705,12 +693,14 @@ func (s *Ethereum) StartMining(threads int) error {
 			return fmt.Errorf("etherbase missing: %v", err)
 		}
 		if clique, ok := s.engine.(*clique.Clique); ok {
-			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
-			if wallet == nil || err != nil {
+			if s.signer == nil {
 				log.Error("Etherbase account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			clique.Authorize(eb, wallet.SignData)
+
+			clique.Authorize(eb, func(_ common.Address, message []byte) ([]byte, error) {
+				return crypto.Sign(message, s.signer)
+			})
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
@@ -739,7 +729,6 @@ func (s *Ethereum) StopMining() {
 func (s *Ethereum) IsMining() bool      { return s.config.Miner.Enabled }
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
-func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
 func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
 func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }

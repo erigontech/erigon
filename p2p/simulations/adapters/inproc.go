@@ -100,8 +100,7 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 			Dialer:          s,
 			EnableMsgEvents: config.EnableMsgEvents,
 		},
-		ExternalSigner: config.ExternalSigner,
-		Logger:         log.New("node.id", id.String()),
+		Logger: log.New("node.id", id.String()),
 	})
 	if err != nil {
 		return nil, err

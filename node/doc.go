@@ -99,9 +99,6 @@ Databases are also stored within the instance subdirectory. If multiple node
 instances use the same data directory, opening the databases with identical names will
 create one database for each instance.
 
-The account key store is shared among all node instances using the same data directory
-unless its location is changed through the KeyStoreDir configuration option.
-
 
 Data Directory Sharing Example
 
@@ -122,6 +119,5 @@ directory. Node instance A opens the database "db", node instance B opens the da
             db/                -- data for "db"
             db-2/              -- data for "db-2"
         B.ipc                  -- JSON-RPC UNIX domain socket endpoint of instance B
-        keystore/              -- account key store, used by both instances
 */
 package node

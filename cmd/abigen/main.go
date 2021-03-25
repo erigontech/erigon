@@ -117,7 +117,7 @@ func init() {
 		langFlag,
 		aliasFlag,
 	}
-	app.Action = utils.MigrateFlags(abigen)
+	app.Action = abigen
 	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 

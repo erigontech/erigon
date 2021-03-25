@@ -105,7 +105,6 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
-	nodeConfig.NoUSB = true
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
 	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
