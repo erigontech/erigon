@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
@@ -193,7 +194,7 @@ func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 	return stack
 }
 
-func createGQLService(t *testing.T, stack *node.Node) { //nolint:unparam
+func createGQLService(t *testing.T, stack *node.Node) {
 	// create backend
 	ethConf := &ethconfig.Config{
 		Genesis: &core.Genesis{
@@ -216,12 +217,17 @@ func createGQLService(t *testing.T, stack *node.Node) { //nolint:unparam
 	if err != nil {
 		t.Fatalf("could not create eth backend: %v", err)
 	}
+
+	engine := ethash.NewFaker()
+
+	eng := process.NewRemoteEngine(engine, params.AllEthashProtocolChanges)
+
 	// Create some blocks and import them
 	chain, _, _ := core.GenerateChain(
 		params.AllEthashProtocolChanges,
 		ethBackend.BlockChain().Genesis(),
-		ethash.NewFaker(), ethBackend.ChainDb().(*ethdb.ObjectDatabase), 10, func(i int, gen *core.BlockGen) {}, false)
-	if _, err = stagedsync.InsertBlocksInStages(ethBackend.ChainDb(), ethdb.DefaultStorageMode, params.TestChainConfig, ethBackend.BlockChain().GetVMConfig(), ethBackend.BlockChain().Engine(), chain, true /* checkRoot */); err != nil {
+		engine, ethBackend.ChainDb().(*ethdb.ObjectDatabase), 10, func(i int, gen *core.BlockGen) {}, false)
+	if _, err = stagedsync.InsertBlocksInStages(ethBackend.ChainDb(), ethdb.DefaultStorageMode, params.TestChainConfig, ethBackend.BlockChain().GetVMConfig(), ethBackend.BlockChain().Engine(), eng, chain, true /* checkRoot */); err != nil {
 		t.Fatalf("could not create import blocks: %v", err)
 	}
 	_, err = ethBackend.BlockChain().InsertChain(context.TODO(), chain)

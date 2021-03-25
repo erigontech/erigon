@@ -26,15 +26,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	json "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-
-	json "github.com/json-iterator/go"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -138,26 +137,24 @@ var ErrNotFound = errors.New("not found")
 func lastSnapshot(db ethdb.Database) (uint64, error) {
 	lastEnc, err := db.Get(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
 	if err != nil {
-		log.Error("can't check last snapshot", "err", err)
-		debugLog("lastSnapshot-1", err)
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			log.Error("can't check last snapshot", "err", err)
+		}
 		return 0, ErrNotFound
 	}
 
 	lastNum, err := dbutils.DecodeBlockNumber(lastEnc)
 	if err != nil {
 		log.Error("can't decode last snapshot", "err", err)
-		debugLog("lastSnapshot-2", err)
 		return 0, ErrNotFound
 	}
-
-	debugLog("lastSnapshot-3", lastNum)
 
 	return lastNum, nil
 }
 
 // store inserts the snapshot into the database.
 func (s *Snapshot) store(force bool) error {
-	return s.snapStorage.save(s.Number, s.Hash, s, force)
+	return s.snapStorage.save(s, force)
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
@@ -206,7 +203,7 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(r *recoverer, snapID uint64, headers ...*types.Header) error {
+func (s *Snapshot) apply(r *recoverer, headers ...*types.Header) error {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return nil
@@ -215,9 +212,8 @@ func (s *Snapshot) apply(r *recoverer, snapID uint64, headers ...*types.Header) 
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
-			debugLog("invalid voting chain - 1")
-			return fmt.Errorf("%w:  next block index %d(%d), previous block index %d(%d) - %d",
-				errInvalidVotingChain, i+1, headers[i+1].Number.Uint64(), i, headers[i].Number.Uint64()+1, snapID)
+			return fmt.Errorf("%w:  next block index %d(%d), previous block index %d(%d)",
+				errInvalidVotingChain, i+1, headers[i+1].Number.Uint64(), i, headers[i].Number.Uint64()+1)
 		}
 	}
 
@@ -226,11 +222,11 @@ func (s *Snapshot) apply(r *recoverer, snapID uint64, headers ...*types.Header) 
 		for _, par := range headers {
 			parStr += fmt.Sprintf("%d ", par.Number.Uint64())
 		}
-		fmt.Printf("!!! invalid voting chain - 2, id=%d, from %d, to %d, snap+1 %d, %s - %d\n",
-			snapID, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1, parStr, snapID)
+		fmt.Printf("invalid voting chain - 2, from %d, to %d, snap+1 %d, %s\n",
+			headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1, parStr)
 
-		return fmt.Errorf("%w: highest parent %d, snap %d - %s - %d",
-			errInvalidVotingChain, headers[0].Number.Uint64(), s.Number, parStr, snapID)
+		return fmt.Errorf("%w: highest parent %d, snap %d - %s",
+			errInvalidVotingChain, headers[0].Number.Uint64(), s.Number, parStr)
 	}
 
 	var start, logged time.Time
@@ -249,6 +245,7 @@ func (s *Snapshot) apply(r *recoverer, snapID uint64, headers ...*types.Header) 
 
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
+
 		if number%s.config.Epoch == 0 {
 			s.Votes = nil
 			s.Tally = make(map[common.Address]Tally)
@@ -440,7 +437,6 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 		for {
 			select {
 			case snap := <-st.ch:
-				debugLog("to-save-1", snap.number)
 				snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 
 				if len(snaps) >= batchSize {
@@ -487,94 +483,66 @@ func (st *storage) appendSnap(snap *snapObj, snaps []*snapObj, isSorted bool) ([
 	return snaps, isSorted
 }
 
-func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool) error {
+func (st *storage) save(s *Snapshot, force bool) error {
 	if !force {
 		if atomic.LoadUint32(st.chStatus) == 1 {
 			return nil
 		}
 		select {
 		case <-st.exit:
-		case st.ch <- &snapObj{number, hash, s}:
+		case st.ch <- &snapObj{s.Number, s.Hash, s}:
 		}
 
 		return nil
 	}
 
-	debugLog("SAVE-1===================================================", number, debug.Callers(10))
-
 	// a forced case (genesis)
-	ok, err := hasSnapshotData(st.db, number, hash)
+	ok, err := hasSnapshotData(st.db, s.Number, s.Hash)
 
-	debugLog("to-save-2", number, ok, err)
 	if !ok || err != nil {
-		debugLog("to-save-2.0", number)
-		if err != nil {
-			debugLog("error while hasSnapshotData",
-				"number", number,
-				"hash", hash.String(),
-				"error", err,
-				"has", ok)
-		}
-		debugLog("to-save-2.1", number)
 		blob, err := json.Marshal(s)
 		if err != nil {
-			debugLog("to-save-2.2", number, err)
 			return err
 		}
-		debugLog("to-save-2.1.1", number)
 
 		st.saveMu.Lock()
 		defer st.saveMu.Unlock()
+
 		tx, err := st.db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
-			debugLog("to-save-2.3", number, err)
 			return err
 		}
-		debugLog("to-save-2.1.2", number)
+
 		defer tx.Rollback()
 
-		if err := tx.Put(dbutils.CliqueBucket, SnapshotFullKey(number, hash), blob); err != nil {
-			log.Error("can't store a snapshot", "block", number, "hash", hash, "err", err)
-			debugLog("to-save-2.4", number, err)
+		if err := tx.Put(dbutils.CliqueBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
+			log.Error("can't store a snapshot", "block", s.Number, "hash", s.Hash, "err", err)
 			return err
 		}
-		debugLog("to-save-2.1.3", number)
 
-		if err := tx.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(number), []byte{0}); err != nil {
-			log.Error("can't store a snapshot number", "block", number, "hash", hash, "err", err)
-			debugLog("to-save-2.5", number, err)
+		if err := tx.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(s.Number), []byte{0}); err != nil {
+			log.Error("can't store a snapshot number", "block", s.Number, "hash", s.Hash, "err", err)
 			return err
 		}
-		debugLog("to-save-2.1.4", number)
 
 		lastSnap, err := lastSnapshot(tx)
-		if lastSnap < number || errors.Is(err, ErrNotFound) {
-			debugLog("to-save-2.6", number, err)
-			if err := tx.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(number)); err != nil {
-				log.Error("can't store a snapshot number", "block", number, "hash", hash, "err", err)
-				debugLog("to-save-2.7", number, err)
+		if lastSnap < s.Number || errors.Is(err, ErrNotFound) {
+			if err := tx.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(s.Number)); err != nil {
+				log.Error("can't store a snapshot number", "block", s.Number, "hash", s.Hash, "err", err)
 				return err
 			}
 		}
-		debugLog("to-save-2.1.5", number)
 
 		if err := tx.Commit(); err != nil {
-			log.Error("can't commit snapshot transaction", "block", number, "hash", hash, "err", err)
-			debugLog("to-save-2.8", number, err)
+			log.Error("can't commit snapshot transaction", "block", s.Number, "hash", s.Hash, "err", err)
 			return err
 		}
-		debugLog("to-save-2.1.6", number)
-
-		debugLog("COMMITTED-1", number)
 	}
-
-	debugLog("SAVE-1.1===================================================")
 
 	return nil
 }
 
 func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
-	debugLog("SAVE-2", len(snaps))
 	if len(snaps) == 0 {
 		return
 	}
@@ -586,55 +554,56 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 		})
 	}
 
+	var blob []byte
+	var err error
+	blobs := make([][]byte, len(snaps))
+
+	for i, snap := range snaps {
+		blob, err = json.Marshal(snap.blob)
+		if err != nil {
+			log.Error("can't store a snapshot(marshalling)", "block", snap.number, "hash", snap.hash, "err", err)
+			continue
+		}
+
+		blobs[i] = blob
+	}
+
 	st.saveMu.Lock()
 	defer st.saveMu.Unlock()
 
 	batch := st.db.NewBatch()
 	defer batch.Rollback()
 
-	var blob []byte
-
-	for _, snap := range snaps {
+	for i, snap := range snaps {
 		ok, err := hasSnapshotData(batch, snap.number, snap.hash)
 		if ok && err == nil {
-			debugLog("save-snap-ch-1", snap.number, err)
 			continue
 		}
 
-		blob, err = json.Marshal(snap)
-		if err != nil {
-			debugLog("save-snap-ch-2", snap.number, err)
-			log.Error("can't store a snapshot(marshalling)", "block", snap.number, "hash", snap.hash, "err", err)
+		if len(blobs[i]) == 0 {
 			continue
 		}
 
-		if err := batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blob); err != nil {
-			debugLog("save-snap-ch-3", snap.number, err)
+		if err := batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blobs[i]); err != nil {
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 
 		if err := batch.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(snap.number), []byte{0}); err != nil {
-			debugLog("save-snap-ch-4", snap.number, err)
 			log.Error("can't store a snapshot number", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 
 		lastSnap, err := lastSnapshot(batch)
 		if lastSnap < snap.number || errors.Is(err, ErrNotFound) {
-			debugLog("save-snap-ch-5", snap.number, err)
 			if err := batch.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(snap.number)); err != nil {
-				debugLog("save-snap-ch-6", snap.number, err)
 				log.Error("can't store a snapshot number", "block", snap.number, "hash", snap.hash, "err", err)
 			}
 		}
 	}
 
 	if err := batch.Commit(); err != nil {
-		debugLog("save-snap-ch-7", err)
 		log.Error("can't store snapshots", "blockFrom", snaps[0].number, "blockTo", snaps[len(snaps)-1].number, "err", err)
 		return
 	}
-
-	debugLog("COMMITTED-2", snaps[0].number, snaps[len(snaps)-1].number)
 }
 
 func (st *storage) Close() {

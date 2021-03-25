@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -81,9 +82,14 @@ func TestHeaderVerification(t *testing.T) {
 			}
 		}
 		engine := ethash.NewFaker()
-		if _, err = stagedsync.InsertBlocksInStages(testdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
+		eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+
+		if _, err = stagedsync.InsertBlocksInStages(testdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
+
+		eng.Close()
+		engine.Close()
 	}
 }
 

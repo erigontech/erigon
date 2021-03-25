@@ -3,7 +3,6 @@ package clique
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -23,29 +22,20 @@ func NewCliqueVerifier(c *Clique) *Verifier {
 }
 
 func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
-	t := time.Now()
-	defer func() {
-		debugLog("in Verifier.verifyByRequest", header.Number.Uint64(), time.Since(t))
-	}()
-
 	types.SortHeadersAsc(parents)
 
-	snapID := rand.Uint64()
-
-	return c.verifyHeader(header, parents, chain.Config(), snapID)
+	return c.verifyHeader(header, parents, chain.Config())
 }
 
 func (c *Verifier) AncestorsNeededForVerification(header *types.Header) int {
-	debugLog("AncestorsNeededForVerification")
-	return c.findPrevCheckpoint(header.Number.Uint64(), header.Hash(), header.ParentHash, rand.Uint64())
+	return c.findPrevCheckpoint(header.Number.Uint64(), header.Hash(), header.ParentHash)
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
-func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, config *params.ChainConfig, snapID uint64) error {
-	t := time.Now()
+func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, config *params.ChainConfig) error {
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -104,19 +94,13 @@ func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, c
 		}
 	}
 
-	debugLog("verifyHeader-1", header.Number.Uint64(), time.Since(t))
-	t = time.Now()
-
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyForkHashes(config, header, false); err != nil {
 		return err
 	}
-	debugLog("verifyHeader-1-VerifyForkHashes", header.Number.Uint64(), time.Since(t))
-	t = time.Now()
 
 	// All basic checks passed, verify cascading fields
-	err := c.verifyCascadingFields(header, parents, snapID)
-	debugLog("verifyHeader-2-verifyCascadingFields", header.Number.Uint64(), time.Since(t))
+	err := c.verifyCascadingFields(header, parents)
 	return err
 }
 
@@ -124,32 +108,15 @@ func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, c
 // rather depend on a batch of previous headers. The caller may optionally pass
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
-func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.Header, snapID uint64) error {
+func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.Header) error {
 	// The genesis block is the always valid dead-end
 	number := header.Number.Uint64()
 
-	t := time.Now()
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(&parents, snapID)
-	if len(parents) > 0 && snap != nil {
-		debugLogf("verifyCascadingFields-0.1-snapshot snapID=%d header=%d from=%d to=%d parentsLen=%d snapNum=%d %s err=%v\n",
-			snapID, header.Number, parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64(), len(parents), snap.Number, len(parents), err)
-	}
-	if len(parents) == 0 && snap != nil {
-		debugLogf("verifyCascadingFields-0.2-snapshot snapID=%d header=%d parentsLen=%d snapNum=%d %s err=%v\n",
-			snapID, header.Number, len(parents), snap.Number, len(parents), err)
-	}
-	if snap == nil {
-		debugLogf("verifyCascadingFields-0.3-snapshot snapID=%d header=%d from=%d to=%d parentsLen=%d snapNIL=%d %s err=%v\n",
-			snapID, header.Number, parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64(), len(parents), snap == nil, len(parents), err)
-	}
-
+	snap, err := c.snapshot(&parents)
 	if err != nil {
 		return err
 	}
-	debugLog("verifyCascadingFields-1-snapshot", snapID, time.Since(t))
-
-	t = time.Now()
 
 	// Ensure that the block's timestamp isn't too close to its parent
 	parent := new(types.Header)
@@ -162,22 +129,7 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	}
 
 	if highestParentNum == -1 || parent.Number.Uint64() != number-1 || parent.HashCache() != header.ParentHash {
-		if parent.Number != nil {
-			debugLogf("verifyCascadingFields-2-snapshot snapID=%d highestParentNum=%v parent.Number=%v parent.HashCacheCMP=%v parent.HashCache=%v %s\n",
-				snapID,
-				highestParentNum == -1,
-				parent.Number.Uint64() != number-1,
-				parent.HashCache() != header.ParentHash,
-				parent.HashCache().String(),
-				len(parents))
-		} else {
-			debugLogf("verifyCascadingFields-2-snapshot snapID=%d highestParentNum=%v parentr=%v %s\n",
-				snapID,
-				highestParentNum == -1,
-				parent == nil,
-				len(parents))
-		}
-		return fmt.Errorf("verifyCascadingFields %d num=%d err=%w %v", snapID, header.Number.Uint64(), consensus.ErrUnknownAncestor, len(parents))
+		return fmt.Errorf("verifyCascadingFields num=%d err=%w %v", header.Number.Uint64(), consensus.ErrUnknownAncestor, len(parents))
 	}
 	if parent.Time+c.config.Period > header.Time {
 		return errInvalidTimestamp
@@ -196,39 +148,24 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 		}
 	}
 
-	debugLog("verifyCascadingFields-2", snapID, time.Since(t))
-	t = time.Now()
-
 	// All basic checks passed, verify the seal and return
 	err = c.verifySeal(header, snap)
-	debugLog("verifyCascadingFields-3-verifySeal", snapID, time.Since(t))
-	t = time.Now()
-
 	if err == nil {
-		debugLog("applyAndStoreSnapshot-3.1-START", snapID, "snap=", snap.Number, header.Number, len(parents))
-		if err = c.applyAndStoreSnapshot(snap, snapID, true, header); err != nil {
-			debugLog("applyAndStoreSnapshot-3.1-ERR", snapID, "snap=", snap.Number, header.Number, err)
-
-			log.Error("can't store a snapshot", "block", snapID, header.Number.Uint64(), "hash", header.HashCache().String(), "err", err, len(parents))
+		if err = c.applyAndStoreSnapshot(snap, true, header); err != nil {
+			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.HashCache().String(), "err", err, len(parents))
 		}
-		debugLog("applyAndStoreSnapshot-3.1-END", snapID, "snap=", snap.Number, header.Number)
 	}
-	debugLog("verifyCascadingFields-4-applyAndStoreSnapshot", snapID, time.Since(t))
 
 	return err
 }
 
 // Search for a snapshot in memory or on disk for checkpoints
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapshot, error) {
+func (c *Verifier) snapshot(parentsRef *[]*types.Header) (*Snapshot, error) {
 	var snap *Snapshot
 	var err error
 
 	parents := *parentsRef
-
-	t := time.Now()
-	debugLog("snapshot-1", snapID, parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64(), time.Since(t))
-	t = time.Now()
 
 	var (
 		i int
@@ -236,12 +173,7 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 		p *types.Header
 	)
 
-	debugLog("snap.0", snapID, parents[len(parents)-1].Number.Uint64(), parents[0].Number.Uint64(), len(parents))
-
 	for i = len(parents) - 1; i >= 0; i-- {
-
-		debugLog("snap.1", snapID, i, parents[i].Number.Uint64())
-
 		p = parents[i]
 		number := parents[i].Number.Uint64()
 
@@ -249,7 +181,6 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 		var ok bool
 		if s, ok = c.recentsGet(p.HashCache()); ok {
 			snap = s
-			debugLog("snap-break-1", snapID, i, snap.Number, p.Number.Uint64())
 			break
 		}
 
@@ -257,8 +188,8 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 		if isSnapshot(number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
 			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.HashCache(), c.config, c.snapStorage); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.HashCache())
+
 				snap = s
-				debugLog("snap-break-2", snapID, i, snap.Number, p.Number.Uint64())
 				break
 			} else {
 				log.Trace("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.HashCache().String(), "error", err)
@@ -267,19 +198,15 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 
 		// If we're at the genesis, snapshot the initial state.
 		if p.Number.Int64() == 0 {
-			snap, err = c.storeGenesisSnapshot(p, snapID)
+			snap, err = c.storeGenesisSnapshot(p)
 			if err != nil {
-				debugLog("snap-break-3-error!!!!", snapID, i, p.Number.Uint64(), err)
 				return nil, err
 			}
 
 			log.Info("Stored genesis checkpoint snapshot to disk", "number", p.Number, "hash", p.HashCache())
-			debugLog("snap-break-4", snapID, i, snap.Number, p.Number.Uint64())
 			break
 		}
 	}
-	debugLog("snapshot-2", snapID, time.Since(t))
-	t = time.Now()
 
 	if snap == nil {
 		if len(parents) > 0 {
@@ -302,21 +229,11 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 		}
 	}
 
-	if len(parents) > 0 {
-		debugLogf("applyAndStoreSnapshot-PRE-slice snapID=%d snapNum=%d partntsLen=%d i=%d fromNum=%d toNum=%d %d\n",
-			snapID, snap.Number, len(parents), i, parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64(), len(parents))
-	}
-
-	//snapID=6399527266456256611 snapNum=0 partntsLen=1 i=0 fromNum=0 toNum=0 "parents: '0 '"
-	// 0 1 2 3 4
-	//     i
 	// we always need at least 1 parent for further validation
 	if i != len(parents)-1 {
 		if i+1 <= len(parents)+1 {
-			debugLog("applyAndStoreSnapshot-slice-case-1", snapID, snap.Number, len(parents), i, len(parents))
 			parents = parents[i+1:]
 		} else {
-			debugLog("applyAndStoreSnapshot-slice-case-2", snapID, snap.Number, len(parents), i, len(parents))
 			parents = []*types.Header{}
 		}
 	} else {
@@ -324,44 +241,24 @@ func (c *Verifier) snapshot(parentsRef *[]*types.Header, snapID uint64) (*Snapsh
 	}
 	*parentsRef = parents
 
-	if len(parents) > 0 {
-		debugLogf("applyAndStoreSnapshot-POST-1-slice snapID=%d snapNum=%d partntsLen=%d i=%d fromNum=%d toNum=%d %d\n",
-			snapID, snap.Number, len(parents), i, parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64(), len(parents))
-	}
-	debugLogf("applyAndStoreSnapshot-POST-2-slice snapID=%d snapNum=%d partntsLen=%d i=%d %d\n",
-		snapID, snap.Number, len(parents), i, len(parents))
-
-	debugLog("snapshot-3", snapID, time.Since(t))
-
-	debugLog("GOT-3!!!", snapID, snap.Number)
-	t = time.Now()
-
-	debugLog("applyAndStoreSnapshot-1-START", snapID, snap.Number, len(parents), len(parents))
-	err = c.applyAndStoreSnapshot(snap, snapID, true, parents...)
+	err = c.applyAndStoreSnapshot(snap, true, parents...)
 	if err != nil {
-		debugLog("applyAndStoreSnapshot-1-END", snapID, snap.Number, len(parents), len(parents))
 		return nil, err
 	}
-	debugLog("applyAndStoreSnapshot-1-SUCC", snapID, snap.Number, len(parents), len(parents))
-	debugLog("snapshot-4-applyAndStoreSnapshot", snapID, snap.Number, len(parents), time.Since(t))
 
 	return snap, nil
 }
 
-func (c *Verifier) storeGenesisSnapshot(h *types.Header, snapID uint64) (*Snapshot, error) {
+func (c *Verifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
 	signers := make([]common.Address, (len(h.Extra)-extraVanity-extraSeal)/common.AddressLength)
 	for i := 0; i < len(signers); i++ {
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
 	}
 
 	snap := newSnapshot(c.config, c.snapStorage, h.Number.Uint64(), h.HashCache(), signers)
-	debugLog("applyAndStoreSnapshot-2-START", snapID, snap.Number)
-	if err := c.applyAndStoreSnapshot(snap, snapID, false); err != nil {
-		debugLog("applyAndStoreSnapshot-2-END", snapID, snap.Number)
+	if err := c.applyAndStoreSnapshot(snap, false); err != nil {
 		return nil, err
 	}
-
-	debugLog("GOT!!!-2", snapID, snap.Number)
 
 	return snap, nil
 }
@@ -389,7 +286,7 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 
 	for seen, recent := range snap.Recents {
 		if recent == signer {
-			// Signer is among recents, only fail if the current block doesn't shift it out
+			// Signer is among RecentsRLP, only fail if the current block doesn't shift it out
 			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
 				return errRecentlySigned
 			}
@@ -410,8 +307,7 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	return nil
 }
 
-func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash, snapID uint64) int {
-	debugLog("findPrevCheckpoint")
+func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash) int {
 	if num == 0 {
 		// If we're at the genesis, snapshot the initial state.
 		return 0
@@ -423,42 +319,21 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 		highest = num
 	)
 
-	/*
-		n = sort.Search(int(highest)+1, func(blockNum int) bool {
-			_, ok = c.recentsNum.Get(uint64(blockNum))
-			debugLog("lastSnapshot-555", c.recents.Len())
-			return ok
-		})
-	*/
 	for n = int(highest); n >= 0; n-- {
 		_, ok = c.recentsNum.Get(uint64(n))
 		if ok {
 			break
 		}
 	}
-	debugLog("lastSnapshot-777", n, ok)
 
 	if !ok {
-		last, err := lastSnapshot(c.db)
-		debugLog("lastSnapshot-999", last, err)
+		last, _ := lastSnapshot(c.db)
 		if last < num {
 			highest = last
 		}
 
-		/*
-			n = sort.Search(int(highest)+1, func(blockNum int) bool {
-				return !c.checkClosestSnapshot(uint64(blockNum), hash, parentHash, num, snapID)
-			})
-		*/
-
-		/*
-			n = Search(int(highest)+1, func(currentN int) bool {
-				return !c.checkClosestSnapshot(uint64(currentN), hash, parentHash, num, snapID)
-			})
-		*/
-
 		for n = int(highest); n >= 0; n-- {
-			ok = c.checkClosestSnapshot(uint64(n), hash, parentHash, num, snapID)
+			ok = c.checkClosestSnapshot(uint64(n), hash, parentHash, num)
 			if ok {
 				break
 			}
@@ -466,10 +341,8 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 
 		if n <= int(highest) {
 			ok = true
-			debugLog("xxx-1", n, last)
 		} else {
 			n = 0
-			debugLog("xxx-2", n, last)
 		}
 	}
 
@@ -478,7 +351,6 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 	}
 
 	ancestors := int(num) - n
-	debugLog("ancestors", ancestors)
 
 	if ancestors <= 0 {
 		ancestors = 1 // we need at least 1 parent for verification
@@ -487,26 +359,7 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 	return ancestors
 }
 
-func Search(length int, f func(int) bool) int {
-	// Define f(-1) == false and f(n) == true.
-	// Invariant: f(i-1) == false, f(j) == true.
-	i, j := 0, length
-	for i < j {
-		h := int(uint(i+j) >> 1) // avoid overflow when computing h
-		// i ≤ h < j
-		debugLog("xxx-0", h)
-		if !f(h) {
-			i = h + 1 // preserves f(i-1) == false
-		} else {
-			j = h // preserves f(j) == true
-		}
-	}
-	// i == j, f(i-1) == false, and f(j) (= f(i)) == true  =>  answer is i.
-	return i
-}
-
-func (c *Verifier) checkClosestSnapshot(num uint64, hash common.Hash, parentHash common.Hash, maxNum uint64, snapID uint64) bool {
-	debugLog("findPrevCheckpoint-1")
+func (c *Verifier) checkClosestSnapshot(num uint64, hash common.Hash, parentHash common.Hash, maxNum uint64) bool {
 	var snapshotHash *common.Hash
 
 	switch num {
@@ -522,14 +375,14 @@ func (c *Verifier) checkClosestSnapshot(num uint64, hash common.Hash, parentHash
 		// nothing to do
 	}
 
-	return c.checkSnapshot(num, snapshotHash, snapID)
+	return c.checkSnapshot(num, snapshotHash)
 }
 
 func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {
 	return number == 0 || number%checkpointInterval == 0 || number%epoch == 0
 }
 
-//debug
+//nolint debug
 func parentsToString(parents []*types.Header) string {
 	parStr := "parents: '"
 	for _, par := range parents {

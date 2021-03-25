@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -112,6 +113,9 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false)
 
+		engNoFork = process.NewRemoteEngine(engine, configNoFork)
+		engProFork = process.NewRemoteEngine(engine, configProFork)
+
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:   dbNoFork,
 			Chain:      chainNoFork,
@@ -119,7 +123,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			Network:    1,
 			Sync:       downloader.StagedSync,
 			BloomCache: 1,
-		})
+		}, engNoFork)
 		ethProFork, _ = newHandler(&handlerConfig{
 			Database:   dbProFork,
 			Chain:      chainProFork,
@@ -127,7 +131,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			Network:    1,
 			Sync:       downloader.StagedSync,
 			BloomCache: 1,
-		})
+		}, engProFork)
 	)
 	ethNoFork.Start(1000)
 	ethProFork.Start(1000)
@@ -138,6 +142,9 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 
 	defer ethNoFork.Stop()
 	defer ethProFork.Stop()
+
+	defer engNoFork.Close()
+	defer engProFork.Close()
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()
@@ -168,11 +175,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[:1], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, engine, engNoFork, blocksNoFork[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	atomic.StoreUint64(&ethNoFork.currentHeight, 1)
-	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[:1], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, engine, engProFork, blocksProFork[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	atomic.StoreUint64(&ethProFork.currentHeight, 1)
@@ -205,11 +212,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[1:2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), engNoFork, blocksNoFork[1:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	atomic.StoreUint64(&ethNoFork.currentHeight, 2)
-	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[1:2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), engProFork, blocksProFork[1:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	atomic.StoreUint64(&ethProFork.currentHeight, 2)

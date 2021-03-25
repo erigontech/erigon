@@ -501,10 +501,18 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 	knownParents, ancestorsReq := c.requestHeadersNotFromRange(reqID, headerNumber, headerParentHash, uint64(parentsToAsk))
 	knownParentsFromRange := c.checkHeadersFromRange(header, reqHeaders, uint64(parentsToAsk), uint64(parentsToValidate))
 
-	fmt.Printf("request %d\n\trequestHeadersNotFromRange %d %d\n\tcheckHeadersFromRange %d\n",
-		header.Number.Uint64(),
-		ancestorsReq.HighestBlockNumber, ancestorsReq.Number,
-		len(knownParentsFromRange))
+	if len(knownParentsFromRange) > 0 {
+		log.Debug(fmt.Sprintf("request %d\n\trequestHeadersNotFromRange %d %d\n\tcheckHeadersFromRange %d(%d-%d)\n",
+			header.Number.Uint64(),
+			ancestorsReq.HighestBlockNumber, ancestorsReq.Number,
+			len(knownParentsFromRange),
+			knownParentsFromRange[0].Number.Uint64(), knownParentsFromRange[len(knownParentsFromRange)-1].Number.Uint64()))
+	} else {
+		log.Debug(fmt.Sprintf("request %d\n\trequestHeadersNotFromRange %d %d\n\tcheckHeadersFromRange %d\n",
+			header.Number.Uint64(),
+			ancestorsReq.HighestBlockNumber, ancestorsReq.Number,
+			len(knownParentsFromRange)))
+	}
 
 	knownParents = append(knownParents, knownParentsFromRange...)
 

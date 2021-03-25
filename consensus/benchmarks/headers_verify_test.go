@@ -71,7 +71,7 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 	headers := toHeaders(hardTips)
 
 	const threshold = 15 // percent
-	const repeats = 20
+	const repeats = 5
 
 	ethConfig := ethash.Config{
 		CachesInMem:      1,
@@ -149,6 +149,7 @@ func TestVerifyHeadersCliqueOnly1024(t *testing.T) {
 }
 
 func TestVerifyHeadersCliqueOnly65536(t *testing.T) {
+	t.Skip("too slow")
 	const toVerify = 65536
 
 	testVerifyHeadersCliqueOnly(t, toVerify)
@@ -162,7 +163,7 @@ func testVerifyHeadersClique(t *testing.T, toVerify int) {
 	headers := toHeaders(hardTips)
 
 	const threshold = 10 // percent
-	const repeats = 20
+	const repeats = 10
 
 	results := make([]result, repeats)
 

@@ -12,8 +12,8 @@ func OpenDatabase(path string, inmem bool) *ethdb.ObjectDatabase {
 }
 
 func openKV(path string, inmem bool) ethdb.KV {
-	if dbType == "mdbx" {
-		opts := ethdb.NewMDBX()
+	if dbType == "lmdb" {
+		opts := ethdb.NewLMDB()
 		if inmem {
 			opts = opts.InMem()
 		} else {
@@ -21,9 +21,10 @@ func openKV(path string, inmem bool) ethdb.KV {
 		}
 
 		return opts.MustOpen()
+
 	}
 
-	opts := ethdb.NewLMDB()
+	opts := ethdb.NewMDBX()
 	if inmem {
 		opts = opts.InMem()
 	} else {

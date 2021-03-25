@@ -47,7 +47,7 @@ func TestTestMode(t *testing.T) {
 	case block := <-results:
 		header.Nonce = types.EncodeNonce(block.Nonce())
 		header.MixDigest = block.MixDigest()
-		if err := ethash.verifySeal(nil, header, false); err != nil {
+		if err := ethash.verifySeal(header, false); err != nil {
 			t.Fatalf("unexpected verification error: %v", err)
 		}
 	case <-time.NewTimer(4 * time.Second).C:
@@ -89,7 +89,7 @@ func verifyTest(wg *sync.WaitGroup, e *Ethash, workerIndex, epochs int) {
 		}
 		header := &types.Header{Number: big.NewInt(block), Difficulty: big.NewInt(100)}
 		// we expect an error there sometimes
-		e.verifySeal(nil, header, false) //nolint:errcheck
+		e.verifySeal(header, false) //nolint:errcheck
 	}
 }
 

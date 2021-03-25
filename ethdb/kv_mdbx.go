@@ -267,16 +267,12 @@ var idID = new(uint64)
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	fmt.Println("CLOSE-CALLED", debug.Callers(10))
 	if ok := atomic.CompareAndSwapUint32(db.status, statusOK, statusClosed); !ok {
 		return
 	}
 
 	if db.env != nil {
-		closeID := atomic.AddUint64(idID, 1) - 1
-		fmt.Println("!!!Close", closeID, db.wg == nil)
 		db.wg.Wait()
-		fmt.Println("!!!Close-DONE", closeID, db.wg == nil)
 	}
 
 	if db.env != nil {
@@ -346,14 +342,12 @@ func (db *MdbxKV) CollectMetrics() {
 
 func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
 	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		fmt.Println("begin-err-1", atomic.LoadUint32(db.status), db.env == nil)
 		return nil, ErrDBClosed
 	}
 
 	defer func() {
 		if err == nil {
 			if atomic.LoadUint32(db.status) != statusOK {
-				fmt.Println("begin-err-2", atomic.LoadUint32(db.status))
 				err = ErrDBClosed
 				return
 			}
@@ -374,14 +368,13 @@ func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
 }
 
 func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
-	if db.env == nil {
-		return nil, fmt.Errorf("db closed")
+	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
+		return nil, ErrDBClosed
 	}
 	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
 			if atomic.LoadUint32(db.status) != statusOK {
-				fmt.Println("begin-err-2", atomic.LoadUint32(db.status))
 				err = ErrDBClosed
 				return
 			}
@@ -626,7 +619,7 @@ func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 }
 
 func (tx *MdbxTx) Commit(ctx context.Context) error {
-	if tx.db.env == nil {
+	if tx.db.env == nil || atomic.LoadUint32(tx.db.status) != statusOK {
 		return ErrDBClosed
 	}
 	if tx.tx == nil {
@@ -669,7 +662,7 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 }
 
 func (tx *MdbxTx) Rollback() {
-	if tx.db.env == nil {
+	if tx.db.env == nil || atomic.LoadUint32(tx.db.status) != statusOK {
 		return
 	}
 	if tx.tx == nil {

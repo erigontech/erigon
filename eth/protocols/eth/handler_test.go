@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -71,8 +72,12 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 
 	headBlock := genesis
 	if blocks > 0 {
-		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
-		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
+		engine := ethash.NewFaker()
+		eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+		defer eng.Close()
+
+		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, blocks, generator, true)
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, bs, true /* checkRoot */); err != nil {
 			panic(err)
 		}
 		headBlock = bs[len(bs)-1]

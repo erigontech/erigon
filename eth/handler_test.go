@@ -122,6 +122,7 @@ type testHandler struct {
 	txpool    *testTxPool
 	handler   *handler
 	headBlock *types.Block
+	eng       *process.RemoteEngine
 }
 
 // newTestHandler creates a new handler for testing purposes with no blocks.
@@ -139,12 +140,16 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}).MustCommit(db)
 
-	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	engine := ethash.NewFaker()
+
+	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
+
+	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
 
 	headBlock := genesis
 	if blocks > 0 {
 		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, nil, false)
-		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, bs, true /* checkRoot */); err != nil {
 			panic(err)
 		}
 		headBlock = bs[len(bs)-1]
@@ -158,7 +163,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		Network:    1,
 		Sync:       downloader.StagedSync,
 		BloomCache: 1,
-	})
+	}, eng)
 	handler.Start(1000)
 
 	return &testHandler{
@@ -167,11 +172,13 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		txpool:    txpool,
 		handler:   handler,
 		headBlock: headBlock,
+		eng:       eng,
 	}
 }
 
 // close tears down the handler and all its internal constructs.
 func (b *testHandler) close() {
+	b.eng.Close()
 	b.handler.Stop()
 	b.chain.Stop()
 }

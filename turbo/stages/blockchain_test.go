@@ -267,7 +267,9 @@ func TestLastBlock(t *testing.T) {
 
 	blocks := makeBlockChain(blockchain.CurrentBlock(), 1, ethash.NewFullFaker(), db, 0)
 	engine := ethash.NewFaker()
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
 	if blocks[len(blocks)-1].Hash() != rawdb.ReadHeadBlockHash(db) {
@@ -557,6 +559,9 @@ func TestBadBlockHashes(t *testing.T)  { testBadHashes(t, true) }
 func testBadHashes(t *testing.T, full bool) {
 	t.Skip("to support this error in TG")
 
+	engine := ethash.NewFaker()
+	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+
 	// Create a pristine chain and database
 	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
 	if err != nil {
@@ -572,13 +577,13 @@ func testBadHashes(t *testing.T, full bool) {
 		core.BadHashes[blocks[2].Header().Hash()] = true
 		defer func() { delete(core.BadHashes, blocks[2].Header().Hash()) }()
 
-		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), blockchain.GetVMConfig(), blockchain.Engine(), blocks, true /* checkRoot */)
+		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), blockchain.GetVMConfig(), blockchain.Engine(), eng, blocks, true /* checkRoot */)
 	} else {
 		headers := makeHeaderChain(blockchain.CurrentHeader(), 3, ethash.NewFaker(), db, 10)
 
 		core.BadHashes[headers[2].Hash()] = true
 		defer func() { delete(core.BadHashes, headers[2].Hash()) }()
-		_, _, _, err = stagedsync.InsertHeadersInStages(db, blockchain.Config(), blockchain.Engine(), headers)
+		_, _, _, err = stagedsync.InsertHeadersInStages(db, eng, headers)
 	}
 	if !errors.Is(err, core.ErrBlacklistedHash) {
 		t.Errorf("error mismatch: have: %v, want: %v", err, core.ErrBlacklistedHash)
@@ -3560,6 +3565,7 @@ func TestEIP2718Transition(t *testing.T) {
 
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
+		eng    = process.NewRemoteEngine(engine, params.YoloV3ChainConfig)
 		db     = ethdb.NewMemDatabase()
 
 		// A sender who makes transactions, has some funds
@@ -3615,7 +3621,7 @@ func TestEIP2718Transition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
