@@ -222,7 +222,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		if !vmConfig.Debug {
 			return
 		}
-		w, err1 := os.Create(fmt.Sprintf("trace_%d.txt", id))
+		w, err1 := os.Create(fmt.Sprintf("/Users/alex.sharov/projects/turbo-geth/trace_%d.txt", id))
 		if err1 != nil {
 			panic(err1)
 		}
@@ -335,6 +335,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
+				miningWorld.Block.Header.GasLimit = nextBlock.Header().GasLimit
+				miningWorld.Block.Header.Difficulty = nextBlock.Header().Difficulty
+				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
 			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {

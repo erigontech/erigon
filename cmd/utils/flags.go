@@ -1194,7 +1194,7 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	if v := flags.Bool(LightKDFFlag.Name, false, LightKDFFlag.Usage); v != nil {
 		cfg.UseLightweightKDF = *v
 	}
-	if v := flags.Bool(NoUSBFlag.Name, false, NoUSBFlag.Usage); v != nil || cfg.NoUSB {
+	if v := flags.Bool(NoUSBFlag.Name, false, NoUSBFlag.Usage); v != nil {
 		log.Warn("Option nousb is deprecated and USB is deactivated by default. Use --usb to enable")
 	}
 	if v := flags.Bool(USBFlag.Name, false, USBFlag.Usage); v != nil {
