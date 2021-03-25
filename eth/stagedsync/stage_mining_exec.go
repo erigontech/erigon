@@ -124,6 +124,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		//if !chainConfig.IsByzantium(header.Number) {
 		//	batch.Rollback()
 		//}
+		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 
 		current.txs = append(current.txs, txn)
 		current.receipts = append(current.receipts, receipt)

@@ -222,9 +222,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		if !vmConfig.Debug {
 			return
 		}
-		w, err1 := os.Create(fmt.Sprintf("/Users/alex.sharov/projects/turbo-geth/trace_%d.txt", id))
-		if err1 != nil {
-			panic(err1)
+		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
+		if err3 != nil {
+			panic(err3)
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
@@ -397,6 +397,7 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 	localTxs := make(map[common.Address]types.Transactions, nextBlock.Transactions().Len())
 	senders := nextBlock.Body().SendersFromTxs()
 	for i, txn := range nextBlock.Transactions() {
+		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
 	}
 	return localTxs, nextBlock.Transactions()
