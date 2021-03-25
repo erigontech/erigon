@@ -385,7 +385,7 @@ func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {
 	return number == 0 || number%checkpointInterval == 0 || number%epoch == 0
 }
 
-//nolint:deadcode
+//nolint:unused
 func parentsToString(parents []*types.Header) string {
 	parStr := "parents: '"
 	for _, par := range parents {
