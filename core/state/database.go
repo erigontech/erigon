@@ -688,26 +688,6 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*
 	return witnesses, nil
 }
 
-// ResolveStateTrieStateless uses a witness DB to resolve subtries
-func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
-	var startPos int64
-	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
-		if loader == nil {
-			return trie.SubTries{}, nil
-		}
-
-		subTries, pos, err := loader.LoadFromWitnessDb(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos, len(dbPrefixes))
-		if err != nil {
-			return subTries, err
-		}
-
-		startPos = pos
-		return subTries, nil
-	}
-
-	return tds.resolveStateTrieWithFunc(loadFunc)
-}
-
 // CalcTrieRoots calculates trie roots without modifying the state trie
 func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	tds.tMu.Lock()

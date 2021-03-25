@@ -4,9 +4,10 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
-func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid string, pb *PrefetchedBlocks) error {
+func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid string, pb *bodydownload.PrefetchedBlocks) error {
 	logPrefix := s.state.LogPrefix()
 	cont, err := d.SpawnBodyDownloadStage(logPrefix, pid, s, u, pb)
 	if err != nil {

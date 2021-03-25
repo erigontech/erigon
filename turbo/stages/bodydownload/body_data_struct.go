@@ -28,6 +28,7 @@ type BodyDownload struct {
 	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	peerMap          map[string]int
+	prefetchedBlocks *PrefetchedBlocks
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -47,6 +48,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
+		prefetchedBlocks: NewPrefetchedBlocks(),
 	}
 	return bd
 }

@@ -17,10 +17,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
+	OnNewPendingLogs(types.Logs)
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
@@ -45,7 +47,7 @@ type StageParameters struct {
 	headersFetchers       []func() error
 	txPool                *core.TxPool
 	poolStart             func() error
-	prefetchedBlocks      *PrefetchedBlocks
+	prefetchedBlocks      *bodydownload.PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier
@@ -64,15 +66,15 @@ type MiningStagesParameters struct {
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
 	noempty      bool
-	pendingTxs   map[common.Address]types.Transactions
-	txPoolLocals []common.Address
+	PendingTxs   map[common.Address]types.Transactions
+	TxPoolLocals []common.Address
 
 	// runtime dat
 	Block *miningBlock
 }
 
 func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, Block: &miningBlock{}}
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}}
 
 }
 
@@ -380,7 +382,7 @@ func DefaultStages() StageBuilders {
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.TX)
 						if err != nil {
 							return err
 						}
@@ -418,8 +420,8 @@ func MiningStages() StageBuilders {
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
-							world.mining.txPoolLocals,
-							world.mining.pendingTxs,
+							world.mining.TxPoolLocals,
+							world.mining.PendingTxs,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -442,6 +444,7 @@ func MiningStages() StageBuilders {
 							world.mining.Block.remoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
+							world.notifier,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -472,7 +475,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.mining.Block.header.Root = stateRoot
+						world.mining.Block.Header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },

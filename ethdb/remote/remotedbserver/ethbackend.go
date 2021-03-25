@@ -84,7 +84,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		}
 
 		err = subscribeServer.Send(&remote.SubscribeReply{
-			Type: uint64(EventTypeHeader),
+			Type: remote.Event_HEADER,
 			Data: payload,
 		})
 

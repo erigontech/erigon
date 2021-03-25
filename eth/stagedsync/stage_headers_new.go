@@ -74,7 +74,7 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	localTd, err1 := rawdb.ReadTd(tx, headHash, headerProgress)
+	localTd, err1 := rawdb.ReadTd(tx, hash, headerProgress)
 	if err1 != nil {
 		return err1
 	}
@@ -150,8 +150,10 @@ func HeadersForward(
 			break
 		}
 	}
-	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
-		return err
+	if headerInserter.AnythingDone() {
+		if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return err
+		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
 		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {

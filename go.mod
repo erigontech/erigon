@@ -48,7 +48,6 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/kr/pretty v0.2.0 // indirect
 	github.com/ledgerwatch/lmdb-go v1.17.4
-	github.com/llgcode/draw2d v0.0.0-20200603164053-19660b984a28
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.7
 	github.com/mattn/go-isatty v0.0.12

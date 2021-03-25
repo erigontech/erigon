@@ -3,7 +3,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"time"
@@ -13,10 +15,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debugprint"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -43,7 +48,6 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
-
 		ctx := utils.RootContext()
 		cfg := &node.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -63,13 +67,13 @@ Examples:
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
-			return err
+			return nil
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
 				log.Error(err.Error())
-				return err
+				return nil
 			}
 
 		}
@@ -107,7 +111,7 @@ var loopExecCmd = &cobra.Command{
 		}
 		if err := loopExec(db, ctx, unwind); err != nil {
 			log.Error("Error", "err", err)
-			return err
+			return nil
 		}
 
 		return nil
@@ -210,6 +214,34 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		stopAt = 1
 	}
 
+	traceStart := func() {
+		vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+		vmConfig.Debug = true
+	}
+	traceStop := func(id int) {
+		if !vmConfig.Debug {
+			return
+		}
+		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
+		if err3 != nil {
+			panic(err3)
+		}
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent(" ", " ")
+		for _, l := range core.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs()) {
+			if err2 := encoder.Encode(l); err2 != nil {
+				panic(err2)
+			}
+		}
+		if err2 := w.Close(); err2 != nil {
+			panic(err2)
+		}
+
+		vmConfig.Tracer = nil
+		vmConfig.Debug = false
+	}
+	_, _ = traceStart, traceStop
+
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -260,6 +292,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
+		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 
 		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
 		//	return err
@@ -272,12 +305,12 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			break
 		}
 
-		if miningConfig.Enabled {
-			nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
-			if err != nil {
-				panic(err)
-			}
+		nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
+		if err != nil {
+			panic(err)
+		}
 
+		if miningConfig.Enabled && nextBlock.Header().Coinbase != (common.Address{}) {
 			unordered, ordered := miningTransactions(nextBlock)
 			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
 			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, unordered, nil)
@@ -289,7 +322,30 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				panic(err)
 			}
 			var minedBlock *types.Block
+			// Use all non-mining fields from nextBlock
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
+					miningWorld.Block,
+					chainConfig,
+					cc.Engine(),
+					miningWorld.ExtraData,
+					miningWorld.GasFloor,
+					miningWorld.GasCeil,
+					miningWorld.Etherbase,
+					miningWorld.TxPoolLocals,
+					miningWorld.PendingTxs,
+					quit)
+				miningWorld.Block.Uncles = nextBlock.Uncles()
+				miningWorld.Block.Header.Time = nextBlock.Header().Time
+				miningWorld.Block.Header.GasLimit = nextBlock.Header().GasLimit
+				miningWorld.Block.Header.Difficulty = nextBlock.Header().Difficulty
+				miningWorld.Block.Header.Nonce = nextBlock.Header().Nonce
+				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
+				return err
+			})
 			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+				//debugprint.Receipts(receiptsInDB, miningWorld.Block.Receipts)
 				var err error
 				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
 				return err
@@ -301,7 +357,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			checkMinedBlock(nextBlock, minedBlock)
+			checkMinedBlock(nextBlock, minedBlock, chainConfig)
 		}
 
 		// Unwind all stages to `execStage - unwind` block
@@ -346,40 +402,25 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 	localTxs := make(map[common.Address]types.Transactions, nextBlock.Transactions().Len())
 	senders := nextBlock.Body().SendersFromTxs()
 	for i, txn := range nextBlock.Transactions() {
+		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
 	}
 	return localTxs, nextBlock.Transactions()
 }
 
-func checkMinedBlock(b1, b2 *types.Block) {
+func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 	h1 := b1.Header()
 	h2 := b2.Header()
 	if h1.Root != h2.Root ||
-		h1.ReceiptHash != h2.ReceiptHash ||
+		(chainConfig.IsByzantium(b1.Number()) && h1.ReceiptHash != h2.ReceiptHash) ||
 		h1.TxHash != h2.TxHash ||
 		h1.ParentHash != h2.ParentHash ||
 		h1.UncleHash != h2.UncleHash ||
 		h1.GasUsed != h2.GasUsed ||
 		!bytes.Equal(h1.Extra, h2.Extra) {
-		printBlocks(b1, b2)
+		debugprint.Headers(h1, h2)
 		panic("blocks are not same")
 	}
-}
-
-func printBlocks(b1, b2 *types.Block) {
-	h1 := b1.Header()
-	h2 := b2.Header()
-	fmt.Printf("==== Header ====\n")
-	fmt.Printf("root:        %x, %x\n", h1.Root, h2.Root)
-	fmt.Printf("nonce:       %d, %d\n", h1.Nonce.Uint64(), h2.Nonce.Uint64())
-	fmt.Printf("number:      %d, %d\n", h1.Number.Uint64(), h2.Number.Uint64())
-	fmt.Printf("gasLimit:    %d, %d\n", h1.GasLimit, h2.GasLimit)
-	fmt.Printf("gasUsed:     %d, %d\n", h1.GasUsed, h2.GasUsed)
-	fmt.Printf("Difficulty:  %d, %d\n", h1.Difficulty, h2.Difficulty)
-	fmt.Printf("ReceiptHash: %x, %x\n", h1.ReceiptHash, h2.ReceiptHash)
-	fmt.Printf("TxHash:      %x, %x\n", h1.TxHash, h2.TxHash)
-	fmt.Printf("UncleHash:   %x, %x\n", h1.UncleHash, h2.UncleHash)
-	fmt.Printf("ParentHash:  %x, %x\n", h1.ParentHash, h2.ParentHash)
 }
 
 func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
