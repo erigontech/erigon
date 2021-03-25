@@ -67,8 +67,6 @@ var Defaults = Config{
 	},
 	NetworkID:               1,
 	TxLookupLimit:           2350000,
-	LightPeers:              100,
-	UltraLightFraction:      75,
 	DatabaseCache:           512,
 	TrieCleanCache:          256,
 	TrieCleanCacheJournal:   "triecache",
@@ -153,20 +151,6 @@ type Config struct {
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
-
-	// Light client options
-	LightServ          int  `toml:",omitempty"` // Maximum percentage of time allowed for serving LES requests
-	LightIngress       int  `toml:",omitempty"` // Incoming bandwidth limit for light servers
-	LightEgress        int  `toml:",omitempty"` // Outgoing bandwidth limit for light servers
-	LightPeers         int  `toml:",omitempty"` // Maximum number of LES client peers
-	LightNoPrune       bool `toml:",omitempty"` // Whether to disable light chain pruning
-	LightNoSyncServe   bool `toml:",omitempty"` // Whether to serve light clients before syncing
-	SyncFromCheckpoint bool `toml:",omitempty"` // Whether to sync the header chain from the configured checkpoint
-
-	// Ultra Light client options
-	UltraLightServers      []string `toml:",omitempty"` // List of trusted ultra light servers
-	UltraLightFraction     int      `toml:",omitempty"` // Percentage of trusted servers to accept an announcement
-	UltraLightOnlyAnnounce bool     `toml:",omitempty"` // Whether to only announce headers, or also serve them
 
 	// Database options
 	SkipBcVersionCheck bool `toml:"-"`

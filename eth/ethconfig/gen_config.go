@@ -67,10 +67,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
 	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
-	enc.LightServ = c.LightServ
-	enc.LightIngress = c.LightIngress
-	enc.LightEgress = c.LightEgress
-	enc.LightPeers = c.LightPeers
 	enc.SkipBcVersionCheck = c.SkipBcVersionCheck
 	enc.DatabaseHandles = c.DatabaseHandles
 	enc.DatabaseCache = c.DatabaseCache
@@ -174,18 +170,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.ArchiveSyncInterval != nil {
 		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval
-	}
-	if dec.LightServ != nil {
-		c.LightServ = *dec.LightServ
-	}
-	if dec.LightIngress != nil {
-		c.LightIngress = *dec.LightIngress
-	}
-	if dec.LightEgress != nil {
-		c.LightEgress = *dec.LightEgress
-	}
-	if dec.LightPeers != nil {
-		c.LightPeers = *dec.LightPeers
 	}
 	if dec.SkipBcVersionCheck != nil {
 		c.SkipBcVersionCheck = *dec.SkipBcVersionCheck
