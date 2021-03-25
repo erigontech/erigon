@@ -292,14 +292,14 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
-		receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution))
+		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 
-		if err := tx.RollbackAndBegin(context.Background()); err != nil {
-			return err
-		}
-		//if err := tx.CommitAndBegin(context.Background()); err != nil {
+		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
 		//	return err
 		//}
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
 		execAtBlock = progress(tx, stages.Execution)
 		if execAtBlock == stopAt {
 			break
@@ -344,10 +344,10 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				return err
 			})
 			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+				//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+				//debugprint.Receipts(receiptsInDB, miningWorld.Block.Receipts)
 				var err error
 				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
-				debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
-				debugprint.Receipts(receiptsInDB, miningWorld.Block.Receipts)
 				return err
 			})
 
