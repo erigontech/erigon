@@ -115,8 +115,10 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+		snap := ibs.Snapshot()
 		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
+			ibs.RevertToSnapshot(snap)
 			return nil, err
 		}
 		//if !chainConfig.IsByzantium(header.Number) {
