@@ -337,6 +337,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
 				miningWorld.Block.Header.GasLimit = nextBlock.Header().GasLimit
 				miningWorld.Block.Header.Difficulty = nextBlock.Header().Difficulty
+				miningWorld.Block.Header.Nonce = nextBlock.Header().Nonce
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})

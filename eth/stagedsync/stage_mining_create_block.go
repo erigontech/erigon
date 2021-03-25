@@ -130,7 +130,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return fmt.Errorf("mining failed")
+		return fmt.Errorf("[%s] mining failed", logPrefix)
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
