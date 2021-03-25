@@ -364,6 +364,9 @@ func HasBody(db databaseReader, hash common.Hash, number uint64) bool {
 // ReadBody retrieves the block body corresponding to the hash.
 func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	if body == nil {
+		return nil
+	}
 	var err error
 	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
 	if err != nil {

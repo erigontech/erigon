@@ -67,7 +67,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(engine, current.Header, current.txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(engine, current.Header, current.Txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
 		return err
 	}
 
@@ -128,8 +128,8 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		//}
 		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 
-		current.txs = append(current.txs, txn)
-		current.receipts = append(current.receipts, receipt)
+		current.Txs = append(current.Txs, txn)
+		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil
 	}
 
