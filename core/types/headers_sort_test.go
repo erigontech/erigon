@@ -83,7 +83,7 @@ func TestSortHeadersDesc(t *testing.T) {
 			}
 
 			for i, h := range hs {
-				value := uint64(len(hs)-i-1)
+				value := uint64(len(hs) - i - 1)
 				if h.GasLimit != value {
 					t.Error("GasLimit has been changed")
 				}
@@ -103,7 +103,7 @@ func BenchmarkSortHeadersAsc(b *testing.B) {
 	b.StopTimer()
 
 	for i := 0; i < b.N; i++ {
-		const n = 16386//128
+		const n = 16386 //128
 		idxs := rand.Perm(n)
 		hs := make([]*Header, n)
 
@@ -125,7 +125,7 @@ func BenchmarkSortHeadersAscStd(b *testing.B) {
 	b.ReportAllocs()
 	b.StopTimer()
 	for i := 0; i < b.N; i++ {
-		const n = 16386//128
+		const n = 16386 //128
 		idxs := rand.Perm(n)
 		hs := make([]*Header, n)
 
@@ -146,12 +146,11 @@ func BenchmarkSortHeadersAscStd(b *testing.B) {
 	}
 }
 
-
 func BenchmarkSortHeadersDesc(b *testing.B) {
 	b.ReportAllocs()
 	b.StopTimer()
 	for i := 0; i < b.N; i++ {
-		const n = 16386//128
+		const n = 16386 //128
 		idxs := rand.Perm(n)
 		hs := make([]*Header, n)
 
@@ -174,7 +173,7 @@ func BenchmarkSortHeadersDescStd(b *testing.B) {
 	b.ReportAllocs()
 	b.StopTimer()
 	for i := 0; i < b.N; i++ {
-		const n = 16386//128
+		const n = 16386 //128
 		idxs := rand.Perm(n)
 		hs := make([]*Header, n)
 
@@ -194,7 +193,6 @@ func BenchmarkSortHeadersDescStd(b *testing.B) {
 		b.StopTimer()
 	}
 }
-
 
 func permutations(arr []int) [][]int {
 	var helper func([]int, int)

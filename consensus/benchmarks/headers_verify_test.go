@@ -197,8 +197,7 @@ func testVerifyHeadersCliqueOnly(t *testing.T, toVerify int) {
 		resCliqueProcess = verifyByEngineProcess(t, headers, core.DefaultRinkebyGenesisBlock(), params.CliqueSnapshot)
 	}
 
-	fmt.Sprint(io.Discard, resCliqueProcess)
-
+	fmt.Fprint(io.Discard, resCliqueProcess)
 }
 
 type engineConstructor func(db ethdb.Database) consensus.Engine

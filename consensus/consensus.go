@@ -103,6 +103,4 @@ type PoW interface {
 type Verifier interface {
 	Verify(chain ChainHeaderReader, header *types.Header, parents []*types.Header, uncle bool, seal bool) error
 	AncestorsNeededForVerification(header *types.Header) int
-
-//	PrepareHeaders(headers []*types.Header)
 }

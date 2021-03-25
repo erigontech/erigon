@@ -388,7 +388,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 
 	// All basic checks passed, verify cascading fields
-	if err := c.verifyCascadingFields(chain, header, parents, snap); err != nil {
+	if err = c.verifyCascadingFields(chain, header, parents, snap); err != nil {
 		return err
 	}
 

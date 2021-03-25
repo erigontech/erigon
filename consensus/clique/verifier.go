@@ -339,11 +339,14 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 			}
 		}
 
-		if n <= int(highest) {
-			ok = true
-		} else {
-			n = 0
-		}
+		//fixme check if it's needed
+		/*
+			if n <= int(highest) {
+					ok = true
+				} else {
+					n = 0
+				}
+		*/
 	}
 
 	if n < 0 {
@@ -382,7 +385,7 @@ func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {
 	return number == 0 || number%checkpointInterval == 0 || number%epoch == 0
 }
 
-//nolint debug
+//nolint:deadcode
 func parentsToString(parents []*types.Header) string {
 	parStr := "parents: '"
 	for _, par := range parents {

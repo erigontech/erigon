@@ -814,7 +814,6 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.headerReader = headerReader
 }
 
-
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
 
@@ -826,7 +825,7 @@ func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
 		}
 
-		if _, err := buf.Write(b); err != nil {
+		if _, err = buf.Write(b); err != nil {
 			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
 		}
 

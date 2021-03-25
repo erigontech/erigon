@@ -515,7 +515,7 @@ func (st *storage) save(s *Snapshot, force bool) error {
 
 		defer tx.Rollback()
 
-		if err := tx.Put(dbutils.CliqueBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
+		if err = tx.Put(dbutils.CliqueBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
 			log.Error("can't store a snapshot", "block", s.Number, "hash", s.Hash, "err", err)
 			return err
 		}
@@ -574,8 +574,10 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 	batch := st.db.NewBatch()
 	defer batch.Rollback()
 
+	var ok bool
+
 	for i, snap := range snaps {
-		ok, err := hasSnapshotData(batch, snap.number, snap.hash)
+		ok, err = hasSnapshotData(batch, snap.number, snap.hash)
 		if ok && err == nil {
 			continue
 		}
@@ -584,11 +586,11 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 			continue
 		}
 
-		if err := batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blobs[i]); err != nil {
+		if err = batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blobs[i]); err != nil {
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 
-		if err := batch.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(snap.number), []byte{0}); err != nil {
+		if err = batch.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(snap.number), []byte{0}); err != nil {
 			log.Error("can't store a snapshot number", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 

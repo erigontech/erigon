@@ -262,8 +262,6 @@ func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
-var idID = new(uint64)
-
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {

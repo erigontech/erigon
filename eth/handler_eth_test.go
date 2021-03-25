@@ -113,7 +113,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false)
 
-		engNoFork = process.NewRemoteEngine(engine, configNoFork)
+		engNoFork  = process.NewRemoteEngine(engine, configNoFork)
 		engProFork = process.NewRemoteEngine(engine, configProFork)
 
 		ethNoFork, _ = newHandler(&handlerConfig{
