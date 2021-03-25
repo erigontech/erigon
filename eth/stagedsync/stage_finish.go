@@ -14,13 +14,9 @@ func NotifyRpcDaemon(from, to uint64, notifier ChainEventNotifier, db ethdb.Data
 		return nil
 	}
 	for i := from; i <= to; i++ {
-		hash, err := rawdb.ReadCanonicalHash(db, i)
-		if err != nil {
-			return err
-		}
-		header := rawdb.ReadHeader(db, hash, i)
+		header := rawdb.ReadHeaderByNumber(db, i)
 		if header == nil {
-			return fmt.Errorf("could not find canonical header for hash: %x number: %d", hash, i)
+			return fmt.Errorf("could not find canonical header for number: %d", i)
 		}
 		notifier.OnNewHeader(header)
 	}
