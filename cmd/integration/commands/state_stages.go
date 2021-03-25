@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debugprint"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -259,7 +260,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
 		}
-
 		//if err := tx.RollbackAndBegin(context.Background()); err != nil {
 		//	return err
 		//}
@@ -316,7 +316,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			checkMinedBlock(nextBlock, minedBlock)
+			checkMinedBlock(nextBlock, minedBlock, chainConfig)
 		}
 
 		// Unwind all stages to `execStage - unwind` block
@@ -366,35 +366,19 @@ func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transa
 	return localTxs, nextBlock.Transactions()
 }
 
-func checkMinedBlock(b1, b2 *types.Block) {
+func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 	h1 := b1.Header()
 	h2 := b2.Header()
 	if h1.Root != h2.Root ||
-		h1.ReceiptHash != h2.ReceiptHash ||
+		(chainConfig.IsByzantium(b1.Number()) && h1.ReceiptHash != h2.ReceiptHash) ||
 		h1.TxHash != h2.TxHash ||
 		h1.ParentHash != h2.ParentHash ||
 		h1.UncleHash != h2.UncleHash ||
 		h1.GasUsed != h2.GasUsed ||
 		!bytes.Equal(h1.Extra, h2.Extra) {
-		printBlocks(b1, b2)
+		debugprint.Headers(h1, h2)
 		panic("blocks are not same")
 	}
-}
-
-func printBlocks(b1, b2 *types.Block) {
-	h1 := b1.Header()
-	h2 := b2.Header()
-	fmt.Printf("==== Header ====\n")
-	fmt.Printf("root:        %x, %x\n", h1.Root, h2.Root)
-	fmt.Printf("nonce:       %d, %d\n", h1.Nonce.Uint64(), h2.Nonce.Uint64())
-	fmt.Printf("number:      %d, %d\n", h1.Number.Uint64(), h2.Number.Uint64())
-	fmt.Printf("gasLimit:    %d, %d\n", h1.GasLimit, h2.GasLimit)
-	fmt.Printf("gasUsed:     %d, %d\n", h1.GasUsed, h2.GasUsed)
-	fmt.Printf("Difficulty:  %d, %d\n", h1.Difficulty, h2.Difficulty)
-	fmt.Printf("ReceiptHash: %x, %x\n", h1.ReceiptHash, h2.ReceiptHash)
-	fmt.Printf("TxHash:      %x, %x\n", h1.TxHash, h2.TxHash)
-	fmt.Printf("UncleHash:   %x, %x\n", h1.UncleHash, h2.UncleHash)
-	fmt.Printf("ParentHash:  %x, %x\n", h1.ParentHash, h2.ParentHash)
 }
 
 func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {

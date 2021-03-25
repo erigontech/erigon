@@ -112,9 +112,10 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 	signer := types.NewEIP155Signer(chainConfig.ChainID)
 
 	var coalescedLogs types.Logs
+	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, stateWriter state.StateWriter, current *miningBlock) ([]*types.Log, error) {
-		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, stateWriter, header, txn, &header.GasUsed, *vmConfig)
+	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +179,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 		// Start executing the transaction
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
-		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, cc, ibs, stateWriter, current)
+		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, cc, ibs, current)
 
 		switch err {
 		case core.ErrGasLimitReached:
