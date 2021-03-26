@@ -294,9 +294,14 @@ func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btB
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of he longest chain until last block is imported.
-	for b := rawdb.ReadCurrentHeader(db); b != nil && b.Number.Uint64() != 0; b, _ = rawdb.ReadHeaderByHash(db, b.ParentHash) {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b); err != nil {
+	for b := rawdb.ReadCurrentHeader(db); b != nil && b.Number.Uint64() != 0; {
+		err := validateHeader(bmap[b.Hash()].BlockHeader, b)
+		if err != nil {
 			return fmt.Errorf("imported block header validation failed: %v", err)
+		}
+		b, err = rawdb.ReadHeaderByHash(db, b.ParentHash)
+		if err != nil {
+			return err
 		}
 	}
 	return nil

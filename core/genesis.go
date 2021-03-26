@@ -378,7 +378,10 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	}
 	rawdb.WriteHeadBlockHash(tx, block.Hash())
 	rawdb.WriteHeadFastBlockHash(tx, block.Hash())
-	rawdb.WriteHeadHeaderHash(tx, block.Hash())
+	err = rawdb.WriteHeadHeaderHash(tx, block.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
