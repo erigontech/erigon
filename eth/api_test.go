@@ -16,7 +16,7 @@
 
 package eth_test
 
-/*
+/*`
 TODO: revive this tests for RPCDaemon - https://github.com/ledgerwatch/turbo-geth/issues/939
 
 import (

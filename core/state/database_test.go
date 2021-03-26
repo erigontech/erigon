@@ -25,7 +25,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
@@ -804,8 +806,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 }
 
 func TestReproduceCrash(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
-
 	// This example was taken from Ropsten contract that used to cause a crash
 	// it is created in the block 598915 and then there are 3 transactions modifying
 	// its storage in the same block:
@@ -819,45 +819,31 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt().SetUint64(0x58c00a51)
 	db := ethdb.NewMemDatabase()
-	tds := state.NewTrieDbState(common.Hash{}, db, 0)
-
-	tsw := tds.TrieStateWriter()
-	intraBlockState := state.New(tds)
+	tsw := state.NewDbStateWriter(db, 0)
+	intraBlockState := state.New(state.NewDbStateReader(db))
 	ctx := context.Background()
 	// Start the 1st transaction
-	tds.StartNewBuffer()
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
-	tds.StartNewBuffer()
 	intraBlockState.SetState(contract, &storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	tds.StartNewBuffer()
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	tds.StartNewBuffer()
 	intraBlockState.SubBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	if _, err := tds.ComputeTrieRoots(); err != nil {
-		t.Errorf("ComputeTrieRoots failed: %v", err)
-	}
-	// We expect the list of prunable entries to be empty
-	prunables := tds.TriePruningDebugDump()
-	if len(prunables) > 0 {
-		t.Errorf("Expected empty list of prunables, got:\n %s", prunables)
 	}
 }
 func TestEip2200Gas(t *testing.T) {
@@ -1205,16 +1191,14 @@ func TestWrongIncarnation2(t *testing.T) {
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	db := ethdb.NewMemDatabase()
-	tds := state.NewTrieDbState(common.Hash{}, db, 0)
-	tsw := tds.TrieStateWriter()
-	intraBlockState := state.New(tds)
+	defer db.Close()
+	r, tsw := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
-	tds.StartNewBuffer()
 	intraBlockState.CreateAccount(contract, true)
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
@@ -1224,18 +1208,12 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
-
-	if _, err := tds.ComputeTrieRoots(); err != nil {
-		t.Errorf("error computing roots: %w", err)
-	}
-
+	_, err := trie.CalcRoot("test", db)
+	require.NoError(t, err)
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
-
-	trieCode, tcErr := tds.ReadAccountCode(contract, 1, oldCodeHash)
+	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
-
-	tds.StartNewBuffer()
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
 	intraBlockState.SetCode(contract, newCode)
@@ -1244,74 +1222,45 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	if _, err := tds.ComputeTrieRoots(); err != nil {
-		t.Errorf("error computing roots: %w", err)
-	}
-
 	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, tcErr = tds.ReadAccountCode(contract, 1, newCodeHash)
+	trieCode, tcErr = r.ReadAccountCode(contract, 1, newCodeHash)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 }
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
+	t.Skip("to fix")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
-	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	db := ethdb.NewMemDatabase()
-	tds := state.NewTrieDbState(root, db, 0)
-	tds.SetResolveReads(true)
-	intraBlockState := state.New(tds)
+	defer db.Close()
+	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
-	tds.StartNewBuffer()
 	intraBlockState.CreateAccount(contract, true)
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := intraBlockState.CommitBlock(ctx, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	if _, err := tds.ResolveStateTrie(false /* extractWitness */, false /* trace */); err != nil {
-		assert.NoError(t, err)
-	}
-
-	oldSize := tds.Trie().TrieSize()
-
-	tds.StartNewBuffer()
-
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	if _, err = tds.ResolveStateTrie(false, false); err != nil {
-		assert.NoError(t, err)
-	}
-
-	newSize := tds.Trie().TrieSize()
-	assert.Equal(t, oldSize, newSize, "should not load codeNode, so the size shouldn't change")
-
-	tds.StartNewBuffer()
-
-	code2, err := tds.ReadAccountCode(contract, 1, codeHash)
+	code2, err := r.ReadAccountCode(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
-
-	if _, err = tds.ResolveStateTrie(false, false); err != nil {
-		assert.NoError(t, err)
-	}
-
-	newSize2 := tds.Trie().TrieSize()
-	assert.Equal(t, oldSize, newSize2-len(code), "should load codeNode when requesting new data ")
 }
 
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
@@ -1321,44 +1270,42 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	db := ethdb.NewMemDatabase()
-	tds := state.NewTrieDbState(root, db, 0)
-	tds.SetResolveReads(true)
-	intraBlockState := state.New(tds)
+	defer db.Close()
+	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
-	tds.StartNewBuffer()
 	intraBlockState.CreateAccount(contract, true)
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := intraBlockState.CommitBlock(ctx, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
-	if _, err := tds.ResolveStateTrie(false, false); err != nil {
-		assert.NoError(t, err)
-	}
 
-	tds.StartNewBuffer()
+	r2, err := trie.CalcRoot("test", db)
+	require.NoError(t, err)
+	require.Equal(t, root, r2)
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	if _, err = tds.ResolveStateTrie(false, false); err != nil {
-		assert.NoError(t, err)
-	}
-
 	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
 
-	codeSize2, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
+
+	r2, err = trie.CalcRoot("test", db)
+	require.NoError(t, err)
+	require.Equal(t, root, r2)
 }
 
 func TestRecreateAndRewind(t *testing.T) {
