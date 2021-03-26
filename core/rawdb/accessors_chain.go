@@ -226,6 +226,9 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 func ReadCurrentHeader(db databaseReader) *types.Header {
 	headHash := ReadHeadBlockHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
 	return ReadHeader(db, headHash, *headNumber)
 }
 

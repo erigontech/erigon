@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -41,9 +42,9 @@ type testBackend struct {
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	if number == rpc.LatestBlockNumber {
-		return b.chain.CurrentBlock().Header(), nil
+		return rawdb.ReadCurrentHeader(b.chain.ChainDb()), nil
 	}
-	return b.chain.GetHeaderByNumber(uint64(number)), nil
+	return rawdb.ReadHeaderByNumber(b.chain.ChainDb(), uint64(number)), nil
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
@@ -69,7 +70,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	)
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	//defer db.Close()
 	genesis, _, err := gspec.Commit(db, false)
 	if err != nil {
 		t.Fatal(err)
