@@ -1384,15 +1384,15 @@ done:
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
-	db, genesis, err := newCanonical(ethash.NewFaker(), 0, true)
-	if err != nil {
-		t.Fatalf("failed to create pristine chain: %v", err)
+	db, genesis, err1 := newCanonical(ethash.NewFaker(), 0, true)
+	if err1 != nil {
+		t.Fatalf("failed to create pristine chain: %v", err1)
 	}
 	defer db.Close()
 
-	chain, _, err := core.GenerateChain(params.AllEthashProtocolChanges, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate chain: %v", err)
+	chain, _, err2 := core.GenerateChain(params.AllEthashProtocolChanges, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+	if err2 != nil {
+		t.Fatalf("generate chain: %v", err2)
 	}
 
 	var pend sync.WaitGroup
