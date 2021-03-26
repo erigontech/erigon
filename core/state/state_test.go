@@ -36,7 +36,8 @@ type StateSuite struct {
 	db    ethdb.Database
 	kv    ethdb.RwKV // Same as db, but with a different interface
 	state *IntraBlockState
-	tds   *TrieDbState
+	r     StateReader
+	w     StateWriter
 }
 
 var _ = checker.Suite(&StateSuite{})
@@ -52,20 +53,15 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := s.w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-
-	err = s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	err = s.w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	_, err = s.tds.ComputeTrieRoots()
+	err = s.state.FinalizeTx(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -108,9 +104,9 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := ethdb.NewMemDatabase()
 	s.db = db
 	s.kv = db.RwKV()
-	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
-	s.state = New(s.tds)
-	s.tds.StartNewBuffer()
+	s.r = NewDbStateReader(s.db)
+	s.w = NewDbStateWriter(s.db, 0)
+	s.state = New(s.r)
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
@@ -122,12 +118,10 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	s.state.SetState(address, &common.Hash{}, value)
 
 	ctx := context.TODO()
-	err := s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)

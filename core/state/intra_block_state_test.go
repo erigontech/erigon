@@ -470,19 +470,12 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.FinalizeTx(context.Background(), s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(context.Background(), s.w)
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
 
-	_, err = s.tds.ComputeTrieRoots()
-	if err != nil {
-		c.Fatal("error while ComputeTrieRoots", err)
-	}
-
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
+	err = s.state.CommitBlock(context.Background(), s.w)
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
