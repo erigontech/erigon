@@ -1428,7 +1428,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 			}
 		}(chain[i])
 
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), types.Blocks{chain[i]}, true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), types.Blocks{chain[i]}, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert block %d: %v", i, err)
 		}
 	}
