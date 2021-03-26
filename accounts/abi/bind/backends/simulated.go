@@ -100,7 +100,7 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	engine := ethash.NewFaker()
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, genesis.Config, exit)
+	eng := process.NewConsensusProcess(engine, genesis.Config, exit, 1)
 
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
@@ -133,7 +133,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	engine := ethash.NewFaker()
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, genesis.Config, exit)
+	eng := process.NewConsensusProcess(engine, genesis.Config, exit, 1)
 
 	txCacher := core.NewTxSenderCacher(1)
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)

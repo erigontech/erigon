@@ -504,7 +504,7 @@ func initialState1() error {
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
+	eng := process.NewConsensusProcess(engine, gspec.Config, exit, 1)
 	defer close(exit)
 
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* rootCheck */); err != nil {

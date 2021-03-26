@@ -13,12 +13,12 @@ type RemoteEngine struct {
 	exit chan struct{}
 }
 
-func NewRemoteEngine(e consensus.Engine, config *params.ChainConfig) *RemoteEngine {
+func NewRemoteEngine(e consensus.Engine, config *params.ChainConfig, workers int) *RemoteEngine {
 	exit := make(chan struct{})
 
 	return &RemoteEngine{
 		e,
-		NewConsensusProcess(e, config, exit),
+		NewConsensusProcess(e, config, exit, workers),
 		exit,
 	}
 }

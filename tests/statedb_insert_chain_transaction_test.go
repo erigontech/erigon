@@ -534,7 +534,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)

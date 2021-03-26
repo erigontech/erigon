@@ -311,7 +311,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		consensusConfig = &config.Ethash
 	}
 
-	eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+	eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, runtime.NumCPU() /* workers */)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 

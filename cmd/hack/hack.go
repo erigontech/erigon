@@ -1860,7 +1860,7 @@ func applyBlock(chaindata string, hash common.Hash) error {
 
 	exit := make(chan struct{})
 	cons := ethash.NewFaker()
-	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 
 	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, cons, eng, block, true /* checkRoot */); err != nil {

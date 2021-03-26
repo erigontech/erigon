@@ -55,7 +55,7 @@ func createTestDb() (ethdb.Database, error) {
 	engine := ethash.NewFaker()
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)

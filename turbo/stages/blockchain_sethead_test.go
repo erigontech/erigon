@@ -1774,7 +1774,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	chainConfig := params.AllEthashProtocolChanges
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, chainConfig, exit)
+	eng := process.NewConsensusProcess(engine, chainConfig, exit, 1)
 	defer common.SafeClose(exit)
 
 	// If sidechain blocks are needed, make a light chain and import it

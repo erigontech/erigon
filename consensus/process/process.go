@@ -38,15 +38,12 @@ var (
 	errRequestTimeout = errors.New("request timeout")
 )
 
-func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}) *Consensus {
+func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}, workers int) *Consensus {
 	c := &Consensus{
 		Server:        v,
 		API:           consensus.NewAPI(config),
 		innerValidate: make(chan *validateHeaderRequest, 65536),
 	}
-
-	// event loop
-	workers := runtime.NumCPU()
 
 	for i := 0; i < workers; i++ {
 		go func() {

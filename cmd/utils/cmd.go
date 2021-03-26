@@ -134,7 +134,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 	n := 0
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(chain.Engine(), chain.Config(), exit)
+	eng := process.NewConsensusProcess(chain.Engine(), chain.Config(), exit, runtime.NumCPU() /* workers */)
 	defer close(exit)
 
 	for batch := 0; ; batch++ {

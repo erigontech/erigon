@@ -132,7 +132,7 @@ func (t *BlockTest) Run(_ bool) error {
 		}
 	*/
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, config, exit)
+	eng := process.NewConsensusProcess(engine, config, exit, 1)
 	defer common.SafeClose(exit)
 
 	validBlocks, err := t.insertBlocks(db, config, engine, eng)
