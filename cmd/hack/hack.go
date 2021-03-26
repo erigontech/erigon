@@ -827,7 +827,6 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	db := ethdb.NewMemDatabase()
 	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(false)
 	tool.Check(err)
 	genesisHeader := genesisBlock.Header()
