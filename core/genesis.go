@@ -260,9 +260,9 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	tmpDB:= ethdb.NewMemDatabase()
+	tmpDB := ethdb.NewMemDatabase()
 	defer tmpDB.Close()
-	r,w:= state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
+	r, w := state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
 	statedb := state.New(r)
 	for addr, account := range g.Alloc {
 		balance, _ := uint256.FromBig(account.Balance)
@@ -291,7 +291,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err :=	trie.CalcRoot("genesis", tmpDB)
+	root, err := trie.CalcRoot("genesis", tmpDB)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -352,9 +352,9 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if dbErr != nil {
 		return nil, nil, dbErr
 	}
-	block, statedb, err := g.WriteGenesisState(tx, history)
-	if err != nil {
-		return block, statedb, err
+	block, statedb, err2 := g.WriteGenesisState(tx, history)
+	if err2 != nil {
+		return block, statedb, err2
 	}
 	config := g.Config
 	if config == nil {
@@ -377,8 +377,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	}
 	rawdb.WriteHeadBlockHash(tx, block.Hash())
 	rawdb.WriteHeadFastBlockHash(tx, block.Hash())
-	err = rawdb.WriteHeadHeaderHash(tx, block.Hash())
-	if err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
