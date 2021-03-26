@@ -113,7 +113,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
 		defer db.Close()
-		cfg.r = state/cmd/hack/hack.go:143.NewDbStateReader(db)
+		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
 		cfg.State = state.New(cfg.r)
 	}
