@@ -276,8 +276,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 			statedb.SetIncarnation(addr, 1)
 		}
 	}
-	err := statedb.FinalizeTx(context.Background(), w)
-	if err != nil {
+	if err := statedb.FinalizeTx(context.Background(), w); err != nil {
 		return nil, nil, err
 	}
 	root, err := trie.CalcRoot("genesis", tmpDB)
