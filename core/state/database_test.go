@@ -143,7 +143,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -352,7 +352,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -547,7 +547,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[0:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -681,7 +681,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -812,7 +812,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -967,7 +967,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1116,7 +1116,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1201,7 +1201,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1353,7 +1353,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1698,7 +1698,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	// BLOCKS 1 and 2
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)

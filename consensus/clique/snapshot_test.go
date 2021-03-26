@@ -418,7 +418,7 @@ func TestClique(t *testing.T) {
 		engine.fakeDiff = true
 
 		exit := make(chan struct{})
-		eng := process.NewConsensusProcess(NewCliqueVerifier(engine), params.AllEthashProtocolChanges, exit)
+		eng := process.NewConsensusProcess(NewCliqueVerifier(engine), params.AllEthashProtocolChanges, exit, 1)
 
 		txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, txCacher)

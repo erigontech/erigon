@@ -287,7 +287,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 		t.Errorf("setting up genensis block: %v", err)
 	}
 
-	engine := ethconfig.CreateConsensusEngine(config, consensusConfig, nil, false)
+	engine := ethconfig.CreateConsensusEngine(config, consensusConfig, nil, false, 1)
 	defer engine.Close()
 
 	var done int

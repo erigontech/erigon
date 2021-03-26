@@ -144,7 +144,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 
 	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
 
-	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+	eng := process.NewRemoteEngine(engine, params.TestChainConfig, 1)
 
 	headBlock := genesis
 	if blocks > 0 {

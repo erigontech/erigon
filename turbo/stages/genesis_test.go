@@ -141,7 +141,7 @@ func TestSetupGenesis(t *testing.T) {
 				}
 				exit := make(chan struct{})
 				cons := ethash.NewFaker()
-				eng := process.NewConsensusProcess(cons, oldcustomg.Config, exit)
+				eng := process.NewConsensusProcess(cons, oldcustomg.Config, exit, 1)
 				defer common.SafeClose(exit)
 				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 					return nil, common.Hash{}, nil, err

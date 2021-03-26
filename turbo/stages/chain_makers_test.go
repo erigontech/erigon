@@ -104,7 +104,7 @@ func ExampleGenerateChain() {
 	// Import the chain. This runs all block validation rules.
 	exit := make(chan struct{})
 	cons := ethash.NewFaker()
-	eng := process.NewConsensusProcess(ethash.NewFaker(), gspec.Config, exit)
+	eng := process.NewConsensusProcess(ethash.NewFaker(), gspec.Config, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons, eng, chain, true /* checkRoot */); err != nil {
 		fmt.Printf("insert error%v\n", err)

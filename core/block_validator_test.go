@@ -82,7 +82,7 @@ func TestHeaderVerification(t *testing.T) {
 			}
 		}
 		engine := ethash.NewFaker()
-		eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+		eng := process.NewRemoteEngine(engine, params.TestChainConfig, 1)
 
 		if _, err = stagedsync.InsertBlocksInStages(testdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)

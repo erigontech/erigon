@@ -73,7 +73,7 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 	headBlock := genesis
 	if blocks > 0 {
 		engine := ethash.NewFaker()
-		eng := process.NewRemoteEngine(engine, params.TestChainConfig)
+		eng := process.NewRemoteEngine(engine, params.TestChainConfig, 1)
 		defer eng.Close()
 
 		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, blocks, generator, true)

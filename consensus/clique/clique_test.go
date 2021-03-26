@@ -98,7 +98,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genspec.MustCommit(db)
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(NewCliqueVerifier(engine), params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(NewCliqueVerifier(engine), params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, eng, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)

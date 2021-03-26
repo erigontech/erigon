@@ -58,7 +58,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
@@ -128,7 +128,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
@@ -191,7 +191,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
@@ -255,7 +255,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
@@ -317,7 +317,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
@@ -378,7 +378,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -456,7 +456,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -617,7 +617,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit)
+	eng := process.NewConsensusProcess(blockchain.Engine(), blockchain.Config(), exit, 1)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
