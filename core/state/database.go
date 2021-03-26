@@ -235,7 +235,6 @@ type TrieDbState struct {
 	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
-	loader            *trie.SubTrieLoader
 	pw                *PreimageWriter
 	incarnationMap    map[common.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
@@ -512,89 +511,11 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 func (tds *TrieDbState) resolveCodeTouches(
 	codeTouches map[common.Hash]common.Hash,
 	codeSizeTouches map[common.Hash]common.Hash,
-	loadFunc trie.LoadFunc,
 ) error {
-	firstRequest := true
-	for address, codeHash := range codeTouches {
-		delete(codeSizeTouches, codeHash)
-		if need, req := tds.t.NeedLoadCode(address, codeHash, true /*bytecode*/); need {
-			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
-			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.loader.AddCodeRequest(req)
-		}
-	}
-
-	for address, codeHash := range codeSizeTouches {
-		if need, req := tds.t.NeedLoadCode(address, codeHash, false /*bytecode*/); need {
-			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
-			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
-			}
-			firstRequest = false
-			tds.loader.AddCodeRequest(req)
-		}
-	}
-
-	if !firstRequest {
-		if _, err := loadFunc(tds.loader, nil, nil, nil); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 var bytes8 [8]byte
-
-func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, loadFunc trie.LoadFunc) error {
-	// Build the retain list
-	rl := trie.NewRetainList(0)
-	for _, addrHash := range accountTouches {
-		var incarnation uint64
-		if inc, ok := tds.aggregateBuffer.accountReadsIncarnation[addrHash]; ok {
-			incarnation = inc
-		}
-		var nibbles = make([]byte, 2*(common.HashLength+common.IncarnationLength))
-		for i, b := range addrHash[:] {
-			nibbles[i*2] = b / 16
-			nibbles[i*2+1] = b % 16
-		}
-		binary.BigEndian.PutUint64(bytes8[:], incarnation)
-		for i, b := range bytes8[:] {
-			nibbles[2*common.HashLength+i*2] = b / 16
-			nibbles[2*common.HashLength+i*2+1] = b % 16
-		}
-		rl.AddHex(nibbles)
-	}
-	for _, storageKey := range storageTouches {
-		var nibbles = make([]byte, 2*len(storageKey))
-		for i, b := range storageKey[:] {
-			nibbles[i*2] = b / 16
-			nibbles[i*2+1] = b % 16
-		}
-		rl.AddHex(nibbles)
-	}
-
-	dbPrefixes, fixedbits, hooks := tds.t.FindSubTriesToLoad(rl)
-	// FindSubTriesToLoad would have gone through the entire rs, so we need to rewind to the beginning
-	rl.Rewind()
-	loader := trie.NewSubTrieLoader(tds.blockNr)
-	subTries, err := loadFunc(loader, rl, dbPrefixes, fixedbits)
-	if err != nil {
-		return err
-	}
-	if err := tds.t.HookSubTries(subTries, hooks); err != nil {
-		for i, hash := range subTries.Hashes {
-			log.Error("Info for error", "dbPrefix", fmt.Sprintf("%x", dbPrefixes[i]), "fixedbits", fixedbits[i], "hash", hash)
-		}
-		return err
-	}
-	return nil
-}
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
 	for _, addrHash := range accountTouches {
@@ -608,55 +529,6 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) 
 // since the last invocation of `ExtractTouches`.
 func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouches [][]byte) {
 	return tds.retainListBuilder.ExtractTouches()
-}
-
-func (tds *TrieDbState) resolveStateTrieWithFunc(loadFunc trie.LoadFunc) error {
-	// Aggregating the current buffer, if any
-	if tds.currentBuffer != nil {
-		if tds.aggregateBuffer == nil {
-			tds.aggregateBuffer = &Buffer{}
-			tds.aggregateBuffer.initialise()
-		}
-		tds.aggregateBuffer.merge(tds.currentBuffer)
-	}
-	if tds.aggregateBuffer == nil {
-		return nil
-	}
-
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-
-	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
-	storageTouches := tds.buildStorageReads()
-
-	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
-	accountTouches := tds.buildAccountReads()
-
-	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
-	codeTouches := tds.buildCodeTouches()
-
-	// Prepare (resolve) contract code size reads so that actual modifications can proceed without database access
-	codeSizeTouches := tds.buildCodeSizeTouches()
-
-	var err error
-	if err = tds.resolveAccountAndStorageTouches(accountTouches, storageTouches, loadFunc); err != nil {
-		return err
-	}
-
-	if err = tds.resolveCodeTouches(codeTouches, codeSizeTouches, loadFunc); err != nil {
-		return err
-	}
-
-	if tds.resolveReads {
-		tds.populateAccountBlockProof(accountTouches)
-	}
-
-	if tds.resolveReads {
-		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
