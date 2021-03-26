@@ -119,7 +119,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	var flags = opts.flags
 	if opts.inMem {
 		flags ^= mdbx.Durable
-		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync | mdbx.WriteMap // it's ok for tests
+		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync // it's ok for tests
 		opts.dirtyListMaxPages = 8 * 1024
 	}
 
@@ -128,8 +128,14 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 
 	if opts.flags&mdbx.Accede == 0 {
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
-			return nil, err
+		if opts.inMem {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(16*datasize.MB), -1, 4*1024); err != nil {
+				return nil, err
+			}
+		} else {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+				return nil, err
+			}
 		}
 		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
 			return nil, err

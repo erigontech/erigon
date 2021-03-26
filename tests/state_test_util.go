@@ -151,21 +151,21 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, error) {
-	state, statedb, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
+func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	state, _, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
 	if err != nil {
-		return state, statedb, err
+		return state, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
-		return state, statedb, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
-		return state, statedb, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return state, statedb, nil
+	return state, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
@@ -175,18 +175,20 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	db := ethdb.NewMemDatabase()
-	block, _, err := t.genesis(config).ToBlock(db, false)
+	block, _, err := t.genesis(config).ToBlock(nil, false)
 	if err != nil {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	defer db.Close()
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
-	statedb, tds, err := MakePreState(context.Background(), ethdb.NewMemDatabase(), t.json.Pre, readBlockNr)
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, _ := db.Begin(context.Background(), ethdb.RW)
+	defer tx.Rollback()
+	statedb, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
