@@ -76,7 +76,7 @@ func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db *eth
 // newCanonical creates a chain database, and injects a deterministic canonical
 // chain. Depending on the full flag, if creates either a full block chain or a
 // header only chain.
-func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatabase, *core.BlockChain, error) {
+func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatabase, *types.Block, error) {
 	db := ethdb.NewMemDatabase()
 	genesis, _, err := new(core.Genesis).Commit(db, true /* history */)
 	if err != nil {
@@ -84,41 +84,40 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 	}
 
 	// Initialize a fresh chain with only a genesis block
-	cacheConfig := &core.CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
-	}
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, txCacher)
+	//cacheConfig := &core.CacheConfig{
+	//	TrieCleanLimit: 256,
+	//	TrieDirtyLimit: 256,
+	//	TrieTimeLimit:  5 * time.Minute,
+	//	NoHistory:      false,
+	//	Pruning:        false,
+	//}
+	//txCacher := core.NewTxSenderCacher(1)
+	//blockchain, _ := core.NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, txCacher)
 
 	// Create and inject the requested chain
 	if n == 0 {
-		return db, blockchain, nil
+		return db, genesis, nil
 	}
 
 	if full {
 		// Full block-chain requested
 		blocks := makeBlockChain(genesis, n, engine, db, canonicalSeed)
 		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, engine, blocks, true /* checkRoot */)
-		return db, blockchain, err
+		return db, genesis, err
 	}
 	// Header-only chain requested
 	headers := makeHeaderChain(genesis.Header(), n, engine, db, canonicalSeed)
 	_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
-	return db, blockchain, err
+	return db, genesis, err
 }
 
 // Test fork of length N starting from block i
 func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
-	db, blockchain2, err := newCanonical(ethash.NewFaker(), i, true)
+	db, _, err := newCanonical(ethash.NewFaker(), i, true)
 	if err != nil {
 		t.Fatal("could not make new canonical in testFork", err)
 	}
-	defer blockchain2.Stop()
 	defer db.Close()
 
 	// Assert the chains have the same header/block at #i
@@ -206,11 +205,11 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 	}
 	// Sanity check that the forked chain can be imported into the original
 	if full {
-		if err := testBlockChainImport(blockChainB, blockchain2); err != nil {
+		if err := testBlockChainImport(blockChainB, db); err != nil {
 			t.Fatalf("failed to import forked block chain: %v", err)
 		}
 	} else {
-		if err := testHeaderChainImport(headerChainB, blockchain2); err != nil {
+		if err := testHeaderChainImport(headerChainB, db); err != nil {
 			t.Fatalf("failed to import forked header chain: %v", err)
 		}
 	}
@@ -220,8 +219,8 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 
 // testBlockChainImport tries to process a chain of blocks, writing them into
 // the database if successful.
-func testBlockChainImport(chain types.Blocks, blockchain *core.BlockChain) error {
-	if _, err := stagedsync.InsertBlocksInStages(blockchain.ChainDb(), ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), chain, true /* checkRoot */); err != nil {
+func testBlockChainImport(chain types.Blocks, db ethdb.Database) error {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
 		return err
 	}
 	return nil
@@ -229,22 +228,21 @@ func testBlockChainImport(chain types.Blocks, blockchain *core.BlockChain) error
 
 // testHeaderChainImport tries to process a chain of header, writing them into
 // the database if successful.
-func testHeaderChainImport(chain []*types.Header, blockchain *core.BlockChain) error {
-	if _, _, _, err := stagedsync.InsertHeadersInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), chain); err != nil {
+func testHeaderChainImport(chain []*types.Header, db ethdb.Database) error {
+	if _, _, _, err := stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), chain); err != nil {
 		return err
 	}
 	return nil
 }
 
 func TestLastBlock(t *testing.T) {
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, true)
+	db, _, err := newCanonical(ethash.NewFaker(), 0, true)
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
-	defer blockchain.Stop()
 	defer db.Close()
 
-	blocks := makeBlockChain(blockchain.CurrentBlock(), 1, ethash.NewFullFaker(), db, 0)
+	blocks := makeBlockChain(rawdb.ReadCurrentBlock(db), 1, ethash.NewFullFaker(), db, 0)
 	engine := ethash.NewFaker()
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
@@ -263,11 +261,10 @@ func testExtendCanonical(t *testing.T, full bool) {
 	length := 5
 
 	// Make first chain starting from genesis
-	db, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	db, _, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
-	defer processor.Stop()
 	defer db.Close()
 
 	// Define the difficulty comparator
@@ -295,11 +292,10 @@ func testShorterFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	db, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	db, _, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
-	defer processor.Stop()
 	defer db.Close()
 
 	// Define the difficulty comparator
@@ -326,11 +322,10 @@ func testLongerFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	db, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	db, _, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
-	defer processor.Stop()
 	defer db.Close()
 
 	// Define the difficulty comparator
@@ -360,11 +355,10 @@ func testEqualFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	db, processor, err := newCanonical(ethash.NewFaker(), length, full)
+	db, _, err := newCanonical(ethash.NewFaker(), length, full)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
-	defer processor.Stop()
 	defer db.Close()
 
 	// Define the difficulty comparator
@@ -388,22 +382,21 @@ func TestBrokenBlockChain(t *testing.T)  { testBrokenChain(t, true) }
 
 func testBrokenChain(t *testing.T, full bool) {
 	// Make chain starting from genesis
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 10, true)
+	db, _, err := newCanonical(ethash.NewFaker(), 10, true)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
-	defer blockchain.Stop()
 	defer db.Close()
 
 	// Create a forked chain, and try to insert with a missing link
 	if full {
-		chain := makeBlockChain(blockchain.CurrentBlock(), 5, ethash.NewFaker(), db, forkSeed)[1:]
-		if err := testBlockChainImport(chain, blockchain); err == nil {
+		chain := makeBlockChain(rawdb.ReadCurrentBlock(db), 5, ethash.NewFaker(), db, forkSeed)[1:]
+		if err := testBlockChainImport(chain, db); err == nil {
 			t.Errorf("broken block chain not reported")
 		}
 	} else {
-		chain := makeHeaderChain(blockchain.CurrentHeader(), 5, ethash.NewFaker(), db, forkSeed)[1:]
-		if err := testHeaderChainImport(chain, blockchain); err == nil {
+		chain := makeHeaderChain(rawdb.ReadCurrentHeader(db), 5, ethash.NewFaker(), db, forkSeed)[1:]
+		if err := testHeaderChainImport(chain, db); err == nil {
 			t.Errorf("broken header chain not reported")
 		}
 	}
@@ -440,21 +433,20 @@ func testReorgShort(t *testing.T, full bool) {
 
 func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 	// Create a pristine chain and database
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
+	db, genesis, err := newCanonical(ethash.NewFaker(), 0, full)
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
-	defer blockchain.Stop()
 	defer db.Close()
 
 	// Insert an easy and a difficult chain afterwards
-	easyBlocks, _, err := core.GenerateChain(params.TestChainConfig, blockchain.CurrentBlock(), ethash.NewFaker(), db, len(first), func(i int, b *core.BlockGen) {
+	easyBlocks, _, err := core.GenerateChain(params.TestChainConfig, rawdb.ReadCurrentBlock(db), ethash.NewFaker(), db, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffBlocks, _, err := core.GenerateChain(params.TestChainConfig, blockchain.CurrentBlock(), ethash.NewFaker(), db, len(second), func(i int, b *core.BlockGen) {
+	diffBlocks, _, err := core.GenerateChain(params.TestChainConfig, rawdb.ReadCurrentBlock(db), ethash.NewFaker(), db, len(second), func(i int, b *core.BlockGen) {
 		b.OffsetTime(second[i])
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -485,28 +477,30 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 	}
 	// Check that the chain is valid number and link wise
 	if full {
-		prev := blockchain.CurrentBlock()
-		for block := blockchain.GetBlockByNumber(blockchain.CurrentBlock().NumberU64() - 1); block.NumberU64() != 0; prev, block = block, blockchain.GetBlockByNumber(block.NumberU64()-1) {
+		prev := rawdb.ReadCurrentBlock(db)
+		for block, _ := rawdb.ReadBlockByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); block.NumberU64() != 0; {
 			if prev.ParentHash() != block.Hash() {
 				t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 			}
+			prev = block
+			block, _ = rawdb.ReadBlockByNumber(db, block.NumberU64()-1)
 		}
 	} else {
-		prev := blockchain.CurrentHeader()
-		for header := blockchain.GetHeaderByNumber(blockchain.CurrentHeader().Number.Uint64() - 1); header.Number.Uint64() != 0; prev, header = header, blockchain.GetHeaderByNumber(header.Number.Uint64()-1) {
+		prev := rawdb.ReadCurrentHeader(db)
+		for header := rawdb.ReadHeaderByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); header.Number.Uint64() != 0; prev, header = header, rawdb.ReadHeaderByNumber(db, header.Number.Uint64()-1) {
 			if prev.ParentHash != header.Hash() {
 				t.Errorf("parent header hash mismatch: have %x, want %x", prev.ParentHash, header.Hash())
 			}
 		}
 	}
 	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(blockchain.Genesis().Difficulty(), big.NewInt(td))
+	want := new(big.Int).Add(genesis.Difficulty(), big.NewInt(td))
 	if full {
-		if have := blockchain.GetTdByHash(blockchain.CurrentBlock().Hash()); have.Cmp(want) != 0 {
+		if have, _ := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash()); have.Cmp(want) != 0 {
 			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 		}
 	} else {
-		if have := blockchain.GetTdByHash(blockchain.CurrentHeader().Hash()); have.Cmp(want) != 0 {
+		if have, _ := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash()); have.Cmp(want) != 0 {
 			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 		}
 	}
@@ -517,30 +511,29 @@ func TestBadHeaderHashes(t *testing.T) { testBadHashes(t, false) }
 func TestBadBlockHashes(t *testing.T)  { testBadHashes(t, true) }
 
 func testBadHashes(t *testing.T, full bool) {
-	t.Skip("to support this error in TG")
 
+	t.Skip("to support this error in TG")
 	// Create a pristine chain and database
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
+	db, _, err := newCanonical(ethash.NewFaker(), 0, full)
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer db.Close()
-	defer blockchain.Stop()
 
 	// Create a chain, ban a hash and try to import
 	if full {
-		blocks := makeBlockChain(blockchain.CurrentBlock(), 3, ethash.NewFaker(), db, 10)
+		blocks := makeBlockChain(rawdb.ReadCurrentBlock(db), 3, ethash.NewFaker(), db, 10)
 
 		core.BadHashes[blocks[2].Header().Hash()] = true
 		defer func() { delete(core.BadHashes, blocks[2].Header().Hash()) }()
 
-		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), blockchain.GetVMConfig(), blockchain.Engine(), blocks, true /* checkRoot */)
+		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 	} else {
-		headers := makeHeaderChain(blockchain.CurrentHeader(), 3, ethash.NewFaker(), db, 10)
+		headers := makeHeaderChain(rawdb.ReadCurrentHeader(db), 3, ethash.NewFaker(), db, 10)
 
 		core.BadHashes[headers[2].Hash()] = true
 		defer func() { delete(core.BadHashes, headers[2].Hash()) }()
-		_, _, _, err = stagedsync.InsertHeadersInStages(db, blockchain.Config(), blockchain.Engine(), headers)
+		_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
 	}
 	if !errors.Is(err, core.ErrBlacklistedHash) {
 		t.Errorf("error mismatch: have: %v, want: %v", err, core.ErrBlacklistedHash)
@@ -555,64 +548,38 @@ func TestReorgBadBlockHashes(t *testing.T)  { testReorgBadHashes(t, true) }
 func testReorgBadHashes(t *testing.T, full bool) {
 	t.Skip("Broken by removal BadHashes check at the creation of blockchain")
 	// Create a pristine chain and database
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
+	db, _, err := newCanonical(ethash.NewFaker(), 0, full)
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer db.Close()
-	defer blockchain.Stop()
 
 	// Create a chain, import and ban afterwards
-	headers := makeHeaderChain(blockchain.CurrentHeader(), 4, ethash.NewFaker(), db, 10)
-	blocks := makeBlockChain(blockchain.CurrentBlock(), 4, ethash.NewFaker(), db, 10)
+	headers := makeHeaderChain(rawdb.ReadCurrentHeader(db), 4, ethash.NewFaker(), db, 10)
+	blocks := makeBlockChain(rawdb.ReadCurrentBlock(db), 4, ethash.NewFaker(), db, 10)
 
 	if full {
-		if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
+		if err != nil {
 			t.Errorf("failed to import blocks: %v", err)
 		}
-		if blockchain.CurrentBlock().Hash() != blocks[3].Hash() {
-			t.Errorf("last block hash mismatch: have: %x, want %x", blockchain.CurrentBlock().Hash(), blocks[3].Header().Hash())
+		if rawdb.ReadCurrentBlock(db).Hash() != blocks[3].Hash() {
+			t.Errorf("last block hash mismatch: have: %x, want %x", rawdb.ReadCurrentBlock(db).Hash(), blocks[3].Header().Hash())
 		}
 		core.BadHashes[blocks[3].Header().Hash()] = true
 		defer func() { delete(core.BadHashes, blocks[3].Header().Hash()) }()
 	} else {
-		if _, err = blockchain.InsertHeaderChain(headers, 1); err != nil {
+		_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
+		if err != nil {
 			t.Errorf("failed to import headers: %v", err)
 		}
-		if blockchain.CurrentHeader().Hash() != headers[3].Hash() {
-			t.Errorf("last header hash mismatch: have: %x, want %x", blockchain.CurrentHeader().Hash(), headers[3].Hash())
+		if rawdb.ReadCurrentHeader(db).Hash() != headers[3].Hash() {
+			t.Errorf("last header hash mismatch: have: %x, want %x", rawdb.ReadCurrentHeader(db).Hash(), headers[3].Hash())
 		}
 		core.BadHashes[headers[3].Hash()] = true
 		defer func() { delete(core.BadHashes, headers[3].Hash()) }()
 	}
-	blockchain.Stop()
 
-	// Create a new BlockChain and check that it rolled back the state.
-	cacheConfig := &core.CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
-	}
-	txCacher := core.NewTxSenderCacher(1)
-	ncm, err := core.NewBlockChain(blockchain.ChainDb(), cacheConfig, blockchain.Config(), ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatalf("failed to create new chain manager: %v", err)
-	}
-	defer ncm.Stop()
-	if full {
-		if ncm.CurrentBlock().Hash() != blocks[2].Header().Hash() {
-			t.Errorf("last block hash mismatch: have: %x, want %x", ncm.CurrentBlock().Hash(), blocks[2].Header().Hash())
-		}
-		if blocks[2].Header().GasLimit != ncm.GasLimit() {
-			t.Errorf("last  block gasLimit mismatch: have: %d, want %d", ncm.GasLimit(), blocks[2].Header().GasLimit)
-		}
-	} else {
-		if ncm.CurrentHeader().Hash() != headers[2].Hash() {
-			t.Errorf("last header hash mismatch: have: %x, want %x", ncm.CurrentHeader().Hash(), headers[2].Hash())
-		}
-	}
 }
 
 // Tests chain insertions in the face of one entity containing an invalid nonce.
@@ -624,7 +591,7 @@ func testInsertNonceError(t *testing.T, full bool) {
 		i := i
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			// Create a pristine chain and database
-			db, blockchain, err := newCanonical(ethash.NewFaker(), 0, full)
+			db, _, err := newCanonical(ethash.NewFaker(), 0, full)
 			if err != nil {
 				t.Fatalf("failed to create pristine chain: %v", err)
 			}
@@ -634,7 +601,6 @@ func testInsertNonceError(t *testing.T, full bool) {
 				time.Sleep(time.Millisecond)
 				db.Close()
 			}(db)
-			defer blockchain.Stop()
 
 			// Create and insert a chain with a failing nonce
 			var (
@@ -643,22 +609,19 @@ func testInsertNonceError(t *testing.T, full bool) {
 				failNum uint64
 			)
 			if full {
-				blocks := makeBlockChain(blockchain.CurrentBlock(), i, ethash.NewFaker(), db, 0)
+				blocks := makeBlockChain(rawdb.ReadCurrentBlock(db), i, ethash.NewFaker(), db, 0)
 
 				failAt = rand.Int() % len(blocks) // nolint:gosec
 				failNum = blocks[failAt].NumberU64()
 
-				blockchain.SetEngine(ethash.NewFakeFailer(failNum))
-				failRes, err = blockchain.InsertChain(context.Background(), blocks)
+				_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFakeFailer(failNum), blocks, true /* checkRoot */)
 			} else {
-				headers := makeHeaderChain(blockchain.CurrentHeader(), i, ethash.NewFaker(), db, 0)
+				headers := makeHeaderChain(rawdb.ReadCurrentHeader(db), i, ethash.NewFaker(), db, 0)
 
 				failAt = rand.Int() % len(headers) // nolint:gosec
 				failNum = headers[failAt].Number.Uint64()
 
-				blockchain.SetEngine(ethash.NewFakeFailer(failNum))
-				blockchain.HeaderChain().SetEngine(blockchain.Engine())
-				failRes, err = blockchain.InsertHeaderChain(headers, 1)
+				_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFakeFailer(failNum), headers)
 			}
 			// Check that the returned error indicates the failure
 			if failRes != failAt {
@@ -667,11 +630,11 @@ func testInsertNonceError(t *testing.T, full bool) {
 			// Check that all blocks after the failing block have been inserted
 			for j := 0; j < i-failAt; j++ {
 				if full {
-					if block := blockchain.GetBlockByNumber(failNum + uint64(j)); block != nil {
+					if block, _ := rawdb.ReadBlockByNumber(db, failNum+uint64(j)); block != nil {
 						t.Errorf("test %d: invalid block in chain: %v", i, block)
 					}
 				} else {
-					if header := blockchain.GetHeaderByNumber(failNum + uint64(j)); header != nil {
+					if header := rawdb.ReadHeaderByNumber(db, failNum+uint64(j)); header != nil {
 						t.Errorf("test %d: invalid header in chain: %v", i, header)
 					}
 				}
@@ -1421,14 +1384,13 @@ done:
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 0, true)
+	db, genesis, err := newCanonical(ethash.NewFaker(), 0, true)
 	if err != nil {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer db.Close()
-	defer blockchain.Stop()
 
-	chain, _, err := core.GenerateChain(blockchain.Config(), blockchain.Genesis(), ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+	chain, _, err := core.GenerateChain(params.AllEthashProtocolChanges, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -1442,7 +1404,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 			// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
 			for {
-				ch, err := rawdb.ReadCanonicalHash(blockchain.ChainDb(), block.NumberU64())
+				ch, err := rawdb.ReadCanonicalHash(db, block.NumberU64())
 				if err != nil {
 					panic(err)
 				}
@@ -1453,7 +1415,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 					t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
 					return
 				}
-				fb := rawdb.ReadBlock(blockchain.ChainDb(), ch, block.NumberU64())
+				fb := rawdb.ReadBlock(db, ch, block.NumberU64())
 				if fb == nil {
 					t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
 					return
@@ -1466,7 +1428,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 			}
 		}(chain[i])
 
-		if _, err := blockchain.InsertChain(context.Background(), types.Blocks{chain[i]}); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), types.Blocks{chain[i]}, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert block %d: %v", i, err)
 		}
 	}
