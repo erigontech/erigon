@@ -279,7 +279,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if err := statedb.FinalizeTx(context.Background(), w); err != nil {
 		return nil, nil, err
 	}
-	root, err := trie.CalcRoot("genesis", tmpDB)
+	root, err := trie.CalcRoot("genesis", tmpDb)
 	if err != nil {
 		return nil, nil, err
 	}
