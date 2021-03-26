@@ -223,6 +223,15 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
+func ReadCurrentHeader(db databaseReader) *types.Header {
+	headHash := ReadHeadBlockHash(db)
+	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	return ReadHeader(db, headHash, *headNumber)
+}
+
 // ReadHeadersByNumber retrieves all the block header corresponding to the number.
 func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error) {
 	var res []*types.Header

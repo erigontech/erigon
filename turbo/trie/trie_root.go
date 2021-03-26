@@ -1884,3 +1884,11 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 	}
 	return l.receiver.Root(), nil
 }
+
+func CalcRoot(logPrefix string, db ethdb.Database) (common.Hash, error) {
+	loader := NewFlatDBTrieLoader(logPrefix)
+	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
+		return EmptyRoot, err
+	}
+	return loader.CalcTrieRoot(db, nil, nil)
+}
