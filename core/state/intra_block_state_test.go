@@ -44,12 +44,11 @@ func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
+	w := NewDbStateWriter(db, 0)
+	state := New(NewDbStateReader(db))
 
 	// Update it with some accounts
 	for i := byte(0); i < 255; i++ {
-		tds.StartNewBuffer()
 		addr := common.BytesToAddress([]byte{i})
 		state.AddBalance(addr, uint256.NewInt().SetUint64(uint64(11*i)))
 		state.SetNonce(addr, uint64(42*i))
@@ -60,12 +59,7 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		_ = state.FinalizeTx(context.Background(), tds.TrieStateWriter())
-	}
-
-	_, err := tds.ComputeTrieRoots()
-	if err != nil {
-		t.Fatal("error while ComputeTrieRoots", err)
+		_ = state.FinalizeTx(context.Background(), w)
 	}
 
 	// Ensure that no data was leaked into the database
