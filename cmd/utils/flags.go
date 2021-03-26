@@ -50,7 +50,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -65,8 +64,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
-
-const localhost = "127.0.0.1"
 
 func init() {
 	cli.AppHelpTemplate = `{{.Name}} {{if .Flags}}[global options] {{end}}command{{if .Flags}} [command options]{{end}} [arguments...]
@@ -243,41 +240,6 @@ var (
 		Name:  "override.berlin",
 		Usage: "Manually specify Berlin fork-block, overriding the bundled setting",
 	}
-	// Light server and client settings
-	LightServeFlag = cli.IntFlag{
-		Name:  "light.serve",
-		Usage: "Maximum percentage of time allowed for serving LES requests (multi-threaded processing allows values over 100)",
-		Value: ethconfig.Defaults.LightServ,
-	}
-	LightIngressFlag = cli.IntFlag{
-		Name:  "light.ingress",
-		Usage: "Incoming bandwidth limit for serving light clients (kilobytes/sec, 0 = unlimited)",
-		Value: ethconfig.Defaults.LightIngress,
-	}
-	LightEgressFlag = cli.IntFlag{
-		Name:  "light.egress",
-		Usage: "Outgoing bandwidth limit for serving light clients (kilobytes/sec, 0 = unlimited)",
-		Value: ethconfig.Defaults.LightEgress,
-	}
-	LightMaxPeersFlag = cli.IntFlag{
-		Name:  "light.maxpeers",
-		Usage: "Maximum number of light clients to serve, or light servers to attach to",
-		Value: ethconfig.Defaults.LightPeers,
-	}
-	UltraLightServersFlag = cli.StringFlag{
-		Name:  "ulc.servers",
-		Usage: "List of trusted ultra-light servers",
-		Value: strings.Join(ethconfig.Defaults.UltraLightServers, ","),
-	}
-	UltraLightFractionFlag = cli.IntFlag{
-		Name:  "ulc.fraction",
-		Usage: "Minimum % of trusted ultra-light servers required to announce a new head",
-		Value: ethconfig.Defaults.UltraLightFraction,
-	}
-	UltraLightOnlyAnnounceFlag = cli.BoolFlag{
-		Name:  "ulc.onlyannounce",
-		Usage: "Ultra light server sends announcements only",
-	}
 	DownloadOnlyFlag = cli.BoolFlag{
 		Name:  "download-only",
 		Usage: "Run in download only mode - only fetch blocks but not process them",
@@ -362,7 +324,7 @@ var (
 	// Performance tuning settings
 	CacheFlag = cli.IntFlag{
 		Name:  "cache",
-		Usage: "Megabytes of memory allocated to internal caching (default = 4096 mainnet full node, 128 light mode)",
+		Usage: "Megabytes of memory allocated to internal caching (default = 4096 mainnet full node)",
 		Value: 1024,
 	}
 	CacheDatabaseFlag = cli.IntFlag{
@@ -559,20 +521,6 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
-	GraphQLEnabledFlag = cli.BoolFlag{
-		Name:  "graphql",
-		Usage: "Enable GraphQL on the HTTP-RPC server. Note that GraphQL can only be started if an HTTP server is started as well.",
-	}
-	GraphQLCORSDomainFlag = cli.StringFlag{
-		Name:  "graphql.corsdomain",
-		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
-		Value: "",
-	}
-	GraphQLVirtualHostsFlag = cli.StringFlag{
-		Name:  "graphql.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
-		Value: strings.Join(node.DefaultConfig.GraphQLVirtualHosts, ","),
-	}
 	WSEnabledFlag = cli.BoolFlag{
 		Name:  "ws",
 		Usage: "Enable the WS-RPC server",
@@ -601,16 +549,6 @@ var (
 		Name:  "ws.rpcprefix",
 		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
-	}
-	GraphQLListenAddrFlag = cli.StringFlag{
-		Name:  "graphql.addr",
-		Usage: "GraphQL server listening interface",
-		Value: node.DefaultGraphQLHost,
-	}
-	GraphQLPortFlag = cli.IntFlag{
-		Name:  "graphql.port",
-		Usage: "GraphQL server listening port",
-		Value: node.DefaultGraphQLPort,
 	}
 	ExecFlag = cli.StringFlag{
 		Name:  "exec",
@@ -757,16 +695,6 @@ var (
 		Usage: "Comma-separated InfluxDB tags (key/values) attached to all measurements",
 		Value: metrics.DefaultConfig.InfluxDBTags,
 	}
-	EWASMInterpreterFlag = cli.StringFlag{
-		Name:  "vm.ewasm",
-		Usage: "External ewasm configuration (default = built-in interpreter)",
-		Value: "",
-	}
-	EVMInterpreterFlag = cli.StringFlag{
-		Name:  "vm.evm",
-		Usage: "External EVM configuration (default = built-in interpreter)",
-		Value: "",
-	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -843,12 +771,8 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
 	switch {
-	case ctx.GlobalIsSet(BootnodesFlag.Name) || ctx.GlobalIsSet(LegacyBootnodesV4Flag.Name):
-		if ctx.GlobalIsSet(LegacyBootnodesV4Flag.Name) {
-			urls = SplitAndTrim(ctx.GlobalString(LegacyBootnodesV4Flag.Name))
-		} else {
-			urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-		}
+	case ctx.GlobalIsSet(BootnodesFlag.Name):
+		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	case ctx.GlobalBool(RopstenFlag.Name):
 		urls = params.RopstenBootnodes
 	case ctx.GlobalBool(RinkebyFlag.Name):
@@ -879,12 +803,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
 	switch {
-	case ctx.GlobalIsSet(BootnodesFlag.Name) || ctx.GlobalIsSet(LegacyBootnodesV5Flag.Name):
-		if ctx.GlobalIsSet(LegacyBootnodesV5Flag.Name) {
-			urls = SplitAndTrim(ctx.GlobalString(LegacyBootnodesV5Flag.Name))
-		} else {
-			urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-		}
+	case ctx.GlobalIsSet(BootnodesFlag.Name):
+		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	case ctx.GlobalBool(RopstenFlag.Name):
 		urls = params.RopstenBootnodes
 	case ctx.GlobalBool(RinkebyFlag.Name):
@@ -940,71 +860,6 @@ func SplitAndTrim(input string) (ret []string) {
 	}
 	return ret
 }
-
-// setGraphQL creates the GraphQL listener interface string from the set
-// command line flags, returning empty if the GraphQL endpoint is disabled.
-//func setGraphQL(ctx *cli.Context, cfg *node.Config) {
-//	if ctx.GlobalIsSet(GraphQLCORSDomainFlag.Name) {
-//		cfg.GraphQLCors = splitAndTrim(ctx.GlobalString(GraphQLCORSDomainFlag.Name))
-//	}
-//	if ctx.GlobalIsSet(GraphQLVirtualHostsFlag.Name) {
-//		cfg.GraphQLVirtualHosts = splitAndTrim(ctx.GlobalString(GraphQLVirtualHostsFlag.Name))
-//	}
-//}
-
-// setWS creates the WebSocket RPC listener interface string from the set
-// command line flags, returning empty if the HTTP endpoint is disabled.
-//func setWS(ctx *cli.Context, cfg *node.Config) {
-//	if ctx.GlobalBool(WSEnabledFlag.Name) && cfg.WSHost == "" {
-//		cfg.WSHost = localhost
-//		if ctx.GlobalIsSet(LegacyWSListenAddrFlag.Name) {
-//			cfg.WSHost = ctx.GlobalString(LegacyWSListenAddrFlag.Name)
-//			log.Warn("The flag --wsaddr is deprecated and will be removed in the future, please use --ws.addr")
-//		}
-//		if ctx.GlobalIsSet(WSListenAddrFlag.Name) {
-//			cfg.WSHost = ctx.GlobalString(WSListenAddrFlag.Name)
-//		}
-//	}
-//	if ctx.GlobalIsSet(LegacyWSPortFlag.Name) {
-//		cfg.WSPort = ctx.GlobalInt(LegacyWSPortFlag.Name)
-//		log.Warn("The flag --wsport is deprecated and will be removed in the future, please use --ws.port")
-//	}
-//	if ctx.GlobalIsSet(WSPortFlag.Name) {
-//		cfg.WSPort = ctx.GlobalInt(WSPortFlag.Name)
-//	}
-//
-//	if ctx.GlobalIsSet(LegacyWSAllowedOriginsFlag.Name) {
-//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(LegacyWSAllowedOriginsFlag.Name))
-//		log.Warn("The flag --wsorigins is deprecated and will be removed in the future, please use --ws.origins")
-//	}
-//	if ctx.GlobalIsSet(WSAllowedOriginsFlag.Name) {
-//		cfg.WSOrigins = splitAndTrim(ctx.GlobalString(WSAllowedOriginsFlag.Name))
-//	}
-//
-//	if ctx.GlobalIsSet(LegacyWSApiFlag.Name) {
-//		cfg.WSModules = splitAndTrim(ctx.GlobalString(LegacyWSApiFlag.Name))
-//		log.Warn("The flag --wsapi is deprecated and will be removed in the future, please use --ws.api")
-//	}
-//	if ctx.GlobalIsSet(WSApiFlag.Name) {
-//		cfg.WSModules = splitAndTrim(ctx.GlobalString(WSApiFlag.Name))
-//	}
-//
-//	if ctx.GlobalIsSet(WSPathPrefixFlag.Name) {
-//		cfg.WSPathPrefix = ctx.GlobalString(WSPathPrefixFlag.Name)
-//	}
-//}
-
-// setIPC creates an IPC path configuration from the set command line flags,
-// returning an empty string if IPC was explicitly disabled, or the set path.
-//func setIPC(ctx *cli.Context, cfg *node.Config) {
-//	CheckExclusive(ctx, IPCDisabledFlag, IPCPathFlag)
-//	switch {
-//	case ctx.GlobalBool(IPCDisabledFlag.Name):
-//		cfg.IPCPath = ""
-//	case ctx.GlobalIsSet(IPCPathFlag.Name):
-//		cfg.IPCPath = ctx.GlobalString(IPCPathFlag.Name)
-//	}
-//}
 
 // makeDatabaseHandles raises out the number of allowed file handles per process
 // for Geth and returns half of the allowance to assign to the database.
@@ -1092,28 +947,18 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
 
-	lightClient := false
 	ethPeers := cfg.MaxPeers
-	if lightClient {
-		ethPeers = 0
-	}
 	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.GlobalInt(MaxPendingPeersFlag.Name)
 	}
-	if ctx.GlobalIsSet(NoDiscoverFlag.Name) || lightClient {
+	if ctx.GlobalIsSet(NoDiscoverFlag.Name) {
 		cfg.NoDiscovery = true
 	}
 
-	// if we're running a light client or server, force enable the v5 peer discovery
-	// unless it is explicitly disabled with --nodiscover note that explicitly specifying
-	// --v5disc overrides --nodiscover, in which case the later only disables v4 discovery
-	forceV5Discovery := (lightClient) && !ctx.GlobalBool(NoDiscoverFlag.Name)
 	if ctx.GlobalIsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.GlobalBool(DiscoveryV5Flag.Name)
-	} else if forceV5Discovery {
-		cfg.DiscoveryV5 = true
 	}
 
 	if netrestrict := ctx.GlobalString(NetrestrictFlag.Name); netrestrict != "" {
@@ -1136,26 +981,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 // SetNodeConfig applies node-related command line flags to the config.
 func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
-	//setIPC(ctx, cfg)
-	//setGraphQL(ctx, cfg)
-	//setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
-
-	//if ctx.GlobalBool(LegacyRPCEnabledFlag.Name) ||
-	//	ctx.GlobalBool(HTTPEnabledFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCPortFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPPortFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCCORSDomainFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPCORSDomainFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCApiFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPApiFlag.Name) ||
-	//	ctx.GlobalIsSet(LegacyRPCVirtualHostsFlag.Name) ||
-	//	ctx.GlobalIsSet(HTTPVirtualHostsFlag.Name) &&
-	//		cfg.HTTPHost == "" {
-	//	Fatalf("Turbo-Geth does not support native rpc. Use instead rpcdaemon.")
-	//}
 
 	if ctx.GlobalIsSet(ExternalSignerFlag.Name) {
 		cfg.ExternalSigner = ctx.GlobalString(ExternalSignerFlag.Name)
@@ -1281,17 +1109,9 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	}
 }
 
-func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
-	if ctx.GlobalIsSet(LegacyGpoBlocksFlag.Name) {
-		cfg.Blocks = ctx.GlobalInt(LegacyGpoBlocksFlag.Name)
-		log.Warn("The flag --gpoblocks is deprecated and will be removed in the future, please use --gpo.blocks")
-	}
+func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 	if ctx.GlobalIsSet(GpoBlocksFlag.Name) {
 		cfg.Blocks = ctx.GlobalInt(GpoBlocksFlag.Name)
-	}
-	if ctx.GlobalIsSet(LegacyGpoPercentileFlag.Name) {
-		cfg.Percentile = ctx.GlobalInt(LegacyGpoPercentileFlag.Name)
-		log.Warn("The flag --gpopercentile is deprecated and will be removed in the future, please use --gpo.percentile")
 	}
 	if ctx.GlobalIsSet(GpoPercentileFlag.Name) {
 		cfg.Percentile = ctx.GlobalInt(GpoPercentileFlag.Name)
@@ -1302,7 +1122,7 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 }
 
 //nolint
-func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config, light bool) {
+func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
 	}
@@ -1541,7 +1361,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		ks = keystores[0].(*keystore.KeyStore)
 	}
 	setEtherbase(ctx, ks, cfg)
-	setGPO(ctx, &cfg.GPO, false)
+	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
@@ -1593,13 +1413,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.GlobalBool(VMEnableDebugFlag.Name)
 	}
 
-	if ctx.GlobalIsSet(EWASMInterpreterFlag.Name) {
-		cfg.EWASMInterpreter = ctx.GlobalString(EWASMInterpreterFlag.Name)
-	}
-
-	if ctx.GlobalIsSet(EVMInterpreterFlag.Name) {
-		cfg.EVMInterpreter = ctx.GlobalString(EVMInterpreterFlag.Name)
-	}
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
 	}
@@ -1707,11 +1520,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
 	}
-
-	// TODO(fjl): move trie cache generations into config
-	//if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-	//	state.MaxTrieCacheSize = uint64(gen)
-	//}
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
@@ -1721,9 +1529,6 @@ func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 		return // already set through flags/config
 	}
 	protocol := "all"
-	if cfg.SyncMode == downloader.LightSync {
-		protocol = "les"
-	}
 	if url := params.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
@@ -1736,49 +1541,6 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
 	return backend
-}
-
-// RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
-// the given node.
-//func RegisterEthStatsService(stack *node.Node, backend ethapi.Backend, url string) {
-//	if err := ethstats.New(stack, backend, backend.Engine(), url); err != nil {
-//		Fatalf("Failed to register the Ethereum Stats service: %v", err)
-//	}
-//}
-
-// RegisterGraphQLService is a utility function to construct a new service and register it against a node.
-//func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {
-//	if err := graphql.New(stack, backend, cfg.GraphQLCors, cfg.GraphQLVirtualHosts); err != nil {
-//		Fatalf("Failed to register the GraphQL service: %v", err)
-//	}
-//}
-
-func SetupMetrics(ctx *cli.Context) {
-	//if metrics.Enabled {
-	//	log.Info("Enabling metrics collection")
-	//
-	//	var (
-	//		enableExport = ctx.GlobalBool(MetricsEnableInfluxDBFlag.Name)
-	//		endpoint     = ctx.GlobalString(MetricsInfluxDBEndpointFlag.Name)
-	//		database     = ctx.GlobalString(MetricsInfluxDBDatabaseFlag.Name)
-	//		username     = ctx.GlobalString(MetricsInfluxDBUsernameFlag.Name)
-	//		password     = ctx.GlobalString(MetricsInfluxDBPasswordFlag.Name)
-	//	)
-	//
-	//	if enableExport {
-	//		tagsMap := SplitTagsFlag(ctx.GlobalString(MetricsInfluxDBTagsFlag.Name))
-	//
-	//		log.Info("Enabling metrics export to InfluxDB")
-	//
-	//		go influxdb.InfluxDBWithTags(metrics.DefaultRegistry, 10*time.Second, endpoint, database, username, password, "geth.", tagsMap)
-	//	}
-	//
-	//	if ctx.GlobalIsSet(MetricsHTTPFlag.Name) {
-	//		address := fmt.Sprintf("%s:%d", ctx.GlobalString(MetricsHTTPFlag.Name), ctx.GlobalInt(MetricsPortFlag.Name))
-	//		log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
-	//		exp.Setup(address)
-	//	}
-	//}
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {

@@ -1892,10 +1892,6 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	//db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	//check(err)
-	//defer db.Close()
 	if *action == "cfg" {
 		flow.TestGenCfg()
 	}
@@ -1907,39 +1903,18 @@ func main() {
 	if *action == "syncChart" {
 		mychart()
 	}
-	//testRebuild()
 	if *action == "testRewind" {
 		testRewind(*chaindata, *block, *rewind)
 	}
-	//hashFile()
-	//buildHashFromFile()
 	if *action == "testResolve" {
 		testResolve(*chaindata)
 	}
-	//rlpIndices()
-	//printFullNodeRLPs()
-	//testStartup()
-	//testDifficulty()
-	//testRewindTests()
-	//if *reset != -1 {
-	//	testReset(uint64(*reset))
-	//}
 	if *action == "testBlockHashes" {
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
 	}
-	//printBuckets(db)
-	//printTxHashes()
-	//relayoutKeys()
-	//upgradeBlocks()
-	//compareTries()
 	if *action == "invTree" {
 		invTree("root", "right", "diff", *name)
 	}
-	//invTree("iw", "ir", "id", *block, true)
-	//loadAccount()
-	//printBranches(uint64(*block))
-	//extractTrie(*block)
-	//repair()
 	if *action == "readAccount" {
 		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
 	}
@@ -1952,8 +1927,6 @@ func main() {
 	if *action == "nextIncarnation" {
 		nextIncarnation(*chaindata, common.HexToHash(*account))
 	}
-	//repairCurrent()
-	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()
 	}

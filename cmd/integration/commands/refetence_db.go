@@ -368,14 +368,6 @@ MainLoop:
 				return ctx.Err()
 			case <-commitEvery.C:
 				log.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
-				//if err2 := dstTx.Commit(ctx); err2 != nil {
-				//	return err2
-				//}
-				//dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
-				//if err != nil {
-				//	return err
-				//}
-				//c = dstTx.Cursor(bucket)
 			}
 		}
 		prevK = nil

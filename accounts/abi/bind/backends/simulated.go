@@ -110,7 +110,7 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		config:       genesis.Config,
 		txCacher:     txCacher,
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -137,7 +137,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		config:       genesis.Config,
 		txCacher:     txCacher,
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{database, backend}, false)
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
 }

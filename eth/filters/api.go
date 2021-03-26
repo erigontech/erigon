@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -49,7 +48,6 @@ type filter struct {
 // information related to the Ethereum protocol such als blocks, transactions and logs.
 type PublicFilterAPI struct {
 	backend   Backend
-	mux       *event.TypeMux
 	quit      chan struct{}
 	chainDb   ethdb.Database
 	events    *EventSystem
@@ -59,12 +57,12 @@ type PublicFilterAPI struct {
 }
 
 // NewPublicFilterAPI returns a new PublicFilterAPI instance.
-func NewPublicFilterAPI(backend Backend, lightMode bool, timeout time.Duration) *PublicFilterAPI {
+func NewPublicFilterAPI(backend Backend, timeout time.Duration) *PublicFilterAPI {
 	api := &PublicFilterAPI{
 		backend: backend,
 		quit:    make(chan struct{}, 1),
 		chainDb: backend.ChainDb(),
-		events:  NewEventSystem(backend, lightMode),
+		events:  NewEventSystem(backend),
 		filters: make(map[rpc.ID]*filter),
 		timeout: timeout,
 	}

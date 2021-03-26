@@ -153,8 +153,6 @@ func (inject *blockOrHeaderInject) hash() common.Hash {
 // BlockFetcher is responsible for accumulating block announcements from various peers
 // and scheduling them for retrieval.
 type BlockFetcher struct {
-	light bool // The indicator whether it's a light fetcher or normal one.
-
 	// Various event channels
 	notify chan *blockAnnounce
 	inject chan *blockOrHeaderInject
@@ -197,9 +195,8 @@ type BlockFetcher struct {
 }
 
 // NewBlockFetcher creates a block fetcher to retrieve blocks based on hash announcements.
-func NewBlockFetcher(light bool, getHeader HeaderRetrievalFn, getBlock blockRetrievalFn, verifyHeader headerVerifierFn, broadcastBlock blockBroadcasterFn, chainHeight chainHeightFn, insertHeaders headersInsertFn, insertChain chainInsertFn, dropPeer peerDropFn) *BlockFetcher {
+func NewBlockFetcher(getHeader HeaderRetrievalFn, getBlock blockRetrievalFn, verifyHeader headerVerifierFn, broadcastBlock blockBroadcasterFn, chainHeight chainHeightFn, insertHeaders headersInsertFn, insertChain chainInsertFn, dropPeer peerDropFn) *BlockFetcher {
 	return &BlockFetcher{
-		light:          light,
 		notify:         make(chan *blockAnnounce),
 		inject:         make(chan *blockOrHeaderInject),
 		headerFilter:   make(chan chan *headerFilterTask),
@@ -366,7 +363,7 @@ func (f *BlockFetcher) loop() {
 				break
 			}
 			// Otherwise if fresh and still unknown, try and import
-			if (number+maxUncleDist < height) || (f.light && f.getHeader(hash) != nil) || (!f.light && f.getBlock(hash) != nil) {
+			if (number+maxUncleDist < height) || f.getBlock(hash) != nil {
 				f.forgetBlock(hash)
 				continue
 			}
@@ -418,12 +415,6 @@ func (f *BlockFetcher) loop() {
 		case op := <-f.inject:
 			// A direct block insertion was requested, try and fill any pending gaps
 			blockBroadcastInMeter.Mark(1)
-
-			// Now only direct block injection is allowed, drop the header injection
-			// here silently if we receive.
-			if f.light {
-				continue
-			}
 			f.enqueue(op.origin, nil, op.block)
 
 		case <-fetchTimer.C:
@@ -514,7 +505,7 @@ func (f *BlockFetcher) loop() {
 
 			// Split the batch of headers into unknown ones (to return to the caller),
 			// known incomplete ones (requiring body retrievals) and completed blocks.
-			unknown, incomplete, complete, lightHeaders := []*types.Header{}, []*blockAnnounce{}, []*types.Block{}, []*blockAnnounce{}
+			unknown, incomplete, complete := []*types.Header{}, []*blockAnnounce{}, []*types.Block{}
 			for _, header := range task.headers {
 				hash := header.Hash()
 
@@ -524,16 +515,6 @@ func (f *BlockFetcher) loop() {
 					if header.Number.Uint64() != announce.number {
 						log.Trace("Invalid block number fetched", "peer", announce.origin, "hash", header.Hash(), "announced", announce.number, "provided", header.Number)
 						f.dropPeer(announce.origin)
-						f.forgetHash(hash)
-						continue
-					}
-					// Collect all headers only if we are running in light
-					// mode and the headers are not imported by other means.
-					if f.light {
-						if f.getHeader(hash) == nil {
-							announce.header = header
-							lightHeaders = append(lightHeaders, announce)
-						}
 						f.forgetHash(hash)
 						continue
 					}
@@ -580,10 +561,6 @@ func (f *BlockFetcher) loop() {
 				if len(f.fetched) == 1 {
 					f.rescheduleComplete(completeTimer)
 				}
-			}
-			// Schedule the header for light fetcher import
-			for _, announce := range lightHeaders {
-				f.enqueue(announce.origin, announce.header, nil)
 			}
 			// Schedule the header-only blocks for import
 			for _, block := range complete {
@@ -668,12 +645,6 @@ func (f *BlockFetcher) loop() {
 func (f *BlockFetcher) rescheduleFetch(fetch *time.Timer) {
 	// Short circuit if no blocks are announced
 	if len(f.announcedS) == 0 {
-		return
-	}
-	// Schedule announcement retrieval quickly for light mode
-	// since server won't send any headers to client.
-	if f.light {
-		fetch.Reset(lightTimeout)
 		return
 	}
 	// Otherwise find the earliest expiring announcement
