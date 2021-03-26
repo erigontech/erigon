@@ -118,7 +118,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 	sort.Strings(unfurlList)
 	loader := trie.NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(unfurl, nil, nil, false); err != nil {
+	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
 		panic(err)
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}

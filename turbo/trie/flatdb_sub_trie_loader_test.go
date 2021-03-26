@@ -27,13 +27,10 @@ func TestResolve1(t *testing.T) {
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
-	_, err := loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaabbbbb"), nil)
-	if err != nil {
-		panic(err)
-	}
+	err := loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
+	_, err = loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaabbbbb"), nil)
+	require.NoError(err)
 }
 
 func TestResolve2(t *testing.T) {
@@ -50,13 +47,10 @@ func TestResolve2(t *testing.T) {
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
-	_, err := loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaaaaaaa"), nil)
-	if err != nil {
-		panic(err)
-	}
+	err := loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
+	_, err = loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaaaaaaa"), nil)
+	require.NoError(err)
 }
 
 func TestResolve2Keep(t *testing.T) {
@@ -97,13 +91,10 @@ func TestResolve3Keep(t *testing.T) {
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
-	_, err := loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaaaaaaa"), nil)
-	if err != nil {
-		panic(err)
-	}
+	err := loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
+	_, err = loader.CalcTrieRoot(db, common.Hex2Bytes("aaaaaaaaaa"), nil)
+	require.NoError(err)
 }
 
 func TestTrieSubTrieLoader(t *testing.T) {
@@ -127,9 +118,8 @@ func TestTrieSubTrieLoader(t *testing.T) {
 	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
+	err := loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
 	for _, prefix := range [][]byte{common.Hex2Bytes("aaaaa"), common.Hex2Bytes("bb")} {
 		_, err := loader.CalcSubTrieRootOnCache(db, prefix, nil, nil)
 		require.NoError(err, "resolve error")
@@ -165,9 +155,8 @@ func TestTwoStorageItems(t *testing.T) {
 
 	rs := NewRetainList(0)
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
+	err = loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
 	got, err := loader.CalcTrieRoot(db, nil, nil)
 	require.NoError(err, "resolve error")
 	assert.Equal(rootHash.String(), got)
@@ -175,10 +164,9 @@ func TestTwoStorageItems(t *testing.T) {
 	rs2 := NewRetainList(0)
 	rs2.AddHex([]byte{0xd})
 	loader = NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs2, nil, nil, false); err != nil {
-		panic(err)
-	}
-	got, err = loader.CalcTrieRoot(db, []byte{0xd0}, nil)
+	err = loader.Reset(rs2, nil, nil, false)
+	require.NoError(err)
+	_, err = loader.CalcTrieRoot(db, []byte{0xd0}, nil)
 	require.NoError(err, "resolve error")
 }
 
@@ -206,7 +194,7 @@ func TestTwoAccounts(t *testing.T) {
 	rs := NewRetainList(0)
 	rs.AddKey(key1)
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
+	if err = loader.Reset(rs, nil, nil, false); err != nil {
 		panic(err)
 	}
 	got, err := loader.CalcTrieRoot(db, nil, nil)
@@ -225,10 +213,9 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
 	rs := NewRetainList(0)
 	loader := NewFlatDBTrieLoader("checkRoots")
-	if err := loader.Reset(rs, nil, nil, false); err != nil {
-		panic(err)
-	}
-	_, err := loader.CalcTrieRoot(db, nil, nil)
+	err := loader.Reset(rs, nil, nil, false)
+	require.NoError(err)
+	_, err = loader.CalcTrieRoot(db, nil, nil)
 	require.NotNil(t, err)
 }
 

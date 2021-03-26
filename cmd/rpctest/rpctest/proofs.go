@@ -19,8 +19,8 @@ func Proofs(chaindata string, url string, block uint64) {
 	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
 	var t *trie.Trie
-	if _, err := os.Stat(fileName); err != nil {
-		if os.IsNotExist(err) {
+	if _, errf := os.Stat(fileName); errf != nil {
+		if os.IsNotExist(errf) {
 			// Resolve 6 top levels of the accounts trie
 			rl := trie.NewRetainList(6)
 			loader := trie.NewFlatDBTrieLoader("checkRoots")
@@ -41,7 +41,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			}
 			fmt.Printf("Saved trie to file\n")
 		} else {
-			panic(err)
+			panic(errf)
 		}
 	} else {
 		f, err1 := os.Open(fileName)
