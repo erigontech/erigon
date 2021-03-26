@@ -108,8 +108,11 @@ func resetState(db ethdb.Database, _ context.Context) error {
 	}
 
 	// set genesis after reset all buckets
-	tx, _ := db.Begin(context.Background(), ethdb.RW)
-	if _, _, err := core.DefaultGenesisBlock().CommitGenesisState(tx, false); err != nil {
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	if _, _, err = core.DefaultGenesisBlock().WriteGenesisState(tx, false); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

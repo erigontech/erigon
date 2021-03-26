@@ -319,7 +319,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) CommitGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock(tx, history)
 	if err != nil {
 		return nil, nil, err
@@ -353,7 +353,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if dbErr != nil {
 		return nil, nil, dbErr
 	}
-	block, statedb, err := g.CommitGenesisState(tx, history)
+	block, statedb, err := g.WriteGenesisState(tx, history)
 	if err != nil {
 		return block, statedb, err
 	}
