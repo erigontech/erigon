@@ -139,7 +139,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
-		_, statedb, _ = gen.ToBlock(db, false /* history */)
+		_, statedb, _ = gen.ToBlock(false)
 		chainConfig = gen.Config
 	} else {
 		tds := state.NewTrieDbState(common.Hash{}, db, 0)

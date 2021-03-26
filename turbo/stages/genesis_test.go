@@ -36,14 +36,14 @@ import (
 func TestDefaultGenesisBlock(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	block, _, _ := core.DefaultGenesisBlock().ToBlock(db, true)
+	block, _, _ := core.DefaultGenesisBlock().ToBlock(true)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 	var err error
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	block, _, err = core.DefaultRopstenGenesisBlock().ToBlock(db1, true)
+	block, _, err = core.DefaultRopstenGenesisBlock().ToBlock(true)
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}

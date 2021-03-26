@@ -184,7 +184,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	if genesis != nil {
 		db := ethdb.NewMemDatabase()
 		defer db.Close()
-		block, stateDB1, err1 := genesis.ToBlock(db, history)
+		block, stateDB1, err1 := genesis.ToBlock(history)
 		if err1 != nil {
 			return genesis.Config, common.Hash{}, nil, err1
 		}
@@ -257,7 +257,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, error) {
 	tmpDB := ethdb.NewMemDatabase()
 	defer tmpDB.Close()
 	r, w := state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
@@ -319,7 +319,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 }
 
 func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := g.ToBlock(tx, history)
+	block, statedb, err := g.ToBlock(history)
 	if err != nil {
 		return nil, nil, err
 	}
