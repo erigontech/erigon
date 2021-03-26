@@ -28,7 +28,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -82,16 +82,6 @@ func main() {
 		// Start tracking the node and its enode
 		nodes = append(nodes, ethBackend)
 		enodes = append(enodes, stack.Server().Self())
-
-		// Inject the signer key and start sealing with it
-		store := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-		signer, err := store.ImportECDSA(sealer, "")
-		if err != nil {
-			panic(err)
-		}
-		if err := store.Unlock(signer, ""); err != nil {
-			panic(err)
-		}
 	}
 
 	// Iterate over all the nodes and start signing on them

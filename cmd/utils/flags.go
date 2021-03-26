@@ -21,7 +21,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"path"
@@ -33,13 +32,10 @@ import (
 	"text/template"
 	"time"
 
-	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/spf13/pflag"
 
-	"github.com/ledgerwatch/turbo-geth/accounts"
-	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -104,7 +100,7 @@ var (
 	// General settings
 	DataDirFlag = DirectoryFlag{
 		Name:  "datadir",
-		Usage: "Data directory for the databases and keystore",
+		Usage: "Data directory for the databases",
 		Value: DirectoryString(node.DefaultDataDir()),
 	}
 	AncientFlag = DirectoryFlag{
@@ -114,23 +110,6 @@ var (
 	MinFreeDiskSpaceFlag = DirectoryFlag{
 		Name:  "datadir.minfreedisk",
 		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
-	}
-	KeyStoreDirFlag = DirectoryFlag{
-		Name:  "keystore",
-		Usage: "Directory for the keystore (default = inside the datadir)",
-	}
-	NoUSBFlag = cli.BoolFlag{
-		Name:  "nousb",
-		Usage: "Disables monitoring for and managing USB hardware wallets (deprecated)",
-	}
-	USBFlag = cli.BoolFlag{
-		Name:  "usb",
-		Usage: "Enable monitoring and management of USB hardware wallets",
-	}
-	SmartCardDaemonPathFlag = cli.StringFlag{
-		Name:  "pcscdpath",
-		Usage: "Path to the smartcard daemon (pcscd) socket file",
-		Value: pcsclite.PCSCDSockName,
 	}
 	NetworkIdFlag = cli.Uint64Flag{
 		Name:  "networkid",
@@ -396,8 +375,13 @@ var (
 	}
 	MinerEtherbaseFlag = cli.StringFlag{
 		Name:  "miner.etherbase",
-		Usage: "Public address for block mining rewards (default = first account)",
+		Usage: "Public address for block mining rewards",
 		Value: "0",
+	}
+	MinerSigningKeyFlag = cli.StringFlag{
+		Name:  "miner.sigkey",
+		Usage: "Private key to sign blocks with",
+		Value: "",
 	}
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
@@ -411,22 +395,6 @@ var (
 	MinerNoVerfiyFlag = cli.BoolFlag{
 		Name:  "miner.noverify",
 		Usage: "Disable remote sealing verification",
-	}
-	// Account settings
-	UnlockedAccountFlag = cli.StringFlag{
-		Name:  "unlock",
-		Usage: "Comma separated list of accounts to unlock",
-		Value: "",
-	}
-	PasswordFileFlag = cli.StringFlag{
-		Name:  "password",
-		Usage: "Password file to use for non-interactive password input",
-		Value: "",
-	}
-	ExternalSignerFlag = cli.StringFlag{
-		Name:  "signer",
-		Usage: "External signer (url or path to ipc file)",
-		Value: "",
 	}
 	VMEnableDebugFlag = cli.BoolFlag{
 		Name:  "vmdebug",
@@ -875,69 +843,25 @@ func makeDatabaseHandles() int {
 	return int(raised / 2) // Leave half for networking and other stuff
 }
 
-// MakeAddress converts an account specified directly as a hex encoded string or
-// a key index in the key store to an internal account representation.
-func MakeAddress(ks *keystore.KeyStore, account string) (accounts.Account, error) {
-	// If the specified account is a valid address, return it
-	if common.IsHexAddress(account) {
-		return accounts.Account{Address: common.HexToAddress(account)}, nil
-	}
-	// Otherwise try to interpret the account as a keystore index
-	index, err := strconv.Atoi(account)
-	if err != nil || index < 0 {
-		return accounts.Account{}, fmt.Errorf("invalid account address or index %q", account)
-	}
-	log.Warn("-------------------------------------------------------------------")
-	log.Warn("Referring to accounts by order in the keystore folder is dangerous!")
-	log.Warn("This functionality is deprecated and will be removed in the future!")
-	log.Warn("Please use explicit addresses! (can search via `geth account list`)")
-	log.Warn("-------------------------------------------------------------------")
-
-	accs := ks.Accounts()
-	if len(accs) <= index {
-		return accounts.Account{}, fmt.Errorf("index %d higher than number of accounts %d", index, len(accs))
-	}
-	return accs[index], nil
-}
-
-// setEtherbase retrieves the etherbase either from the directly specified
-// command line flags or from the keystore if CLI indexed.
-func setEtherbase(ctx *cli.Context, ks *keystore.KeyStore, cfg *eth.Config) {
-	// Extract the current etherbase, new flag overriding legacy one
-	var etherbase string
-	if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
-		etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
-	}
-	// Convert the etherbase into an address and configure it
-	if etherbase != "" {
-		if ks != nil {
-			account, err := MakeAddress(ks, etherbase)
+// setEtherbase retrieves the etherbase from the directly specified
+// command line flags.
+func setEtherbase(ctx *cli.Context, cfg *eth.Config) {
+	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
+		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
+		if sigkey != "" {
+			var err error
+			cfg.Miner.SigKey, err = crypto.HexToECDSA(sigkey)
 			if err != nil {
-				Fatalf("Invalid miner etherbase: %v", err)
+				Fatalf("Failed to parse ECDSA private key: %v", err)
 			}
-			cfg.Miner.Etherbase = account.Address
-		} else {
-			Fatalf("No etherbase configured")
+			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
+		}
+	} else if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
+		etherbase := ctx.GlobalString(MinerEtherbaseFlag.Name)
+		if etherbase != "" {
+			cfg.Miner.Etherbase = common.HexToAddress(etherbase)
 		}
 	}
-}
-
-// MakePasswordList reads password lines from the file specified by the global --password flag.
-func MakePasswordList(ctx *cli.Context) []string {
-	path := ctx.GlobalString(PasswordFileFlag.Name)
-	if path == "" {
-		return nil
-	}
-	text, err := ioutil.ReadFile(path)
-	if err != nil {
-		Fatalf("Failed to read password file: %v", err)
-	}
-	lines := strings.Split(string(text), "\n")
-	// Sanitise DOS line endings.
-	for i := range lines {
-		lines[i] = strings.TrimRight(lines[i], "\r")
-	}
-	return lines
 }
 
 func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
@@ -983,93 +907,12 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	SetP2PConfig(ctx, &cfg.P2P)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
-	setSmartCard(ctx, cfg)
-
-	if ctx.GlobalIsSet(ExternalSignerFlag.Name) {
-		cfg.ExternalSigner = ctx.GlobalString(ExternalSignerFlag.Name)
-	}
-
-	if ctx.GlobalIsSet(KeyStoreDirFlag.Name) {
-		cfg.KeyStoreDir = ctx.GlobalString(KeyStoreDirFlag.Name)
-	}
-	if ctx.GlobalIsSet(LightKDFFlag.Name) {
-		cfg.UseLightweightKDF = ctx.GlobalBool(LightKDFFlag.Name)
-	}
-	if ctx.GlobalIsSet(NoUSBFlag.Name) {
-		log.Warn("Option nousb is deprecated and USB is deactivated by default. Use --usb to enable")
-	}
-	if ctx.GlobalIsSet(USBFlag.Name) {
-		cfg.USB = ctx.GlobalBool(USBFlag.Name)
-	}
-	if ctx.GlobalIsSet(InsecureUnlockAllowedFlag.Name) {
-		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
-	}
-
 }
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	flags := cmd.Flags()
 	//SetP2PConfig(ctx, &cfg.P2P)
 	setNodeUserIdentCobra(flags, cfg)
 	setDataDirCobra(flags, cfg)
-	setSmartCardCobra(flags, cfg)
-
-	if v := flags.String(ExternalSignerFlag.Name, ExternalSignerFlag.Value, ExternalSignerFlag.Usage); v != nil {
-		cfg.ExternalSigner = *v
-	}
-	if v := flags.String(KeyStoreDirFlag.Name, KeyStoreDirFlag.Value.String(), KeyStoreDirFlag.Usage); v != nil {
-		cfg.KeyStoreDir = *v
-	}
-	if v := flags.Bool(LightKDFFlag.Name, false, LightKDFFlag.Usage); v != nil {
-		cfg.UseLightweightKDF = *v
-	}
-	//if v := flags.Bool(NoUSBFlag.Name, false, NoUSBFlag.Usage); v != nil {
-	//	log.Warn("Option nousb is deprecated and USB is deactivated by default. Use --usb to enable")
-	//}
-	if v := flags.Bool(USBFlag.Name, false, USBFlag.Usage); v != nil {
-		cfg.USB = *v
-	}
-	if v := flags.Bool(InsecureUnlockAllowedFlag.Name, false, InsecureUnlockAllowedFlag.Usage); v != nil {
-		cfg.InsecureUnlockAllowed = *v
-	}
-}
-
-func setSmartCard(ctx *cli.Context, cfg *node.Config) {
-	// Skip enabling smartcards if no path is set
-	path := ctx.GlobalString(SmartCardDaemonPathFlag.Name)
-	if path == "" {
-		return
-	}
-	// Sanity check that the smartcard path is valid
-	fi, err := os.Stat(path)
-	if err != nil {
-		log.Info("Smartcard socket not found, disabling", "err", err)
-		return
-	}
-	if fi.Mode()&os.ModeType != os.ModeSocket {
-		log.Error("Invalid smartcard daemon path", "path", path, "type", fi.Mode().String())
-		return
-	}
-	// Smartcard daemon path exists and is a socket, enable it
-	cfg.SmartCardDaemonPath = path
-}
-func setSmartCardCobra(f *pflag.FlagSet, cfg *node.Config) {
-	// Skip enabling smartcards if no path is set
-	path := f.String(SmartCardDaemonPathFlag.Name, SmartCardDaemonPathFlag.Value, SmartCardDaemonPathFlag.Usage)
-	if path == nil || *path == "" {
-		return
-	}
-	// Sanity check that the smartcard path is valid
-	fi, err := os.Stat(*path)
-	if err != nil {
-		log.Info("Smartcard socket not found, disabling", "err", err)
-		return
-	}
-	if fi.Mode()&os.ModeType != os.ModeSocket {
-		log.Error("Invalid smartcard daemon path", "path", *path, "type", fi.Mode().String())
-		return
-	}
-	// Smartcard daemon path exists and is a socket, enable it
-	cfg.SmartCardDaemonPath = *path
 }
 
 func setDataDir(ctx *cli.Context, cfg *node.Config) {
@@ -1195,7 +1038,7 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
-func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.MiningConfig) {
+func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	flags := cmd.Flags()
 	var err error
 	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
@@ -1240,22 +1083,9 @@ func SetupMinerCobra(cmd *cobra.Command, am *accounts.Manager, cfg *params.Minin
 		panic(err)
 	}
 
-	var ks *keystore.KeyStore
-	if keystores := am.Backends(keystore.KeyStoreType); len(keystores) > 0 {
-		ks = keystores[0].(*keystore.KeyStore)
-	}
-
 	// Convert the etherbase into an address and configure it
 	if etherbase != "" {
-		if ks != nil {
-			account, err := MakeAddress(ks, etherbase)
-			if err != nil {
-				Fatalf("Invalid miner etherbase: %v", err)
-			}
-			cfg.Etherbase = account.Address
-		} else {
-			Fatalf("No etherbase configured")
-		}
+		Fatalf("No etherbase configured")
 	}
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
@@ -1355,12 +1185,8 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
 	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, YoloV3Flag)
-	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
-	var ks *keystore.KeyStore
-	if keystores := stack.AccountManager().Backends(keystore.KeyStoreType); len(keystores) > 0 {
-		ks = keystores[0].(*keystore.KeyStore)
-	}
-	setEtherbase(ctx, ks, cfg)
+	CheckExclusive(ctx, MinerSigningKeyFlag, MinerEtherbaseFlag)
+	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
@@ -1470,35 +1296,14 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = 1337
 		}
 		// Create new developer account or reuse existing one
-		var (
-			developer  accounts.Account
-			passphrase string
-			err        error
-		)
-		if list := MakePasswordList(ctx); len(list) > 0 {
-			// Just take the first value. Although the function returns a possible multiple values and
-			// some usages iterate through them as attempts, that doesn't make sense in this setting,
-			// when we're definitely concerned with only one account.
-			passphrase = list[0]
+		developer := cfg.Miner.Etherbase
+		if developer == (common.Address{}) {
+			Fatalf("Please specify developer account address using --miner.etherbase")
 		}
-		// setEtherbase has been called above, configuring the miner address from command line flags.
-		if cfg.Miner.Etherbase != (common.Address{}) {
-			developer = accounts.Account{Address: cfg.Miner.Etherbase}
-		} else if accs := ks.Accounts(); len(accs) > 0 {
-			developer = ks.Accounts()[0]
-		} else {
-			developer, err = ks.NewAccount(passphrase)
-			if err != nil {
-				Fatalf("Failed to create developer account: %v", err)
-			}
-		}
-		if err := ks.Unlock(developer, passphrase); err != nil {
-			Fatalf("Failed to unlock developer account: %v", err)
-		}
-		log.Info("Using developer account", "address", developer.Address)
+		log.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer.Address)
+		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
 		if ctx.GlobalIsSet(DataDirFlag.Name) {
 			// Check if we have an already initialized chain and fall back to
 			// that if so. Otherwise we need to generate a new genesis spec.
@@ -1645,30 +1450,6 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 		preloads = append(preloads, strings.TrimSpace(file))
 	}
 	return preloads
-}
-
-// MigrateFlags sets the global flag from a local flag when it's set.
-// This is a temporary function used for migrating old command/flags to the
-// new format.
-//
-// e.g. geth account new --keystore /tmp/mykeystore --lightkdf
-//
-// is equivalent after calling this method with:
-//
-// geth --keystore /tmp/mykeystore --lightkdf account new
-//
-// This allows the use of the existing configuration functionality.
-// When all flags are migrated this function can be removed and the existing
-// configuration functionality must be changed that is uses local flags
-func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error {
-	return func(ctx *cli.Context) error {
-		for _, name := range ctx.FlagNames() {
-			if ctx.IsSet(name) {
-				ctx.GlobalSet(name, ctx.String(name))
-			}
-		}
-		return action(ctx)
-	}
 }
 
 func CobraFlags(cmd *cobra.Command, urfaveCliFlags []cli.Flag) {

@@ -53,16 +53,8 @@ Examples:
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
-		accManagerConf, err := cfg.AccountConfig()
-		if err != nil {
-			return err
-		}
-		am, _, err := node.MakeAccountManager(accManagerConf)
-		if err != nil {
-			return err
-		}
 		miningConfig := &params.MiningConfig{}
-		utils.SetupMinerCobra(cmd, am, miningConfig)
+		utils.SetupMinerCobra(cmd, miningConfig)
 		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {

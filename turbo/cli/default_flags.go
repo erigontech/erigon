@@ -9,7 +9,6 @@ import (
 // DefaultFlags contains all flags that are used and supported by turbo-geth binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
-	utils.KeyStoreDirFlag,
 	utils.EthashDatasetDirFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,

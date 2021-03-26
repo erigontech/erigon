@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"github.com/ledgerwatch/turbo-geth/console/prompt"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 
@@ -23,7 +22,6 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
-		prompt.Stdin.Close() // Resets terminal mode.
 		return nil
 	}
 	return app

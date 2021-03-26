@@ -19,7 +19,6 @@ package node
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,11 +27,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/turbo-geth/accounts"
-	"github.com/ledgerwatch/turbo-geth/accounts/external"
-	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
-	"github.com/ledgerwatch/turbo-geth/accounts/scwallet"
-	"github.com/ledgerwatch/turbo-geth/accounts/usbwallet"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -42,11 +36,10 @@ import (
 )
 
 const (
-	datadirPrivateKey      = "nodekey"            // Path within the datadir to the node's private key
-	datadirDefaultKeyStore = "keystore"           // Path within the datadir to the keystore
-	datadirStaticNodes     = "static-nodes.json"  // Path within the datadir to the static node list
-	datadirTrustedNodes    = "trusted-nodes.json" // Path within the datadir to the trusted node list
-	datadirNodeDatabase    = "nodes"              // Path within the datadir to store the node infos
+	datadirPrivateKey   = "nodekey"            // Path within the datadir to the node's private key
+	datadirStaticNodes  = "static-nodes.json"  // Path within the datadir to the static node list
+	datadirTrustedNodes = "trusted-nodes.json" // Path within the datadir to the trusted node list
+	datadirNodeDatabase = "nodes"              // Path within the datadir to store the node infos
 )
 
 // Config represents a small collection of configuration values to fine tune the
@@ -74,34 +67,6 @@ type Config struct {
 
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
-
-	// KeyStoreDir is the file system folder that contains private keys. The directory can
-	// be specified as a relative path, in which case it is resolved relative to the
-	// current directory.
-	//
-	// If KeyStoreDir is empty, the default location is the "keystore" subdirectory of
-	// DataDir. If DataDir is unspecified and KeyStoreDir is empty, an ephemeral directory
-	// is created by New and destroyed when the node is stopped.
-	KeyStoreDir string `toml:",omitempty"`
-
-	// ExternalSigner specifies an external URI for a clef-type signer
-	ExternalSigner string `toml:",omitempty"`
-
-	// UseLightweightKDF lowers the memory and CPU requirements of the key store
-	// scrypt KDF at the expense of security.
-	UseLightweightKDF bool `toml:",omitempty"`
-
-	// InsecureUnlockAllowed allows user to unlock accounts in unsafe http environment.
-	InsecureUnlockAllowed bool `toml:",omitempty"`
-
-	// NoUSB disables hardware wallet monitoring and connectivity.
-	NoUSB bool `toml:",omitempty"`
-
-	// USB enables hardware wallet monitoring and connectivity.
-	USB bool `toml:",omitempty"`
-
-	// SmartCardDaemonPath is the path to the smartcard daemon's socket
-	SmartCardDaemonPath string `toml:",omitempty"`
 
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
@@ -187,9 +152,8 @@ type Config struct {
 	PrivateApiAddr      string
 	PrivateApiRateLimit uint32
 
-	staticNodesWarning     bool
-	trustedNodesWarning    bool
-	oldGethResourceWarning bool
+	staticNodesWarning  bool
+	trustedNodesWarning bool
 
 	TLSConnection bool
 	TLSCertFile   string
@@ -415,108 +379,6 @@ func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 		nodes = append(nodes, node)
 	}
 	return nodes
-}
-
-type AccountManagerConfig struct {
-	ScryptN               int
-	ScryptP               int
-	Keydir                string
-	ExternalSigner        string
-	SmartCardDaemonPath   string
-	InsecureUnlockAllowed bool
-	USB                   bool
-}
-
-// AccountConfig determines the settings for scrypt and keydirectory
-func (c *Config) AccountConfig() (AccountManagerConfig, error) {
-	scryptN := keystore.StandardScryptN
-	scryptP := keystore.StandardScryptP
-	if c.UseLightweightKDF {
-		scryptN = keystore.LightScryptN
-		scryptP = keystore.LightScryptP
-	}
-
-	var (
-		keydir string
-		err    error
-	)
-	switch {
-	case filepath.IsAbs(c.KeyStoreDir):
-		keydir = c.KeyStoreDir
-	case c.DataDir != "":
-		if c.KeyStoreDir == "" {
-			keydir = filepath.Join(c.DataDir, datadirDefaultKeyStore)
-		} else {
-			keydir, err = filepath.Abs(c.KeyStoreDir)
-		}
-	case c.KeyStoreDir != "":
-		keydir, err = filepath.Abs(c.KeyStoreDir)
-	}
-	return AccountManagerConfig{ScryptN: scryptN, ScryptP: scryptP, Keydir: keydir, ExternalSigner: c.ExternalSigner, SmartCardDaemonPath: c.SmartCardDaemonPath, InsecureUnlockAllowed: c.InsecureUnlockAllowed, USB: c.USB}, err
-}
-
-func MakeAccountManager(conf AccountManagerConfig) (*accounts.Manager, string, error) {
-	scryptN, scryptP, keydir := conf.ScryptN, conf.ScryptP, conf.Keydir
-	var ephemeral string
-	if keydir == "" {
-		// There is no datadir.
-		var err error
-		keydir, err = ioutil.TempDir("", "go-ethereum-keystore")
-		if err != nil {
-			return nil, "", err
-		}
-		ephemeral = keydir
-	}
-	if err := os.MkdirAll(keydir, 0700); err != nil {
-		return nil, "", err
-	}
-	// Assemble the account manager and supported backends
-	var backends []accounts.Backend
-	if len(conf.ExternalSigner) > 0 {
-		log.Info("Using external signer", "url", conf.ExternalSigner)
-		if extapi, err := external.NewExternalBackend(conf.ExternalSigner); err == nil {
-			backends = append(backends, extapi)
-		} else {
-			return nil, "", fmt.Errorf("error connecting to external signer: %v", err)
-		}
-	}
-	if len(backends) == 0 {
-		// For now, we're using EITHER external signer OR local signers.
-		// If/when we implement some form of lockfile for USB and keystore wallets,
-		// we can have both, but it's very confusing for the user to see the same
-		// accounts in both externally and locally, plus very racey.
-		backends = append(backends, keystore.NewKeyStore(keydir, scryptN, scryptP))
-		if conf.USB {
-			// Start a USB hub for Ledger hardware wallets
-			if ledgerhub, err := usbwallet.NewLedgerHub(); err != nil {
-				log.Warn(fmt.Sprintf("Failed to start Ledger hub, disabling: %v", err))
-			} else {
-				backends = append(backends, ledgerhub)
-			}
-			// Start a USB hub for Trezor hardware wallets (HID version)
-			if trezorhub, err := usbwallet.NewTrezorHubWithHID(); err != nil {
-				log.Warn(fmt.Sprintf("Failed to start HID Trezor hub, disabling: %v", err))
-			} else {
-				backends = append(backends, trezorhub)
-			}
-			// Start a USB hub for Trezor hardware wallets (WebUSB version)
-			if trezorhub, err := usbwallet.NewTrezorHubWithWebUSB(); err != nil {
-				log.Warn(fmt.Sprintf("Failed to start WebUSB Trezor hub, disabling: %v", err))
-			} else {
-				backends = append(backends, trezorhub)
-			}
-		}
-		if len(conf.SmartCardDaemonPath) > 0 {
-			// Start a smart card hub
-			if schub, err := scwallet.NewHub(conf.SmartCardDaemonPath, scwallet.Scheme, keydir); err != nil {
-				log.Warn(fmt.Sprintf("Failed to start smart card hub, disabling: %v", err))
-			} else {
-				backends = append(backends, schub)
-			}
-		}
-	}
-
-	return accounts.NewManager(&accounts.Config{InsecureUnlockAllowed: conf.InsecureUnlockAllowed}, backends...), ephemeral, nil
 }
 
 var warnLock sync.Mutex

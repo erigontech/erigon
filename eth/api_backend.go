@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -345,10 +344,6 @@ func (b *EthAPIBackend) ChainDb() ethdb.Database {
 
 func (b *EthAPIBackend) EventMux() *event.TypeMux {
 	return b.eth.EventMux()
-}
-
-func (b *EthAPIBackend) AccountManager() *accounts.Manager {
-	return b.eth.AccountManager()
 }
 
 func (b *EthAPIBackend) ExtRPCEnabled() bool {
