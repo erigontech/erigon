@@ -129,6 +129,25 @@ ERROR[08-01|14:30:38.299] Demoting invalidated transaction         hash="25ee67�
 
 this is also likely to disappered after the introduction of new downloader/sentry design
 
+### Assessing relative performance of sync
+From one release to another, there should not be noticeable degradation in the sync performance, unless there are clear reasons for it. These reasons
+may include raised gas limit on Ethereum network, adding new table to the database, etc.
+
+In order to assess relative performance of the sync compared to the previous release, one needs to capture these log lines from the log files
+(but only after the sync has "stabilised", meaning it is over few initial long sync cycles:
+```
+INFO [03-24|13:41:18.227] Timings                                  Headers=468.891825ms  BlockHashes=1.652309ms   Bodies=3.579430574s    Bodies="619.203µs"     Senders=36.435667ms Execution=75.538895ms  HashState=56.27559ms   IntermediateHashes=113.255714ms AccountHistoryIndex=29.369386ms  StorageHistoryIndex=37.829112ms  LogIndex=20.112169ms  TxLookup=48.53473ms   TxPool=16.63633ms  Finish="37.623µs"
+```
+The line above shows how much time each stage of processing takes.
+```
+INFO [03-24|13:41:20.391] Commit cycle                             in=2.163782297s
+```
+The line above shows how long was commit cycle. We saw in the past that after some changes the commit time dramatically increases, and these
+regressions need to be investigaged. We expect "commit cycle" on Linux with NVMe drive to usually take less than a second. For other operating
+systems and devices the typical time may vary, but it should significantly increase from one release to another.
+Perhaps we need to log some extra information in the log to make it easier for the tester to filter out the log statements after the sync "stabilised".
+
+
 ## Fresh sync (only when there are serious changes in the data model)
 The way to perform this check is almost the same as the Incremental Sync, but starting with an empty directory for the database. This process takes much longer
 (can take 2-3 days on good hardware), that is why it should be done perhaps weekly.
