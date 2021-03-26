@@ -145,11 +145,11 @@ func (t *BlockTest) Run(_ bool) error {
 		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB := state.New(state.NewDbStateReader(tx))
+	newDB := state.New(state.NewPlainStateReader(tx))
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}
-	return t.validateImportedHeaders(db, validBlocks)
+	return t.validateImportedHeaders(tx, config, engine, validBlocks)
 }
 
 func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
@@ -283,7 +283,13 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btBlock) error {
+func (t *BlockTest) validateImportedHeaders(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, validBlocks []btBlock) error {
+	txCacher := core.NewTxSenderCacher(1)
+	cm, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, txCacher)
+	if err != nil {
+		return err
+	}
+	defer cm.Stop()
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {
@@ -293,15 +299,10 @@ func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btB
 	// headers vs test file. some tests have reorgs, and we import
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
-	// be part of he longest chain until last block is imported.
-	for b := rawdb.ReadCurrentHeader(db); b != nil && b.Number.Uint64() != 0; {
-		err := validateHeader(bmap[b.Hash()].BlockHeader, b)
-		if err != nil {
+	// be part of the longest chain until last block is imported.
+	for b := cm.CurrentBlock(); b != nil && b.NumberU64() != 0; b = cm.GetBlockByHash(b.Header().ParentHash) {
+		if err = validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %v", err)
-		}
-		b, err = rawdb.ReadHeaderByHash(db, b.ParentHash)
-		if err != nil {
-			return err
 		}
 	}
 	return nil
