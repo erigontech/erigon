@@ -204,7 +204,7 @@ var GenerateTrace bool
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen),
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen),
 	intermediateHashes bool,
 ) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
