@@ -299,8 +299,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor2, first 
 			fstl.storageKey = nil
 			fstl.storageValue = nil
 			fstl.hashValue = nil
-			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
-				return fmt.Errorf("fail DecodeForStorage: %w", err)
+			if e := fstl.accountValue.DecodeForStorage(fstl.v); e != nil {
+				return fmt.Errorf("fail DecodeForStorage: %w", e)
 			}
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], fstl.accountValue.Incarnation)

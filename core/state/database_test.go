@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
@@ -701,164 +700,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 }
 
-func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
-	t.Skip()
-
-	// Configure and generate a sample block chain
-	numOfContracts := 10
-	txPerBlock := 10
-	numOfBlocks := 10
-	var addresses []common.Address
-	var transactOpts []*bind.TransactOpts
-	for i := 0; i < numOfContracts; i++ {
-		key, err := crypto.GenerateKey()
-		if err != nil {
-			t.Fatal(err)
-		}
-		addresses = append(addresses, crypto.PubkeyToAddress(key.PublicKey))
-		transactOpt := bind.NewKeyedTransactor(key)
-		transactOpt.GasLimit = 1000000
-		transactOpts = append(transactOpts, transactOpt)
-
-	}
-	funds := big.NewInt(1000000000)
-	alloc := core.GenesisAlloc{}
-	for _, v := range addresses {
-		alloc[v] = core.GenesisAccount{Balance: funds}
-	}
-	var (
-		db    = ethdb.NewMemDatabase()
-		gspec = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: alloc,
-		}
-		genesis = gspec.MustCommit(db)
-	)
-
-	engine := ethash.NewFaker()
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-
-	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
-	var err error
-
-	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, numOfBlocks, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
-
-		switch i {
-		case 0:
-			for i := 0; i < numOfContracts; i++ {
-				_, tx, selfDestruct[i], err = contracts.DeploySelfdestruct(transactOpts[i], contractBackend)
-				if err != nil {
-					t.Fatal(err)
-				}
-				block.AddTx(tx)
-			}
-		case numOfBlocks - 1:
-			for i := 0; i < numOfContracts; i++ {
-				for j := 0; j < txPerBlock; j++ {
-					tx, err = selfDestruct[i].Destruct(transactOpts[i])
-					if err != nil {
-						t.Fatal(err)
-					}
-					block.AddTx(tx)
-				}
-			}
-		default:
-			for i := 0; i < numOfContracts; i++ {
-				for j := 0; j < txPerBlock; j++ {
-					tx, err = selfDestruct[i].Change(transactOpts[i])
-					if err != nil {
-						t.Fatal(err)
-					}
-					block.AddTx(tx)
-				}
-			}
-
-		}
-		contractBackend.Commit()
-	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
-
-	stats := BucketsStats{}
-
-	fmt.Println("==========================ACCOUNT===========================")
-	err = db.Walk(dbutils.HashedAccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		acc := &accounts.Account{}
-		innerErr := acc.DecodeForStorage(v)
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		stats.Accounts += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("==========================ACCOUNTHISTORY===========================")
-	err = db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.HAT += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println("==========================STORAGE===========================")
-	err = db.Walk(dbutils.HashedStorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.Storage += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println("==========================StorageHISTORY===========================")
-	err = db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.HST += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println("==========================CHANGESET===========================")
-	err = db.Walk(dbutils.PlainAccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.ChangeSetHAT += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = db.Walk(dbutils.PlainStorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.ChangeSetHST += uint64(len(v))
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	spew.Dump(stats)
-	spew.Dump(stats.Size())
-}
-
 type BucketsStats struct {
 	Accounts     uint64
 	Storage      uint64
@@ -1376,15 +1217,17 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
+		t.Errorf("error finalising 1st tx: %w", err)
 	}
 
-	tds.ComputeTrieRoots()
+	if _, err := tds.ComputeTrieRoots(); err != nil {
+		t.Errorf("error computing roots: %w", err)
+	}
 
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 
-	trieCode, err := tds.ReadAccountCode(contract, 1, oldCodeHash)
-	assert.NoError(t, err, "you can receive the new code")
+	trieCode, tcErr := tds.ReadAccountCode(contract, 1, oldCodeHash)
+	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	tds.StartNewBuffer()
@@ -1392,15 +1235,17 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
 	intraBlockState.SetCode(contract, newCode)
 
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	tds.ComputeTrieRoots()
+	if _, err := tds.ComputeTrieRoots(); err != nil {
+		t.Errorf("error computing roots: %w", err)
+	}
 
 	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, err = tds.ReadAccountCode(contract, 1, newCodeHash)
-	assert.NoError(t, err, "you can receive the new code")
+	trieCode, tcErr = tds.ReadAccountCode(contract, 1, newCodeHash)
+	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 }
 

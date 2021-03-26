@@ -89,7 +89,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see RetainList.Retain function).
 // `buildExtensions` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
-// makes decisions about the local structure, i.e. the presense of the prefix groups.
+// makes decisions about the local structure, i.e. the presence of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `h` parameter is the hash collector, which is notified whenever branch node is constructed.
 // `data` parameter specified if a hash or a binary string or an account should be emitted.

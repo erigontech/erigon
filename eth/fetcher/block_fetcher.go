@@ -31,7 +31,6 @@ import (
 )
 
 const (
-	lightTimeout  = time.Millisecond       // Time allowance before an announced header is explicitly requested
 	arriveTimeout = 500 * time.Millisecond // Time allowance before an announced block/transaction is explicitly requested
 	gatherSlack   = 100 * time.Millisecond // Interval used to collate almost-expired announces with fetches
 	fetchTimeout  = 5 * time.Second        // Maximum allotted time to return an explicitly requested block/transaction
@@ -177,7 +176,6 @@ type BlockFetcher struct {
 	queued  map[common.Hash]*blockOrHeaderInject // Set of already queued blocks (to dedupe imports)
 
 	// Callbacks
-	getHeader      HeaderRetrievalFn  // Retrieves a header from the local chain
 	getBlock       blockRetrievalFn   // Retrieves a block from the local chain
 	verifyHeader   headerVerifierFn   // Checks if a block's headers have a valid proof of work
 	broadcastBlock blockBroadcasterFn // Broadcasts a block to connected peers

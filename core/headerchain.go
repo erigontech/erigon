@@ -36,12 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-const (
-	headerCacheLimit = 512
-	tdCacheLimit     = 1024
-	numberCacheLimit = 2048
-)
-
 // HeaderChain implements the basic block header chain logic that is shared by
 // core.BlockChain and light.LightChain. It is not usable in itself, only as
 // a part of either structure.

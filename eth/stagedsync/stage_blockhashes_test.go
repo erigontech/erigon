@@ -21,7 +21,9 @@ func TestBlockHashStage(t *testing.T) {
 		panic(err)
 	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
-	rawdb.WriteHeadHeaderHash(db, origin.Hash())
+	if err := rawdb.WriteHeadHeaderHash(db, origin.Hash()); err != nil {
+		t.Fatalf("failed to write head header hash: %v", err)
+	}
 	if err := stages.SaveStageProgress(db, stages.Headers, origin.Number.Uint64()); err != nil {
 		t.Fatalf("setting headers progress: %v", err)
 	}

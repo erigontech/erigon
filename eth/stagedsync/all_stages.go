@@ -279,7 +279,9 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		return err
 	}
 	rawdb.WriteHeadBlockHash(db, newHeadHash)
-	rawdb.WriteHeadHeaderHash(db, newHeadHash)
+	if writeErr := rawdb.WriteHeadHeaderHash(db, newHeadHash); writeErr != nil {
+		return writeErr
+	}
 	if err = stages.SaveStageProgress(db, stages.Headers, newHead); err != nil {
 		return err
 	}

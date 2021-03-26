@@ -28,8 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
-var testVMConfig = vm.Config{}
-
 func TestState(t *testing.T) {
 	t.Parallel()
 

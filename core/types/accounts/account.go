@@ -427,19 +427,21 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 			)
 		}
 
+		// Commented out because of the ineffectual assignment - uncomment if adding more fields
 		var storageSize uint64
 		if storageSizeBytes == 0 && newPos == pos {
 			storageSize = uint64(enc[newPos])
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			//pos = newPos + 1
+			pos = newPos + 1
 		} else {
 			for _, b := range enc[newPos : newPos+storageSizeBytes] {
 				storageSize = (storageSize << 8) + uint64(b)
 			}
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			//pos = newPos + storageSizeBytes
+			pos = newPos + storageSizeBytes
 		}
+		_ = storageSize
 	}
+	_ = pos
+
 	return nil
 }
 
@@ -518,6 +520,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		a.CodeHash.SetBytes(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
+
+	_ = pos
 
 	return nil
 }

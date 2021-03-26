@@ -212,17 +212,15 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 // current state) and future transactions. Transactions move between those
 // two states over time as they are received and processed.
 type TxPool struct {
-	config       TxPoolConfig
-	chainconfig  *params.ChainConfig
-	chaindb      ethdb.Database
-	gasPrice     *uint256.Int
-	txFeed       event.Feed
-	scope        event.SubscriptionScope
-	chainHeadCh  chan ChainHeadEvent
-	chainHeadSub event.Subscription
-	signer       types.Signer
-	senderCacher *TxSenderCacher
-	mu           sync.RWMutex
+	config      TxPoolConfig
+	chainconfig *params.ChainConfig
+	chaindb     ethdb.Database
+	gasPrice    *uint256.Int
+	txFeed      event.Feed
+	scope       event.SubscriptionScope
+	chainHeadCh chan ChainHeadEvent
+	signer      types.Signer
+	mu          sync.RWMutex
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -1502,10 +1500,6 @@ func newAccountSet(signer types.Signer, addrs ...common.Address) *accountSet {
 func (as *accountSet) contains(addr common.Address) bool {
 	_, exist := as.accounts[addr]
 	return exist
-}
-
-func (as *accountSet) empty() bool {
-	return len(as.accounts) == 0
 }
 
 // containsTx checks if the sender of a given tx is within the set. If the sender

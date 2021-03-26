@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -32,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -72,7 +70,7 @@ func TestEVM(t *testing.T) {
 		}
 	}()
 
-	Execute([]byte{
+	if _, _, err := Execute([]byte{
 		byte(vm.DIFFICULTY),
 		byte(vm.TIMESTAMP),
 		byte(vm.GASLIMIT),
@@ -80,7 +78,9 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, 0)
+	}, nil, nil, 0); err != nil {
+		t.Fatal("didn't expect error", err)
+	}
 }
 
 func TestExecute(t *testing.T) {
@@ -326,37 +326,6 @@ func TestBlockhash(t *testing.T) {
 	if exp, got := 255, chain.counter; exp != got {
 		t.Errorf("suboptimal; too much chain iteration, expected %d, got %d", exp, got)
 	}
-}
-
-type stepCounter struct {
-	inner *vm.JSONLogger
-	steps int
-}
-
-func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
-	return nil
-}
-
-func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	s.steps++
-	// Enable this for more output
-	//s.inner.CaptureState(env, pc, op, gas, cost, memory, stack, rStack, contract, depth, err)
-	return nil
-}
-
-func (s *stepCounter) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-
-func (s *stepCounter) CaptureEnd(_ int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	return nil
-}
-
-func (s *stepCounter) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
-}
-
-func (s *stepCounter) CaptureAccountRead(account common.Address) error {
-	return nil
 }
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the

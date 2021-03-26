@@ -323,12 +323,11 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	}
 
 	// Ping the selected node and wait for a pong.
-	remoteSeq, err := tab.net.ping(unwrapNode(last))
+	remoteSeq, rErr := tab.net.ping(unwrapNode(last))
 
 	// Also fetch record if the node replied and returned a higher sequence number.
 	if last.Seq() < remoteSeq {
-		n, err := tab.net.RequestENR(unwrapNode(last))
-		if err != nil {
+		if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
 			tab.log.Debug("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
 		} else {
 			last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
@@ -338,7 +337,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 	b := tab.buckets[bi]
-	if err == nil {
+	if rErr == nil {
 		// The node responded, move it to the front.
 		last.livenessChecks++
 		tab.log.Debug("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)

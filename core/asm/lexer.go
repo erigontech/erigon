@@ -182,13 +182,13 @@ func (l *lexer) blob() string {
 
 // Emits a new token on to token channel for processing
 func (l *lexer) emit(t tokenType) {
-	token := token{t, l.lineno, l.blob()}
+	t1 := token{t, l.lineno, l.blob()}
 
 	if l.debug {
-		fmt.Fprintf(os.Stderr, "%04d: (%-20v) %s\n", token.lineno, token.typ, token.text)
+		fmt.Fprintf(os.Stderr, "%04d: (%-20v) %s\n", t1.lineno, t1.typ, t1.text)
 	}
 
-	l.tokens <- token
+	l.tokens <- t1
 	l.start = l.pos
 }
 

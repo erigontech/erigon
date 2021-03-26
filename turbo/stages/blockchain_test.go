@@ -1104,7 +1104,7 @@ func TestLogRebirth(t *testing.T) {
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 
 	// This chain contains a single log.
-	chain, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
+	chain, _, chainErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
 		if i == 1 {
 			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
 			if err != nil {
@@ -1113,12 +1113,12 @@ func TestLogRebirth(t *testing.T) {
 			gen.AddTx(tx)
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate chain: %v", err)
+	if chainErr != nil {
+		t.Fatalf("generate chain: %v", chainErr)
 	}
 	// Generate long reorg chain containing another log. Inserting the
 	// chain removes one log and adds one.
-	forkChain, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
+	forkChain, _, forkChainErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
 		if i == 1 {
 			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
 			if err != nil {
@@ -1128,13 +1128,13 @@ func TestLogRebirth(t *testing.T) {
 			gen.OffsetTime(-9) // higher block difficulty
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate fork chain: %v", err)
+	if forkChainErr != nil {
+		t.Fatalf("generate fork chain: %v", forkChainErr)
 	}
 	// This chain segment is rooted in the original chain, but doesn't contain any logs.
 	// When inserting it, the canonical chain switches away from forkChain and re-emits
 	// the log event for the old chain, as well as a RemovedLogsEvent for forkChain.
-	newBlocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 3, func(i int, gen *core.BlockGen) {
+	newBlocks, _, newBlocksErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 3, func(i int, gen *core.BlockGen) {
 		if i == 1 {
 			tx, err1 := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
 			if err1 != nil {
@@ -1143,8 +1143,8 @@ func TestLogRebirth(t *testing.T) {
 			gen.AddTx(tx)
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate new blocks: %v", err)
+	if newBlocksErr != nil {
+		t.Fatalf("generate new blocks: %v", newBlocksErr)
 	}
 
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
@@ -1196,7 +1196,7 @@ func TestSideLogRebirth(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	// Generate side chain with lower difficulty
-	sideChain, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 3, func(i int, gen *core.BlockGen) {
+	sideChain, _, sideChainErr := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 3, func(i int, gen *core.BlockGen) {
 		if i == 1 {
 			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
 			if err != nil {
@@ -1205,8 +1205,8 @@ func TestSideLogRebirth(t *testing.T) {
 			gen.AddTx(tx)
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate side chain: %v", err)
+	if sideChainErr != nil {
+		t.Fatalf("generate side chain: %v", sideChainErr)
 	}
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
@@ -1226,12 +1226,12 @@ func TestSideLogRebirth(t *testing.T) {
 func checkLogEvents(t *testing.T, logsCh <-chan []*types.Log, rmLogsCh <-chan core.RemovedLogsEvent, wantNew, wantRemoved int) {
 	t.Helper()
 
-	if len(logsCh) != wantNew {
-		//t.Fatalf("wrong number of log events: got %d, want %d", len(logsCh), wantNew)
-	}
-	if len(rmLogsCh) != wantRemoved {
-		//t.Fatalf("wrong number of removed log events: got %d, want %d", len(rmLogsCh), wantRemoved)
-	}
+	// if len(logsCh) != wantNew {
+	//t.Fatalf("wrong number of log events: got %d, want %d", len(logsCh), wantNew)
+	// }
+	// if len(rmLogsCh) != wantRemoved {
+	//t.Fatalf("wrong number of removed log events: got %d, want %d", len(rmLogsCh), wantRemoved)
+	// }
 	// Drain events.
 	for i := 0; i < len(logsCh); i++ {
 		<-logsCh
@@ -1271,7 +1271,7 @@ func TestReorgSideEvent(t *testing.T) {
 		t.Fatalf("failed to insert chain: %v", err)
 	}
 
-	replacementBlocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db2, 4, func(i int, gen *core.BlockGen) {
+	replacementBlocks, _, replacementBlocksErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db2, 4, func(i int, gen *core.BlockGen) {
 		tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), nil), signer, key1)
 		if i == 2 {
 			gen.OffsetTime(-9)
@@ -1281,8 +1281,8 @@ func TestReorgSideEvent(t *testing.T) {
 		}
 		gen.AddTx(tx)
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate replacement chain: %v", err)
+	if replacementBlocksErr != nil {
+		t.Fatalf("generate replacement chain: %v", replacementBlocksErr)
 	}
 	chainSideCh := make(chan core.ChainSideEvent, 64)
 	blockchain.SubscribeChainSideEvent(chainSideCh)
@@ -1410,7 +1410,7 @@ func TestEIP155Transition(t *testing.T) {
 	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, chainErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
 		var (
 			tx      *types.Transaction
 			err     error
@@ -1451,12 +1451,12 @@ func TestEIP155Transition(t *testing.T) {
 			block.AddTx(tx)
 		}
 	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate chain: %v", err)
+	if chainErr != nil {
+		t.Fatalf("generate chain: %v", chainErr)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); err != nil {
-		t.Fatal(err)
+	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); chainErr != nil {
+		t.Fatal(chainErr)
 	}
 	block := blockchain.GetBlockByNumber(1)
 	if block.Transactions()[0].Protected() {
@@ -1470,33 +1470,30 @@ func TestEIP155Transition(t *testing.T) {
 	if !block.Transactions()[1].Protected() {
 		t.Error("Expected block[3].txs[1] to be replay protected")
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[4:], true /* checkRoot */); err != nil {
-		t.Fatal(err)
+	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[4:], true /* checkRoot */); chainErr != nil {
+		t.Fatal(chainErr)
 	}
 
 	// generate an invalid chain id transaction
 	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
-	blocks, _, err = core.GenerateChain(config, blocks[len(blocks)-1], ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, chainErr = core.GenerateChain(config, blocks[len(blocks)-1], ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
 		var (
-			tx      *types.Transaction
-			err     error
 			basicTx = func(signer types.Signer) (*types.Transaction, error) {
 				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		if i == 0 {
-			tx, err = basicTx(types.LatestSigner(config))
-			if err != nil {
-				t.Fatal(err)
+			tx, txErr := basicTx(types.LatestSigner(config))
+			if txErr != nil {
+				t.Fatal(txErr)
 			}
 			block.AddTx(tx)
 		}
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
+	if chainErr != nil {
+		t.Fatalf("generate blocks: %v", chainErr)
 	}
-	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
-	if !errors.Is(err, types.ErrInvalidChainId) {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); !errors.Is(err, types.ErrInvalidChainId) {
 		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
 	}
 }
@@ -1603,7 +1600,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 		err := db.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
 			// we ignore empty account history
 			//nolint:scopelint
-			if bucketName == string(dbutils.AccountsHistoryBucket) && len(v) == 0 {
+			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
 				return true, nil
 			}
 
@@ -1614,12 +1611,12 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 			return err
 		}
 
-		if bucketName == string(dbutils.BlockReceiptsPrefix) {
+		if bucketName == dbutils.BlockReceiptsPrefix {
 			// we will always have a receipt for genesis
 			numberOfEntries--
 		}
 
-		if bucketName == string(dbutils.PreimagePrefix) {
+		if bucketName == dbutils.PreimagePrefix {
 			// we will always have 2 preimages because core.GenerateChain interface does not
 			// allow us to set it to ignore them
 			// but if the preimages are enabled in BlockChain, we will have more than 2.
@@ -2255,284 +2252,6 @@ func TestPrunedImportSide(t *testing.T) {
 	testSideImport(t, 10, 0)
 	testSideImport(t, 1, 10)
 	testSideImport(t, 1, -10)
-}
-
-func TestInsertKnownHeaders(t *testing.T)      { testInsertKnownChainData(t, "headers") }
-func TestInsertKnownReceiptChain(t *testing.T) { testInsertKnownChainData(t, "receipts") }
-func TestInsertKnownBlocks(t *testing.T)       { testInsertKnownChainData(t, "blocks") }
-
-func testInsertKnownChainData(t *testing.T, typ string) {
-	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
-	engine := ethash.NewFaker()
-
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	genesis := new(core.Genesis).MustCommit(db)
-
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-	// A longer chain but total difficulty is lower.
-	blocks2, receipts2, err := core.GenerateChain(params.TestChainConfig, blocks[len(blocks)-1], engine, db, 65, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks2: %v", err)
-	}
-	// A shorter chain but total difficulty is higher.
-	blocks3, receipts3, err := core.GenerateChain(params.TestChainConfig, blocks[len(blocks)-1], engine, db, 64, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-		b.OffsetTime(-9) // A higher difficulty
-	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-	// Import the shared chain and the original canonical one
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatalf("failed to create temp freezer dir: %v", err)
-	}
-	defer os.Remove(dir)
-	chaindb, err := ethdb.NewDatabaseWithFreezer(ethdb.NewMemDatabase(), dir, "")
-	if err != nil {
-		t.Fatalf("failed to create temp freezer db: %v", err)
-	}
-	new(core.Genesis).MustCommit(chaindb)
-	defer os.RemoveAll(dir)
-
-	txCacher := core.NewTxSenderCacher(1)
-	chain, err := core.NewBlockChain(chaindb, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
-
-	var (
-		inserter func(blocks []*types.Block, receipts []types.Receipts) error
-		asserter func(t *testing.T, block *types.Block)
-	)
-	if typ == "headers" {
-		inserter = func(blocks []*types.Block, receipts []types.Receipts) error {
-			headers := make([]*types.Header, 0, len(blocks))
-			for _, block := range blocks {
-				headers = append(headers, block.Header())
-			}
-			_, err := chain.InsertHeaderChain(headers, 1)
-			return err
-		}
-		asserter = func(t *testing.T, block *types.Block) {
-			if chain.CurrentHeader().Hash() != block.Hash() {
-				t.Fatalf("current head header mismatch, have %v, want %v", chain.CurrentHeader().Hash().Hex(), block.Hash().Hex())
-			}
-		}
-	} else if typ == "receipts" {
-		inserter = func(blocks []*types.Block, receipts []types.Receipts) error {
-			headers := make([]*types.Header, 0, len(blocks))
-			for _, block := range blocks {
-				headers = append(headers, block.Header())
-			}
-			_, err := chain.InsertHeaderChain(headers, 1)
-			if err != nil {
-				return err
-			}
-			_, err = chain.InsertReceiptChain(blocks, receipts, 0)
-			return err
-		}
-		asserter = func(t *testing.T, block *types.Block) {
-			if chain.CurrentFastBlock().Hash() != block.Hash() {
-				t.Fatalf("current head fast block mismatch, have %v, want %v", chain.CurrentFastBlock().Hash().Hex(), block.Hash().Hex())
-			}
-		}
-	} else {
-		inserter = func(blocks []*types.Block, receipts []types.Receipts) error {
-			_, err := chain.InsertChain(context.Background(), blocks)
-			return err
-		}
-		asserter = func(t *testing.T, block *types.Block) {
-			if chain.CurrentBlock().Hash() != block.Hash() {
-				t.Fatalf("current head block mismatch, have %v, want %v", chain.CurrentBlock().Hash().Hex(), block.Hash().Hex())
-			}
-		}
-	}
-
-	if err := inserter(blocks, receipts); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-
-	// Reimport the chain data again. All the imported
-	// chain data are regarded "known" data.
-	if err := inserter(blocks, receipts); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-	asserter(t, blocks[len(blocks)-1])
-
-	// Import a long canonical chain with some known data as prefix.
-	rollback := blocks[len(blocks)/2].NumberU64()
-
-	chain.SetHead(rollback - 1) //nolint:errcheck
-	if err := inserter(append(blocks, blocks2...), append(receipts, receipts2...)); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-	asserter(t, blocks2[len(blocks2)-1])
-
-	// Import a heavier shorter but higher total difficulty chain with some known data as prefix.
-	if err := inserter(append(blocks, blocks3...), append(receipts, receipts3...)); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-	asserter(t, blocks3[len(blocks3)-1])
-
-	// Import a longer but lower total difficulty chain with some known data as prefix.
-	if err := inserter(append(blocks, blocks2...), append(receipts, receipts2...)); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-	// The head shouldn't change.
-	asserter(t, blocks3[len(blocks3)-1])
-
-	// Rollback the heavier chain and re-insert the longer chain again
-	chain.SetHead(rollback - 1) //nolint:errcheck
-	if err := inserter(append(blocks, blocks2...), append(receipts, receipts2...)); err != nil {
-		t.Fatalf("failed to insert chain data: %v", err)
-	}
-	asserter(t, blocks2[len(blocks2)-1])
-}
-
-// getLongAndShortChains returns two chains,
-// A is longer, B is heavier
-func getLongAndShortChains() (*core.BlockChain, []*types.Block, []*types.Block, error) {
-	// Generate a canonical chain to act as the main dataset
-	engine := ethash.NewFaker()
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	genesis := new(core.Genesis).MustCommit(db)
-
-	// Generate and import the canonical chain,
-	// Offset the time, to keep the difficulty low
-	longChain, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 80, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	}, false /* intermediateHashes */)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate long chain: %v", err)
-	}
-	diskdb := ethdb.NewMemDatabase()
-	defer diskdb.Close()
-	new(core.Genesis).MustCommit(diskdb)
-
-	txCacher := core.NewTxSenderCacher(1)
-	chain, err := core.NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create tester chain: %v", err)
-	}
-	defer chain.Stop()
-
-	// Generate fork chain, make it shorter than canon, with common ancestor pretty early
-	parentIndex := 3
-	parent := longChain[parentIndex]
-	heavyChain, _, err := core.GenerateChain(params.TestChainConfig, parent, engine, db, 75, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{2})
-		b.OffsetTime(-9)
-	}, false /* intermediateHashes */)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("generate heavy chain: %v", err)
-	}
-	// Verify that the test is sane
-	var (
-		longerTd  = new(big.Int)
-		shorterTd = new(big.Int)
-	)
-	for index, b := range longChain {
-		longerTd.Add(longerTd, b.Difficulty())
-		if index <= parentIndex {
-			shorterTd.Add(shorterTd, b.Difficulty())
-		}
-	}
-	for _, b := range heavyChain {
-		shorterTd.Add(shorterTd, b.Difficulty())
-	}
-	if shorterTd.Cmp(longerTd) <= 0 {
-		return nil, nil, nil, fmt.Errorf("Test is moot, heavyChain td (%v) must be larger than canon td (%v)", shorterTd, longerTd)
-	}
-	longerNum := longChain[len(longChain)-1].NumberU64()
-	shorterNum := heavyChain[len(heavyChain)-1].NumberU64()
-	if shorterNum >= longerNum {
-		return nil, nil, nil, fmt.Errorf("Test is moot, heavyChain num (%v) must be lower than canon num (%v)", shorterNum, longerNum)
-	}
-	return chain, longChain, heavyChain, nil
-}
-
-// TestReorgToShorterRemovesCanonMapping tests that if we
-// 1. Have a chain [0 ... N .. X]
-// 2. Reorg to shorter but heavier chain [0 ... N ... Y]
-// 3. Then there should be no canon mapping for the block at height X
-func TestReorgToShorterRemovesCanonMapping(t *testing.T) {
-	t.Skip("TestReorgToShorterRemovesCanonMapping")
-	chain, canonblocks, sideblocks, err := getLongAndShortChains()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	if n, err = chain.InsertChain(context.Background(), canonblocks); err != nil {
-		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
-	}
-	canonNum := chain.CurrentBlock().NumberU64()
-	_, err = chain.InsertChain(context.Background(), sideblocks)
-	if err != nil {
-		t.Errorf("Got error, %v", err)
-	}
-	head := chain.CurrentBlock()
-	if got := sideblocks[len(sideblocks)-1].Hash(); got != head.Hash() {
-		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
-	}
-	// We have now inserted a sidechain.
-	if blockByNum := chain.GetBlockByNumber(canonNum); blockByNum != nil {
-		t.Errorf("expected block to be gone: %v", blockByNum.NumberU64())
-	}
-	if headerByNum := chain.GetHeaderByNumber(canonNum); headerByNum != nil {
-		t.Errorf("expected header to be gone: %v", headerByNum.Number.Uint64())
-	}
-}
-
-// TestReorgToShorterRemovesCanonMappingHeaderChain is the same scenario
-// as TestReorgToShorterRemovesCanonMapping, but applied on headerchain
-// imports -- that is, for fast sync
-func TestReorgToShorterRemovesCanonMappingHeaderChain(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
-	chain, canonblocks, sideblocks, err := getLongAndShortChains()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Convert into headers
-	canonHeaders := make([]*types.Header, len(canonblocks))
-	for i, block := range canonblocks {
-		canonHeaders[i] = block.Header()
-	}
-	if n, err := chain.InsertHeaderChain(canonHeaders, 0); err != nil {
-		t.Fatalf("header %d: failed to insert into chain: %v", n, err)
-	}
-	canonNum := chain.CurrentHeader().Number.Uint64()
-	sideHeaders := make([]*types.Header, len(sideblocks))
-	for i, block := range sideblocks {
-		sideHeaders[i] = block.Header()
-	}
-	if n, err := chain.InsertHeaderChain(sideHeaders, 0); err != nil {
-		t.Fatalf("header %d: failed to insert into chain: %v", n, err)
-	}
-	head := chain.CurrentHeader()
-	if got := sideblocks[len(sideblocks)-1].Hash(); got != head.Hash() {
-		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
-	}
-	// We have now inserted a sidechain.
-	if blockByNum := chain.GetBlockByNumber(canonNum); blockByNum != nil {
-		t.Errorf("expected block to be gone: %v", blockByNum.NumberU64())
-	}
-	if headerByNum := chain.GetHeaderByNumber(canonNum); headerByNum != nil {
-		t.Errorf("expected header to be gone: %v", headerByNum.Number.Uint64())
-	}
-}
-
-func TestTransactionIndices(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
-}
-
-func TestSkipStaleTxIndicesInFastSync(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
 }
 
 // Benchmarks large blocks with value transfers to non-existing accounts

@@ -83,14 +83,9 @@ type FlatDBTrieLoader struct {
 
 	ihSeek, accSeek, storageSeek []byte
 	kHex, kHexS                  []byte
-	// Storage item buffer
-	storageKey   []byte
-	storageValue []byte
 
 	// Account item buffer
-	accountKey   []byte
 	accountValue accounts.Account
-	hashValue    []byte
 
 	receiver        StreamReceiver
 	defaultReceiver *RootHashAggregator
@@ -516,16 +511,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 }
 
 //nolint
-func (r *RootHashAggregator) traceIf(acc, st string) {
-	// "succ" - because on this iteration this "succ" will become "curr"
-	if r.succStorage.Len() == 0 {
-		var accNibbles []byte
-		hexutil.DecompressNibbles(common.FromHex(acc), &accNibbles)
-		r.trace = bytes.HasPrefix(r.succ.Bytes(), accNibbles)
-	} else {
-		r.trace = bytes.HasPrefix(r.currAccK, common.FromHex(acc)) && bytes.HasPrefix(r.succStorage.Bytes(), common.FromHex(st))
-	}
-}
+// func (r *RootHashAggregator) traceIf(acc, st string) {
+// 	// "succ" - because on this iteration this "succ" will become "curr"
+// 	if r.succStorage.Len() == 0 {
+// 		var accNibbles []byte
+// 		hexutil.DecompressNibbles(common.FromHex(acc), &accNibbles)
+// 		r.trace = bytes.HasPrefix(r.succ.Bytes(), accNibbles)
+// 	} else {
+// 		r.trace = bytes.HasPrefix(r.currAccK, common.FromHex(acc)) && bytes.HasPrefix(r.succStorage.Bytes(), common.FromHex(st))
+// 	}
+// }
 
 func (r *RootHashAggregator) Result() SubTries {
 	panic("don't call me")

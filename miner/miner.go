@@ -19,7 +19,6 @@ package miner
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -41,15 +40,14 @@ type Backend interface {
 
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
-	mux        *event.TypeMux
-	worker     *worker
-	coinbase   common.Address
-	coinbaseMu sync.RWMutex
-	eth        Backend
-	engine     consensus.Engine
-	exitCh     chan struct{}
-	startCh    chan common.Address
-	stopCh     chan struct{}
+	mux      *event.TypeMux
+	worker   *worker
+	coinbase common.Address
+	eth      Backend
+	engine   consensus.Engine
+	exitCh   chan struct{}
+	startCh  chan common.Address
+	stopCh   chan struct{}
 }
 
 func New(eth Backend, config *params.MiningConfig, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(block *types.Block) bool) *Miner {

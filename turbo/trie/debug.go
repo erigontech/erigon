@@ -31,7 +31,7 @@ func (t *Trie) Print(w io.Writer) {
 	if err != nil {
 		panic(err)
 	}
-	_, err = witness.WriteTo(w)
+	_, err = witness.WriteInto(w)
 	if err != nil {
 		panic(err)
 	}

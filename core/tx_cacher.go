@@ -78,48 +78,6 @@ func (cacher *TxSenderCacher) cache() {
 	}
 }
 
-// recover recovers the senders from a batch of transactions and caches them
-// back into the same data structures. There is no validation being done, nor
-// any reaction to invalid signatures. That is up to calling code later.
-func (cacher *TxSenderCacher) recover(signer types.Signer, txs []*types.Transaction) {
-	// If there's nothing to recover, abort
-	if len(txs) == 0 {
-		return
-	}
-	// Ensure we have meaningful task sizes and schedule the recoveries
-	tasks := cacher.threads
-	if len(txs) < tasks*4 {
-		tasks = (len(txs) + 3) / 4
-	}
-	for i := 0; i < tasks; i++ {
-		select {
-		case <-cacher.exitCh:
-		case cacher.tasks <- &txSenderCacherRequest{
-			signer: signer,
-			txs:    txs[i:],
-			inc:    tasks,
-		}:
-			//nothing to do
-		}
-
-	}
-}
-
-// recoverFromBlocks recovers the senders from a batch of blocks and caches them
-// back into the same data structures. There is no validation being done, nor
-// any reaction to invalid signatures. That is up to calling code later.
-func (cacher *TxSenderCacher) recoverFromBlocks(signer types.Signer, blocks []*types.Block) {
-	count := 0
-	for _, block := range blocks {
-		count += len(block.Transactions())
-	}
-	txs := make([]*types.Transaction, 0, count)
-	for _, block := range blocks {
-		txs = append(txs, block.Transactions()...)
-	}
-	cacher.recover(signer, txs)
-}
-
 func (cacher *TxSenderCacher) Close() {
 	common.SafeClose(cacher.exitCh)
 	close(cacher.tasks)

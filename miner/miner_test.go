@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -50,49 +49,6 @@ func (m *mockBackend) BlockChain() *core.BlockChain {
 
 func (m *mockBackend) TxPool() *core.TxPool {
 	return m.txPool
-}
-
-type testBlockChain struct {
-	gasLimit      uint64
-	chainHeadFeed *event.Feed
-}
-
-func (bc *testBlockChain) CurrentBlock() *types.Block {
-	return types.NewBlock(&types.Header{
-		GasLimit: bc.gasLimit,
-	}, nil, nil, nil)
-}
-
-func (bc *testBlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return bc.CurrentBlock()
-}
-
-func (bc *testBlockChain) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription {
-	return bc.chainHeadFeed.Subscribe(ch)
-}
-
-func TestMiner(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
-	miner, mux := createMiner(t)
-	miner.Start(common.HexToAddress("0x12345"))
-	waitForMiningState(t, miner, true)
-	// Start the downloader
-	mux.Post(downloader.StartEvent{}) //nolint:errcheck
-	waitForMiningState(t, miner, false)
-	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.DoneEvent{}) //nolint:errcheck
-	waitForMiningState(t, miner, true)
-
-	// Subsequent downloader events after a successful DoneEvent should not cause the
-	// miner to start or stop. This prevents a security vulnerability
-	// that would allow entities to present fake high blocks that would
-	// stop mining operations by causing a downloader sync
-	// until it was discovered they were invalid, whereon mining would resume.
-	mux.Post(downloader.StartEvent{}) //nolint:errcheck
-	waitForMiningState(t, miner, true)
-
-	mux.Post(downloader.FailedEvent{}) //nolint:errcheck
-	waitForMiningState(t, miner, true)
 }
 
 // TestMinerDownloaderFirstFails tests that mining is only
@@ -153,41 +109,6 @@ func TestMinerStartStopAfterDownloaderEvents(t *testing.T) {
 	waitForMiningState(t, miner, false)
 }
 
-func TestStartWhileDownload(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
-	miner, mux := createMiner(t)
-	waitForMiningState(t, miner, false)
-	miner.Start(common.HexToAddress("0x12345"))
-	waitForMiningState(t, miner, true)
-	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.StartEvent{}) //nolint:errcheck
-	waitForMiningState(t, miner, false)
-	// Starting the miner after the downloader should not work
-	miner.Start(common.HexToAddress("0x12345"))
-	waitForMiningState(t, miner, false)
-}
-
-func TestStartStopMiner(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
-	miner, _ := createMiner(t)
-	waitForMiningState(t, miner, false)
-	miner.Start(common.HexToAddress("0x12345"))
-	waitForMiningState(t, miner, true)
-	miner.Stop()
-	waitForMiningState(t, miner, false)
-}
-
-func TestCloseMiner(t *testing.T) {
-	t.Skip("skipped for turbo-geth")
-	miner, _ := createMiner(t)
-	waitForMiningState(t, miner, false)
-	miner.Start(common.HexToAddress("0x12345"))
-	waitForMiningState(t, miner, true)
-	// Terminate the miner and wait for the update loop to run
-	miner.Close()
-	waitForMiningState(t, miner, false)
-}
-
 // TestMinerSetEtherbase checks that etherbase becomes set even if mining isn't
 // possible at the moment
 func TestMinerSetEtherbase(t *testing.T) {
@@ -245,7 +166,9 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
-	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
+	cfg := core.DefaultTxPoolConfig
+	cfg.Journal = ""
+	pool := core.NewTxPool(cfg, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
 	backend := NewMockBackend(bc, pool)
 	// Create event Mux
 	mux := new(event.TypeMux)

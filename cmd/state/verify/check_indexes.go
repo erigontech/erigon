@@ -40,6 +40,6 @@ func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, i
 		return err
 	}
 
-	fmt.Println("Check was succesful")
+	fmt.Println("Check was successful")
 	return nil
 }

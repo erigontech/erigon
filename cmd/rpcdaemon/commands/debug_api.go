@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth"
@@ -34,9 +33,8 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	*BaseAPI
-	dbReader     ethdb.Database
-	chainContext core.ChainContext
-	GasCap       uint64
+	dbReader ethdb.Database
+	GasCap   uint64
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance

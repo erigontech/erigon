@@ -420,8 +420,8 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
-	cache = nil
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	var cache *shards.StateCache
 	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("read canonical hash: %w", err)
@@ -436,19 +436,19 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		tx = db.(ethdb.DbWithPendingMutations)
 		useExternalTx = true
 	} else {
-		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return fmt.Errorf("open transcation: %w", err)
+		var txErr error
+		tx, txErr = db.Begin(context.Background(), ethdb.RW)
+		if txErr != nil {
+			return fmt.Errorf("open transcation: %w", txErr)
 		}
 		defer tx.Rollback()
 	}
 
-	if cache != nil {
-		if err = cacheWarmUpIfNeed(tx, cache); err != nil {
-			return err
-		}
-	}
+	// if cache != nil {
+	// 	if err = cacheWarmUpIfNeed(tx, cache); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	logPrefix := s.state.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cache, tmpdir, expectedRootHash, quit); err != nil {

@@ -89,16 +89,16 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 // Tests that if the data dir is already in use, an appropriate error is returned.
 func TestNodeUsedDataDir(t *testing.T) {
 	// Create a temporary folder to use as the data directory
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatalf("failed to create temporary data directory: %v", err)
+	dir, dirErr := ioutil.TempDir("", "")
+	if dirErr != nil {
+		t.Fatalf("failed to create temporary data directory: %v", dirErr)
 	}
 	defer os.RemoveAll(dir)
 
 	// Create a new node based on the data directory
-	original, err := New(&Config{DataDir: dir})
-	if err != nil {
-		t.Fatalf("failed to create original protocol stack: %v", err)
+	original, originalErr := New(&Config{DataDir: dir})
+	if originalErr != nil {
+		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
 	defer original.Close()
 	if err := original.Start(); err != nil {
@@ -106,8 +106,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	_, err = New(&Config{DataDir: dir})
-	if !errors.Is(err, ErrDatadirUsed) {
+	if _, err := New(&Config{DataDir: dir}); !errors.Is(err, ErrDatadirUsed) {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDatadirUsed)
 	}
 }

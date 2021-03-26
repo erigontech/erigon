@@ -32,6 +32,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
+const opTestArg = "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+
 type TwoOperandTestcase struct {
 	X        string
 	Y        string
@@ -229,42 +231,40 @@ func TestAddMod(t *testing.T) {
 }
 
 // getResult is a convenience function to generate the expected values
-func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
-	var (
-		env         = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
-		stack       = stack.New()
-		pc          = uint64(0)
-		interpreter = env.interpreter.(*EVMInterpreter)
-	)
-	result := make([]TwoOperandTestcase, len(args))
-	for i, param := range args {
-		x := new(uint256.Int).SetBytes(common.Hex2Bytes(param.x))
-		y := new(uint256.Int).SetBytes(common.Hex2Bytes(param.y))
-		stack.Push(x)
-		stack.Push(y)
-		opFn(&pc, interpreter, &callCtx{nil, stack, nil})
-		actual := stack.Pop()
-		result[i] = TwoOperandTestcase{param.x, param.y, fmt.Sprintf("%064x", actual)}
-	}
-	return result
-}
+// func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
+// 	var (
+// 		env         = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+// 		stack       = stack.New()
+// 		pc          = uint64(0)
+// 		interpreter = env.interpreter.(*EVMInterpreter)
+// 	)
+// 	result := make([]TwoOperandTestcase, len(args))
+// 	for i, param := range args {
+// 		x := new(uint256.Int).SetBytes(common.Hex2Bytes(param.x))
+// 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(param.y))
+// 		stack.Push(x)
+// 		stack.Push(y)
+// 		opFn(&pc, interpreter, &callCtx{nil, stack, nil})
+// 		actual := stack.Pop()
+// 		result[i] = TwoOperandTestcase{param.x, param.y, fmt.Sprintf("%064x", actual)}
+// 	}
+// 	return result
+// }
 
 // utility function to fill the json-file with testcases
 // Enable this test to generate the 'testcases_xx.json' files
-func TestWriteExpectedValues(t *testing.T) {
-	t.Skip("Enable this test to create json test cases.")
-
-	for name, method := range twoOpMethods {
-		data, err := json.Marshal(getResult(commonParams, method))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = ioutil.WriteFile(fmt.Sprintf("testdata/testcases_%v.json", name), data, 0644)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-}
+// func TestWriteExpectedValues(t *testing.T) {
+// 	for name, method := range twoOpMethods {
+// 		data, err := json.Marshal(getResult(commonParams, method))
+// 		if err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		_ = ioutil.WriteFile(fmt.Sprintf("testdata/testcases_%v.json", name), data, 0644)
+// 		if err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
+// }
 
 // TestJsonTestcases runs through all the testcases defined as json-files
 func TestJsonTestcases(t *testing.T) {
@@ -348,8 +348,8 @@ func BenchmarkOpSub256(b *testing.B) {
 }
 
 func BenchmarkOpMul(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opMul, x, y)
 }
@@ -380,64 +380,64 @@ func BenchmarkOpSdiv(b *testing.B) {
 }
 
 func BenchmarkOpMod(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opMod, x, y)
 }
 
 func BenchmarkOpSmod(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opSmod, x, y)
 }
 
 func BenchmarkOpExp(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opExp, x, y)
 }
 
 func BenchmarkOpSignExtend(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opSignExtend, x, y)
 }
 
 func BenchmarkOpLt(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opLt, x, y)
 }
 
 func BenchmarkOpGt(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opGt, x, y)
 }
 
 func BenchmarkOpSlt(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opSlt, x, y)
 }
 
 func BenchmarkOpSgt(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opSgt, x, y)
 }
 
 func BenchmarkOpEq(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opEq, x, y)
 }
@@ -447,45 +447,45 @@ func BenchmarkOpEq2(b *testing.B) {
 	opBenchmark(b, opEq, x, y)
 }
 func BenchmarkOpAnd(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opAnd, x, y)
 }
 
 func BenchmarkOpOr(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opOr, x, y)
 }
 
 func BenchmarkOpXor(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opXor, x, y)
 }
 
 func BenchmarkOpByte(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
 
 	opBenchmark(b, opByte, x, y)
 }
 
 func BenchmarkOpAddmod(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	z := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
+	z := opTestArg
 
 	opBenchmark(b, opAddmod, x, y, z)
 }
 
 func BenchmarkOpMulmod(b *testing.B) {
-	x := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	y := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
-	z := "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
+	x := opTestArg
+	y := opTestArg
+	z := opTestArg
 
 	opBenchmark(b, opMulmod, x, y, z)
 }

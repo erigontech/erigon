@@ -97,6 +97,7 @@ func OpenDB(cfg Flags) (ethdb.KV, core.ApiBackend, error) {
 			db = database.KV()
 		} else {
 			err = errOpen
+			_ = err
 		}
 		if cfg.SnapshotMode != "" {
 			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
