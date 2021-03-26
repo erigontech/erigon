@@ -282,7 +282,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := db.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
+			if err := tmpDB.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
 				return nil, nil, err
 			}
 		}
