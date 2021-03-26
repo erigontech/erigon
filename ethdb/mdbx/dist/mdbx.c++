@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 162afb9ada1f4431f2b54f0a20d732bd31c7399ab5f371f0097b27427fbbda0a_v0_9_3_66_gb2f52e55
+#define MDBX_BUILD_SOURCERY af62dd2de4c2ad0b5aa76f686bdc58f16f335d55a323b5b0aaa48592afd02424_v0_9_3_62_gc77494e2
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -2598,7 +2598,7 @@ struct MDBX_env {
   uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
   unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
   atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dp_reserve;  /* list of malloc'ed blocks for re-use */
+  MDBX_page *me_dp_reserve;  /* list of malloc'd blocks for re-use */
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
   /* Number of freelist items that can fit in a single overflow page */

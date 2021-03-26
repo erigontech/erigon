@@ -693,53 +693,6 @@ func TestHashimoto(t *testing.T) {
 	}
 }
 
-// Tests that caches generated on disk may be done concurrently.
-func TestConcurrentDiskCacheGeneration(t *testing.T) {
-	t.Skip("turbo-geth doesn't use disk cache")
-	/*
-		// Create a temp folder to generate the caches into
-		cachedir, err := ioutil.TempDir("", "")
-		if err != nil {
-			t.Fatalf("Failed to create temporary cache dir: %v", err)
-		}
-		defer os.RemoveAll(cachedir)
-
-		// Define a heavy enough block, one from mainnet should do
-		block := types.NewBlockWithHeader(&types.Header{
-			Number:      big.NewInt(3311058),
-			ParentHash:  common.HexToHash("0xd783efa4d392943503f28438ad5830b2d5964696ffc285f338585e9fe0a37a05"),
-			UncleHash:   common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
-			Coinbase:    common.HexToAddress("0xc0ea08a2d404d3172d2add29a45be56da40e2949"),
-			Root:        common.HexToHash("0x77d14e10470b5850332524f8cd6f69ad21f070ce92dca33ab2858300242ef2f1"),
-			TxHash:      common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-			ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-			Difficulty:  big.NewInt(167925187834220),
-			GasLimit:    4015682,
-			GasUsed:     0,
-			Time:        1488928920,
-			Extra:       []byte("www.bw.com"),
-			MixDigest:   common.HexToHash("0x3e140b0784516af5e5ec6730f2fb20cca22f32be399b9e4ad77d32541f798cd0"),
-			Nonce:       types.EncodeNonce(0xf400cd0006070c49),
-		})
-		// Simulate multiple processes sharing the same datadir
-		var pend sync.WaitGroup
-
-		for i := 0; i < 3; i++ {
-			pend.Add(1)
-
-			go func(idx int) {
-				defer pend.Done()
-				ethash := New(Config{cachedir, 0, 1, false, "", 0, 0, false, ModeNormal, nil}, nil, false)
-				defer ethash.Close()
-				if err := ethash.verifySeal(nil, block.Header(), false); err != nil {
-					t.Errorf("proc %d: block verification failed: %v", idx, err)
-				}
-			}(i)
-		}
-		pend.Wait()
-	*/
-}
-
 // Benchmarks the cache generation performance.
 func BenchmarkCacheGeneration(b *testing.B) {
 	for i := 0; i < b.N; i++ {

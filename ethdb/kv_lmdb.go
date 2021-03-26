@@ -642,16 +642,6 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	//if tx.db.opts.flags&lmdb.Readonly == 0 && !tx.db.opts.inMem { // call fsync only after main transaction commit
-	//	fsyncTimer := time.Now()
-	//	if err := tx.db.env.Sync(tx.flags&NoSync == 0); err != nil {
-	//		log.Warn("fsync after commit failed", "err", err)
-	//	}
-	//	fsyncTook := time.Since(fsyncTimer)
-	//	if fsyncTook > 20*time.Second {
-	//		log.Info("Batch", "fsync", fsyncTook)
-	//	}
-	//}
 	return nil
 }
 

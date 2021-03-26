@@ -69,15 +69,12 @@ type fetchResult struct {
 	Receipts     types.Receipts
 }
 
-func newFetchResult(header *types.Header, fastSync bool) *fetchResult {
+func newFetchResult(header *types.Header) *fetchResult {
 	item := &fetchResult{
 		Header: header,
 	}
 	if !header.EmptyBody() {
 		item.pending |= (1 << bodyType)
-	}
-	if fastSync && !header.EmptyReceipts() {
-		item.pending |= (1 << receiptType)
 	}
 	return item
 }
@@ -339,15 +336,6 @@ func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
 			q.blockTaskPool[hash] = header
 			q.blockTaskQueue.Push(header, -int64(header.Number.Uint64()))
 		}
-		// Queue for receipt retrieval
-		if q.mode == FastSync && !header.EmptyReceipts() {
-			if _, ok := q.receiptTaskPool[hash]; ok {
-				log.Warn("Header already scheduled for receipt fetch", "number", header.Number, "hash", hash)
-			} else {
-				q.receiptTaskPool[hash] = header
-				q.receiptTaskQueue.Push(header, -int64(header.Number.Uint64()))
-			}
-		}
 		inserts = append(inserts, header)
 		q.headerHead = hash
 		from++
@@ -525,7 +513,7 @@ func (q *queue) reserveHeaders(p *peerConnection, count int, taskPool map[common
 		// we can ask the resultcache if this header is within the
 		// "prioritized" segment of blocks. If it is not, we need to throttle
 
-		stale, throttle, item, err := q.resultCache.AddFetch(header, q.mode == FastSync)
+		stale, throttle, item, err := q.resultCache.AddFetch(header)
 		if stale {
 			// Don't put back in the task queue, this item has already been
 			// delivered upstream

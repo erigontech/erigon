@@ -15,7 +15,6 @@ const (
 	IsByzantiumEnabled
 	IsConstantinopleEnabled
 	IsPetersburgEnabled
-	IsEWASM
 	BlockNumber
 	NoHistory
 	WithHistoryHighest
@@ -29,7 +28,6 @@ func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) cont
 	ctx = context.WithValue(ctx, IsByzantiumEnabled, c.IsByzantium(blockNum))
 	ctx = context.WithValue(ctx, IsConstantinopleEnabled, c.IsConstantinople(blockNum))
 	ctx = context.WithValue(ctx, IsPetersburgEnabled, c.IsPetersburg(blockNum))
-	ctx = context.WithValue(ctx, IsEWASM, c.IsEWASM(blockNum))
 	ctx = context.WithValue(ctx, BlockNumber, blockNum)
 	return ctx
 }

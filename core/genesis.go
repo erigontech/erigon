@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -259,11 +260,10 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	tds := state.NewTrieDbState(common.Hash{}, db, 0)
-
-	tds.StartNewBuffer()
-	statedb := state.New(tds)
-	tds.SetNoHistory(!history)
+	tmpDB := ethdb.NewMemDatabase()
+	defer tmpDB.Close()
+	r, w := state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
+	statedb := state.New(r)
 	for addr, account := range g.Alloc {
 		balance, _ := uint256.FromBig(account.Balance)
 		statedb.AddBalance(addr, balance)
@@ -287,15 +287,14 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 			}
 		}
 	}
-	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	err := statedb.FinalizeTx(context.Background(), w)
 	if err != nil {
 		return nil, nil, err
 	}
-	roots, err := tds.ComputeTrieRoots()
+	root, err := trie.CalcRoot("genesis", tmpDB)
 	if err != nil {
 		return nil, nil, err
 	}
-	root := roots[len(roots)-1]
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
@@ -319,11 +318,7 @@ func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
-	if dbErr != nil {
-		return nil, nil, dbErr
-	}
+func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock(tx, history)
 	if err != nil {
 		return nil, nil, err
@@ -347,19 +342,19 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, nil, err
-	}
 	return block, statedb, nil
 }
 
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := g.CommitGenesisState(db, history)
-	if err != nil {
-		return block, statedb, err
+	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
+	if dbErr != nil {
+		return nil, nil, dbErr
+	}
+	block, statedb, err2 := g.WriteGenesisState(tx, history)
+	if err2 != nil {
+		return block, statedb, err2
 	}
 	config := g.Config
 	if config == nil {
@@ -368,22 +363,28 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+	if err := rawdb.WriteBlock(context.Background(), tx, block); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteReceipts(db, block.NumberU64(), nil); err != nil {
+	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 		return nil, nil, err
 	}
-	rawdb.WriteHeadBlockHash(db, block.Hash())
-	rawdb.WriteHeadFastBlockHash(db, block.Hash())
-	rawdb.WriteHeadHeaderHash(db, block.Hash())
-	if err := rawdb.WriteChainConfig(db, block.Hash(), config); err != nil {
+	rawdb.WriteHeadBlockHash(tx, block.Hash())
+	rawdb.WriteHeadFastBlockHash(tx, block.Hash())
+	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
+		return nil, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
 	return block, statedb, nil

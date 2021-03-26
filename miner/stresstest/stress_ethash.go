@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -84,10 +83,11 @@ func main() {
 		enodes = append(enodes, stack.Server().Self())
 
 		// Inject the signer key and start sealing with it
-		store := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-		if _, err := store.NewAccount(""); err != nil {
-			panic(err)
+		key, keyErr := crypto.GenerateKey()
+		if keyErr != nil {
+			panic(keyErr)
 		}
+		ethBackend.SetSigner(key)
 	}
 
 	// Iterate over all the nodes and start mining
@@ -155,7 +155,6 @@ func makeMiner(genesis *core.Genesis) (*node.Node, *eth.Ethereum, error) {
 			NoDiscovery: true,
 			MaxPeers:    25,
 		},
-		UseLightweightKDF: true,
 	}
 	// Create the node and configure a full Ethereum node on it
 	stack, err := node.New(config)

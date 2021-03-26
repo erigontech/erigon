@@ -177,7 +177,7 @@ func TestBlockSubscription(t *testing.T) {
 	defer db.Close()
 	var (
 		backend     = &testBackend{db: db}
-		api         = NewPublicFilterAPI(backend, false, deadline)
+		api         = NewPublicFilterAPI(backend, deadline)
 		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
 		chain, _, _ = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 		chainEvents = []core.ChainEvent{}
@@ -231,7 +231,7 @@ func TestPendingTxFilter(t *testing.T) {
 
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, deadline)
+		api     = NewPublicFilterAPI(backend, deadline)
 
 		transactions = []*types.Transaction{
 			types.NewTransaction(0, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(uint256.Int), 0, new(uint256.Int), nil),
@@ -287,7 +287,7 @@ func TestLogFilterCreation(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, deadline)
+		api     = NewPublicFilterAPI(backend, deadline)
 
 		testCases = []struct {
 			crit    FilterCriteria
@@ -331,7 +331,7 @@ func TestInvalidLogFilterCreation(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, deadline)
+		api     = NewPublicFilterAPI(backend, deadline)
 	)
 
 	// different situations where log filter creation should fail.
@@ -354,7 +354,7 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 	defer db.Close()
 	var (
 		backend   = &testBackend{db: db}
-		api       = NewPublicFilterAPI(backend, false, deadline)
+		api       = NewPublicFilterAPI(backend, deadline)
 		blockHash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
 	)
 
@@ -381,7 +381,7 @@ func TestLogFilter(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, deadline)
+		api     = NewPublicFilterAPI(backend, deadline)
 
 		firstAddr      = common.HexToAddress("0x1111111111111111111111111111111111111111")
 		secondAddr     = common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -496,7 +496,7 @@ func TestPendingLogsSubscription(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, deadline)
+		api     = NewPublicFilterAPI(backend, deadline)
 
 		firstAddr      = common.HexToAddress("0x1111111111111111111111111111111111111111")
 		secondAddr     = common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -632,7 +632,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	var (
 		db      = ethdb.NewMemoryDatabase()
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false, timeout)
+		api     = NewPublicFilterAPI(backend, timeout)
 		done    = make(chan struct{})
 	)
 

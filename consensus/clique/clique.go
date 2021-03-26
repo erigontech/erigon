@@ -32,9 +32,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	json "github.com/json-iterator/go"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -49,6 +46,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -144,7 +142,7 @@ var (
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]byte, error)
+type SignerFn func(signer common.Address, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
@@ -922,7 +920,7 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
+	sighash, err := signFn(signer, CliqueRLP(header))
 	if err != nil {
 		return err
 	}

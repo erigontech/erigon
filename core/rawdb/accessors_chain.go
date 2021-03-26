@@ -223,6 +223,15 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
+func ReadCurrentHeader(db databaseReader) *types.Header {
+	headHash := ReadHeadBlockHash(db)
+	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	return ReadHeader(db, headHash, *headNumber)
+}
+
 // ReadHeadersByNumber retrieves all the block header corresponding to the number.
 func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error) {
 	var res []*types.Header
@@ -270,14 +279,6 @@ func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
 	}
 	if err := db.Delete(dbutils.HeaderNumberBucket, hash.Bytes(), nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
-	}
-}
-
-// deleteHeaderWithoutNumber removes only the block header but does not remove
-// the hash to number mapping.
-func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
-		log.Crit("Failed to delete header", "err", err)
 	}
 }
 
@@ -772,20 +773,6 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 		return err
 	}
 	DeleteHeader(db, hash, number)
-	DeleteBody(db, hash, number)
-	if err := DeleteTd(db, hash, number); err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteBlockWithoutNumber removes all block data associated with a hash, except
-// the hash to number mapping.
-func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
-	if err := DeleteReceipts(db, number); err != nil {
-		return err
-	}
-	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {
 		return err

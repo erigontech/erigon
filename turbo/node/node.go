@@ -105,7 +105,6 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
-	nodeConfig.NoUSB = true
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
 	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
@@ -177,9 +176,6 @@ func prepare(ctx *cli.Context) {
 
 	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
 	debug.SetGCPercent(int(gogc))
-
-	// Start metrics export if enabled
-	utils.SetupMetrics(ctx)
 
 	// Start system runtime metrics collection
 	go metrics.CollectProcessMetrics(10 * time.Second)

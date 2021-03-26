@@ -12,8 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
-const prof = false // whether to profile
-
 type StagedSync struct {
 	PrefetchedBlocks *bodydownload.PrefetchedBlocks
 	stageBuilders    StageBuilders

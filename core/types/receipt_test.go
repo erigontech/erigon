@@ -92,10 +92,6 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			if dec.CumulativeGasUsed != receipt.CumulativeGasUsed {
 				t.Fatalf("Receipt CumulativeGasUsed mismatch, want %v, have %v", receipt.CumulativeGasUsed, dec.CumulativeGasUsed)
 			}
-			// rlp.Decode doesn't restore .Bloom field anymore because TG switched to bitmap indices, see dbutils.LogIndex
-			//if dec.Bloom != receipt.Bloom {
-			//	t.Fatalf("Bloom data mismatch, want %x, have %x", receipt.Bloom, dec.Bloom)
-			//}
 			if len(dec.Logs) != len(receipt.Logs) {
 				t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
 			}
