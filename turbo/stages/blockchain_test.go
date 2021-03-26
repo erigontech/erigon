@@ -478,29 +478,46 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 	// Check that the chain is valid number and link wise
 	if full {
 		prev := rawdb.ReadCurrentBlock(db)
-		for block, _ := rawdb.ReadBlockByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); block.NumberU64() != 0; {
+		block, err := rawdb.ReadBlockByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for block.NumberU64() != 0 {
 			if prev.ParentHash() != block.Hash() {
 				t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 			}
 			prev = block
-			block, _ = rawdb.ReadBlockByNumber(db, block.NumberU64()-1)
+			block, err = rawdb.ReadBlockByNumber(db, block.NumberU64()-1)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	} else {
 		prev := rawdb.ReadCurrentHeader(db)
-		for header := rawdb.ReadHeaderByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); header.Number.Uint64() != 0; prev, header = header, rawdb.ReadHeaderByNumber(db, header.Number.Uint64()-1) {
+		for header := rawdb.ReadHeaderByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); header != nil && header.Number.Uint64() != 0; {
 			if prev.ParentHash != header.Hash() {
 				t.Errorf("parent header hash mismatch: have %x, want %x", prev.ParentHash, header.Hash())
 			}
+			prev, header = header, rawdb.ReadHeaderByNumber(db, header.Number.Uint64()-1)
+
 		}
 	}
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(genesis.Difficulty(), big.NewInt(td))
 	if full {
-		if have, _ := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash()); have.Cmp(want) != 0 {
+		have, err := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if have.Cmp(want) != 0 {
 			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 		}
 	} else {
-		if have, _ := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash()); have.Cmp(want) != 0 {
+		have, err := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if have.Cmp(want) != 0 {
 			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 		}
 	}
