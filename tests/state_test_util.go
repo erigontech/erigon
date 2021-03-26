@@ -232,12 +232,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	if err = statedb.CommitBlock(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
-
-	l := trie.NewFlatDBTrieLoader("genesis")
-	if err = l.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
-		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
-	}
-	root, err := l.CalcTrieRoot(db, nil, nil)
+	root, err := trie.CalcRoot("test", db)
 	if err != nil {
 		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
@@ -266,15 +261,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if err := statedb.FinalizeTx(ctx, w); err != nil {
 		return nil, err
 	}
-	l := trie.NewFlatDBTrieLoader("genesis")
-	if err := l.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
-		return nil, err
-	}
-	_, err := l.CalcTrieRoot(db, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err = statedb.CommitBlock(ctx, w); err != nil {
+	if err := statedb.CommitBlock(ctx, w); err != nil {
 		return nil, err
 	}
 	statedb = state.New(r)

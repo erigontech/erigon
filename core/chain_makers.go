@@ -305,14 +305,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				}
 				fmt.Printf("===============================\n")
 			}
-			var hashCollector func(keyHex []byte, _, _, _ uint16, hashes []byte, rootHash []byte) error
-			var storageHashCollector func(addrWithInc []byte, keyHex []byte, _, _, _ uint16, hashes []byte, rootHash []byte) error
-			unfurl := trie.NewRetainList(0)
-			loader := trie.NewFlatDBTrieLoader("GenerateChain")
-			if err := loader.Reset(unfurl, hashCollector, storageHashCollector, false); err != nil {
-				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
-			}
-			if hash, err := loader.CalcTrieRoot(tx, []byte{}, nil); err == nil {
+			if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)

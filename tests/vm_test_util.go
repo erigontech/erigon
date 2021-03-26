@@ -119,11 +119,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	l := trie.NewFlatDBTrieLoader("genesis")
-	if err = l.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
-		return err
-	}
-	root, err := l.CalcTrieRoot(db, nil, nil)
+	root, err := trie.CalcRoot("test", db)
 	if err != nil {
 		return err
 	}
