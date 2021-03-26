@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestState(t *testing.T) {

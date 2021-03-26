@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -169,15 +170,15 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := t.genesis(config).ToBlock(false)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
 	readBlockNr := block.Number().Uint64()
@@ -188,16 +189,16 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	defer db.Close()
 	tx, _ := db.Begin(context.Background(), ethdb.RW)
 	defer tx.Rollback()
-	statedb, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
+	w := state.NewDbStateWriter(tx, 0)
+	statedb, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
 	if err != nil {
-		return nil, nil, common.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	// Prepare the EVM.
@@ -215,8 +216,8 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	}
 
 	// Commit block
-	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+	if err = statedb.FinalizeTx(ctx, w); err != nil {
+		return nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
 	// Add 0-value mining reward. This only makes a difference in the cases
@@ -225,30 +226,31 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+	if err = statedb.FinalizeTx(ctx, w); err != nil {
+		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+	if err = statedb.CommitBlock(ctx, w); err != nil {
+		return nil, common.Hash{}, err
 	}
 
-	roots, err := tds.ComputeTrieRoots()
+	l := trie.NewFlatDBTrieLoader("genesis")
+	if err = l.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
+		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+	}
+	root, err := l.CalcTrieRoot(db, nil, nil)
 	if err != nil {
-		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
-
-	root := roots[len(roots)-1]
-	return statedb, tds, root, nil
+	return statedb, root, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
-	tds := state.NewTrieDbState(common.Hash{}, db, blockNr)
-	statedb := state.New(tds)
-	tds.StartNewBuffer()
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
@@ -261,20 +263,22 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, err
+	if err := statedb.FinalizeTx(ctx, w); err != nil {
+		return nil, err
 	}
-
-	if _, err := tds.ComputeTrieRoots(); err != nil {
-		return nil, nil, err
+	l := trie.NewFlatDBTrieLoader("genesis")
+	if err := l.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
+		return nil, err
 	}
-
-	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return nil, nil, err
+	_, err := l.CalcTrieRoot(db, nil, nil)
+	if err != nil {
+		return nil, err
 	}
-	statedb = state.New(tds)
-	return statedb, tds, nil
+	if err = statedb.CommitBlock(ctx, w); err != nil {
+		return nil, err
+	}
+	statedb = state.New(r)
+	return statedb, nil
 }
 
 func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {

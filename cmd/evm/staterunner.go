@@ -109,7 +109,7 @@ func stateTestCmd(ctx *cli.Context) error {
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
 					_ = statedb
-					//tx, err1 := tds.Database().(ethdb.HasRwKV).RwKV().Begin(context.Background())
+					//tx, err1 := db.KV().Begin(context.Background())
 					//if err1 != nil {
 					//	return fmt.Errorf("transition cannot open tx: %v", err1)
 					//}
