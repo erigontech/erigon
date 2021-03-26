@@ -574,7 +574,7 @@ func (s *Ethereum) APIs() []rpc.API {
 		{
 			Namespace: "eth",
 			Version:   "1.0",
-			Service:   filters.NewPublicFilterAPI(s.APIBackend, false, 5*time.Minute),
+			Service:   filters.NewPublicFilterAPI(s.APIBackend, 5*time.Minute),
 			Public:    true,
 		},
 		//{

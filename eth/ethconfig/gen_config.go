@@ -25,14 +25,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NoPrefetch              bool
 		TxLookupLimit           uint64                 `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
-		LightIngress            int                    `toml:",omitempty"`
-		LightEgress             int                    `toml:",omitempty"`
 		StorageMode             string
-		LightNoPrune            bool `toml:",omitempty"`
-		LightNoSyncServe        bool `toml:",omitempty"`
 		ArchiveSyncInterval     int
-		LightServ               int `toml:",omitempty"`
-		LightPeers              int `toml:",omitempty"`
 		OnlyAnnounce            bool
 		SkipBcVersionCheck      bool `toml:"-"`
 		DatabaseHandles         int  `toml:"-"`
@@ -102,14 +96,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NoPrefetch              *bool
 		TxLookupLimit           *uint64                `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
-		LightIngress            *int                   `toml:",omitempty"`
-		LightEgress             *int                   `toml:",omitempty"`
 		Mode                    *string
-		LightNoPrune            *bool `toml:",omitempty"`
-		LightNoSyncServe        *bool `toml:",omitempty"`
 		ArchiveSyncInterval     *int
-		LightServ               *int `toml:",omitempty"`
-		LightPeers              *int `toml:",omitempty"`
 		OnlyAnnounce            *bool
 		SkipBcVersionCheck      *bool `toml:"-"`
 		DatabaseHandles         *int  `toml:"-"`

@@ -341,11 +341,6 @@ func (d *Downloader) RegisterPeer(id string, version uint, peer Peer) error {
 	return nil
 }
 
-// RegisterLightPeer injects a light client peer, wrapping it so it appears as a regular peer.
-func (d *Downloader) RegisterLightPeer(id string, version uint, peer LightPeer) error {
-	return d.RegisterPeer(id, version, &lightPeerWrapper{peer})
-}
-
 // UnregisterPeer remove a peer from the known list, preventing any action from
 // the specified peer. An effort is also made to return any pending fetches into
 // the queue.
@@ -1750,7 +1745,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						}
 					}
 				}
-				// Unless we're doing light chains, schedule the headers for associated content retrieval
+				// Schedule the headers for associated content retrieval
 				if mode == FullSync {
 					// If we've reached the allowed number of pending headers, stall a bit
 					for d.queue.PendingBlocks() >= maxQueuedHeaders || d.queue.PendingReceipts() >= maxQueuedHeaders {

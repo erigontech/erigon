@@ -180,7 +180,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return 0, err
 	}
-	h.blockFetcher = fetcher.NewBlockFetcher(false, nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+	h.blockFetcher = fetcher.NewBlockFetcher(nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)
