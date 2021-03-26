@@ -23,11 +23,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/util"
-
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/hack/db"
 	"github.com/ledgerwatch/turbo-geth/cmd/hack/flow"
 	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
@@ -51,6 +47,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/util"
 )
 
 var (
