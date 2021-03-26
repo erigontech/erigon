@@ -140,7 +140,7 @@ func mychart() {
 			Show:        true,
 			StrokeColor: chart.ColorBlack,
 		},
-		YAxis:   chart.YAxisSecondary,core/rlp_test.go:87
+		YAxis:   chart.YAxisSecondary,
 		XValues: blocks,
 		YValues: dbsize,
 	}
