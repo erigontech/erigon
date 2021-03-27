@@ -1084,7 +1084,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	}
 
 	// Convert the etherbase into an address and configure it
-	if etherbase != "" {
+	if etherbase == "" {
 		Fatalf("No etherbase configured")
 	}
 	cfg.Etherbase = common.HexToAddress(etherbase)
