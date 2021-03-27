@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -30,7 +31,7 @@ func TestBlockHashStage(t *testing.T) {
 		t.Fatalf("writing canonical hash: %v", err)
 	}
 
-	if _, _, _, err := InsertHeaderChain("logPrefix", db, headers); err != nil {
+	if _, _, _, err := InsertHeaderChain("logPrefix", db, headers, time.Duration(100000)); err != nil {
 		t.Errorf("inserting header chain: %v", err)
 	}
 	if err := stages.SaveStageProgress(db, stages.Headers, headers[len(headers)-1].Number.Uint64()); err != nil {
