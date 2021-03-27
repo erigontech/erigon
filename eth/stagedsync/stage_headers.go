@@ -268,7 +268,7 @@ Error: %v
 	// Report some public statistics so the user has a clue what's going on
 	since := time.Since(start)
 	ctx := []interface{}{
-		"count", len(headers), "elapsed", common.PrettyDuration(since),
+		"count", len(headers), "insertion", common.PrettyDuration(since),
 		"verification", common.PrettyDuration(verificationTime),
 		"number", lastHeader.Number, "hash", lastHeader.HashCache(),
 		"blk/sec", float64(len(headers)) / (since.Seconds() + verificationTime.Seconds()),

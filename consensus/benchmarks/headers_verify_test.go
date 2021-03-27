@@ -261,7 +261,7 @@ loop:
 
 		res += time.Since(tn)
 
-		newCanonical, _, _, err := stagedsync.InsertHeaderChain("logPrefix", db, headers[from:to])
+		newCanonical, _, _, err := stagedsync.InsertHeaderChain("logPrefix", db, headers[from:to], time.Since(tn))
 		if err != nil {
 			t.Errorf("while inserting %v, from %d to %d", err, from, to)
 			break
@@ -320,7 +320,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 
 		res += time.Since(tn)
 
-		newCanonical, _, _, err := stagedsync.InsertHeaderChain("logPrefix", db, headers[from:to])
+		newCanonical, _, _, err := stagedsync.InsertHeaderChain("logPrefix", db, headers[from:to], time.Since(tn))
 		if err != nil {
 			t.Errorf("while inserting %v, from %d to %d", err, from, to)
 			break
