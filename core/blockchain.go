@@ -19,10 +19,12 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1932,7 +1934,27 @@ func ExecuteBlockEphemerally(
 		if !vmConfig.NoReceipts {
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 		}
+		writeTrace := false
+		if vmConfig.Debug && vmConfig.Tracer == nil {
+			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			writeTrace = true
+		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		if writeTrace {
+			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
+			if err1 != nil {
+				panic(err1)
+			}
+			encoder := json.NewEncoder(w)
+			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+			if err2 := encoder.Encode(logs); err2 != nil {
+				panic(err2)
+			}
+			if err2 := w.Close(); err2 != nil {
+				panic(err2)
+			}
+			vmConfig.Tracer = nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}

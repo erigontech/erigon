@@ -27,7 +27,7 @@ var wrongTxs = []string{
 // parameters:
 // needCompare - if false - doesn't call TurboGeth and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
-func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
+func Bench11(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(tgURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -54,10 +54,8 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := blockNumber.Number
-	fmt.Printf("Last block: %d\n", lastBlock)
-	firstBn := int(blockNum)
-	for bn := firstBn; bn <= int(lastBlock); bn++ {
+	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	for bn := blockFrom; bn <= blockTo; bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
 		res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
@@ -114,7 +112,7 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 					return
 				}
 				if resg.Err == nil && resg.Result.Get("error") == nil {
-					if err := compareTraceCalls(res.Result, resg.Result); err != nil {
+					if err := compareResults(res.Result, resg.Result); err != nil {
 						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
 						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
