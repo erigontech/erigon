@@ -237,6 +237,7 @@ func init() {
 	withUnwind(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withSilkworm(cmdStageExec)
+	withTxTrace(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -372,6 +373,12 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	if reset {
 		return resetExec(db)
 	}
+	vmConfig := bc.GetVMConfig()
+	if txtrace {
+		// Activate tracing and writing into json files for each transaction
+		vmConfig.Tracer = nil
+		vmConfig.Debug = true
+	}
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -391,7 +398,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 			})
 	}
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
-		bc.Config(), cc, bc.GetVMConfig(),
+		bc.Config(), cc, vmConfig,
 		ch,
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:               block, // limit execution to the specified block
