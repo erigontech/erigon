@@ -112,7 +112,7 @@ func Bench13(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 				return
 			}
 			if resg.Err == nil && resg.Result.Get("error") == nil {
-				if err := compareTraceCallManys(res.Result, resg.Result); err != nil {
+				if err := compareResults(res.Result, resg.Result); err != nil {
 					fmt.Printf("Different traceManys block %d: %v\n", bn, err)
 					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 					fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)

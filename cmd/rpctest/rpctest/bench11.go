@@ -112,7 +112,7 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 					return
 				}
 				if resg.Err == nil && resg.Result.Get("error") == nil {
-					if err := compareTraceCalls(res.Result, resg.Result); err != nil {
+					if err := compareResults(res.Result, resg.Result); err != nil {
 						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
 						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)

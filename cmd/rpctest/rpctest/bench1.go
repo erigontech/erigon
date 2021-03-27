@@ -278,40 +278,6 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 				fmt.Printf("Error getting modified accounts (turbo-geth): %d %s\n", mag.Error.Code, mag.Error.Message)
 				return
 			}
-			if res.Err == nil && mag.Error == nil {
-				accountSet := extractAccountMap(&mag)
-				for account := range accountSet {
-					reqGen.reqID++
-					var logs EthLogs
-					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
-					resultsCh <- res
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account (turbo-geth) %x: %v\n", account, res.Err)
-						return
-					}
-					if logs.Error != nil {
-						fmt.Printf("Error getting logs for account (turbo-geth) %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
-						return
-					}
-					if needCompare {
-						var logsg EthLogs
-						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-						resultsCh <- res
-						if res.Err != nil {
-							fmt.Printf("Could not get logs for account (geth) %x: %v\n", account, res.Err)
-							return
-						}
-						if logsg.Error != nil {
-							fmt.Printf("Error getting logs for account (geth) %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-							return
-						}
-						if !compareLogs(&logs, &logsg) {
-							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-							return
-						}
-					}
-				}
-			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
 			page := common.Hash{}.Bytes()
