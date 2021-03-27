@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
+func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(tgURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -35,13 +35,11 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := blockNumber.Number
-	fmt.Printf("Last block: %d\n", lastBlock)
+	fmt.Printf("Last block: %d\n", blockNumber.Number)
 
-	firstBn := int(blockNum)
-	prevBn := firstBn
+	prevBn := blockFrom
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
-	for bn := firstBn; bn <= int(lastBlock)-100000; bn++ {
+	for bn := blockFrom; bn <= blockTo-100000; bn++ {
 
 		if prevBn < bn && bn%100 == 0 {
 			// Checking modified accounts

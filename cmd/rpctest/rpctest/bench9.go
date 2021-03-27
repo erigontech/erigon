@@ -2,10 +2,11 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 )
 
 // bench9 tests eth_getProof
@@ -34,7 +35,7 @@ func Bench9(tgURL, gethURL string, needCompare bool) {
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	// Go back 256 blocks
-	bn := int(lastBlock) - 256
+	bn := uint64(lastBlock) - 256
 	page := common.Hash{}.Bytes()
 
 	for len(page) > 0 {
