@@ -254,7 +254,7 @@ var (
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}}
-	CliqueSnapshot           = NewSnapshotConfig(10, 1024, 16384, true, "")
+	CliqueSnapshot           = NewSnapshotConfig(10, 1024, 16384, true, "", false /* mdbx */)
 
 	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, new(EthashConfig), nil}
 	TestRules       = TestChainConfig.Rules(new(big.Int))
@@ -391,11 +391,12 @@ type SnapshotConfig struct {
 	InmemorySignatures int    // Number of recent block signatures to keep in memory
 	DBPath             string
 	InMemory           bool
+	MDBX               bool // Whether to use MDBX (true) or LMDB (false)
 }
 
 const cliquePath = "clique"
 
-func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *SnapshotConfig {
+func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string, mdbx bool) *SnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()
 	}
@@ -406,6 +407,7 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 		inmemorySignatures,
 		path.Join(dbPath, cliquePath),
 		inmemory,
+		mdbx,
 	}
 }
 
