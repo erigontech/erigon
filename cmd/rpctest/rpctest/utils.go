@@ -177,13 +177,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	return nil
 }
 
-func compareTraceCalls(trace, traceg *fastjson.Value) error {
-	r := trace.Get("result")
-	rg := traceg.Get("result")
-	return compareJsonValues("result", r, rg)
-}
-
-func compareTraceCallManys(trace, traceg *fastjson.Value) error {
+func compareResults(trace, traceg *fastjson.Value) error {
 	r := trace.Get("result")
 	rg := traceg.Get("result")
 	return compareJsonValues("result", r, rg)
@@ -328,44 +322,13 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 	return true
 }
 
-func compareLogs(logs, logsg *EthLogs) bool {
-	r := logs.Result
-	rg := logsg.Result
-	if len(r) != len(rg) {
-		fmt.Printf("Different log lenths: %d %d\n", len(r), len(rg))
-		return false
-	}
-	for i, l := range r {
-		lg := rg[i]
-		if l.Address != lg.Address {
-			fmt.Printf("Different log %d addresses: %x %x\n", i, l.Address, lg.Address)
-			return false
-		}
-		if len(l.Topics) != len(lg.Topics) {
-			fmt.Printf("Different log %d topic lengths: %d %d\n", i, len(l.Topics), len(lg.Topics))
-			return false
-		}
-		for j, t := range l.Topics {
-			tg := lg.Topics[j]
-			if t != tg {
-				fmt.Printf("Different log %d topics %d: %x %x\n", i, j, t, tg)
-				return false
-			}
-		}
-		if !bytes.Equal(l.Data, lg.Data) {
-			fmt.Printf("Different log %d data: %x %x\n", i, l.Data, lg.Data)
-			return false
-		}
-	}
-	return true
-}
-
-func getTopics(logs *EthLogs) []common.Hash {
+func getTopics(v *fastjson.Value) []common.Hash {
 	topicSet := make(map[common.Hash]struct{})
-	r := logs.Result
+	r := v.GetArray("result")
 	for _, l := range r {
-		for _, t := range l.Topics {
-			topicSet[t] = struct{}{}
+		for _, t := range l.GetArray("topics") {
+			topic := common.HexToHash(t.String())
+			topicSet[topic] = struct{}{}
 		}
 	}
 	topics := make([]common.Hash, len(topicSet))

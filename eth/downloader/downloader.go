@@ -301,13 +301,9 @@ func (d *Downloader) Progress() ethereum.SyncProgress {
 	d.syncStatsLock.RLock()
 	defer d.syncStatsLock.RUnlock()
 
-	current := uint64(0)
-	mode := d.getMode()
-	switch {
-	case d.blockchain != nil && mode == FullSync:
-		current = d.blockchain.CurrentBlock().NumberU64()
-	default:
-		log.Error("Unknown downloader chain/mode combo", "full", d.blockchain != nil, "mode", mode)
+	current, err := stages.GetStageProgress(d.stateDB, stages.Finish)
+	if err != nil {
+		log.Error("Could not get current progress", "error", err)
 	}
 	return ethereum.SyncProgress{
 		StartingBlock: d.syncStatsChainOrigin,
