@@ -3,6 +3,7 @@ package benchmarks
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"testing"
 	"time"
 
@@ -237,7 +238,7 @@ loop:
 		tn := time.Now()
 
 		if done >= len(headers[1:]) {
-			t.Logf("done %d of %d\n", done, len(headers[1:]))
+			t.Logf("verifyByEngine done %d of %d\n", done, len(headers[1:]))
 			break
 		}
 
@@ -287,7 +288,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 		t.Errorf("setting up genensis block: %v", err)
 	}
 
-	engine := ethconfig.CreateConsensusEngine(config, consensusConfig, nil, false, 1)
+	engine := ethconfig.CreateConsensusEngine(config, consensusConfig, nil, false, runtime.NumCPU())
 	defer engine.Close()
 
 	var done int
@@ -299,6 +300,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 	for {
 		tn := time.Now()
 		if done >= len(headers[1:]) {
+			t.Logf("verifyByEngineProcess done %d of %d\n", done, len(headers[1:]))
 			break
 		}
 
