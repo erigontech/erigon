@@ -72,7 +72,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit, 1)
 	defer common.SafeClose(exit)
 
 	genesis, _, err := gspec.Commit(db, false)
