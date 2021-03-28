@@ -302,7 +302,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			panic(err)
 		}
 
-		if miningConfig.Enabled && nextBlock.Header().Coinbase != (common.Address{}) {
+		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
 			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
