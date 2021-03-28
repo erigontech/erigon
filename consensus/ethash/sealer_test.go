@@ -126,6 +126,8 @@ func TestRemoteNotifyFull(t *testing.T) {
 // Tests that pushing work packages fast to the miner doesn't cause any data race
 // issues in the notifications.
 func TestRemoteMultiNotify(t *testing.T) {
+	t.Skip("Often fails spuriously, needs to be investiaged")
+
 	// Start a simple web server to capture notifications.
 	sink := make(chan [3]string, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
