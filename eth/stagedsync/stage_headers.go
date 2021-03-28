@@ -14,9 +14,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
+
+var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
 	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
@@ -287,5 +290,6 @@ Error: %v
 	}
 
 	log.Info(fmt.Sprintf("[%s] Imported new block headers", logPrefix), ctx...)
+	stageHeadersGauge.Update(int64(lastHeader.Number.Uint64()))
 	return newCanonical, reorg, forkBlockNumber, nil
 }

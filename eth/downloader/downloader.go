@@ -1853,6 +1853,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}
+
 		return blocks[index-1].NumberU64() + 1, nil
 	}
 	return 0, nil

@@ -330,6 +330,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 	}
 
+	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
+		return nil, err
+	}
+
 	vmConfig, cacheConfig := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, txCacher)

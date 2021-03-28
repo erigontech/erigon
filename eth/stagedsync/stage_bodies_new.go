@@ -13,8 +13,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
+
+var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
@@ -181,6 +184,7 @@ func BodiesForward(
 		}
 	}
 	log.Info("Processed", "highest", bodyProgress)
+	stageBodiesGauge.Update(int64(bodyProgress))
 	return nil
 }
 
