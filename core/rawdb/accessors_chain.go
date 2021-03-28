@@ -223,13 +223,21 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
-func ReadCurrentHeader(db databaseReader) *types.Header {
-	headHash := ReadHeadBlockHash(db)
+func ReadCurrentHeader(db ethdb.Getter) *types.Header {
+	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
 		return nil
 	}
 	return ReadHeader(db, headHash, *headNumber)
+}
+func ReadCurrentBlock(db ethdb.Getter) *types.Block {
+	headHash := ReadHeadBlockHash(db)
+	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	return ReadBlock(db, headHash, *headNumber)
 }
 
 // ReadHeadersByNumber retrieves all the block header corresponding to the number.
@@ -484,6 +492,14 @@ func ReadTd(db databaseReader, hash common.Hash, number uint64) (*big.Int, error
 		return nil, fmt.Errorf("invalid block total difficulty RLP: %x, %w", hash, err)
 	}
 	return td, nil
+}
+
+func ReadTdByHash(db ethdb.Getter, hash common.Hash) (*big.Int, error) {
+	headNumber := ReadHeaderNumber(db, hash)
+	if headNumber == nil {
+		return nil, nil
+	}
+	return ReadTd(db, hash, *headNumber)
 }
 
 // WriteTd stores the total difficulty of a block into the database.
