@@ -512,6 +512,7 @@ func (pool *TxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	if !pool.IsStarted() {
 		return pending, nil
 	}
+	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pending = make(types.TransactionsGroupedBySender, len(pool.pending))
 	for _, list := range pool.pending {
