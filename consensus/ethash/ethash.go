@@ -461,6 +461,7 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 		update:   make(chan struct{}),
 		hashrate: metrics.NewMeterForced(),
 	}
+
 	ethash.remote = startRemoteSealer(ethash, notify, noverify)
 	return ethash
 }

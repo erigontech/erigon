@@ -349,11 +349,6 @@ var (
 		Name:  "mine",
 		Usage: "Enable mining",
 	}
-	MinerThreadsFlag = cli.IntFlag{
-		Name:  "miner.threads",
-		Usage: "Number of CPU threads to use for mining",
-		Value: 0,
-	}
 	MinerNotifyFlag = cli.StringFlag{
 		Name:  "miner.notify",
 		Usage: "Comma separated HTTP URL list to notify of new work packages",
@@ -1049,6 +1044,9 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
+	if cfg.Enabled && len(cfg.Notify) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s is required", MinerNotifyFlag.Name))
+	}
 	extraDataStr, err := flags.GetString(MinerExtraDataFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1096,6 +1094,9 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
+	}
+	if cfg.Enabled && len(cfg.Notify) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s is required", MinerNotifyFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.GlobalString(MinerExtraDataFlag.Name))

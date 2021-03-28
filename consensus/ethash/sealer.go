@@ -66,7 +66,6 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderRead
 	}
 
 	ethash.lock.Lock()
-	threads := ethash.threads
 	if ethash.rand == nil {
 		seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
 		if err != nil {
@@ -76,52 +75,8 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderRead
 		ethash.rand = rand.New(rand.NewSource(seed.Int64()))
 	}
 	ethash.lock.Unlock()
-	if threads == 0 {
-		threads = runtime.NumCPU()
-	}
-	if threads < 0 {
-		threads = 0 // Allows disabling local mining without extra logic around local/remote
-	}
 	// Push new work to remote sealer
-	if ethash.remote != nil {
-		ethash.remote.workCh <- &sealTask{block: block, results: results}
-	}
-	var (
-		pend   sync.WaitGroup
-		locals = make(chan consensus.ResultWithContext)
-	)
-	for i := 0; i < threads; i++ {
-		pend.Add(1)
-		// fixme: refactor as a constantly running workers
-		go func(id int, nonce uint64) {
-			defer pend.Done()
-			ethash.mine(ctx, block, id, nonce, locals)
-		}(i, uint64(ethash.rand.Int63()))
-	}
-	// Wait until sealing is terminated or a nonce is found
-	go func() {
-		var result consensus.ResultWithContext
-		select {
-		case <-stop:
-			// Outside abort, stop all miner threads
-			ctx.CancelFunc()
-		case result = <-locals:
-			// One of the threads found a block, abort all others
-			select {
-			case results <- result:
-			default:
-				ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "local", "sealhash", ethash.SealHash(block.Header()))
-			}
-			//ctx.CancelFunc()
-		case <-ethash.update:
-			// Thread count was changed on user request, restart
-			if err := ethash.Seal(ctx, chain, block, results, stop); err != nil {
-				ethash.config.Log.Error("Failed to restart sealing after update", "err", err)
-			}
-		}
-		// Wait for all miners to terminate and return the block
-		pend.Wait()
-	}()
+	ethash.remote.workCh <- &sealTask{block: block, results: results}
 	return nil
 }
 
