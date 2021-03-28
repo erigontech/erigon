@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debugprint"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -234,9 +233,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
-	miningResultCh := make(chan consensus.ResultWithContext, 1)
+	miningResultCh := make(chan *types.Block, 1)
 	defer close(miningResultCh)
-	consensusCtx := consensus.NewCancel()
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -307,7 +305,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil, miningResultCh, consensusCtx)
+			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil, miningResultCh, quit)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -350,8 +348,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			minedResult := <-miningResultCh
-			checkMinedBlock(nextBlock, minedResult.Block, chainConfig)
+			minedBlock := <-miningResultCh
+			checkMinedBlock(nextBlock, minedBlock, chainConfig)
 		}
 
 		// Unwind all stages to `execStage - unwind` block

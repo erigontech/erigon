@@ -641,8 +641,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return fmt.Errorf("failed to fetch pending transactions: %w", err)
 		}
 
-		miningResultCh := make(chan consensus.ResultWithContext, 1)
-		consensusCtx := consensus.NewCancel()
+		miningResultCh := make(chan *types.Block, 1)
+		sealCancel := make(chan struct{})
 
 		if d.miningState, err = d.mining.Prepare(
 			d,
@@ -661,7 +661,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			txPool,
 			poolStart,
 			false,
-			stagedsync.NewMiningStagesParameters(d.miningConfig, true, pending, txPool.Locals(), miningResultCh, consensusCtx),
+			stagedsync.NewMiningStagesParameters(d.miningConfig, true, pending, txPool.Locals(), miningResultCh, sealCancel),
 		); err != nil {
 			return err
 		}

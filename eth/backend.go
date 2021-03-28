@@ -697,7 +697,7 @@ func (s *Ethereum) StartMining(threads int) error {
 				return fmt.Errorf("signer missing: %v", err)
 			}
 
-			clique.Authorize(eb, func(_ common.Address, message []byte) ([]byte, error) {
+			clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(message, s.signer)
 			})
 		}

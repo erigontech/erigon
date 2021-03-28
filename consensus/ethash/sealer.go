@@ -26,7 +26,6 @@ import (
 	"math/big"
 	"math/rand"
 	"net/http"
-	"runtime"
 	"sync"
 	"time"
 
@@ -48,13 +47,13 @@ var (
 
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
 // the block's difficulty requirements.
-func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	// If we're running a fake PoW, simply return a 0 nonce immediately
 	if ethash.config.PowMode == ModeFake || ethash.config.PowMode == ModeFullFake {
 		header := block.Header()
 		header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 		select {
-		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
+		case results <- block.WithSeal(header):
 		default:
 			ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", ethash.SealHash(block.Header()))
 		}
@@ -62,9 +61,8 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderRead
 	}
 	// If we're running a shared PoW, delegate sealing to it
 	if ethash.shared != nil {
-		return ethash.shared.Seal(ctx, chain, block, results, stop)
+		return ethash.shared.Seal(chain, block, results, stop)
 	}
-
 	ethash.lock.Lock()
 	if ethash.rand == nil {
 		seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
@@ -78,67 +76,6 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderRead
 	// Push new work to remote sealer
 	ethash.remote.workCh <- &sealTask{block: block, results: results}
 	return nil
-}
-
-// mine is the actual proof-of-work miner that searches for a nonce starting from
-// seed that results in correct final block difficulty.
-func (ethash *Ethash) mine(ctx consensus.Cancel, block *types.Block, id int, seed uint64, found chan consensus.ResultWithContext) {
-	// Extract some data from the header
-	var (
-		header  = block.Header()
-		hash    = ethash.SealHash(header).Bytes()
-		target  = new(big.Int).Div(two256, header.Difficulty)
-		number  = header.Number.Uint64()
-		dataset = ethash.dataset(number, false)
-	)
-	// Start generating random nonces until we abort or find a good one
-	var (
-		attempts = int64(0)
-		nonce    = seed
-	)
-	logger := ethash.config.Log.New("miner", id)
-	logger.Trace("Started ethash search for new nonces", "seed", seed)
-search:
-	for {
-		select {
-		case <-ctx.Done():
-			// Mining terminated, update stats and abort
-			logger.Trace("Ethash nonce search aborted", "attempts", nonce-seed)
-			ethash.hashrate.Mark(attempts)
-			break search
-
-		default:
-			// nothing to do
-		}
-		// We don't have to update hash rate on every nonce, so update after after 2^X nonces
-		attempts++
-		if (attempts % (1 << 15)) == 0 {
-			ethash.hashrate.Mark(attempts)
-			attempts = 0
-		}
-		// Compute the PoW value of this nonce
-		digest, result := hashimotoFull(dataset.dataset, hash, nonce)
-		if new(big.Int).SetBytes(result).Cmp(target) <= 0 {
-			// Correct nonce found, create a new header with it
-			header = types.CopyHeader(header)
-			header.Nonce = types.EncodeNonce(nonce)
-			header.MixDigest = common.BytesToHash(digest)
-
-			// Seal and return a block (if still needed)
-			select {
-			case found <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
-				logger.Trace("Ethash nonce found and reported", "attempts", nonce-seed, "nonce", nonce)
-			case <-ctx.Done():
-				logger.Trace("Ethash nonce found but discarded", "attempts", nonce-seed, "nonce", nonce)
-			}
-			break search
-		}
-		nonce++
-	}
-
-	// Datasets are unmapped in a finalizer. Ensure that the dataset stays live
-	// during sealing so it's not unmapped while being read.
-	runtime.KeepAlive(dataset)
 }
 
 // This is the timeout for HTTP requests to notify external miners.
@@ -156,7 +93,7 @@ type remoteSealer struct {
 	ethash       *Ethash
 	noverify     bool
 	notifyURLs   []string
-	results      chan<- consensus.ResultWithContext
+	results      chan<- *types.Block
 	workCh       chan *sealTask   // Notification channel to push new work and relative result channel to remote sealer
 	fetchWorkCh  chan *sealWork   // Channel used for remote sealer to fetch mining work
 	submitWorkCh chan *mineResult // Channel used for remote sealer to submit their mining result
@@ -169,7 +106,7 @@ type remoteSealer struct {
 // sealTask wraps a seal block with relative result channel for remote sealer thread.
 type sealTask struct {
 	block   *types.Block
-	results chan<- consensus.ResultWithContext
+	results chan<- *types.Block
 }
 
 // mineResult wraps the pow solution parameters for the specified block.
@@ -179,7 +116,6 @@ type mineResult struct {
 	hash      common.Hash
 
 	errc chan error
-	ctx  consensus.Cancel
 }
 
 // hashrate wraps the hash rate submitted by the remote sealer.
@@ -249,7 +185,7 @@ func (s *remoteSealer) loop() {
 
 		case result := <-s.submitWorkCh:
 			// Verify submitted PoW solution based on maintained mining blocks.
-			if s.submitWork(result.ctx, result.nonce, result.mixDigest, result.hash) {
+			if s.submitWork(result.nonce, result.mixDigest, result.hash) {
 				result.errc <- nil
 			} else {
 				result.errc <- errInvalidSealResult
@@ -314,7 +250,16 @@ func (s *remoteSealer) makeWork(block *types.Block) {
 // new work to be processed.
 func (s *remoteSealer) notifyWork() {
 	work := s.currentWork
-	blob, _ := json.Marshal(work)
+
+	// Encode the JSON payload of the notification. When NotifyFull is set,
+	// this is the complete block header, otherwise it is a JSON array.
+	var blob []byte
+	if s.ethash.config.NotifyFull {
+		blob, _ = json.Marshal(s.currentBlock.Header())
+	} else {
+		blob, _ = json.Marshal(work)
+	}
+
 	s.reqWG.Add(len(s.notifyURLs))
 	for _, url := range s.notifyURLs {
 		go s.sendNotification(s.notifyCtx, url, blob, work)
@@ -346,7 +291,7 @@ func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []
 // submitWork verifies the submitted pow solution, returning
 // whether the solution was accepted or not (not can be both a bad pow as well as
 // any other error, like no pending work or stale mining result).
-func (s *remoteSealer) submitWork(ctx consensus.Cancel, nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash) bool {
+func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash) bool {
 	if s.currentBlock == nil {
 		s.ethash.config.Log.Error("Pending work without block", "sealhash", sealhash)
 		return false
@@ -382,7 +327,7 @@ func (s *remoteSealer) submitWork(ctx consensus.Cancel, nonce types.BlockNonce, 
 	// The submitted solution is within the scope of acceptance.
 	if solution.NumberU64()+staleThreshold > s.currentBlock.NumberU64() {
 		select {
-		case s.results <- consensus.ResultWithContext{Cancel: ctx, Block: solution}:
+		case s.results <- solution:
 			s.ethash.config.Log.Debug("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 			return true
 		default:
