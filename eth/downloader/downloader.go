@@ -669,7 +669,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return err
 		}
 		tx.Rollback()
-		_ = <-miningResultCh
+
+		// TODO: send mined block to sentry
+		<-miningResultCh
 		return nil
 	}
 
