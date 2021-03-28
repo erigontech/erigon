@@ -100,7 +100,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		}
 	}
 	hc.currentHeaderHash = hc.CurrentHeader().Hash()
-	headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
+	//headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
 
 	return hc, nil
 }
@@ -275,7 +275,7 @@ func (hc *HeaderChain) writeHeaders(headers []*types.Header) (result *headerWrit
 		// Last step update all in-memory head header markers
 		hc.currentHeaderHash = lastHash
 		hc.currentHeader.Store(types.CopyHeader(lastHeader))
-		headHeaderGauge.Update(lastHeader.Number.Int64())
+		//headHeaderGauge.Update(lastHeader.Number.Int64())
 
 		// Chain status is canonical since this insert was a reorg.
 		// Note that all inserts which have higher TD than existing are 'reorg'.
@@ -543,7 +543,7 @@ func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
 	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
 	hc.currentHeader.Store(head)
 	hc.currentHeaderHash = head.Hash()
-	headHeaderGauge.Update(head.Number.Int64())
+	//headHeaderGauge.Update(head.Number.Int64())
 }
 
 type (
@@ -598,7 +598,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		}
 		hc.currentHeader.Store(parent)
 		hc.currentHeaderHash = parentHash
-		headHeaderGauge.Update(parent.Number.Int64())
+		//headHeaderGauge.Update(parent.Number.Int64())
 
 		// If this is the first iteration, wipe any leftover data upwards too so
 		// we don't end up with dangling daps in the database

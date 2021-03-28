@@ -418,3 +418,28 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
 	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
 }
+
+// UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
+// need to fix it in future
+func UpdateMetrics(db ethdb.Getter) error {
+	var progress uint64
+	var err error
+	progress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	stageHeadersGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	stageBodiesGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return err
+	}
+	stageExecutionGauge.Update(int64(progress))
+	return nil
+}

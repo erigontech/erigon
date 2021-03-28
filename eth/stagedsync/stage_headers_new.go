@@ -179,6 +179,7 @@ func HeadersForward(
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}
+	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
 	return nil
 }
 
