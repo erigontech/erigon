@@ -49,7 +49,8 @@ func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header 
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	panic("must not be called")
 }
-func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+
+func (c *powEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	panic("must not be called")
 }
 func (c *powEngine) SealHash(header *types.Header) common.Hash {

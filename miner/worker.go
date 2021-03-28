@@ -36,8 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -439,12 +437,19 @@ func (w *worker) mainLoop() {
 				coinbase := w.coinbase
 				w.mu.RUnlock()
 
-				txs := make(map[common.Address]types.Transactions)
+				idx := map[common.Address]int{}
+				groups := types.TransactionsGroupedBySender{}
 				for _, tx := range ev.Txs {
 					acc, _ := types.Sender(w.current.signer, tx)
-					txs[acc] = append(txs[acc], tx)
+					i, ok := idx[acc]
+					if ok {
+						groups[i] = append(groups[i], tx)
+					} else {
+						idx[acc] = len(groups)
+						groups = append(groups, types.Transactions{tx})
+					}
 				}
-				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs)
+				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, groups)
 				tcount := w.current.tcount
 				w.commitTransactions(txset, coinbase, nil)
 				// Only update the snapshot if any new transactons were added
@@ -601,74 +606,15 @@ func (w *worker) taskLoop() {
 				continue
 			}
 
-			resultCh := make(chan consensus.ResultWithContext, 1)
-			if err := w.engine.Seal(task.ctx, w.chain, task.block, resultCh, task.ctx.Done()); err != nil {
+			resultCh := make(chan *types.Block, 1)
+			if err := w.engine.Seal(w.chain, task.block, resultCh, task.ctx.Done()); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
-			w.insertToChain(<-resultCh, task.createdAt, sealHash, task, false)
 		case <-w.exitCh:
 			return
 		}
 	}
-}
-
-func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time, sealHash common.Hash, task *task, directInsert bool) {
-	// Short circuit when receiving empty result.
-	if result.Block == nil {
-		return
-	}
-	block := result.Block
-
-	// Short circuit when receiving duplicate result caused by resubmitting.
-	if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
-		log.Warn("Duplicate result caused by resubmitting", "number", block.NumberU64(), "hash", block.Hash().String())
-		return
-	}
-
-	// Different block could share same sealhash, deep copy here to prevent write-write conflict.
-	if directInsert {
-		var (
-			receipts = make([]*types.Receipt, len(task.receipts))
-			logs     = make([]*types.Log, len(task.receipts))
-		)
-		hash := block.Hash()
-
-		for i, receipt := range task.receipts {
-			// add block location fields
-			receipt.BlockHash = hash
-			receipt.BlockNumber = block.Number()
-			receipt.TransactionIndex = uint(i)
-
-			receipts[i] = new(types.Receipt)
-			*receipts[i] = *receipt
-
-			// Update the block hash in all logs since it is now available and not when the
-			// receipt/log of individual transactions were created.
-			for _, log := range receipt.Logs {
-				log.BlockHash = hash
-			}
-			logs = append(logs, receipt.Logs...)
-		}
-
-		// Commit block and state to database.
-		_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
-		if err != nil {
-			log.Error("Failed writing block with state", "err", err)
-			return
-		}
-
-		log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
-			"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
-	} else {
-		if _, err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), &vm.Config{}, w.chain.Engine(), block, true /* checkRoot */); err != nil {
-			log.Error("Failed writing block to chain", "err", err)
-			return
-		}
-	}
-
-	// Broadcast the block and announce chain insertion event
-	_ = w.mux.Post(core.NewMinedBlockEvent{Block: block})
 }
 
 // makeCurrent creates a new environment for the current cycle.
@@ -1038,11 +984,22 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	}
 
 	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
-	for _, account := range w.eth.TxPool().Locals() {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
+	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+	txPoolLocals := w.eth.TxPool().Locals()
+	for _, txs := range pending {
+		from, _ := types.Sender(w.current.signer, txs[0])
+		isLocal := false
+		for _, local := range txPoolLocals {
+			if local == from {
+				isLocal = true
+				break
+			}
+		}
+
+		if isLocal {
+			localTxs = append(localTxs, txs)
+		} else {
+			remoteTxs = append(remoteTxs, txs)
 		}
 	}
 	if len(localTxs) > 0 {

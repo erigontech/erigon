@@ -635,6 +635,7 @@ func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) er
 func AppendReceipts(tx ethdb.Database, blockNumber uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
+		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
 		if len(r.Logs) == 0 {
 			continue
 		}

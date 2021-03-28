@@ -27,8 +27,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
@@ -38,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"golang.org/x/crypto/sha3"
 )
 
 // Ethash proof-of-work protocol constants.

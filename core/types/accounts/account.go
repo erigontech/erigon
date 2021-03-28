@@ -24,6 +24,13 @@ type Account struct {
 	Incarnation uint64
 }
 
+const (
+	MimetypeDataWithValidator = "data/validator"
+	MimetypeTypedData         = "data/typed"
+	MimetypeClique            = "application/x-clique-header"
+	MimetypeTextPlain         = "text/plain"
+)
+
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
