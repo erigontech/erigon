@@ -78,11 +78,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		begin = latest
-		if crit.FromBlock != nil {
+		if crit.FromBlock != nil && crit.FromBlock.Sign() > 0 {
 			begin = crit.FromBlock.Uint64()
 		}
 		end = latest
-		if crit.ToBlock != nil {
+		if crit.ToBlock != nil && crit.ToBlock.Sign() > 0 {
 			end = crit.ToBlock.Uint64()
 		}
 	}
