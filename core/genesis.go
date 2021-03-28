@@ -19,6 +19,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -153,19 +155,18 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
 	return SetupGenesisBlockWithOverride(db, genesis, nil, history, overwrite)
 }
 
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideBerlin *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	var stateDB *state.IntraBlockState
+func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideBerlin *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
 	if genesis != nil && genesis.Config == nil {
-		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, ErrGenesisNoConfig
+		return params.AllEthashProtocolChanges, common.Hash{}, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored, err := rawdb.ReadCanonicalHash(db, 0)
 	if err != nil {
-		return nil, common.Hash{}, nil, err
+		return nil, common.Hash{}, err
 	}
 	if overwrite || (stored == common.Hash{}) {
 		if genesis == nil {
@@ -174,21 +175,21 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		} else {
 			log.Info("Writing custom genesis block")
 		}
-		block, stateDB1, err := genesis.Commit(db, history)
-		if err != nil {
-			return genesis.Config, common.Hash{}, nil, err
+		block, _, err1 := genesis.Commit(db, history)
+		if err1 != nil {
+			return genesis.Config, common.Hash{}, err1
 		}
-		return genesis.Config, block.Hash(), stateDB1, nil
+		return genesis.Config, block.Hash(), nil
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, stateDB1, err1 := genesis.ToBlock(history)
+		block, _, err1 := genesis.ToBlock(history)
 		if err1 != nil {
-			return genesis.Config, common.Hash{}, nil, err1
+			return genesis.Config, common.Hash{}, err1
 		}
 		hash := block.Hash()
 		if hash != stored {
-			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
+			return genesis.Config, block.Hash(), &GenesisMismatchError{stored, hash}
 		}
 	}
 	// Get the existing chain configuration.
@@ -197,25 +198,25 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		newcfg.BerlinBlock = overrideBerlin
 	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
-		return newcfg, common.Hash{}, nil, err
+		return newcfg, common.Hash{}, err
 	}
 	storedcfg, err := rawdb.ReadChainConfig(db, stored)
 	if err != nil {
-		return newcfg, common.Hash{}, nil, err
+		return newcfg, common.Hash{}, err
 	}
 	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
 		if err1 != nil {
-			return newcfg, common.Hash{}, nil, err1
+			return newcfg, common.Hash{}, err1
 		}
-		return newcfg, stored, stateDB, nil
+		return newcfg, stored, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
 	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
 	// if we just continued here.
 	if genesis == nil && stored != params.MainnetGenesisHash {
-		return storedcfg, stored, stateDB, nil
+		return storedcfg, stored, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -225,13 +226,13 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	} else {
 		compatErr := storedcfg.CheckCompatible(newcfg, *height)
 		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
-			return newcfg, stored, stateDB, compatErr
+			return newcfg, stored, compatErr
 		}
 	}
 	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
-		return newcfg, common.Hash{}, nil, err
+		return newcfg, common.Hash{}, err
 	}
-	return newcfg, stored, stateDB, nil
+	return newcfg, stored, nil
 }
 
 func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
@@ -274,16 +275,6 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 		if len(account.Code) > 0 || len(account.Storage) > 0 {
 			statedb.SetIncarnation(addr, 1)
 		}
-		/*
-			if len(account.Code) == 0 && len(account.Storage) > 0 {
-				// Special case for weird tests - inaccessible storage
-				var b [8]byte
-				binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-				if err := tmpDB.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
-					return nil, nil, err
-				}
-			}
-		*/
 	}
 	err := statedb.FinalizeTx(context.Background(), w)
 	if err != nil {
@@ -321,6 +312,17 @@ func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Blo
 	if err != nil {
 		return nil, nil, err
 	}
+	for addr, account := range g.Alloc {
+		if len(account.Code) == 0 && len(account.Storage) > 0 {
+			// Special case for weird tests - inaccessible storage
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
+			if err := tx.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}

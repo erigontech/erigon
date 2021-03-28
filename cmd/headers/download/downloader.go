@@ -304,7 +304,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	default:
 		return nil, fmt.Errorf("chain %s is not known", chain)
 	}
-	if chainConfig, _, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
+	if chainConfig, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
 	engine := ethconfig.CreateConsensusEngine(chainConfig, ethashConfig, nil, false, db)
