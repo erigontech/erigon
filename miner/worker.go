@@ -439,12 +439,19 @@ func (w *worker) mainLoop() {
 				coinbase := w.coinbase
 				w.mu.RUnlock()
 
-				txs := make(map[common.Address]types.Transactions)
+				idx := map[common.Address]int{}
+				groups := types.TransactionsGroupedBySender{}
 				for _, tx := range ev.Txs {
 					acc, _ := types.Sender(w.current.signer, tx)
-					txs[acc] = append(txs[acc], tx)
+					i, ok := idx[acc]
+					if ok {
+						groups[i] = append(groups[i], tx)
+					} else {
+						idx[acc] = len(groups)
+						groups = append(groups, types.Transactions{tx})
+					}
 				}
-				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs)
+				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, groups)
 				tcount := w.current.tcount
 				w.commitTransactions(txset, coinbase, nil)
 				// Only update the snapshot if any new transactons were added
@@ -1038,11 +1045,22 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	}
 
 	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
-	for _, account := range w.eth.TxPool().Locals() {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
+	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+	txPoolLocals := w.eth.TxPool().Locals()
+	for _, txs := range pending {
+		from, _ := types.Sender(w.current.signer, txs[0])
+		isLocal := false
+		for _, local := range txPoolLocals {
+			if local == from {
+				isLocal = true
+				break
+			}
+		}
+
+		if isLocal {
+			localTxs = append(localTxs, txs)
+		} else {
+			remoteTxs = append(remoteTxs, txs)
 		}
 	}
 	if len(localTxs) > 0 {

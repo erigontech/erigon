@@ -66,14 +66,14 @@ type MiningStagesParameters struct {
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
 	noempty      bool
-	PendingTxs   map[common.Address]types.Transactions
+	PendingTxs   types.TransactionsGroupedBySender
 	TxPoolLocals []common.Address
 
 	// runtime dat
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address) *MiningStagesParameters {
 	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}}
 
 }
@@ -440,8 +440,8 @@ func MiningStages() StageBuilders {
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.mining.Block.localTxs,
-							world.mining.Block.remoteTxs,
+							world.mining.Block.LocalTxs,
+							world.mining.Block.RemoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.notifier,

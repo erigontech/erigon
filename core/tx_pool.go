@@ -507,15 +507,15 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce. The returned transaction set is a copy and can be
 // freely modified by calling code.
-func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
-	pending := make(map[common.Address]types.Transactions)
+func (pool *TxPool) Pending() (types.TransactionsGroupedBySender, error) {
+	var pending types.TransactionsGroupedBySender
 	if !pool.IsStarted() {
 		return pending, nil
 	}
-	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	for addr, list := range pool.pending {
-		pending[addr] = list.Flatten()
+	pending = make(types.TransactionsGroupedBySender, len(pool.pending))
+	for _, list := range pool.pending {
+		pending = append(pending, list.Flatten())
 	}
 	return pending, nil
 }

@@ -51,7 +51,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
-	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -559,24 +558,24 @@ func (s *Ethereum) APIs() []rpc.API {
 		//	Service:   NewPublicMinerAPI(s),
 		//	Public:    true,
 		//},
-		{
-			Namespace: "eth",
-			Version:   "1.0",
-			Service:   downloader.NewPublicDownloaderAPI(s.handler.downloader, s.eventMux),
-			Public:    true,
-		},
+		//{
+		//	Namespace: "eth",
+		//	Version:   "1.0",
+		//	Service:   downloader.NewPublicDownloaderAPI(s.handler.downloader, s.eventMux),
+		//	Public:    true,
+		//},
 		//{
 		//	Namespace: "miner",
 		//	Version:   "1.0",
 		//	Service:   NewPrivateMinerAPI(s),
 		//	Public:    false,
 		//},
-		{
-			Namespace: "eth",
-			Version:   "1.0",
-			Service:   filters.NewPublicFilterAPI(s.APIBackend, 5*time.Minute),
-			Public:    true,
-		},
+		//{
+		//	Namespace: "eth",
+		//	Version:   "1.0",
+		//	Service:   filters.NewPublicFilterAPI(s.APIBackend, 5*time.Minute),
+		//	Public:    true,
+		//},
 		//{
 		//	Namespace: "admin",
 		//	Version:   "1.0",

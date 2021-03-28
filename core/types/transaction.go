@@ -365,6 +365,9 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
+// TransactionsGroupedBySender - lists of transactions grouped by sender
+type TransactionsGroupedBySender []Transactions
+
 // TxDifference returns a new set which is the difference between a and b.
 func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))
@@ -420,13 +423,21 @@ func (s *TxByPriceAndTime) Pop() interface{} {
 	return x
 }
 
+type TransactionsStream interface {
+	Empty() bool
+	Peek() *Transaction
+	Shift()
+	Pop()
+}
+
 // TransactionsByPriceAndNonce represents a set of transactions that can return
 // transactions in a profit-maximizing sorted order, while supporting removing
 // entire batches of transactions for non-executable accounts.
 type TransactionsByPriceAndNonce struct {
-	txs    map[common.Address]Transactions // Per account nonce-sorted list of transactions
-	heads  TxByPriceAndTime                // Next transaction for each unique account (price heap)
-	signer Signer                          // Signer for the set of transactions
+	idx    map[common.Address]int      // Per account nonce-sorted list of transactions
+	txs    TransactionsGroupedBySender // Per account nonce-sorted list of transactions
+	heads  TxByPriceAndTime            // Next transaction for each unique account (price heap)
+	signer Signer                      // Signer for the set of transactions
 }
 
 // NewTransactionsByPriceAndNonce creates a transaction set that can retrieve
@@ -434,22 +445,29 @@ type TransactionsByPriceAndNonce struct {
 //
 // Note, the input map is reowned so the caller should not interact any more with
 // if after providing it to the constructor.
-func NewTransactionsByPriceAndNonce(signer Signer, txs map[common.Address]Transactions) *TransactionsByPriceAndNonce {
+func NewTransactionsByPriceAndNonce(signer Signer, txs TransactionsGroupedBySender) *TransactionsByPriceAndNonce {
 	// Initialize a price and received time based heap with the head transactions
 	heads := make(TxByPriceAndTime, 0, len(txs))
-	for from, accTxs := range txs {
+	idx := make(map[common.Address]int, len(txs))
+	for i, accTxs := range txs {
+		from, _ := Sender(signer, accTxs[0])
+
 		// Ensure the sender address is from the signer
-		if acc, _ := Sender(signer, accTxs[0]); acc != from {
-			delete(txs, from)
-			continue
-		}
+		//if  acc != from {
+		//	delete(txs, from)
+		//txs[i] = txs[len(txs)-1]
+		//txs = txs[:len(txs)-1]
+		//continue
+		//}
 		heads = append(heads, accTxs[0])
-		txs[from] = accTxs[1:]
+		idx[from] = i
+		txs[i] = accTxs[1:]
 	}
 	heap.Init(&heads)
 
 	// Assemble and return the transaction set
 	return &TransactionsByPriceAndNonce{
+		idx:    idx,
 		txs:    txs,
 		heads:  heads,
 		signer: signer,
@@ -457,7 +475,7 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs map[common.Address]Transa
 }
 
 func (t *TransactionsByPriceAndNonce) Empty() bool {
-	return len(t.txs) == 0
+	return len(t.idx) == 0
 }
 
 // Peek returns the next transaction by price.
@@ -471,12 +489,18 @@ func (t *TransactionsByPriceAndNonce) Peek() *Transaction {
 // Shift replaces the current best head with the next one from the same account.
 func (t *TransactionsByPriceAndNonce) Shift() {
 	acc, _ := Sender(t.signer, t.heads[0])
-	if txs, ok := t.txs[acc]; ok && len(txs) > 0 {
-		t.heads[0], t.txs[acc] = txs[0], txs[1:]
-		heap.Fix(&t.heads, 0)
-	} else {
+	idx, ok := t.idx[acc]
+	if !ok {
 		heap.Pop(&t.heads)
+		return
 	}
+	txs := t.txs[idx]
+	if len(txs) == 0 {
+		heap.Pop(&t.heads)
+		return
+	}
+	t.heads[0], t.txs[idx] = txs[0], txs[1:]
+	heap.Fix(&t.heads, 0)
 }
 
 // Pop removes the best transaction, *not* replacing it with the next one from
@@ -484,6 +508,46 @@ func (t *TransactionsByPriceAndNonce) Shift() {
 // and hence all subsequent ones should be discarded from the same account.
 func (t *TransactionsByPriceAndNonce) Pop() {
 	heap.Pop(&t.heads)
+}
+
+// TransactionsFixedOrder represents a set of transactions that can return
+// transactions in a profit-maximizing sorted order, while supporting removing
+// entire batches of transactions for non-executable accounts.
+type TransactionsFixedOrder struct {
+	Transactions
+}
+
+// NewTransactionsFixedOrder creates a transaction set that can retrieve
+// price sorted transactions in a nonce-honouring way.
+//
+// Note, the input map is reowned so the caller should not interact any more with
+// if after providing it to the constructor.
+func NewTransactionsFixedOrder(txs Transactions) *TransactionsFixedOrder {
+	return &TransactionsFixedOrder{txs}
+}
+
+func (t *TransactionsFixedOrder) Empty() bool {
+	return len(t.Transactions) == 0
+}
+
+// Peek returns the next transaction by price.
+func (t *TransactionsFixedOrder) Peek() *Transaction {
+	if len(t.Transactions) == 0 {
+		return nil
+	}
+	return t.Transactions[0]
+}
+
+// Shift replaces the current best head with the next one from the same account.
+func (t *TransactionsFixedOrder) Shift() {
+	t.Transactions = t.Transactions[1:]
+}
+
+// Pop removes the best transaction, *not* replacing it with the next one from
+// the same account. This should be used when a transaction cannot be executed
+// and hence all subsequent ones should be discarded from the same account.
+func (t *TransactionsFixedOrder) Pop() {
+	t.Transactions = t.Transactions[1:]
 }
 
 // Message is a fully derived transaction and implements core.Message

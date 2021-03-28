@@ -18,7 +18,7 @@ import (
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs *types.TransactionsByPriceAndNonce, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
@@ -107,7 +107,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txs *types.TransactionsByPriceAndNonce, coinbase common.Address, ibs *state.IntraBlockState, stateWriter state.StateWriter, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, stateWriter state.StateWriter, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -123,6 +123,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 			ibs.RevertToSnapshot(snap)
 			return nil, err
 		}
+
 		//if !chainConfig.IsByzantium(header.Number) {
 		//	batch.Rollback()
 		//}
