@@ -224,7 +224,7 @@ func ReadHeader(db databaseReader, hash common.Hash, number uint64) *types.Heade
 }
 
 func ReadCurrentHeader(db ethdb.Getter) *types.Header {
-	headHash := ReadHeadBlockHash(db)
+	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
 		return nil
