@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debugprint"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -233,6 +234,9 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
+	miningResultCh := make(chan consensus.ResultWithContext, 1)
+	defer close(miningResultCh)
+	consensusCtx := consensus.NewCancel()
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -303,7 +307,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil)
+			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil, miningResultCh, consensusCtx)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -311,7 +315,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err != nil {
 				panic(err)
 			}
-			var minedBlock *types.Block
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
@@ -335,13 +338,11 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
-			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-				//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
-				//debugprint.Receipts(miningWorld.Block.Receipts, receiptsInDB)
-				var err error
-				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
-				return err
-			})
+			//miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+			//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+			//debugprint.Receipts(miningWorld.Block.Receipts, receiptsInDB)
+			//return stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
+			//})
 
 			if err := miningStages.Run(db, tx); err != nil {
 				return err
@@ -349,7 +350,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
-			checkMinedBlock(nextBlock, minedBlock, chainConfig)
+			minedResult := <-miningResultCh
+			checkMinedBlock(nextBlock, minedResult.Block, chainConfig)
 		}
 
 		// Unwind all stages to `execStage - unwind` block

@@ -8,6 +8,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -69,12 +70,15 @@ type MiningStagesParameters struct {
 	PendingTxs   types.TransactionsGroupedBySender
 	TxPoolLocals []common.Address
 
+	resultCh     chan consensus.ResultWithContext
+	consensusCtx consensus.Cancel
+
 	// runtime dat
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address, resultCh chan consensus.ResultWithContext, consensusCtx consensus.Cancel) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}, resultCh: resultCh, consensusCtx: consensusCtx}
 
 }
 
@@ -489,11 +493,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
-						if err != nil {
-							return err
-						}
-						return nil
+						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.mining.resultCh, world.mining.consensusCtx, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
