@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
 
@@ -100,22 +99,22 @@ func stateTestCmd(ctx *cli.Context) error {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, tds, err := test.Run(context.Background(), st, cfg)
+			statedb, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
-			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
-			}
+			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+			//	fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
+			//}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
-					if err1 != nil {
-						return fmt.Errorf("transition cannot open tx: %v", err1)
-					}
-					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
-					tx.Rollback()
-					result.State = &dump
+					//tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
+					//if err1 != nil {
+					//	return fmt.Errorf("transition cannot open tx: %v", err1)
+					//}
+					//dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+					//tx.Rollback()
+					//result.State = &dump
 				}
 			}
 
@@ -128,7 +127,6 @@ func stateTestCmd(ctx *cli.Context) error {
 					vm.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
-			tds.Database().Close()
 		}
 	}
 	out, _ := json.MarshalIndent(results, "", "  ")

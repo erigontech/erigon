@@ -143,7 +143,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 
 	var flags = opts.flags
 	if opts.inMem {
-		flags |= lmdb.NoMetaSync
+		flags |= lmdb.NoMetaSync | lmdb.NoSync
 	}
 
 	var exclusiveLock fileutil.Releaser

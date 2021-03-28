@@ -1398,7 +1398,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *params.ChainConfig, chain *core.BlockChain, chainDb *ethdb.ObjectDatabase) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */, false /* overwrite */)
+	config, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */, false /* overwrite */)
 	if err != nil {
 		Fatalf("%v", err)
 	}

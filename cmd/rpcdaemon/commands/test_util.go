@@ -45,7 +45,7 @@ func createTestDb() (ethdb.Database, error) {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, _, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return nil, err
 	}

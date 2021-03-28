@@ -827,8 +827,7 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	db := ethdb.NewMemDatabase()
-	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(db, false /* history */)
+	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(false)
 	tool.Check(err)
 	genesisHeader := genesisBlock.Header()
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)

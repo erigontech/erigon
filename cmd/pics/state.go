@@ -334,7 +334,7 @@ func initialState1() error {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, _, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return err
 	}
@@ -462,7 +462,7 @@ func initialState1() error {
 	kv = db.KV()
 	snapshotDB := db.MemCopy()
 
-	_, _, _, err = core.SetupGenesisBlock(db, gspec, true, false)
+	_, _, err = core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return err
 	}
