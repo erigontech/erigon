@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
-	"math/rand"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -597,67 +595,6 @@ func testReorgBadHashes(t *testing.T, full bool) {
 		defer func() { delete(core.BadHashes, headers[3].Hash()) }()
 	}
 
-}
-
-// Tests chain insertions in the face of one entity containing an invalid nonce.
-func TestHeadersInsertNonceError(t *testing.T) { testInsertNonceError(t, false) }
-func TestBlocksInsertNonceError(t *testing.T)  { testInsertNonceError(t, true) }
-
-func testInsertNonceError(t *testing.T, full bool) {
-	for i := 1; i < 25 && !t.Failed(); i++ {
-		i := i
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			// Create a pristine chain and database
-			db, _, err := newCanonical(ethash.NewFaker(), 0, full)
-			if err != nil {
-				t.Fatalf("failed to create pristine chain: %v", err)
-			}
-
-			defer func(db ethdb.Database) {
-				// could not close db because .ValidateHeaderChain could not wait for ethash.VerifyHeaders finish
-				time.Sleep(time.Millisecond)
-				db.Close()
-			}(db)
-
-			// Create and insert a chain with a failing nonce
-			var (
-				failAt  int
-				failRes int
-				failNum uint64
-			)
-			if full {
-				blocks := makeBlockChain(rawdb.ReadCurrentBlock(db), i, ethash.NewFaker(), db, 0)
-
-				failAt = rand.Int() % len(blocks) // nolint:gosec
-				failNum = blocks[failAt].NumberU64()
-
-				_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFakeFailer(failNum), blocks, true /* checkRoot */)
-			} else {
-				headers := makeHeaderChain(rawdb.ReadCurrentHeader(db), i, ethash.NewFaker(), db, 0)
-
-				failAt = rand.Int() % len(headers) // nolint:gosec
-				failNum = headers[failAt].Number.Uint64()
-
-				_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFakeFailer(failNum), headers)
-			}
-			// Check that the returned error indicates the failure
-			if failRes != failAt {
-				t.Errorf("test %d: failure (%v) index mismatch: have %d, want %d", i, err, failRes, failAt)
-			}
-			// Check that all blocks after the failing block have been inserted
-			for j := 0; j < i-failAt; j++ {
-				if full {
-					if block, _ := rawdb.ReadBlockByNumber(db, failNum+uint64(j)); block != nil {
-						t.Errorf("test %d: invalid block in chain: %v", i, block)
-					}
-				} else {
-					if header := rawdb.ReadHeaderByNumber(db, failNum+uint64(j)); header != nil {
-						t.Errorf("test %d: invalid header in chain: %v", i, header)
-					}
-				}
-			}
-		})
-	}
 }
 
 // Tests that fast importing a block chain produces the same chain data as the
