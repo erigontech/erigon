@@ -153,7 +153,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 
 // Run executes a specific subtest and verifies the post-state and logs
 func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, _, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
+	state, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}

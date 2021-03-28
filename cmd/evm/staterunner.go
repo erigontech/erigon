@@ -99,10 +99,10 @@ func stateTestCmd(ctx *cli.Context) error {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, tds, err := test.Run(context.Background(), st, cfg)
+			statedb, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
 			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-			fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
+			//fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
 			//}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
@@ -113,9 +113,9 @@ func stateTestCmd(ctx *cli.Context) error {
 					//if err1 != nil {
 					//	return fmt.Errorf("transition cannot open tx: %v", err1)
 					//}
-					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+					//dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
 					//tx.Rollback()
-					result.State = &dump
+					//result.State = &dump
 				}
 			}
 
