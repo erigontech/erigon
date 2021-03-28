@@ -162,6 +162,7 @@ func BodiesForward(
 		case <-wakeUpChan:
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
+		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
@@ -184,7 +185,6 @@ func BodiesForward(
 		}
 	}
 	log.Info("Processed", "highest", bodyProgress)
-	stageBodiesGauge.Update(int64(bodyProgress))
 	return nil
 }
 

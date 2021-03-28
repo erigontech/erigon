@@ -225,6 +225,7 @@ Error: %v
 		if err := batch.Put(dbutils.HeadersBucket, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
+		stageHeadersGauge.Update(int64(lastHeader.Number.Uint64()))
 	}
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -290,6 +291,5 @@ Error: %v
 	}
 
 	log.Info(fmt.Sprintf("[%s] Imported new block headers", logPrefix), ctx...)
-	stageHeadersGauge.Update(int64(lastHeader.Number.Uint64()))
 	return newCanonical, reorg, forkBlockNumber, nil
 }
