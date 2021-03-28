@@ -214,6 +214,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	// Split the pending transactions into locals and remotes
 	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
 	for _, txs := range pendingTxs {
+		if len(txs) == 0 {
+			continue
+		}
 		from, _ := types.Sender(signer, txs[0])
 		isLocal := false
 		for _, local := range txPoolLocals {
