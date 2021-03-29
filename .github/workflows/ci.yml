@@ -1,0 +1,38 @@
+name: Continuous integration
+on: [ push ]
+jobs:
+  ci:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16.x
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt update && sudo apt install build-essential
+          fi
+        shell: bash
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Build
+        run: make all
+      - name: Lint
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: latest
+          args: "--build-tags=mdbx"
+          skip-go-installation: true
+          skip-pkg-cache: true
+          skip-build-cache: true
+      - name: Test
+        run: make test
