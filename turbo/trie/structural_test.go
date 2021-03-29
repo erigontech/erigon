@@ -120,7 +120,7 @@ func TestV2Resolution(t *testing.T) {
 	for i := 0; i < 1000; i += 200 {
 		rl.AddKey([]byte(keys[i]))
 	}
-	// Next, some non-exsiting keys
+	// Next, some non-existing keys
 	for i := 0; i < 1000; i++ {
 		rl.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}

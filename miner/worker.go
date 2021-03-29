@@ -42,9 +42,6 @@ import (
 )
 
 const (
-	// resultQueueSize is the size of channel listening to sealing result.
-	resultQueueSize = 10
-
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
 	txChanSize = 4096
@@ -57,9 +54,6 @@ const (
 
 	// resubmitAdjustChanSize is the size of resubmitting interval adjustment channel.
 	resubmitAdjustChanSize = 10
-
-	// miningLogAtDepth is the number of confirmations before logging successful mining.
-	miningLogAtDepth = 7
 
 	// minRecommitInterval is the minimal time interval to recreate the mining block with
 	// any newly arrived transactions.
@@ -173,12 +167,6 @@ type worker struct {
 type hooks struct {
 	// External functions
 	isLocalBlock func(block *types.Block) bool // Function used to determine whether the specified block is mined by local miner.
-
-	// Test hooks
-	newTaskHook  func(*task)                        // Method to call upon receiving a new sealing task.
-	skipSealHook func(*task) bool                   // Method to decide whether skipping the sealing.
-	fullTaskHook func()                             // Method to call before pushing the full sealing task.
-	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
 func newWorker(config *params.MiningConfig, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
@@ -359,10 +347,6 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			log.Info("Miner recommit interval update", "from", minRecommit, "to", interval)
 			minRecommit, recommit = interval, interval
 
-			if w.resubmitHook != nil {
-				w.resubmitHook(minRecommit, recommit)
-			}
-
 		case adjust := <-w.resubmitAdjustCh:
 			// Adjust resubmit interval by feedback.
 			if adjust.inc {
@@ -374,10 +358,6 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 				before := recommit
 				recommit = recalcRecommit(minRecommit, recommit, float64(minRecommit.Nanoseconds()), false)
 				log.Trace("Decrease miner recommit interval", "from", before, "to", recommit)
-			}
-
-			if w.resubmitHook != nil {
-				w.resubmitHook(minRecommit, recommit)
 			}
 
 		case <-w.exitCh:
@@ -563,7 +543,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 						return false
 					})
 
-					if err := w.commit(ctx, uncles, nil, true, start); err != nil {
+					if err := w.commit(ctx, uncles, true, start); err != nil {
 						ctx.CancelFunc()
 						log.Debug("cannot commit a block", "err", err)
 					}
@@ -591,20 +571,12 @@ func (w *worker) taskLoop() {
 		case task := <-w.taskCh:
 			log.Warn("mining task", "number", task.block.NumberU64(), "hash", task.block.Hash().String())
 
-			if w.newTaskHook != nil {
-				w.newTaskHook(task)
-			}
-
 			// Reject duplicate sealing work due to resubmitting.
 			sealHash := w.engine.SealHash(task.block.Header())
 			if sealHash == prev {
 				continue
 			}
 			prev = sealHash
-
-			if w.skipSealHook != nil && w.skipSealHook(task) {
-				continue
-			}
 
 			resultCh := make(chan *types.Block, 1)
 			if err := w.engine.Seal(w.chain, task.block, resultCh, task.ctx.Done()); err != nil {
@@ -961,7 +933,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	// sealing in advance without waiting block execution finished.
 	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
 		now := time.Now()
-		if err = w.commit(ctx, uncles, nil, false, tstart); err != nil {
+		if err = w.commit(ctx, uncles, false, tstart); err != nil {
 			log.Error("Failed to commit empty block", "err", err)
 			ctx.CancelFunc()
 		}
@@ -1016,7 +988,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	}
 
 	now := time.Now()
-	if err = w.commit(ctx, uncles, w.fullTaskHook, true, tstart); err != nil {
+	if err = w.commit(ctx, uncles, true, tstart); err != nil {
 		log.Error("Failed to commit block", "err", err)
 		ctx.CancelFunc()
 	}
@@ -1025,11 +997,11 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 
 // commit runs any post-transaction state modifications, assembles the final block
 // and commits new work if consensus engine is running.
-func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval func(), update bool, start time.Time) error {
+func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, update bool, start time.Time) error {
 	// Deep copy receipts here to avoid interaction between different tasks.
 	receipts := copyReceipts(w.current.receipts)
 
-	s := &(*w.current.state)
+	s := w.current.state
 
 	block, err := NewBlock(w.engine, s, w.current.tds, w.chain.Config(), w.current.GetHeader(), w.current.txs, uncles, w.current.receipts)
 	if err != nil {
@@ -1039,10 +1011,6 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 	w.current.SetHeader(block.Header())
 
 	if w.isRunning() {
-		if interval != nil {
-			interval()
-		}
-
 		select {
 		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now(), ctx: ctx}:
 			log.Warn("mining: worker task event",
@@ -1094,14 +1062,6 @@ func (w *worker) clearCanonicalChainContext() {
 		ctx.CancelFunc()
 	}
 	w.canonicalMining = nil
-}
-
-// postSideBlock fires a side chain event, only use it for testing.
-func (w *worker) postSideBlock(event core.ChainSideEvent) {
-	select {
-	case w.chainSideCh <- event:
-	case <-w.exitCh:
-	}
 }
 
 // totalFees computes total consumed fees in ETH. Block transactions and receipts have to have the same order.

@@ -610,10 +610,7 @@ func (txn *Txn) Del(dbi DBI, key, val []byte) error {
 //
 // See mdbx_cursor_open.
 func (txn *Txn) OpenCursor(dbi DBI) (*Cursor, error) {
-	cur, err := openCursor(txn, dbi)
-	if cur != nil && txn.readonly {
-	}
-	return cur, err
+	return openCursor(txn, dbi)
 }
 
 func (txn *Txn) errf(format string, v ...interface{}) {

@@ -9,7 +9,6 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//nolint:varcheck
 var hasBMI2 = cpu.X86.HasBMI2
 
 // go:noescape

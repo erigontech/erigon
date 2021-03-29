@@ -67,8 +67,8 @@ var (
 	//
 	//blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
 	//blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
-	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockExecutionNumber = metrics.NewRegisteredGauge("chain/execution/number", nil)
+	blockExecutionTimer = metrics.NewRegisteredTimer("chain/execution", nil)
+	//blockExecutionNumber = metrics.NewRegisteredGauge("chain/execution/number", nil)
 	//blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
@@ -323,20 +323,6 @@ func (bc *BlockChain) GetVMConfig() *vm.Config {
 	return &bc.vmConfig
 }
 
-// empty returns an indicator whether the blockchain is empty.
-// Note, it's a special case that we connect a non-empty ancient
-// database with an empty node, so that we can plugin the ancient
-// into node seamlessly.
-func (bc *BlockChain) empty() bool {
-	genesis := bc.genesisBlock.Hash()
-	for _, hash := range []common.Hash{rawdb.ReadHeadBlockHash(bc.db), rawdb.ReadHeadHeaderHash(bc.db), rawdb.ReadHeadFastBlockHash(bc.db)} {
-		if hash != genesis {
-			return false
-		}
-	}
-	return true
-}
-
 // loadLastState loads the last known chain state from the database. This method
 // assumes that the chain manager mutex is held.
 func (bc *BlockChain) loadLastState() error {
@@ -398,10 +384,8 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
 		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
-			newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
-			if newHeadBlock == nil {
+			if newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64()); newHeadBlock == nil {
 				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
-				newHeadBlock = bc.genesisBlock
 			} else {
 				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
 
@@ -661,11 +645,7 @@ func (bc *BlockChain) HasBlock(hash common.Hash, number uint64) bool {
 // in the database or not, caching it if present.
 func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
 	// Check first that the block itself is known
-	block := bc.GetBlock(hash, number)
-	if block == nil {
-		return false
-	}
-	return true
+	return bc.GetBlock(hash, number) != nil
 }
 
 // GetBlock retrieves a block from the database by hash and number,
@@ -812,10 +792,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	defer bc.doneJob()
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
-	var (
-		ancientBlocks, liveBlocks     types.Blocks
-		ancientReceipts, liveReceipts []types.Receipts
-	)
+	liveBlocks := types.Blocks{}
+	liveReceipts := []types.Receipts{}
+
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i := 0; i < len(blockChain); i++ {
 		if i != 0 {
@@ -826,9 +805,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 					blockChain[i-1].Hash().Bytes()[:4], i, blockChain[i].NumberU64(), blockChain[i].Hash().Bytes()[:4], blockChain[i].ParentHash().Bytes()[:4])
 			}
 		}
-		if blockChain[i].NumberU64() <= ancientLimit {
-			ancientBlocks, ancientReceipts = append(ancientBlocks, blockChain[i]), append(ancientReceipts, receiptChain[i])
-		} else {
+		if blockChain[i].NumberU64() > ancientLimit {
 			liveBlocks, liveReceipts = append(liveBlocks, blockChain[i]), append(liveReceipts, receiptChain[i])
 		}
 	}
@@ -1242,9 +1219,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
 
-	canonicalHash, err := rawdb.ReadCanonicalHash(bc.db, parentNumber)
-	if err != nil {
-		return 0, err
+	canonicalHash, canonicalHashErr := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+	if canonicalHashErr != nil {
+		return 0, canonicalHashErr
 	}
 	for canonicalHash != parentHash {
 		log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
@@ -1257,6 +1234,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
+
+		var err error
 		canonicalHash, err = rawdb.ReadCanonicalHash(bc.db, parentNumber)
 		if err != nil {
 			return 0, err
@@ -1296,9 +1275,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 
 		// Wait for the block's verification to complete
-		var err error
 		ctx, _ = params.GetNoHistoryByBlock(ctx, block.Number())
-		if err = bc.Validator().ValidateBody(ctx, block); err != nil {
+		if err := bc.Validator().ValidateBody(ctx, block); err != nil {
 			return k, err
 		}
 
@@ -1310,7 +1288,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		readBlockNr := parentNumber
 		var root common.Hash
 		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
-			if _, err = bc.GetTrieDbState(); err != nil {
+			if _, err := bc.GetTrieDbState(); err != nil {
 				return k, err
 			}
 		}
@@ -1330,20 +1308,20 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 			bc.committedBlock.Store(bc.currentBlock.Load())
 
-			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
+			if err := bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				log.Error("Could not rewind", "error", err)
 				bc.setTrieDbState(nil)
 				return k, err
 			}
 
-			root := bc.trieDbState.LastRoot()
-			if root != parentRoot {
-				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
+			lastRoot := bc.trieDbState.LastRoot()
+			if lastRoot != parentRoot {
+				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", lastRoot), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.setTrieDbState(nil)
-				return k, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
+				return k, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", lastRoot, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
-			if err = bc.reorg(currentBlock, parent); err != nil {
+			if err := bc.reorg(currentBlock, parent); err != nil {
 				bc.setTrieDbState(nil)
 				return k, err
 			}
@@ -1359,29 +1337,29 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
-			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
+			receipts, logs, usedGas, root, canonicalHashErr = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
 			reuseTrieDbState := true
-			if err != nil {
-				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+			if canonicalHashErr != nil {
+				bc.rollbackBadBlock(block, receipts, canonicalHashErr, reuseTrieDbState)
+				return k, canonicalHashErr
 			}
 
-			err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
-			if err != nil {
-				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+			canonicalHashErr = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
+			if canonicalHashErr != nil {
+				bc.rollbackBadBlock(block, receipts, canonicalHashErr, reuseTrieDbState)
+				return k, canonicalHashErr
 			}
 
 			reuseTrieDbState = false
-			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
-			if err != nil {
-				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+			canonicalHashErr = bc.processor.PostProcess(block, bc.trieDbState, receipts)
+			if canonicalHashErr != nil {
+				bc.rollbackBadBlock(block, receipts, canonicalHashErr, reuseTrieDbState)
+				return k, canonicalHashErr
 			}
-			err = bc.Validator().ValidateReceipts(block, receipts)
-			if err != nil {
-				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
-				return k, err
+			canonicalHashErr = bc.Validator().ValidateReceipts(block, receipts)
+			if canonicalHashErr != nil {
+				bc.rollbackBadBlock(block, receipts, canonicalHashErr, reuseTrieDbState)
+				return k, canonicalHashErr
 			}
 		}
 		proctime := time.Since(start)
@@ -1520,7 +1498,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 					l := *log
 					if removed {
 						l.Removed = true
-					} else {
 					}
 					logs = append(logs, &l)
 				}

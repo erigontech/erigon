@@ -19,7 +19,6 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -99,14 +98,6 @@ func (b Bloom) MarshalText() ([]byte, error) {
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
-}
-
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
 }
 
 func CreateBloom(receipts Receipts) Bloom {

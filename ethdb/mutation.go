@@ -20,8 +20,7 @@ import (
 )
 
 var (
-	dbCommitBigBatchTimer   = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
-	dbCommitSmallBatchTimer = metrics.NewRegisteredTimer("db/commit/small_batch", nil)
+	dbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
 )
 
 type mutation struct {

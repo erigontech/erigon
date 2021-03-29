@@ -105,7 +105,7 @@ func (api *PublicDownloaderAPI) Syncing(ctx context.Context) (*rpc.Subscription,
 		for {
 			select {
 			case status := <-statuses:
-				notifier.Notify(rpcSub.ID, status)
+				_ = notifier.Notify(rpcSub.ID, status)
 			case <-rpcSub.Err():
 				sub.Unsubscribe()
 				return

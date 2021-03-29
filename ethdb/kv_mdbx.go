@@ -150,25 +150,25 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
-		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
-		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
-		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-		/*
-			if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
-				return nil, err
+	/*
+		if opts.flags&mdbx.Accede == 0 {
+			// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
+			// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
+			// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
+				if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+					return nil, err
+				}
 			}
-			if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
-				return nil, err
-			}
-			if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
-				return nil, err
-			}
-			if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
-				return nil, err
-			}
-		*/
-	}
+	*/
 
 	db := &MdbxKV{
 		opts:    opts,

@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -55,22 +54,6 @@ func nodeKey() *ecdsa.PrivateKey {
 		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
 	}
 	return key
-}
-
-// SentryMsg declares ID fields necessary for communicating with the sentry
-type SentryMsg struct {
-	sentryId  int
-	requestId int
-}
-
-type BlockHeadersFromSentry struct {
-	SentryMsg
-	headers []*types.Header
-}
-
-type PenaltyMsg struct {
-	SentryMsg
-	penalty headerdownload.Penalty
 }
 
 func makeP2PServer(
@@ -161,10 +144,6 @@ func makeP2PServer(
 		p2pConfig.Protocols = append(p2pConfig.Protocols, pMap[protocolName])
 	}
 	return &p2p.Server{Config: p2pConfig}, nil
-}
-
-func errResp(code int, format string, v ...interface{}) error {
-	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
 }
 
 func runPeer(

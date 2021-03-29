@@ -186,7 +186,6 @@ func TestIntermediateLeaks(t *testing.T) {
 }
 
 func TestSnapshotRandom(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth. tag: mining")
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {

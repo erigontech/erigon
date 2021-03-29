@@ -788,12 +788,12 @@ func (s *Stream) Decode(val interface{}) error {
 	if rval.IsNil() {
 		return errDecodeIntoNil
 	}
-	decoder, err := cachedDecoder(rtyp.Elem())
+	dcd, err := cachedDecoder(rtyp.Elem())
 	if err != nil {
 		return err
 	}
 
-	err = decoder(s, rval.Elem())
+	err = dcd(s, rval.Elem())
 	if decErr, ok := err.(*decodeError); ok && len(decErr.ctx) > 0 {
 		// add decode target type to error so context has more meaning
 		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
@@ -975,8 +975,8 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 }
 
 func (s *Stream) readFull(buf []byte) (err error) {
-	if err := s.willRead(uint64(len(buf))); err != nil {
-		return err
+	if e := s.willRead(uint64(len(buf))); e != nil {
+		return e
 	}
 	var nn, n int
 	for n < len(buf) && err == nil {

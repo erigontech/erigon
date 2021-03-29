@@ -116,13 +116,11 @@ lintci: mdbx
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-		--build-tags="mdbx" \
-	    --config ./.golangci/step1.yml \
-	    --exclude "which can be annoying to use"
+		--build-tags="mdbx"
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.37.1
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.39.0
 
 clean:
 	env GO111MODULE=on go clean -cache

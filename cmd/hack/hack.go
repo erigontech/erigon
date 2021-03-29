@@ -418,12 +418,6 @@ func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	return thresholds, counts, shorts
 }
 
-func ts() []chart.GridLine {
-	return []chart.GridLine{
-		{Value: 420.0},
-	}
-}
-
 func trieChart() {
 	thresholds, counts, shorts := readTrieLog()
 	fmt.Printf("%d %d %d\n", len(thresholds), len(counts), len(shorts))
@@ -746,8 +740,7 @@ func testResolve(chaindata string) {
 	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
 	resolveHash := common.HexToHash("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
 	l := trie.NewSubTrieLoader(currentBlockNr)
-	var key []byte
-	key = common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
+	key := common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
 	rl := trie.NewRetainList(0)
 	rl.AddHex(key[:3])
 	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
@@ -1089,11 +1082,9 @@ func printBucket(chaindata string) {
 }
 
 func ValidateTxLookups2(chaindata string) {
-	startTime := time.Now()
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	//nolint: errcheck
-	startTime = time.Now()
+	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -1135,7 +1126,7 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)
 			}
-			if bytes.Compare(val, bn) != 0 {
+			if !bytes.Equal(val, bn) {
 				tool.Check(err)
 				panic(fmt.Sprintf("Validation process failed(%d). Expected %b, got %b", iterations, bn, val))
 			}
@@ -1891,144 +1882,147 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	if *action == "cfg" {
+
+	var err error
+	switch *action {
+	case "cfg":
 		flow.TestGenCfg()
-	}
-	if *action == "bucketStats" {
-		if err := bucketStats(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "syncChart" {
+
+	case "bucketStats":
+		err = bucketStats(*chaindata)
+
+	case "syncChart":
 		mychart()
-	}
-	if *action == "testRewind" {
+
+	case "testRewind":
 		testRewind(*chaindata, *block, *rewind)
-	}
-	if *action == "testResolve" {
+
+	case "testResolve":
 		testResolve(*chaindata)
-	}
-	if *action == "testBlockHashes" {
+
+	case "testDifficulty":
+		testDifficulty()
+
+	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
-	}
-	if *action == "invTree" {
+
+	case "invTree":
 		invTree("root", "right", "diff", *name)
-	}
-	if *action == "readAccount" {
+
+	case "readAccount":
 		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
-	}
-	if *action == "readPlainAccount" {
+
+	case "readPlainAccount":
 		readPlainAccount(*chaindata, common.HexToAddress(*account))
-	}
-	if *action == "fixAccount" {
+
+	case "fixAccount":
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
-	}
-	if *action == "nextIncarnation" {
+
+	case "nextIncarnation":
 		nextIncarnation(*chaindata, common.HexToHash(*account))
-	}
-	if *action == "dumpStorage" {
+
+	case "dumpStorage":
 		dumpStorage()
-	}
-	if *action == "current" {
+
+	case "current":
 		printCurrentBlockNumber(*chaindata)
-	}
-	if *action == "bucket" {
+
+	case "bucket":
 		printBucket(*chaindata)
+
+	case "val-tx-lookup-2":
+		ValidateTxLookups2(*chaindata)
+
+	case "modiAccounts":
+		getModifiedAccounts(*chaindata)
+
+	case "slice":
+		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
+
+	case "getProof":
+		err = testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false)
+
+	case "regenerateIH":
+		err = regenerate(*chaindata)
+
+	case "searchChangeSet":
+		err = searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))
+
+	case "searchStorageChangeSet":
+		err = searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block))
+
+	case "changeSetStats":
+		err = changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind))
+
+	case "supply":
+		err = supply(*chaindata)
+
+	case "extractCode":
+		err = extractCode(*chaindata)
+
+	case "iterateOverCode":
+		err = iterateOverCode(*chaindata)
+
+	case "mint":
+		err = mint(*chaindata, uint64(*block))
+
+	case "extractHeaders":
+		err = extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name)
+
+	case "extractHashes":
+		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
+
+	case "defrag":
+		err = db.Defrag()
+
+	case "textInfo":
+		err = db.TextInfo(*chaindata, &strings.Builder{})
+
+	case "indexKeySizes":
+		err = indexKeySizes(*chaindata)
+
+	case "extractBodies":
+		err = extractBodies(*chaindata, uint64(*block))
+
+	case "applyBlock":
+		err = applyBlock(*chaindata, common.HexToHash(*hash))
+
+	case "fixUnwind":
+		err = fixUnwind(*chaindata)
+
+	case "repairCurrent":
+		repairCurrent()
+
+	case "printBranches":
+		printBranches(uint64(*block))
+
+	case "preimage":
+		preimage(*chaindata, common.HexToHash(*hash))
+
+	case "printFullNodeRLPs":
+		printFullNodeRLPs()
+
+	case "rlpIndices":
+		rlpIndices()
+
+	case "hashFile":
+		hashFile()
+
+	case "testStartup":
+		testStartup()
+
+	case "trieChart":
+		trieChart()
+
+	case "printTxHashes":
+		printTxHashes()
+
+	case "extractTrie":
+		extractTrie(*block)
+
 	}
 
-	if *action == "val-tx-lookup-2" {
-		ValidateTxLookups2(*chaindata)
-	}
-	if *action == "modiAccounts" {
-		getModifiedAccounts(*chaindata)
-	}
-	if *action == "slice" {
-		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
-	}
-	if *action == "getProof" {
-		if err := testGetProof(*chaindata, common.HexToAddress(*account), *rewind, false); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "regenerateIH" {
-		if err := regenerate(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "searchChangeSet" {
-		if err := searchChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "searchStorageChangeSet" {
-		if err := searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "changeSetStats" {
-		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "supply" {
-		if err := supply(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "extractCode" {
-		if err := extractCode(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "iterateOverCode" {
-		if err := iterateOverCode(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "mint" {
-		if err := mint(*chaindata, uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "extractHeaders" {
-		if err := extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "extractHashes" {
-		if err := extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "defrag" {
-		if err := db.Defrag(); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "textInfo" {
-		sb := strings.Builder{}
-		if err := db.TextInfo(*chaindata, &sb); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "indexKeySizes" {
-		if err := indexKeySizes(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "extractBodies" {
-		if err := extractBodies(*chaindata, uint64(*block)); err != nil {
-			fmt.Printf("Error:%v\n", err)
-		}
-	}
-	if *action == "applyBlock" {
-		if err := applyBlock(*chaindata, common.HexToHash(*hash)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "fixUnwind" {
-		if err := fixUnwind(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
 	}
 }

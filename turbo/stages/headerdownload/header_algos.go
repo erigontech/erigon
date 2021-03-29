@@ -138,20 +138,20 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	var prevLink *Link
+	// var prevLink *Link
 	for link != nil && !link.preverified {
 		link.preverified = true
-		if prevLink != nil && len(link.next) > 1 {
-			// Remove all non-canonical links
-			var toRemove []*Link
-			for _, n := range link.next {
-				if n != prevLink {
-					toRemove = append(toRemove, n)
-				}
-			}
-			hd.removeUpwards(toRemove)
-			link.next = append(link.next[:0], prevLink)
-		}
+		// if prevLink != nil && len(link.next) > 1 {
+		// 	// Remove all non-canonical links
+		// 	var toRemove []*Link
+		// 	for _, n := range link.next {
+		// 		if n != prevLink {
+		// 			toRemove = append(toRemove, n)
+		// 		}
+		// 	}
+		// 	hd.removeUpwards(toRemove)
+		// 	link.next = append(link.next[:0], prevLink)
+		// }
 		link = hd.links[link.header.ParentHash]
 	}
 }

@@ -13,9 +13,8 @@ const (
 )
 
 var (
-	ErrNotFound      = errors.New("not found")
-	errIncorrectData = errors.New("empty prepared data")
-	ErrFindValue     = errors.New("find value error")
+	ErrNotFound  = errors.New("not found")
+	ErrFindValue = errors.New("find value error")
 )
 
 /* Plain changesets (key is a common.Address) */

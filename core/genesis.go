@@ -164,9 +164,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		return params.AllEthashProtocolChanges, common.Hash{}, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	stored, err := rawdb.ReadCanonicalHash(db, 0)
-	if err != nil {
-		return nil, common.Hash{}, err
+	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
+	if storedErr != nil {
+		return nil, common.Hash{}, storedErr
 	}
 	if overwrite || (stored == common.Hash{}) {
 		if genesis == nil {
@@ -200,9 +200,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, err
 	}
-	storedcfg, err := rawdb.ReadChainConfig(db, stored)
-	if err != nil {
-		return newcfg, common.Hash{}, err
+	storedcfg, storedErr := rawdb.ReadChainConfig(db, stored)
+	if storedErr != nil {
+		return newcfg, common.Hash{}, storedErr
 	}
 	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")

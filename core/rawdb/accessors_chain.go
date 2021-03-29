@@ -461,23 +461,6 @@ func DeleteBody(db DatabaseDeleter, hash common.Hash, number uint64) {
 	}
 }
 
-// ReadTdRLP retrieves a block's total difficulty corresponding to the hash in RLP encoding.
-func ReadTdRLP(db databaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	//data, _ := db.Ancient(freezerDifficultyTable, number)
-	data := []byte{}
-	if len(data) == 0 {
-		data, _ = db.Get(dbutils.HeaderTDBucket, dbutils.HeaderKey(number, hash))
-		// In the background freezer is moving data from leveldb to flatten files.
-		// So during the first check for ancient db, the data is not yet in there,
-		// but when we reach into leveldb, the data was already moved. That would
-		// result in a not found error.
-		if len(data) == 0 {
-			//data, _ = db.Ancient(freezerDifficultyTable, number)
-		}
-	}
-	return nil // Can't find the data anywhere.
-}
-
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db databaseReader, hash common.Hash, number uint64) (*big.Int, error) {
 	data, err := db.Get(dbutils.HeaderTDBucket, dbutils.HeaderKey(number, hash))

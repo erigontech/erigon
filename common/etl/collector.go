@@ -107,19 +107,18 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
+func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		if c.autoClean {
 			c.Close(logPrefix)
 		}
 	}()
 	if !c.allFlushed {
-		if err := c.flushBuffer(nil, true); err != nil {
-			return err
+		if e := c.flushBuffer(nil, true); e != nil {
+			return e
 		}
 	}
-	err = loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args)
-	if err != nil {
+	if err := loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args); err != nil {
 		return err
 	}
 	return nil

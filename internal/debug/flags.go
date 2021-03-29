@@ -250,7 +250,7 @@ func Setup(ctx *cli.Context) error {
 	glogger.SetHandler(ostream)
 	// logging
 	log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
-	ostream, glogger = log.SetupDefaultTerminalLogger(
+	_, glogger = log.SetupDefaultTerminalLogger(
 		log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
 		ctx.GlobalString(vmoduleFlag.Name),
 		ctx.GlobalString(backtraceAtFlag.Name),
@@ -332,6 +332,6 @@ func StartPProf(address string, withMetrics bool) {
 // Exit stops all running profiles, flushing their output to the
 // respective file.
 func Exit() {
-	Handler.StopCPUProfile()
-	Handler.StopGoTrace()
+	_ = Handler.StopCPUProfile()
+	_ = Handler.StopGoTrace()
 }

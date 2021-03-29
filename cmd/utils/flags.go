@@ -625,39 +625,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	MetricsEnableInfluxDBFlag = cli.BoolFlag{
-		Name:  "metrics.influxdb",
-		Usage: "Enable metrics export/push to an external InfluxDB database",
-	}
-	MetricsInfluxDBEndpointFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.endpoint",
-		Usage: "InfluxDB API endpoint to report metrics to",
-		Value: metrics.DefaultConfig.InfluxDBEndpoint,
-	}
-	MetricsInfluxDBDatabaseFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.database",
-		Usage: "InfluxDB database name to push reported metrics to",
-		Value: metrics.DefaultConfig.InfluxDBDatabase,
-	}
-	MetricsInfluxDBUsernameFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.username",
-		Usage: "Username to authorize access to the database",
-		Value: metrics.DefaultConfig.InfluxDBUsername,
-	}
-	MetricsInfluxDBPasswordFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.password",
-		Usage: "Password to authorize access to the database",
-		Value: metrics.DefaultConfig.InfluxDBPassword,
-	}
-	// Tags are part of every measurement sent to InfluxDB. Queries on tags are faster in InfluxDB.
-	// For example `host` tag could be used so that we can group all nodes and average a measurement
-	// across all of them, but also so that we can select a specific node and inspect its measurements.
-	// https://docs.influxdata.com/influxdb/v1.4/concepts/key_concepts/#tag-key
-	MetricsInfluxDBTagsFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.tags",
-		Usage: "Comma-separated InfluxDB tags (key/values) attached to all measurements",
-		Value: metrics.DefaultConfig.InfluxDBTags,
-	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
