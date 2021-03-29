@@ -34,7 +34,6 @@ jobs:
         with:
           version: latest
           args: "--build-tags=mdbx"
-          only-new-issues: true
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
