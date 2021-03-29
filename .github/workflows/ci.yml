@@ -24,8 +24,6 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ matrix.os }}-go-
       - name: Build
         run: make all
       - name: Lint
