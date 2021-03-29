@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -36,6 +37,9 @@ type OptionalParameters struct {
 	Notifier ChainEventNotifier
 
 	SilkwormExecutionFunc unsafe.Pointer
+
+	SnapshotDir string
+	TorrnetClient *bittorrent.Client
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -104,6 +108,8 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
+			snapshotsDir: stagedSync.params.SnapshotDir,
+			btClient: stagedSync.params.TorrnetClient,
 		},
 	)
 	state := NewState(stages)
@@ -121,4 +127,9 @@ func (stagedSync *StagedSync) Prepare(
 		return nil, err
 	}
 	return state, nil
+}
+
+func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string) {
+	stagedSync.params.TorrnetClient=client
+	stagedSync.params.SnapshotDir = snapshotsDir
 }

@@ -69,7 +69,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	tmpDB := ethdb.NewLMDB().Path(tmpPath).MustOpen()
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).MustOpen()
+	snkv = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()
 	sndb := ethdb.NewObjectDatabase(snkv)
 	tx, err := sndb.Begin(context.Background(), ethdb.RW)
 	if err != nil {

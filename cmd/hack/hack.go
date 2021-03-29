@@ -687,7 +687,7 @@ func testRewind(chaindata string, block, rewind int) {
 
 func testStartup() {
 	startTime := time.Now()
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	//ethDb := ethdb.Open(node.DefaultDataDir() + "/geth/chaindata")
 	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
@@ -910,7 +910,7 @@ func preimage(chaindata string, image common.Hash) {
 }
 
 func printBranches(block uint64) {
-	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
 	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/testnet/geth/chaindata")
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
@@ -1148,7 +1148,7 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 func getModifiedAccounts(chaindata string) {
 	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
 	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
-	// db := ethdb.MustOpen(chaindata)
+	// db := ethdb.Open(chaindata)
 	// defer db.Close()
 	// addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
 	// check(err)
@@ -1892,8 +1892,8 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	//db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	//db := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
+	//db := ethdb.Open(node.DefaultDataDir() + "/geth/chaindata")
 	//check(err)
 	//defer db.Close()
 	if *action == "cfg" {

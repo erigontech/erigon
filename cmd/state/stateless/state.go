@@ -1064,9 +1064,9 @@ func stateGrowthChart5() {
 
 func storageUsage() {
 	startTime := time.Now()
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//db := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
 	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//db := ethdb.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	/*
 		creatorsFile, err := os.Open("creators.csv")
@@ -1181,9 +1181,9 @@ func storageUsage() {
 
 func tokenUsage() {
 	startTime := time.Now()
-	//remoteDB := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//remoteDB := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
 	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//remoteDB := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//remoteDB := ethdb.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	tokensFile, errOpen := os.Open("tokens.csv")
 	check(errOpen)
@@ -1256,9 +1256,9 @@ func tokenUsage() {
 
 func nonTokenUsage() {
 	startTime := time.Now()
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//db := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
 	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//db := ethdb.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	tokensFile, errOpen := os.Open("tokens.csv")
 	check(errOpen)
@@ -1331,9 +1331,9 @@ func nonTokenUsage() {
 
 func dustEOA() {
 	startTime := time.Now()
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	//db := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
 	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//db := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//db := ethdb.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer db.Close()
 	count := 0
 	eoas := 0

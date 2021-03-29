@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -184,14 +186,15 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 		db.buckets[name] = cfg
 	}
 
+	buckets:=bucketSlice(db.buckets)
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
 		tx, innerErr := db.Begin(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
-		for name, cfg := range db.buckets {
-			if cfg.IsDeprecated {
+		for _, name := range buckets {
+			if db.buckets[name].IsDeprecated {
 				continue
 			}
 			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -204,8 +207,8 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 		}
 	} else {
 		if err := db.Update(context.Background(), func(tx RwTx) error {
-			for name, cfg := range db.buckets {
-				if cfg.IsDeprecated {
+			for _, name := range buckets {
+				if db.buckets[name].IsDeprecated {
 					continue
 				}
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -220,9 +223,9 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 
 	// Configure buckets and open deprecated buckets
 	if err := env.View(func(tx *lmdb.Txn) error {
-		for name, cfg := range db.buckets {
+		for _, name := range buckets {
 			// Open deprecated buckets if they exist, don't create
-			if !cfg.IsDeprecated {
+			if !db.buckets[name].IsDeprecated {
 				continue
 			}
 			dbi, createErr := tx.OpenDBI(name, 0)
@@ -1612,4 +1615,15 @@ func (c *LmdbDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
+}
+
+func bucketSlice(b dbutils.BucketsCfg) []string {
+	buckets:=make([]string, 0, len(b))
+	for name:=range b {
+		buckets=append(buckets,name)
+	}
+	sort.Slice(buckets, func(i, j int) bool {
+		return strings.Compare(buckets[i], buckets[j])<0
+	})
+	return buckets
 }

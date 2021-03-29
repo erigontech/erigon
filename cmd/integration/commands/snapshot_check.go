@@ -80,11 +80,11 @@ var cmdSnapshotCheck = &cobra.Command{
 		}()
 		tmpDb := ethdb.NewLMDB().Path(path).MustOpen()
 
-		kv := ethdb.NewSnapshot2KV().
+		kv := ethdb.NewSnapshotKV().
 			DB(tmpDb).
 			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.KV()).
 			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
-			MustOpen()
+			Open()
 
 		db := ethdb.NewObjectDatabase(kv)
 		if isNew {

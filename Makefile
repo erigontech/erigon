@@ -28,7 +28,7 @@ docker:
 docker-compose:
 	docker-compose up
 
-geth:
+geth: mdbx
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -73,6 +73,21 @@ headers:
 	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
+
+seeder:
+	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
+
+sndownloader:
+	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
+
+tracker:
+	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
 db-tools: mdbx
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor

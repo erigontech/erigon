@@ -10,8 +10,8 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 )
 
-func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
-	path := root + "/" + LmdbFilename
+func BuildInfoBytesForSnapshot(root string, fileName string) (metainfo.Info, error) {
+	path := root + "/" + fileName
 	fi, err := os.Stat(path)
 	if err != nil {
 		return metainfo.Info{}, err

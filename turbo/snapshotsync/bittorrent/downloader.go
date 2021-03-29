@@ -25,15 +25,17 @@ type Client struct {
 	snapshotsDir string
 }
 
-func New(snapshotsDir string, seeding bool) (*Client, error) {
+func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+	torrentConfig.PeerID=peerID
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
+		return nil, fmt.Errorf("fail to start: %w",err)
 	}
 
 	return &Client{
@@ -77,6 +79,19 @@ func (cli *Client) Load(db ethdb.Database) error {
 	})
 }
 
+func (cli *Client) SavePeerID(db ethdb.Putter) error {
+	return db.Put(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID), cli.PeerID())
+}
+
+func (cli *Client) Close() {
+	cli.Cli.Close()
+}
+
+
+func (cli *Client) PeerID() []byte {
+	peerID:=cli.Cli.PeerID()
+	return peerID[:]
+}
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) (*torrent.Torrent, error) {
 	t, ok := cli.Cli.Torrent(snapshotHash)
 	if ok {
@@ -122,7 +137,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()
-	log.Info("Got infobytes", "snapshot", snapshotType.String())
+	log.Info("Got infobytes", "snapshot", snapshotType.String(), "file", t.Files()[0].Path())
 
 	if newTorrent {
 		log.Info("Save spec", "snapshot", snapshotType.String())
@@ -198,6 +213,7 @@ func (cli *Client) Download() {
 			t.DownloadAll()
 
 			tt := time.Now()
+			prev:=t.BytesCompleted()
 		dwn:
 			for {
 				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
@@ -205,8 +221,17 @@ func (cli *Client) Download() {
 					break dwn
 				} else {
 					stats := t.Stats()
-					log.Info("Downloading snapshot", "snapshot", t.Name(), "%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))), "seeders", stats.ConnectedSeeders)
-					time.Sleep(time.Minute)
+					log.Info("Downloading snapshot",
+						"snapshot", t.Name(),
+						"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
+						"mb", t.BytesCompleted()/1024/1024,
+						"diff(kb)", (t.BytesCompleted()-prev)/1024,
+						"seeders", stats.ConnectedSeeders,
+						"active", stats.ActivePeers,
+						"total", stats.TotalPeers)
+					prev = t.BytesCompleted()
+					time.Sleep(time.Second*10)
+
 				}
 
 			}
@@ -253,7 +278,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 			Type:          snapshotsync.SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
-			SnapshotBlock: SnapshotBlock,
+			SnapshotBlock: snapshotsync.SnapshotBlock,
 			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
 		}
 		mp[snapshotsync.SnapshotType(tp)] = val

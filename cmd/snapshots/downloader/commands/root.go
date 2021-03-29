@@ -26,7 +26,7 @@ import (
 
 func init() {
 	flags := append(debug.Flags, utils.MetricFlags...)
-	flags = append(flags, PreDownloadMainnetFlag, Addr, Dir)
+	flags = append(flags, PreDownloadMainnetFlag, Addr, Dir, HttpApi)
 	utils.CobraFlags(rootCmd, flags)
 
 	rootCmd.PersistentFlags().Bool("seeding", true, "Seed snapshots")
@@ -46,6 +46,10 @@ var (
 	PreDownloadMainnetFlag = cli.BoolFlag{
 		Name:  "predownload.mainnet",
 		Usage: "add all available mainnet snapshots for seeding",
+	}
+	HttpApi = cli.BoolFlag{
+		Name:  "http",
+		Usage: "Enable http",
 	}
 )
 
@@ -83,7 +87,7 @@ func rootContext() context.Context {
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "run snapshot downloader",
-	Example: "go run ./cmd/snapshots/downloader/main.go --dir /tmp --addr 127.0.0.1:9191",
+	Example: "go run ./cmd/snapshots/downloader/main.go --dir /tmp --addr 127.0.0.1:9191 --predownload.mainnet",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
@@ -135,16 +139,17 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	grpcServer := grpc.NewServer(opts...)
 	bittorrentServer, err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
-		return err
+		return fmt.Errorf("new server: %w",err)
 	}
+	log.Info("Load")
 	err = bittorrentServer.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load: %w",err)
 	}
 
 	mainNetPreDownload, err := cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("get bool: %w",err)
 	}
 	if mainNetPreDownload {
 		log.Info("Predownload mainnet snapshots")
@@ -158,6 +163,23 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 			}
 		}()
 	}
+	go func() {
+		for {
+			snapshots,err:=bittorrentServer.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{
+				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
+			})
+			if err!=nil {
+				log.Error("get snapshots", "err", err)
+				time.Sleep(time.Minute)
+				continue
+			}
+			stats:=bittorrentServer.Stats(context.Background())
+			for _,v:=range snapshots.Info {
+				log.Info("Snapshot "+ v.Type.String(), "%", v.Readiness, "peers", stats[v.Type.String()].ConnectedSeeders)
+			}
+			time.Sleep(time.Minute)
+		}
+	}()
 	snapshotsync.RegisterDownloaderServer(grpcServer, bittorrentServer)
 	go func() {
 		log.Info("Starting grpc")

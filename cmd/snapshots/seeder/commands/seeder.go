@@ -17,6 +17,9 @@ import (
 )
 
 func Seed(ctx context.Context, datadir string) error {
+	defer func() {
+		time.Sleep(time.Second*2)
+	}()
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -33,7 +36,6 @@ func Seed(ctx context.Context, datadir string) error {
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
 		cfg.DataDir + "/state",
-		//cfg.DataDir+"/receipts",
 	}
 
 	cl, err := torrent.NewClient(cfg)
@@ -61,7 +63,7 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-		info, err := trnt.BuildInfoBytesForLMDBSnapshot(v)
+		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.LmdbFilename)
 		if err != nil {
 			return err
 		}
@@ -90,8 +92,6 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-
-		torrents[i].VerifyData()
 	}
 
 	go func() {

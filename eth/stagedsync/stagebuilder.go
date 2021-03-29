@@ -1,7 +1,9 @@
 package stagedsync
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"strings"
 	"time"
 	"unsafe"
@@ -52,6 +54,8 @@ type StageParameters struct {
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
 	mining                *MiningStagesParameters
+	snapshotsDir		 string
+	btClient			 *bittorrent.Client
 }
 
 type MiningStagesParameters struct {
@@ -520,6 +524,59 @@ func DefaultUnwindOrder() UnwindOrder {
 		7, 8, 9, 10, 11,
 	}
 }
+
+func WithSnapshotsStages() StageBuilders {
+	defaulStages:=DefaultStages()
+	blockHashesStageIndex:=-1
+	for i:=range defaulStages {
+		if bytes.Equal(defaulStages[i].ID,stages.Bodies) {
+			blockHashesStageIndex = i
+			break
+		}
+	}
+	if blockHashesStageIndex < 0 {
+		log.Error("Unrecognized block hashes stage")
+		return DefaultStages()
+	}
+
+	stagesWithSnapshots:=make(StageBuilders, 0, len(defaulStages)+1)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[:blockHashesStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateHeadersSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateHeadersSnapshot,
+				Description: "Create ",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[blockHashesStageIndex:]...)
+	return stagesWithSnapshots
+}
+
+
+func UnwindOrderWithSnapshots() UnwindOrder {
+	return []int{
+		0, 1, 2, 3,
+		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// also tx pool is before senders because senders unwind is inside cycle transaction
+		13,
+		4, 5,
+		// Unwinding of IHashes needs to happen after unwinding HashState
+		6, 7,
+		8, 9, 10, 11, 12,
+	}
+}
+
+
+
+
 
 func MiningUnwindOrder() UnwindOrder {
 	return []int{0, 1, 2, 3, 4}

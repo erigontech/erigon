@@ -139,6 +139,7 @@ var (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket        = "DBINFO"
 	SnapshotInfoBucket        = "SNINFO"
+	BittorrentInfoBucket        = "BTINFO"
 	HeadersSnapshotInfoBucket = "hSNINFO"
 	BodiesSnapshotInfoBucket  = "bSNINFO"
 	StateSnapshotInfoBucket   = "sSNINFO"
@@ -238,6 +239,7 @@ var (
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
+	BittorrentPeerID 		 = "peerID"
 )
 
 // Metrics
@@ -295,7 +297,7 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
-
+	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,

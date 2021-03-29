@@ -1,16 +1,20 @@
 package snapshotsync
 
 import (
+	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"path/filepath"
 )
 
 var (
-	bucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
+	BucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
 		SnapshotType_bodies: {
 			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
+			dbutils.EthTx:          dbutils.BucketConfigItem{},
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
@@ -26,58 +30,59 @@ var (
 			},
 			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
 			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
-			dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 	}
 )
 
 func WrapBySnapshotsFromDir(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
 	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
-	snkv := ethdb.NewSnapshot2KV().DB(kv)
+	snkv := ethdb.NewSnapshotKV().DB(kv)
 
 	if mode.Bodies {
 		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return bucketConfigs[SnapshotType_bodies]
+			return BucketConfigs[SnapshotType_bodies]
 		}).Open()
 		if err != nil {
 			log.Error("Can't open body snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			snkv.SnapshotDB([]string{dbutils.BlockBodyPrefix, dbutils.BodiesSnapshotInfoBucket}, snapshotKV)
+			snkv = snkv.SnapshotDB([]string{dbutils.BlockBodyPrefix, dbutils.BodiesSnapshotInfoBucket, dbutils.EthTx}, snapshotKV)
 		}
 	}
 
 	if mode.Headers {
 		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return bucketConfigs[SnapshotType_headers]
+			return BucketConfigs[SnapshotType_headers]
 		}).Open()
 		if err != nil {
 			log.Error("Can't open headers snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			snkv.SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeadersSnapshotInfoBucket}, snapshotKV)
+			snkv = snkv.SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeadersSnapshotInfoBucket}, snapshotKV)
 		}
 	}
 	if mode.State {
-		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return bucketConfigs[SnapshotType_headers]
+		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/state").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return BucketConfigs[SnapshotType_state]
 		}).Open()
 		if err != nil {
-			log.Error("Can't open headers snapshot", "err", err)
+			log.Error("Can't open state snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			snkv.SnapshotDB([]string{dbutils.StateSnapshotInfoBucket, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snapshotKV)
+			snkv = snkv.SnapshotDB([]string{dbutils.StateSnapshotInfoBucket, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snapshotKV)
 		}
 	}
-	return snkv.MustOpen(), nil
+	return snkv.Open(), nil
 }
 
 func WrapBySnapshotsFromDownloader(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.KV, error) {
-	snKV := ethdb.NewSnapshot2KV().DB(kv)
+	snKV := ethdb.NewSnapshotKV().DB(kv)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
-		cfg := bucketConfigs[k]
-		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		cfg := BucketConfigs[k]
+		fmt.Println("Wrap", filepath.Dir(v.Dbpath))
+		spew.Dump(cfg)
+		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(filepath.Dir(v.Dbpath)).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return cfg
 		}).Open()
 
@@ -86,13 +91,13 @@ func WrapBySnapshotsFromDownloader(kv ethdb.KV, snapshots map[SnapshotType]*Snap
 			return nil, err
 		} else { //nolint
 			buckets := make([]string, 0, 1)
-			for bucket := range bucketConfigs[k] {
+			for bucket := range BucketConfigs[k] {
 				buckets = append(buckets, bucket)
 			}
 
-			snKV.SnapshotDB(buckets, snapshotKV)
+			snKV = snKV.SnapshotDB(buckets, snapshotKV)
 		}
 	}
 
-	return snKV.MustOpen(), nil
+	return snKV.Open(), nil
 }

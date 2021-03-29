@@ -24,7 +24,7 @@ func (b adapterLogger) Log(msg lg.Msg) {
 
 	switch lvl {
 	case lg.Debug:
-		log.Debug(msg.String())
+		log.Info(msg.String())
 	case lg.Info:
 		log.Info(msg.String())
 	case lg.Warning:

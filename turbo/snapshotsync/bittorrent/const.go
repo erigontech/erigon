@@ -10,12 +10,26 @@ import (
 
 const (
 	DefaultChunkSize = 1024 * 1024
-	SnapshotBlock    = 11_000_000
 	LmdbFilename     = "data.mdb"
+	MdbxFilename     = "mdbx.dat"
 
-	HeadersSnapshotHash  = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //11кk block 1mb chunk
-	BlocksSnapshotHash   = "6353d013d614f1f8145d71e1479de9b4361d273f" //11кk block 1mb chunk
-	StateSnapshotHash    = "fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78"
+/*
+snapshot=bodies  active peers=0 seeding=true hash=ea86a38511daad97066fb4878d87fbede1dee4de
+snapshot=state   active peers=0 seeding=true hash=fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78
+snapshot=headers active peers=0 seeding=true hash=2ee9fb6572b2dfb9be0080c60cb140716590d963
+
+*/
+//115
+//	hash=
+	HeadersSnapshotHash  = "4dcebdf20f67ce0a478fd5059a4c613ac961e138" //11кk block 1mb chunk
+	BlocksSnapshotHash   = "296f1703f68afb46c3df040b097e2628fc27a66d" //11кk block 1mb chunk
+	StateSnapshotHash    = "8f024711b2c2c277109b44053fcaab1b13346e69"
+
+	//11
+	//HeadersSnapshotHash  = "2ee9fb6572b2dfb9be0080c60cb140716590d963" //11кk block 1mb chunk
+	//BlocksSnapshotHash   = "ea86a38511daad97066fb4878d87fbede1dee4de" //11кk block 1mb chunk
+	//StateSnapshotHash    = "fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78"
+	//BlocksSnapshotHash   = "2635920470345cd4473e672e47aacef42f28cb4a" //11кk block 1mb chunk
 	ReceiptsSnapshotHash = ""
 
 	SnapshotInfoHashPrefix  = "ih"
@@ -42,6 +56,8 @@ func GetAvailableSnapshotTypes(networkID uint64) []snapshotsync.SnapshotType {
 }
 
 var Trackers = [][]string{{
+	"http://35.189.110.210:80/announce",
+},{
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.publicbt.com:80",
