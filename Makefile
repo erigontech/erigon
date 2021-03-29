@@ -1,11 +1,6 @@
 GOBIN = $(CURDIR)/build/bin
 GOTEST = go test ./... -p 1 --tags 'mdbx'
 
-LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
-ifeq ($(LATEST_COMMIT),)
-LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
-endif
-
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git branch --show-current)
 GOBUILD = env GO111MODULE=on go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
@@ -113,9 +108,8 @@ test-mdbx: mdbx
 lint: lintci
 
 lintci: mdbx
-	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
+	@echo "--> Running linter for code"
 	@./build/bin/golangci-lint run \
-	    --new-from-rev=$(LATEST_COMMIT) \
 		--build-tags="mdbx"
 
 lintci-deps:
