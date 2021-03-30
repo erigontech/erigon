@@ -88,7 +88,7 @@ type Ethereum struct {
 
 	// DB interfaces
 	chainDb    ethdb.Database // Block chain database
-	chainKV    ethdb.KV       // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	eventMux *event.TypeMux
@@ -229,13 +229,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if innerErr != nil {
 				return nil, innerErr
 			}
-			snapshotKV := chainDb.(ethdb.HasKV).KV()
+			snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
 
 			snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
 			}
-			chainDb.(ethdb.HasKV).SetKV(snapshotKV)
+			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
@@ -258,7 +258,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
-				snapshotKV := chainDb.(ethdb.HasKV).KV()
+				snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
 				mp, innerErr := torrentClient.GetSnapshots(chainDb, config.NetworkID)
 				if innerErr != nil {
 					return nil, innerErr
@@ -268,7 +268,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				if innerErr != nil {
 					return nil, innerErr
 				}
-				chainDb.(ethdb.HasKV).SetKV(snapshotKV)
+				chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
 				if innerErr != nil {
 					return nil, innerErr
@@ -282,7 +282,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:        config,
 		chainDb:       chainDb,
-		chainKV:       chainDb.(ethdb.HasKV).KV(),
+		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
 		eventMux:      stack.EventMux(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:     config.NetworkID,
@@ -418,12 +418,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasRwKV).RwKV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasRwKV).RwKV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
 			if err != nil {
 				return nil, err
 			}
@@ -735,7 +735,7 @@ func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
 func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
-func (s *Ethereum) ChainKV() ethdb.KV                  { return s.chainKV }
+func (s *Ethereum) ChainKV() ethdb.RwKV                { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
 func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }

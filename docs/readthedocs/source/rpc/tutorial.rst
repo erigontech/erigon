@@ -21,7 +21,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
 
     // API - implementation of ExampleApi
     type API struct {
-        kv ethdb.KV
+        kv ethdb.RwKV
         db ethdb.Getter
     }
 
@@ -29,7 +29,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
         GetBlockNumberByHash(ctx context.Context, hash common.Hash) (uint64, error)
     }
 
-    func NewAPI(kv ethdb.KV, db ethdb.Getter) *API {
+    func NewAPI(kv ethdb.RwKV, db ethdb.Getter) *API {
         return &API{kv: kv, db: db}
     }
 
@@ -80,7 +80,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
         }
     }
 
-    func APIList(kv ethdb.KV, eth ethdb.Backend, cfg *cli.Flags) []rpc.API {
+    func APIList(kv ethdb.RwKV, eth ethdb.Backend, cfg *cli.Flags) []rpc.API {
         dbReader := ethdb.NewObjectDatabase(kv)
         api := NewAPI(kv, dbReader)
 

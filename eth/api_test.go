@@ -43,7 +43,7 @@ import (
 
 var dumper = spew.ConfigState{Indent: "    "}
 
-func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.KV, blockNumber uint64, sdb *state.IntraBlockState, start []byte, requestedNum int, expectedNum int) state.IteratorDump { //nolint: unparam
+func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.RwKV, blockNumber uint64, sdb *state.IntraBlockState, start []byte, requestedNum int, expectedNum int) state.IteratorDump { //nolint: unparam
 	result, err := state.NewDumper(db, blockNumber).IteratorDump(true, true, false, start, requestedNum)
 	if err != nil {
 		t.Fatal(err)
@@ -102,10 +102,10 @@ func TestAccountRange(t *testing.T) {
 
 	trie := tds.Trie()
 
-	accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults/2, eth.AccountRangeMaxResults/2)
+	accountRangeTest(t, trie, db.RwKV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults/2, eth.AccountRangeMaxResults/2)
 	// test pagination
-	firstResult := accountRangeTest(t, trie, db.KV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
-	secondResult := accountRangeTest(t, trie, db.KV(), 0, sdb, firstResult.Next, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
+	firstResult := accountRangeTest(t, trie, db.RwKV(), 0, sdb, []byte{}, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
+	secondResult := accountRangeTest(t, trie, db.RwKV(), 0, sdb, firstResult.Next, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
 
 	hList := make(resultHash, 0)
 	for addr1 := range firstResult.Accounts {
@@ -123,7 +123,7 @@ func TestAccountRange(t *testing.T) {
 	// set and get an even split between the first and second sets.
 	sort.Sort(hList)
 	middleH := hList[eth.AccountRangeMaxResults/2]
-	middleResult := accountRangeTest(t, trie, db.KV(), 0, sdb, middleH, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
+	middleResult := accountRangeTest(t, trie, db.RwKV(), 0, sdb, middleH, eth.AccountRangeMaxResults, eth.AccountRangeMaxResults)
 	missing, infirst, insecond := 0, 0, 0
 	for h := range middleResult.Accounts {
 		if _, ok := firstResult.Accounts[h]; ok {
@@ -156,7 +156,7 @@ func TestEmptyAccountRange(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	results, err1 := state.NewDumper(db.KV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), eth.AccountRangeMaxResults)
+	results, err1 := state.NewDumper(db.RwKV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), eth.AccountRangeMaxResults)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
@@ -245,7 +245,7 @@ func TestStorageRangeAt(t *testing.T) {
 		},
 	}
 
-	dbs := adapter.NewStateReader(db.KV(), 1)
+	dbs := adapter.NewStateReader(db.RwKV(), 1)
 	for i, test := range tests {
 		test := test
 		t.Run("test_"+strconv.Itoa(i), func(t *testing.T) {

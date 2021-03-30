@@ -12,14 +12,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database, pending *Pending) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *Pending) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		if number == rpc.LatestBlockNumber {
-			blockNumber, err = stages.GetStageProgress(dbReader, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
 			if err != nil {
 				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
 			}
@@ -28,7 +28,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database
 		} else if number == rpc.PendingBlockNumber {
 			pendingBlock := pending.Block()
 			if pendingBlock == nil {
-				blockNumber, err = stages.GetStageProgress(dbReader, stages.Execution)
+				blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
 				if err != nil {
 					return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
 				}
@@ -38,18 +38,18 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database
 		} else {
 			blockNumber = uint64(number.Int64())
 		}
-		hash, err = rawdb.ReadCanonicalHash(dbReader, blockNumber)
+		hash, err = rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, err
 		}
 	} else {
-		number := rawdb.ReadHeaderNumber(dbReader, hash)
+		number := rawdb.ReadHeaderNumber(ethdb.NewRoTxDb(tx), hash)
 		if number == nil {
 			return 0, common.Hash{}, fmt.Errorf("block %x not found", hash)
 		}
 		blockNumber = *number
 
-		ch, err := rawdb.ReadCanonicalHash(dbReader, blockNumber)
+		ch, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, err
 		}
@@ -60,7 +60,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database
 	return blockNumber, hash, nil
 }
 
-func GetAccount(tx ethdb.Database, blockNumber uint64, address common.Address) (*accounts.Account, error) {
-	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
+func GetAccount(tx ethdb.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
+	reader := adapter.NewStateReader(tx, blockNumber)
 	return reader.ReadAccountData(address)
 }

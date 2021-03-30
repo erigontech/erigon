@@ -97,7 +97,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, db, numOfAccounts, numOfStateKeys)
 
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -514,7 +514,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -700,7 +700,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	var err error
 	startKey := make([]byte, 60)
 	copy(startKey[:common.AddressLength], addr1.Bytes())
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -882,7 +882,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	})
 
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1076,7 +1076,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		},
 	})
 
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1216,7 +1216,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		},
 	})
 
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}

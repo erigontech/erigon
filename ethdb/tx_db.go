@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -11,6 +10,57 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
+
+// Implements ethdb.Getter for Tx
+type roTxDb struct {
+	top bool
+	tx  Tx
+}
+
+func NewRoTxDb(tx Tx) *roTxDb {
+	return &roTxDb{tx: tx, top: true}
+}
+
+func (m *roTxDb) Get(bucket string, key []byte) ([]byte, error) {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	_, v, err := c.SeekExact(key)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, ErrKeyNotFound
+	}
+	return v, nil
+}
+
+func (m *roTxDb) Has(bucket string, key []byte) (bool, error) {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	_, v, err := c.SeekExact(key)
+
+	return v != nil, err
+}
+
+func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+	c := m.tx.Cursor(bucket)
+	defer c.Close()
+	return Walk(c, startkey, fixedbits, walker)
+}
+
+func (m *roTxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+	return &roTxDb{tx: m.tx, top: false}, nil
+}
+
+func (m *roTxDb) Rollback() {
+	if m.top {
+		m.tx.Rollback()
+	}
+}
+
+func (m *roTxDb) Tx() Tx {
+	return m.tx
+}
 
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
@@ -43,6 +93,18 @@ func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations
 	}
 
 	if err := batch.begin(ctx, flags); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+func (m *TxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+	batch := m
+	if m.tx != nil {
+		panic("nested transactions not supported")
+	}
+
+	if err := batch.begin(ctx, RO); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -93,7 +155,7 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 }
 
 func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
-	kv := m.db.(HasKV).KV()
+	kv := m.db.(HasRwKV).RwKV()
 
 	var tx Tx
 	var err error
@@ -110,7 +172,7 @@ func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
 	return nil
 }
 
-func (m *TxDb) KV() KV {
+func (m *TxDb) RwKV() RwKV {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
@@ -157,67 +219,6 @@ func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
 	return 0, MultiPut(m.tx.(RwTx), tuples...)
 }
 
-func MultiPut(tx RwTx, tuples ...[]byte) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	count := 0
-	total := float64(len(tuples)) / 3
-	for bucketStart := 0; bucketStart < len(tuples); {
-		bucketEnd := bucketStart
-		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
-		}
-		bucketName := string(tuples[bucketStart])
-		c := tx.RwCursor(bucketName)
-
-		// move cursor to a first element in batch
-		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
-		// can apply optimisations for this case
-		firstKey, _, err := c.Seek(tuples[bucketStart+1])
-		if err != nil {
-			return err
-		}
-		isEndOfBucket := firstKey == nil
-
-		l := (bucketEnd - bucketStart) / 3
-		for i := 0; i < l; i++ {
-			k := tuples[bucketStart+3*i+1]
-			v := tuples[bucketStart+3*i+2]
-			if isEndOfBucket {
-				if v == nil {
-					// nothing to delete after end of bucket
-				} else {
-					if err := c.Append(k, v); err != nil {
-						return err
-					}
-				}
-			} else {
-				if v == nil {
-					if err := c.Delete(k, nil); err != nil {
-						return err
-					}
-				} else {
-					if err := c.Put(k, v); err != nil {
-						return err
-					}
-				}
-			}
-
-			count++
-
-			select {
-			default:
-			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-				log.Info("Write to db", "progress", progress, "current table", bucketName)
-			}
-		}
-
-		bucketStart = bucketEnd
-	}
-	return nil
-}
-
 func (m *TxDb) BatchSize() int {
 	return int(m.len)
 }
@@ -239,99 +240,6 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 		}
 	}()
 	return Walk(c, startkey, fixedbits, walker)
-}
-
-func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := Bytesmask(fixedbits)
-	k, v, err := c.Seek(startkey)
-	if err != nil {
-		return err
-	}
-	for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
-		goOn, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !goOn {
-			break
-		}
-		k, v, err = c.Next()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-// MultiWalk is similar to multiple Walk calls folded into one.
-func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error { //nolint
-	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
-	startkey := startkeys[rangeIdx]
-	k, v, err := c.Seek(startkey)
-	if err != nil {
-		return err
-	}
-	for k != nil {
-		// Adjust rangeIdx if needed
-		if fixedbytes > 0 {
-			cmp := int(-1)
-			for cmp != 0 {
-				cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
-				if cmp == 0 {
-					k1 := k[fixedbytes-1] & mask
-					k2 := startkey[fixedbytes-1] & mask
-					if k1 < k2 {
-						cmp = -1
-					} else if k1 > k2 {
-						cmp = 1
-					}
-				}
-				if cmp < 0 {
-					k, v, err = c.Seek(startkey)
-					if err != nil {
-						return err
-					}
-					if k == nil {
-						return nil
-					}
-				} else if cmp > 0 {
-					rangeIdx++
-					if rangeIdx == len(startkeys) {
-						return nil
-					}
-					fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
-					startkey = startkeys[rangeIdx]
-				}
-			}
-		}
-		if len(v) > 0 {
-			if err = walker(rangeIdx, k, v); err != nil {
-				return err
-			}
-		}
-		k, v, err = c.Next()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {

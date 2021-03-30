@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
@@ -16,7 +15,7 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	tx, err1 := api.db.Begin(ctx, ethdb.RO)
+	tx, err1 := api.db.Begin(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
@@ -40,7 +39,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	tx, err1 := api.db.Begin(ctx, ethdb.RO)
+	tx, err1 := api.db.Begin(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
@@ -50,7 +49,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, err
 	}
 	nonce := hexutil.Uint64(0)
-	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return &nonce, err
@@ -60,7 +59,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	tx, err1 := api.db.Begin(ctx, ethdb.RO)
+	tx, err1 := api.db.Begin(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
 	}
@@ -70,7 +69,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, err
 	}
 
-	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
@@ -86,7 +85,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 
-	tx, err1 := api.db.Begin(ctx, ethdb.RO)
+	tx, err1 := api.db.Begin(ctx)
 	if err1 != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err1
 	}
@@ -96,7 +95,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
-	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err

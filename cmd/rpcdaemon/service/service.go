@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 )
 
-func New(db ethdb.Database, ethereum core.EthBackend, engine consensus.Engine, stack *node.Node) {
+func New(db ethdb.RoKV, ethereum core.EthBackend, engine consensus.Engine, stack *node.Node) {
 	var ethashApi *ethash.API
 	if casted, ok := engine.(*ethash.Ethash); !ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)

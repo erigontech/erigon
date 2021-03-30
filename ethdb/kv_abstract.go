@@ -38,33 +38,9 @@ var (
 	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
 )
 
-// KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
-//
-// Common pattern for short-living transactions:
-//
-//  if err := db.View(ctx, func(tx ethdb.Tx) error {
-//     ... code which uses database in transaction
-//  }); err != nil {
-//		return err
-// }
-//
-// Common pattern for long-living transactions:
-//	tx, err := db.Begin(ethdb.RW)
-//	if err != nil {
-//		return err
-//	}
-//	defer tx.Rollback()
-//
-//	... code which uses database in transaction
-//
-//	err := tx.Commit()
-//	if err != nil {
-//		return err
-//	}
-//
-type KV interface {
+// Read-only version of KV.
+type RoKV interface {
 	View(ctx context.Context, f func(tx Tx) error) error
-	Update(ctx context.Context, f func(tx RwTx) error) error
 	Close()
 
 	// Begin - creates transaction
@@ -81,10 +57,41 @@ type KV interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	Begin(ctx context.Context) (Tx, error)
-	BeginRw(ctx context.Context) (RwTx, error)
 	AllBuckets() dbutils.BucketsCfg
 
 	CollectMetrics()
+}
+
+// KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
+//
+// Common pattern for short-living transactions:
+//
+//  if err := db.View(ctx, func(tx ethdb.Tx) error {
+//     ... code which uses database in transaction
+//  }); err != nil {
+//		return err
+// }
+//
+// Common pattern for long-living transactions:
+//	tx, err := db.Begin()
+//	if err != nil {
+//		return err
+//	}
+//	defer tx.Rollback()
+//
+//	... code which uses database in transaction
+//
+//	err := tx.Commit()
+//	if err != nil {
+//		return err
+//	}
+//
+type RwKV interface {
+	RoKV
+
+	Update(ctx context.Context, f func(tx RwTx) error) error
+
+	BeginRw(ctx context.Context) (RwTx, error)
 }
 
 type TxFlags uint

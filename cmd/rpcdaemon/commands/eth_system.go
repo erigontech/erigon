@@ -18,8 +18,13 @@ import (
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
-func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
-	execution, err := stages.GetStageProgress(api.db, stages.Finish)
+func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
+	tx, err := api.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	execution, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
 	if err != nil {
 		return 0, err
 	}
@@ -28,17 +33,17 @@ func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
+	highestBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Headers)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	currentBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
 	if err != nil {
 		return false, err
 	}
@@ -56,7 +61,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 
 // ChainId implements eth_chainId. Returns the current ethereum chainId.
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -83,7 +88,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 
 // HeaderByNumber is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +99,7 @@ func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) 
 		return nil, err
 	}
 
-	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	header := rawdb.ReadHeaderByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if header == nil {
 		return nil, fmt.Errorf("header not found: %d", blockNum)
 	}
@@ -103,7 +108,7 @@ func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) 
 
 // BlockByNumber is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +119,7 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +131,7 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 
 // ChainConfig is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) ChainConfig() *params.ChainConfig {
-	tx, err := api.db.Begin(context.TODO(), ethdb.RO)
+	tx, err := api.db.Begin(context.TODO())
 	if err != nil {
 		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
 		return params.MainnetChainConfig

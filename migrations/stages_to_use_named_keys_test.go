@@ -17,7 +17,7 @@ const oldExecutionKey = 4 // it won't change anymore, not before we apply this m
 func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageProgressOld1)
 	})
 	require.NoError(err)
@@ -50,7 +50,7 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageUnwindOld1)
 	})
 	require.NoError(err)

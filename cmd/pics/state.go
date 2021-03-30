@@ -123,7 +123,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error {
+func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -413,7 +413,7 @@ func initialState1() error {
 	db.Close()
 	// We reset the DB and use the generated blocks
 	db = ethdb.NewMemDatabase()
-	kv := db.KV()
+	kv := db.RwKV()
 	snapshotDB := db.MemCopy()
 
 	_, _, err = core.SetupGenesisBlock(db, gspec, true, false)
@@ -438,7 +438,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 0); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 0); err != nil {
 		return err
 	}
 
@@ -451,7 +451,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 1); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 1); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -462,7 +462,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 2); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 2); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -474,7 +474,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 3); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 3); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -486,7 +486,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 4); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 4); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -498,7 +498,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 5); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -510,7 +510,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 6); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 6); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -522,7 +522,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 7); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 7); err != nil {
 		return err
 	}
 	snapshotDB.Close()
@@ -537,12 +537,12 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 8); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 8); err != nil {
 		return err
 	}
 	snapshotDB.Close()
 
-	kv2 := ethdb.NewMemDatabase().KV()
+	kv2 := ethdb.NewMemDatabase().RwKV()
 	defer kv2.Close()
 	if err = stateDatabaseComparison(kv2, kv, 9); err != nil {
 		return err

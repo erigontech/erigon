@@ -26,10 +26,10 @@ const MaxTxTTL = 30 * time.Second
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.KV
+	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -88,7 +88,7 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.KV) *KvServer {
+func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 

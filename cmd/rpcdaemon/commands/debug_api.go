@@ -34,13 +34,13 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	*BaseAPI
-	dbReader ethdb.Database
+	dbReader ethdb.RoKV
 	GasCap   uint64
 	pending  *rpchelper.Pending
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(dbReader ethdb.Database, gascap uint64, pending *rpchelper.Pending) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(dbReader ethdb.RoKV, gascap uint64, pending *rpchelper.Pending) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		BaseAPI:  &BaseAPI{},
 		dbReader: dbReader,
@@ -51,7 +51,7 @@ func NewPrivateDebugAPI(dbReader ethdb.Database, gascap uint64, pending *rpchelp
 
 // StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -59,16 +59,16 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
+	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -77,7 +77,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block range
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage, excludeMissingPreimages bool) (state.IteratorDump, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -92,7 +92,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
@@ -101,7 +101,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block, err1 := rawdb.ReadBlockByHash(tx, hash)
+		block, err1 := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
 		if err1 != nil {
 			return state.IteratorDump{}, err1
 		}
@@ -115,18 +115,18 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
+	dumper := state.NewDumper(tx, blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+	hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
 	if hash != (common.Hash{}) {
-		header := rawdb.ReadHeader(tx, hash, blockNumber)
+		header := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, blockNumber)
 		if header != nil {
 			res.Root = header.Root.String()
 		}
@@ -137,13 +137,13 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	latestBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
 	if err != nil {
 		return nil, err
 	}
@@ -169,18 +169,18 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return changeset.GetModifiedAccounts(tx, startNum, endNum)
+	return changeset.GetModifiedAccounts(ethdb.NewRoTxDb(tx), startNum, endNum)
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	startBlock, err := rawdb.ReadBlockByHash(tx, startHash)
+	startBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), startHash)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +191,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	endNum := startNum // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
+		endBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), *endHash)
 		if err != nil {
 			return nil, err
 		}
@@ -205,11 +205,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return changeset.GetModifiedAccounts(tx, startNum, endNum)
+	return changeset.GetModifiedAccounts(ethdb.NewRoTxDb(tx), startNum, endNum)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -217,16 +217,16 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 
 	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
+	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
 		return nil, err
 	}
 	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
 	if err != nil {
 		return nil, err
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

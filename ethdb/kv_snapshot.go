@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	_ KV             = &SnapshotKV2{}
+	_ RwKV           = &SnapshotKV2{}
 	_ Tx             = &sn2TX{}
 	_ BucketMigrator = &sn2TX{}
 	_ Cursor         = &snCursor2{}
@@ -24,14 +24,14 @@ func NewSnapshot2KV() snapshotOpts2 {
 
 type snapshotData struct {
 	buckets  []string
-	snapshot KV
+	snapshot RwKV
 }
 type snapshotOpts2 struct {
-	db        KV
+	db        RwKV
 	snapshots []snapshotData
 }
 
-func (opts snapshotOpts2) SnapshotDB(buckets []string, db KV) snapshotOpts2 {
+func (opts snapshotOpts2) SnapshotDB(buckets []string, db RwKV) snapshotOpts2 {
 	opts.snapshots = append(opts.snapshots, snapshotData{
 		buckets:  buckets,
 		snapshot: db,
@@ -39,12 +39,12 @@ func (opts snapshotOpts2) SnapshotDB(buckets []string, db KV) snapshotOpts2 {
 	return opts
 }
 
-func (opts snapshotOpts2) DB(db KV) snapshotOpts2 {
+func (opts snapshotOpts2) DB(db RwKV) snapshotOpts2 {
 	opts.db = db
 	return opts
 }
 
-func (opts snapshotOpts2) MustOpen() KV {
+func (opts snapshotOpts2) MustOpen() RwKV {
 	snapshots := make(map[string]snapshotData)
 	for i, v := range opts.snapshots {
 		for _, bucket := range v.buckets {
@@ -58,7 +58,7 @@ func (opts snapshotOpts2) MustOpen() KV {
 }
 
 type SnapshotKV2 struct {
-	db        KV
+	db        RwKV
 	snapshots map[string]snapshotData
 }
 
@@ -639,7 +639,7 @@ type KvData struct {
 	V []byte
 }
 
-func GenStateData(data []KvData) (KV, error) {
+func GenStateData(data []KvData) (RwKV, error) {
 	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},

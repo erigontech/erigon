@@ -19,13 +19,13 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 		return block.Header(), nil
 	}
 
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	header := rawdb.ReadHeaderByNumber(tx, uint64(blockNumber.Int64()))
+	header := rawdb.ReadHeaderByNumber(ethdb.NewRoTxDb(tx), uint64(blockNumber.Int64()))
 	if header == nil {
 		return nil, fmt.Errorf("block header not found: %d", blockNumber.Int64())
 	}
@@ -35,13 +35,13 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 
 // GetHeaderByHash implements tg_getHeaderByHash. Returns a block's header given a block's hash.
 func (api *TgImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	header, err := rawdb.ReadHeaderByHash(ethdb.NewRoTxDb(tx), hash)
 	if err != nil {
 		return nil, err
 	}

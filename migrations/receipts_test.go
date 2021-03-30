@@ -18,7 +18,7 @@ import (
 func TestReceiptCbor(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockReceiptsPrefix)
 	})
 	require.NoError(err)
@@ -42,7 +42,7 @@ func TestReceiptCbor(t *testing.T) {
 func TestReceiptOnePerTx(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockReceiptsPrefix)
 	})
 	require.NoError(err)

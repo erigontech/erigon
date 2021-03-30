@@ -82,7 +82,7 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Open() (KV, error) {
+func (opts MdbxOpts) Open() (RwKV, error) {
 	var logger log.Logger
 	var err error
 	if opts.inMem {
@@ -258,7 +258,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	return db, nil
 }
 
-func (opts MdbxOpts) MustOpen() KV {
+func (opts MdbxOpts) MustOpen() RwKV {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))

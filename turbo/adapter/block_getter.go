@@ -7,18 +7,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func NewBlockGetter(dbReader ethdb.Database) *blockGetter {
-	return &blockGetter{dbReader}
+func NewBlockGetter(tx ethdb.Tx) *blockGetter {
+	return &blockGetter{tx}
 }
 
 type blockGetter struct {
-	dbReader ethdb.Database
+	tx ethdb.Tx
 }
 
 func (g *blockGetter) GetBlockByHash(hash common.Hash) (*types.Block, error) {
-	return rawdb.ReadBlockByHash(g.dbReader, hash)
+	return rawdb.ReadBlockByHash(ethdb.NewRoTxDb(g.tx), hash)
 }
 
 func (g *blockGetter) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(g.dbReader, hash, number)
+	return rawdb.ReadBlock(ethdb.NewRoTxDb(g.tx), hash, number)
 }

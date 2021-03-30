@@ -14,7 +14,7 @@ import (
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), block.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	hash := *numberOrHash.BlockHash
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]interface{})
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	td, err := rawdb.ReadTd(tx, hash, number)
+	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -122,13 +122,13 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), blockHash)
 	if err != nil {
 		return nil, err
 	}

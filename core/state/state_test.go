@@ -34,7 +34,7 @@ var toAddr = common.BytesToAddress
 
 type StateSuite struct {
 	db    ethdb.Database
-	kv    ethdb.KV // Same as db, but with a different interface
+	kv    ethdb.RwKV // Same as db, but with a different interface
 	state *IntraBlockState
 	tds   *TrieDbState
 }
@@ -107,7 +107,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := ethdb.NewMemDatabase()
 	s.db = db
-	s.kv = db.KV()
+	s.kv = db.RwKV()
 	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
@@ -351,7 +351,7 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := db.KV().Begin(context.Background())
+	tx, err1 := db.RwKV().Begin(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}

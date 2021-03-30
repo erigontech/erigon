@@ -36,7 +36,7 @@ const DupDataNodeFlag uint16 = 4
 const HeaderSize int = 16
 
 // Generates an empty database and returns the file name
-func nothing(kv ethdb.KV, _ ethdb.RwTx) (bool, error) {
+func nothing(kv ethdb.RwKV, _ ethdb.RwTx) (bool, error) {
 	return true, nil
 }
 
@@ -54,7 +54,7 @@ func generate2(tx ethdb.RwTx, entries int) error {
 }
 
 // Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
-func generate3(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate3(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
@@ -65,7 +65,7 @@ func generate3(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 }
 
 // Generates a database with one table, containing 1 short and 1 long (more than one page) values
-func generate4(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate4(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	c := tx.RwCursor("t")
 	defer c.Close()
 	if err := c.Append([]byte("k1"), []byte("very_short_value")); err != nil {
@@ -78,7 +78,7 @@ func generate4(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 }
 
 // Generates a database with one table, containing some DupSort values
-func generate5(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate5(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	c := tx.RwCursorDupSort("t")
 	defer c.Close()
 	if err := c.AppendDup([]byte("key1"), []byte("value11")); err != nil {
@@ -103,7 +103,7 @@ func generate5(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 }
 
 // Generate a database with one table, containing lots of dupsort values
-func generate6(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate6(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	c := tx.RwCursorDupSort("t")
 	defer c.Close()
 	for i := 0; i < 1000; i++ {
@@ -124,14 +124,14 @@ func generate6(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 	return true, nil
 }
 
-func dropT(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func dropT(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket("t"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func generate7(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate7(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	c1 := tx.RwCursor("t1")
 	defer c1.Close()
 	c2 := tx.RwCursor("t2")
@@ -148,14 +148,14 @@ func generate7(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 	return true, nil
 }
 
-func dropT1(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func dropT1(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket("t1"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func dropT2(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func dropT2(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket("t2"); err != nil {
 		return false, err
 	}
@@ -163,7 +163,7 @@ func dropT2(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 }
 
 // Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
-func generate8(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func generate8(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
@@ -192,7 +192,7 @@ func generate9(tx ethdb.RwTx, entries int) error {
 	return nil
 }
 
-func dropAll(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func dropAll(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(ethdb.BucketMigrator).DropBucket(k); err != nil {
@@ -203,7 +203,7 @@ func dropAll(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
 }
 
 // dropGradually drops every other table in its own transaction
-func dropGradually(kv ethdb.KV, tx ethdb.RwTx) (bool, error) {
+func dropGradually(kv ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 	tx.Rollback()
 	for i := 0; i < 100; i += 2 {
 		k := fmt.Sprintf("table_%05d", i)
@@ -252,7 +252,7 @@ func change3(tx ethdb.RwTx) (bool, error) {
 	return true, nil
 }
 
-func launchReader(kv ethdb.KV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
+func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
 	tx1, err := kv.Begin(context.Background())
 	if err != nil {
@@ -295,13 +295,13 @@ func checkReader(tx ethdb.Tx, errorCh chan error) (bool, error) {
 	return false, nil
 }
 
-func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...func(ethdb.KV, ethdb.RwTx) (bool, error)) error {
+func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...func(ethdb.RwKV, ethdb.RwTx) (bool, error)) error {
 	dir, err := ioutil.TempDir(".", "lmdb-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	var kv ethdb.KV
+	var kv ethdb.RwKV
 	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return bucketsCfg
 	}).Open()
@@ -354,13 +354,13 @@ func Defrag() error {
 	}
 	oneBucketCfg := make(dbutils.BucketsCfg)
 	oneBucketCfg["t"] = dbutils.BucketConfigItem{}
-	if err := defragSteps("vis2", oneBucketCfg, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
+	if err := defragSteps("vis2", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
 		return err
 	}
 	if err := defragSteps("vis3", emptyBucketCfg, generate3); err != nil {
 		return err
 	}
-	if err := defragSteps("vis4", oneBucketCfg, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
+	if err := defragSteps("vis4", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
 		return err
 	}
 	if err := defragSteps("vis5", oneBucketCfg, generate4); err != nil {
@@ -374,7 +374,7 @@ func Defrag() error {
 	if err := defragSteps("vis7", oneDupSortCfg, generate6); err != nil {
 		return err
 	}
-	if err := defragSteps("vis8", oneDupSortCfg, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
+	if err := defragSteps("vis8", oneDupSortCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
 		return err
 	}
 	twoBucketCfg := make(dbutils.BucketsCfg)
@@ -394,45 +394,45 @@ func Defrag() error {
 		k := fmt.Sprintf("table_%05d", i)
 		manyBucketCfg[k] = dbutils.BucketConfigItem{IsDeprecated: true}
 	}
-	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
+	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
 		return err
 	}
-	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
+	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
 		return err
 	}
-	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
+	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
 		return err
 	}
 	if err := defragSteps("vis15", oneBucketCfg,
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
 	); err != nil {
 		return err
 	}
 	readerStartCh := make(chan struct{})
 	readerErrorCh := make(chan error)
 	if err := defragSteps("vis16", oneBucketCfg,
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
-		func(kv ethdb.KV, tx ethdb.RwTx) (bool, error) {
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
+		func(kv ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 			return launchReader(kv, tx, "another_short_value_1", readerStartCh, readerErrorCh)
 		},
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change2(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change3(tx) },
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 			return startReader(tx, readerStartCh)
 		},
-		func(_ ethdb.KV, tx ethdb.RwTx) (bool, error) {
+		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 			return checkReader(tx, readerErrorCh)
 		},
 	); err != nil {
