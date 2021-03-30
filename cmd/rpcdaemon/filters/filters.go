@@ -14,18 +14,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+type (
+	SubscriptionID    string
+	HeadsSubID        SubscriptionID
+	PendingLogsSubID  SubscriptionID
+	PendingBlockSubID SubscriptionID
+)
+
 type Filters struct {
 	mu sync.RWMutex
 
-	headsSubs        map[string]chan *types.Header
-	pendingLogsSubs  map[string]chan types.Logs
-	pendingBlockSubs map[string]chan *types.Block
+	headsSubs        map[HeadsSubID]chan *types.Header
+	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
+	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 }
 
 func New(ethBackend core.ApiBackend) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
-	ff := &Filters{headsSubs: make(map[string]chan *types.Header), pendingLogsSubs: make(map[string]chan types.Logs), pendingBlockSubs: make(map[string]chan *types.Block)}
+	ff := &Filters{headsSubs: make(map[HeadsSubID]chan *types.Header), pendingLogsSubs: make(map[PendingLogsSubID]chan types.Logs), pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block)}
 
 	go func() {
 		var err error
@@ -41,43 +48,43 @@ func New(ethBackend core.ApiBackend) *Filters {
 	return ff
 }
 
-func (ff *Filters) SubscribeNewHeads(out chan *types.Header) string {
+func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	id := generateSubscriptionID()
+	id := HeadsSubID(generateSubscriptionID())
 	ff.headsSubs[id] = out
 	return id
 }
 
-func (ff *Filters) UnsubscribeHeads(id string) {
+func (ff *Filters) UnsubscribeHeads(id HeadsSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	delete(ff.headsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingLogs(out chan types.Logs) string {
+func (ff *Filters) SubscribePendingLogs(out chan types.Logs) PendingLogsSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	id := generateSubscriptionID()
+	id := PendingLogsSubID(generateSubscriptionID())
 	ff.pendingLogsSubs[id] = out
 	return id
 }
 
-func (ff *Filters) UnsubscribePendingLogs(id string) {
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	delete(ff.pendingLogsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingBlock(out chan *types.Block) string {
+func (ff *Filters) SubscribePendingBlock(out chan *types.Block) PendingBlockSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	id := generateSubscriptionID()
+	id := PendingBlockSubID(generateSubscriptionID())
 	ff.pendingBlockSubs[id] = out
 	return id
 }
 
-func (ff *Filters) UnsubscribePendingBlock(id string) {
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	delete(ff.pendingBlockSubs, id)
@@ -130,7 +137,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	}
 }
 
-func generateSubscriptionID() string {
+func generateSubscriptionID() SubscriptionID {
 	var id [32]byte
 
 	_, err := rand.Read(id[:])
@@ -138,5 +145,5 @@ func generateSubscriptionID() string {
 		log.Crit("rpc filters: error creating random id", "err", err)
 	}
 
-	return fmt.Sprintf("%x", id)
+	return SubscriptionID(fmt.Sprintf("%x", id))
 }
