@@ -57,7 +57,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return nil, err
 	}
 
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, ethdb.NewRoTxDb(dbtx), api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	ibs := state.New(stateReader)
 	msg := args.ToMessage(api.GasCap)
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, ethdb.NewRoTxDb(dbtx))
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig)
 }
