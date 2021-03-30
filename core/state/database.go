@@ -392,22 +392,6 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.t.Print(w)
 }
 
-// buildStorageReads builds a sorted list of all storage key hashes that were modified
-// (or also just read, if tds.resolveReads flag is turned on) within the
-// period for which we are aggregating updates. It includes the keys of items that
-// were nullified by subsequent updates - best example is the
-// self-destruction of a contract, which nullifies all previous
-// modifications of the contract's storage. In such case, all previously modified storage
-// item updates would be inclided.
-func (tds *TrieDbState) buildStorageReads() common.StorageKeys {
-	storageTouches := common.StorageKeys{}
-	for storageKey := range tds.aggregateBuffer.storageReads {
-		storageTouches = append(storageTouches, storageKey)
-	}
-	sort.Sort(storageTouches)
-	return storageTouches
-}
-
 // buildStorageWrites builds a sorted list of all storage key hashes that were modified within the
 // period for which we are aggregating updates. It skips the updates that
 // were nullified by subsequent updates - best example is the
@@ -445,26 +429,6 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 		tds.retainListBuilder.AddStorageTouch(key[:])
 	}
 	return nil
-}
-
-func (tds *TrieDbState) buildCodeTouches() map[common.Hash]common.Hash {
-	return tds.aggregateBuffer.codeReads
-}
-
-func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
-	return tds.aggregateBuffer.codeSizeReads
-}
-
-// buildAccountReads builds a sorted list of all address hashes that were modified
-// (or also just read, if tds.resolveReads flags is turned one) within the
-// period for which we are aggregating update
-func (tds *TrieDbState) buildAccountReads() common.Hashes {
-	accountTouches := common.Hashes{}
-	for addrHash := range tds.aggregateBuffer.accountReads {
-		accountTouches = append(accountTouches, addrHash)
-	}
-	sort.Sort(accountTouches)
-	return accountTouches
 }
 
 // buildAccountWrites builds a sorted list of all address hashes that were modified within the
@@ -506,22 +470,6 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 		}
 	}
 	return accountTouches, aValues, aCodes
-}
-
-func (tds *TrieDbState) resolveCodeTouches(
-	codeTouches map[common.Hash]common.Hash,
-	codeSizeTouches map[common.Hash]common.Hash,
-) error {
-	return nil
-}
-
-var bytes8 [8]byte
-
-func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
-	for _, addrHash := range accountTouches {
-		a := addrHash
-		tds.retainListBuilder.AddTouch(a[:])
-	}
 }
 
 // ExtractTouches returns two lists of keys - for accounts and storage items correspondingly

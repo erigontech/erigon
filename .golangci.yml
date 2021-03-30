@@ -1,12 +1,17 @@
 run:
   deadline: 10m
 
+
+linters:
+  enable:
+    - unconvert
+#    - gosec
+
 linters-settings:
   govet:
     disable:
       - deepequalerrors
-      - fieldalignment
-      - shadow
+#      - fieldalignment
       - unsafeptr
   goconst:
     min-len: 2

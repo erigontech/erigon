@@ -23,8 +23,6 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
-	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -1351,13 +1349,13 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 		t.Fatalf("generate chain: %v", err2)
 	}
 
-	ok, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), blockchain.GetVMConfig(), blockchain.Engine(), chain, true)
+	ok, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), chain, true)
 	require.NoError(t, err)
 	require.True(t, ok)
 
 	for _, block := range chain {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := rawdb.ReadCanonicalHash(blockchain.ChainDb(), block.NumberU64())
+		ch, err := rawdb.ReadCanonicalHash(db, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)
@@ -1369,7 +1367,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 			t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
 			return
 		}
-		fb := rawdb.ReadBlock(blockchain.ChainDb(), ch, block.NumberU64())
+		fb := rawdb.ReadBlock(db, ch, block.NumberU64())
 		if fb == nil {
 			t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
 			return

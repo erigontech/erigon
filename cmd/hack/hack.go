@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -660,14 +659,6 @@ func printFullNodeRLPs() {
 	trie.Hash5()
 	trie.Hash6()
 	trie.Hash7()
-}
-
-func testDifficulty() {
-	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(false)
-	tool.Check(err)
-	genesisHeader := genesisBlock.Header()
-	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)
-	fmt.Printf("Block 1 difficulty: %d\n", d1)
 }
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
@@ -1687,8 +1678,8 @@ func main() {
 
 	case "syncChart":
 		mychart()
-	}
-	if *action == "testBlockHashes" {
+
+	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
 
 	case "invTree":
@@ -1762,9 +1753,6 @@ func main() {
 	case "textInfo":
 		err = db.TextInfo(*chaindata, &strings.Builder{})
 
-	case "indexKeySizes":
-		err = indexKeySizes(*chaindata)
-
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
 
@@ -1792,17 +1780,11 @@ func main() {
 	case "hashFile":
 		hashFile()
 
-	case "testStartup":
-		testStartup()
-
 	case "trieChart":
 		trieChart()
 
 	case "printTxHashes":
 		printTxHashes()
-
-	case "extractTrie":
-		extractTrie(*block)
 
 	}
 

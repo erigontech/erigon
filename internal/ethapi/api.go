@@ -1368,12 +1368,3 @@ func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
 	}
 	return nil
 }
-
-// toHexSlice creates a slice of hex-strings based on []byte.
-func toHexSlice(b [][]byte) []string {
-	r := make([]string, len(b))
-	for i := range b {
-		r[i] = hexutil.Encode(b[i])
-	}
-	return r
-}

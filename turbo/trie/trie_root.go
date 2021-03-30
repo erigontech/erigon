@@ -1402,18 +1402,6 @@ func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
 	return k, c.kHex, v, nil
 }
 
-func nextAccount(in, out []byte) bool {
-	copy(out, in)
-	for i := len(out) - 1; i >= 0; i-- {
-		if out[i] != 255 {
-			out[i]++
-			return true
-		}
-		out[i] = 0
-	}
-	return false
-}
-
 // keyIsBefore - ksind of bytes.Compare, but nil is the last key. And return
 func keyIsBefore(k1, k2 []byte) bool {
 	if k1 == nil {
