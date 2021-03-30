@@ -245,9 +245,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	tmpdb := ethdb.NewMemDatabase()
-	defer tmpdb.Close()
-	r, w := state.NewDbStateReader(tmpdb), state.NewDbStateWriter(tmpdb, 0)
+	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
