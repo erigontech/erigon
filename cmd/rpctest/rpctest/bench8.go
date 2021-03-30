@@ -1,9 +1,11 @@
 package rpctest
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -15,6 +17,17 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 		Timeout: time.Second * 600,
 	}
 
+	var rec *bufio.Writer
+	if recordFile != "" {
+		f, err := os.Create(recordFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
+			return
+		}
+		defer f.Close()
+		rec = bufio.NewWriter(f)
+		defer rec.Flush()
+	}
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
 	go vegetaWrite(false, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
@@ -35,12 +48,11 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := uint64(blockNumber.Number)
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 
 	prevBn := blockFrom
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
-	for bn := blockFrom; bn <= lastBlock-100000; bn++ {
+	for bn := blockFrom; bn < blockTo; bn++ {
 
 		if prevBn < bn && bn%100 == 0 {
 			// Checking modified accounts
@@ -60,7 +72,9 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 				for account := range accountSet {
 					reqGen.reqID++
 					startTG := time.Now()
-					res = reqGen.TurboGeth2("eth_getLogs", reqGen.getLogs(prevBn, bn, account))
+					request := reqGen.getLogs(prevBn, bn, account)
+					recording := rec != nil // This flag will be set to false if recording is not to be performed
+					res = reqGen.TurboGeth2("eth_getLogs", request)
 					durationTG := time.Since(startTG).Seconds()
 					if res.Err != nil {
 						fmt.Printf("Could not get logs for account (turbo-geth) %x: %v\n", account, res.Err)
@@ -73,13 +87,15 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 					var durationG float64
 					if needCompare {
 						startG := time.Now()
-						resg := reqGen.Geth2("eth_getLogs", reqGen.getLogs(prevBn, bn, account))
+						resg := reqGen.Geth2("eth_getLogs", request)
 						durationG = time.Since(startG).Seconds()
 						resultsCh <- res
 						if resg.Err != nil {
 							fmt.Printf("Could not get logs for account (geth) %x: %v\n", account, resg.Err)
+							recording = false
 						} else if errValg := resg.Result.Get("error"); errValg != nil {
 							fmt.Printf("Error getting logs for account (geth) %x: %d %s\n", account, errValg.GetInt("code"), errValg.GetStringBytes("message"))
+							recording = false
 						} else {
 							if err := compareResults(res.Result, resg.Result); err != nil {
 								fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
@@ -90,12 +106,17 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 						}
 					}
 					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
+					if recording {
+						fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
+					}
 					topics := getTopics(res.Result)
 					// All combination of account and one topic
 					for _, topic := range topics {
 						reqGen.reqID++
 						startTG := time.Now()
-						res = reqGen.TurboGeth2("eth_getLogs", reqGen.getLogs1(prevBn, bn+10000, account, topic))
+						request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
+						recording = rec != nil
+						res = reqGen.TurboGeth2("eth_getLogs", request)
 						durationTG := time.Since(startTG).Seconds()
 						if res.Err != nil {
 							fmt.Printf("Could not get logs for account (turbo-geth) %x %x: %v\n", account, topic, res.Err)
@@ -106,15 +127,16 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 							return
 						}
 						if needCompare {
-							var logsg1 EthLogs
 							startG := time.Now()
-							resg := reqGen.Geth("eth_getLogs", reqGen.getLogs1(prevBn, bn+10000, account, topic), &logsg1)
+							resg := reqGen.Geth2("eth_getLogs", request)
 							durationG = time.Since(startG).Seconds()
 							resultsCh <- res
 							if resg.Err != nil {
 								fmt.Printf("Could not get logs for account (geth) %x %x: %v\n", account, topic, resg.Err)
+								recording = false
 							} else if errValg := resg.Result.Get("error"); errValg != nil {
 								fmt.Printf("Error getting logs for account (geth) %x %x: %d %s\n", account, topic, errValg.GetInt("code"), errValg.GetStringBytes("message"))
+								recording = false
 							} else {
 								if err := compareResults(res.Result, resg.Result); err != nil {
 									fmt.Printf("Different logs for account %x %x and block %d-%d\n", account, topic, prevBn, bn)
@@ -123,6 +145,9 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 									return
 								}
 							}
+						}
+						if recording {
+							fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 						}
 						log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
 					}
@@ -134,7 +159,9 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 							idx2++
 						}
 						reqGen.reqID++
-						res = reqGen.TurboGeth2("eth_getLogs", reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2]))
+						request = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
+						recording = rec != nil
+						res = reqGen.TurboGeth2("eth_getLogs", request)
 						if res.Err != nil {
 							fmt.Printf("Could not get logs for account (turbo-geth) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
 							return
@@ -144,12 +171,14 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 							return
 						}
 						if needCompare {
-							resg := reqGen.Geth2("eth_getLogs", reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2]))
+							resg := reqGen.Geth2("eth_getLogs", request)
 							resultsCh <- res
 							if resg.Err != nil {
 								fmt.Printf("Could not get logs for account (geth) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
+								recording = false
 							} else if errValg := resg.Result.Get("error"); errValg != nil {
 								fmt.Printf("Error getting logs for account (geth) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], errValg.GetInt("code"), errValg.GetStringBytes("message"))
+								recording = false
 							} else {
 								if err := compareResults(res.Result, resg.Result); err != nil {
 									fmt.Printf("Different logs for account %x %x %x and block %d-%d\n", account, topics[idx1], topics[idx2], prevBn, bn)
@@ -158,6 +187,9 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 									return
 								}
 							}
+						}
+						if recording {
+							fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 						}
 						log.Info("Results", "count", len(res.Result.GetArray("result")))
 					}
