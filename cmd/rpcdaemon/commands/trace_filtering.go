@@ -76,7 +76,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, ethdb.NewRoTxDb(tx))
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}

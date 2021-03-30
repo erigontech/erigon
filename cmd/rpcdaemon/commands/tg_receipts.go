@@ -23,12 +23,12 @@ func (api *TgImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*ty
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
-	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(tx))
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	receipts, err := getReceipts(ctx, ethdb.NewRoTxDb(tx), chainConfig, *number, hash)
+	receipts, err := getReceipts(ctx, tx, chainConfig, *number, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

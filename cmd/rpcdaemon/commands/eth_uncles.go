@@ -16,7 +16,7 @@ import (
 
 // GetUncleByBlockNumberAndIndex implements eth_getUncleByBlockNumberAndIndex. Returns information about an uncle given a block's number and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	hash := block.Hash()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), block.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -52,13 +52,13 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 
 // GetUncleByBlockHashAndIndex implements eth_getUncleByBlockHashAndIndex. Returns information about an uncle given a block's hash and the index of the uncle.
 func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, hash, number)
+	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
 
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return &n, err
 	}
@@ -98,7 +98,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return &n, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -111,13 +111,13 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 // GetUncleCountByBlockHash implements eth_getUncleCountByBlockHash. Returns the number of uncles in the block, if any.
 func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx)
 	if err != nil {
 		return &n, err
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
 	if err != nil {
 		return &n, err
 	}

@@ -442,7 +442,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}
@@ -553,7 +553,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}

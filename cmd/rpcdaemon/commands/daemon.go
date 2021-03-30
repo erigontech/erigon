@@ -16,7 +16,7 @@ func APIList(ctx context.Context, kv ethdb.KV, eth core.ApiBackend, filters *fil
 	var defaultAPIList []rpc.API
 
 	pending := rpchelper.NewPending(filters, ctx.Done())
-	ethImpl := NewEthAPI(ethdb.NewObjectDatabase(kv), eth, cfg.Gascap, filters, pending)
+	ethImpl := NewEthAPI(kv, eth, cfg.Gascap, filters, pending)
 	tgImpl := NewTgAPI(kv, pending)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(kv, cfg.Gascap, pending)

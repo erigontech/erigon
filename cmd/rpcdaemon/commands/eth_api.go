@@ -93,27 +93,27 @@ type BaseAPI struct {
 	_genesisSetOnce sync.Once
 }
 
-func (api *BaseAPI) chainConfig(db ethdb.Getter) (*params.ChainConfig, error) {
-	cfg, _, err := api.chainConfigWithGenesis(db)
+func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
+	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
 }
 
 //nolint:unused
-func (api *BaseAPI) genesis(db ethdb.Getter) (*types.Block, error) {
-	_, genesis, err := api.chainConfigWithGenesis(db)
+func (api *BaseAPI) genesis(tx ethdb.Tx) (*types.Block, error) {
+	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Getter) (*params.ChainConfig, *types.Block, error) {
+func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *types.Block, error) {
 	if api._chainConfig != nil {
 		return api._chainConfig, api._genesis, nil
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(db, 0)
+	genesisBlock, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err := rawdb.ReadChainConfig(db, genesisBlock.Hash())
+	cc, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -130,14 +130,14 @@ func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Getter) (*params.ChainConfig
 type APIImpl struct {
 	*BaseAPI
 	ethBackend core.ApiBackend
-	db         ethdb.Database
+	db         ethdb.KV
 	GasCap     uint64
 	filters    *rpcfilters.Filters
 	pending    *rpchelper.Pending
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.Database, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+func NewEthAPI(db ethdb.KV, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,

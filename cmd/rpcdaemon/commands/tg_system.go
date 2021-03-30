@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Forks is a data type to record a list of forks passed by this node
@@ -22,7 +21,7 @@ func (api *TgImpl) Forks(ctx context.Context) (Forks, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesis, err := api.chainConfigWithGenesis(ethdb.NewRoTxDb(tx))
+	chainConfig, genesis, err := api.chainConfigWithGenesis(tx)
 	if err != nil {
 		return Forks{}, err
 	}

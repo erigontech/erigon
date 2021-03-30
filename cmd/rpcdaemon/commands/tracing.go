@@ -32,7 +32,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	getter := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
 	chainContext := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 
-	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(tx))
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}

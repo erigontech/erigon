@@ -55,7 +55,7 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 		return Issuance{}, nil
 	}
 
-	block, err := api.getBlockByRPCNumber(ethdb.NewRoTxDb(tx), blockNr)
+	block, err := api.getBlockByRPCNumber(tx, blockNr)
 	if err != nil {
 		return Issuance{}, err
 	}
@@ -74,12 +74,12 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 	return ret, nil
 }
 
-func (api *TgImpl) getBlockByRPCNumber(db ethdb.Getter, blockNr rpc.BlockNumber) (*types.Block, error) {
-	blockNum, err := getBlockNumber(blockNr, db)
+func (api *TgImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(db, blockNum)
+	return rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 }
 
 // Issuance structure to return information about issuance
