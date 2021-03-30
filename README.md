@@ -9,6 +9,7 @@ performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?sty
 - [Usage](#usage)
     + [Getting Started](#getting-started)
     + [Testnets](#testnets)
+    + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 - [Key features](#key-features)
