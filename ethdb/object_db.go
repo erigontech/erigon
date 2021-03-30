@@ -49,7 +49,6 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv:  kv,
 		log: logger,
-		id:  id(),
 	}
 }
 

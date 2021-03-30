@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -59,6 +60,7 @@ func (opts snapshotOpts) Open() KV {
 
 type SnapshotKV struct {
 	db        KV
+	mtx		  sync.RWMutex
 	snapshots map[string]snapshotData
 }
 
@@ -92,14 +94,30 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV KV) {
+func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV KV, done chan struct{}) {
 	sd:=snapshotData{
 		buckets: buckets,
 		snapshot: snapshotKV,
 	}
+	toClose:=[]KV{}
 	for _,bucket:=range buckets {
+		toClose = append(toClose, s.snapshots[bucket].snapshot)
 		s.snapshots[bucket] = sd
 	}
+	go func() {
+		wg:=sync.WaitGroup{}
+		wg.Add(len(toClose))
+
+		for i:=range toClose {
+			i:=i
+			go func() {
+				defer wg.Done()
+				toClose[i].Close()
+			}()
+		}
+		wg.Wait()
+		close(done)
+	}()
 }
 
 func (s *SnapshotKV) CollectMetrics() {
@@ -113,9 +131,18 @@ func (s *SnapshotKV) Begin(ctx context.Context) (Tx, error) {
 	}
 	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.snapshots,
+		snapshots: s.copySnapshots(),
 		snTX:      map[string]Tx{},
 	}, nil
+}
+func(s *SnapshotKV) copySnapshots() map[string]snapshotData  {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	mp:=make(map[string]snapshotData, len(s.snapshots))
+	for i:=range s.snapshots {
+		mp[i]=s.snapshots[i]
+	}
+	return mp
 }
 
 func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
@@ -125,7 +152,7 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
 	}
 	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.snapshots,
+		snapshots: s.copySnapshots(),
 		snTX:      map[string]Tx{},
 	}, nil
 }

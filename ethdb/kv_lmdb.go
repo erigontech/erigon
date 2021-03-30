@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -901,6 +902,12 @@ func (c *LmdbCursor) initCursor() error {
 	tx.cursors = append(tx.cursors, c.c)
 	return nil
 }
+func (c *LmdbCursor) checkClosed() error {
+	if c.tx.tx==nil {
+		return errors.New("transaction closed")
+	}
+	return nil
+}
 
 func (c *LmdbCursor) Count() (uint64, error) {
 	st, err := c.tx.tx.Stat(c.dbi)
@@ -1050,6 +1057,7 @@ func (c *LmdbCursor) Next() (k, v []byte, err error) {
 	if c.c == nil {
 		if err = c.initCursor(); err != nil {
 			log.Error("init cursor", "err", err)
+			return nil, nil, err
 		}
 	}
 
