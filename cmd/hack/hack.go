@@ -925,57 +925,33 @@ func printBranches(block uint64) {
 	}
 }
 
-func readPlainAccount(chaindata string, address common.Address) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	var acc accounts.Account
-	enc, err := ethDb.Get(dbutils.PlainStateBucket, address[:])
-	if err != nil {
-		panic(err)
-	} else if enc == nil {
-		panic("acc not found")
-	}
-	if err = acc.DecodeForStorage(enc); err != nil {
-		panic(err)
-	}
-	fmt.Printf("%x\n%x\n%x\n%d\n", address, acc.Root, acc.CodeHash, acc.Incarnation)
-}
-
-func readAccount(chaindata string, account common.Address, block uint64, rewind uint64) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	secKey := crypto.Keccak256(account[:])
+func readAccount(chaindata string, account common.Address) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
 	var a accounts.Account
-	ok, err := rawdb.ReadAccount(ethDb, common.BytesToHash(secKey), &a)
+	ok, err := rawdb.PlainReadAccount(db, account, &a)
 	if err != nil {
-		panic(err)
+		return err
 	} else if !ok {
-		panic("acc not found")
+		return fmt.Errorf("acc not found")
 	}
-	fmt.Printf("%x\n%x\n%x\n%d\n", secKey, a.Root, a.CodeHash, a.Incarnation)
-	//var addrHash common.Hash
-	//copy(addrHash[:], secKey)
-	//codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
-	//check(err)
-	//fmt.Printf("codeHash: %x\n", codeHash)
-	timestamp := block
-	for i := uint64(0); i < rewind; i++ {
-		var printed bool
-		encodedTS := dbutils.EncodeBlockNumber(timestamp)
-		err = changeset.Walk(ethDb, dbutils.PlainStorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-			if bytes.HasPrefix(k, account[:]) {
-				incarnation := binary.BigEndian.Uint64(k[common.AddressLength : common.AddressLength+common.IncarnationLength])
-				if !printed {
-					fmt.Printf("Changes for block %d\n", timestamp)
-					printed = true
-				}
-				fmt.Printf("%d %x %x\n", incarnation, k[common.AddressLength+common.IncarnationLength:], v)
+	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
+	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.PlainStateBucket)
+		for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+			if e != nil {
+				return e
 			}
-			return true, nil
-		})
-		tool.Check(err)
-		timestamp--
+			if !bytes.HasPrefix(k, account.Bytes()) {
+				break
+			}
+			fmt.Printf("%x => %x\n", k, v)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
+	return nil
 }
 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
@@ -1910,10 +1886,9 @@ func main() {
 		invTree("root", "right", "diff", *name)
 
 	case "readAccount":
-		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
-
-	case "readPlainAccount":
-		readPlainAccount(*chaindata, common.HexToAddress(*account))
+		if err := readAccount(*chaindata, common.HexToAddress(*account)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 
 	case "fixAccount":
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
