@@ -32,7 +32,7 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	db, err := createTestDb()
+	db, err := createTestKV()
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db, err := createTestDb()
+	db, err := createTestKV()
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}

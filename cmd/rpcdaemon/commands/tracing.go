@@ -18,21 +18,21 @@ import (
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig) (interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	// Retrieve the transaction and assemble its EVM context
-	txn, blockHash, _, txIndex := rawdb.ReadTransaction(tx, hash)
+	txn, blockHash, _, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), hash)
 	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(tx)
+	getter := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
+	chainContext := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -46,34 +46,34 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 }
 
 func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig) (interface{}, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.dbReader.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
 	if err != nil {
 		return nil, err
 	}
 
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, ethdb.NewRoTxDb(dbtx), api.pending)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		stateReader = state.NewPlainStateReader(ethdb.NewRoTxDb(dbtx))
 	} else {
-		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
 	}
-	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
 	msg := args.ToMessage(api.GasCap)
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, ethdb.NewRoTxDb(dbtx))
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig)
 }

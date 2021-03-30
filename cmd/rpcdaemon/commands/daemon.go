@@ -19,7 +19,7 @@ func APIList(ctx context.Context, kv ethdb.KV, eth core.ApiBackend, filters *fil
 	ethImpl := NewEthAPI(ethdb.NewObjectDatabase(kv), eth, cfg.Gascap, filters, pending)
 	tgImpl := NewTgAPI(kv, pending)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(ethdb.NewObjectDatabase(kv), cfg.Gascap, pending)
+	debugImpl := NewPrivateDebugAPI(kv, cfg.Gascap, pending)
 	traceImpl := NewTraceAPI(kv, pending, &cfg)
 	web3Impl := NewWeb3APIImpl()
 	dbImpl := NewDBAPIImpl()   /* deprecated */
