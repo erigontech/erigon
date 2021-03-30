@@ -936,7 +936,7 @@ func readAccount(chaindata string, account common.Address) error {
 		return fmt.Errorf("acc not found")
 	}
 	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.PlainStateBucket)
 		for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
 			if e != nil {
