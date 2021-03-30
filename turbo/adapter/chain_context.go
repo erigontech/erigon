@@ -14,12 +14,12 @@ import (
 )
 
 type chainContext struct {
-	db ethdb.Getter
+	tx ethdb.Tx
 }
 
-func NewChainContext(db ethdb.Getter) *chainContext {
+func NewChainContext(tx ethdb.Tx) *chainContext {
 	return &chainContext{
-		db: db,
+		tx: tx,
 	}
 }
 
@@ -72,7 +72,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(c.db, hash, number)
+	return rawdb.ReadHeader(ethdb.NewRoTxDb(c.tx), hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {

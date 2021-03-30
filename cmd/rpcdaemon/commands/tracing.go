@@ -30,7 +30,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
+	chainContext := adapter.NewChainContext(tx)
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
