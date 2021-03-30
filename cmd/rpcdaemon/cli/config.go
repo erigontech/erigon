@@ -86,7 +86,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func OpenDB(cfg Flags) (ethdb.KV, core.ApiBackend, error) {
+func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 	var db ethdb.KV
 	var ethBackend core.ApiBackend
 	var err error

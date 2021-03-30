@@ -38,6 +38,29 @@ var (
 	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
 )
 
+type RoKV interface {
+	View(ctx context.Context, f func(tx Tx) error) error
+	Close()
+
+	// Begin - creates transaction
+	// 	tx may be discarded by .Rollback() method
+	//
+	// A transaction and its cursors must only be used by a single
+	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
+	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
+	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
+	//
+	// If this `parent` is non-NULL, the new transaction
+	//	will be a nested transaction, with the transaction indicated by parent
+	//	as its parent. Transactions may be nested to any level. A parent
+	//	transaction and its cursors may not issue any other operations than
+	//	Commit and Rollback while it has active child transactions.
+	Begin(ctx context.Context) (Tx, error)
+	AllBuckets() dbutils.BucketsCfg
+
+	CollectMetrics()
+}
+
 // KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
 //
 // Common pattern for short-living transactions:
@@ -63,28 +86,11 @@ var (
 //	}
 //
 type KV interface {
-	View(ctx context.Context, f func(tx Tx) error) error
+	RoKV
+
 	Update(ctx context.Context, f func(tx RwTx) error) error
-	Close()
 
-	// Begin - creates transaction
-	// 	tx may be discarded by .Rollback() method
-	//
-	// A transaction and its cursors must only be used by a single
-	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
-	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
-	//
-	// If this `parent` is non-NULL, the new transaction
-	//	will be a nested transaction, with the transaction indicated by parent
-	//	as its parent. Transactions may be nested to any level. A parent
-	//	transaction and its cursors may not issue any other operations than
-	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context) (Tx, error)
 	BeginRw(ctx context.Context) (RwTx, error)
-	AllBuckets() dbutils.BucketsCfg
-
-	CollectMetrics()
 }
 
 type TxFlags uint

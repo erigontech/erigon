@@ -34,13 +34,13 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	*BaseAPI
-	dbReader ethdb.KV
+	dbReader ethdb.RoKV
 	GasCap   uint64
 	pending  *rpchelper.Pending
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(dbReader ethdb.KV, gascap uint64, pending *rpchelper.Pending) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(dbReader ethdb.RoKV, gascap uint64, pending *rpchelper.Pending) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		BaseAPI:  &BaseAPI{},
 		dbReader: dbReader,

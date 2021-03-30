@@ -31,7 +31,7 @@ type TraceAPI interface {
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
 	*BaseAPI
-	kv        ethdb.KV
+	kv        ethdb.RoKV
 	maxTraces uint64
 	traceType string
 	gasCap    uint64
@@ -39,7 +39,7 @@ type TraceAPIImpl struct {
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(kv ethdb.KV, pending *rpchelper.Pending, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(kv ethdb.RoKV, pending *rpchelper.Pending, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:   &BaseAPI{},
 		kv:        kv,

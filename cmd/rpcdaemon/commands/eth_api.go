@@ -130,14 +130,14 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 type APIImpl struct {
 	*BaseAPI
 	ethBackend core.ApiBackend
-	db         ethdb.KV
+	db         ethdb.RoKV
 	GasCap     uint64
 	filters    *rpcfilters.Filters
 	pending    *rpchelper.Pending
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.KV, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,
