@@ -341,7 +341,8 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 	return nil
 }
 func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	//TODO: Populate froms and tos if it is any call opcode
+	ct.froms[contract.Caller()] = struct{}{}
+	ct.tos[contract.Address()] = struct{}{}
 	return nil
 }
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
