@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig, pending *rpchelper.Pending) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.GetterBeginner, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig, pending *rpchelper.Pending) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -121,7 +121,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockN
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, db ethdb.Database) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, db ethdb.Getter) (vm.BlockContext, vm.TxContext) {
 	return vm.BlockContext{
 			CanTransfer: core.CanTransfer,
 			Transfer:    core.Transfer,
@@ -138,7 +138,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 }
 
-func getHashGetter(requireCanonical bool, db ethdb.Database) func(uint64) common.Hash {
+func getHashGetter(requireCanonical bool, db ethdb.Getter) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
 		hash, err := rawdb.ReadCanonicalHash(db, n)
 		if err != nil {

@@ -291,7 +291,7 @@ func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.RawValue {
+func ReadBodyRLP(db ethdb.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	body := ReadBody(db, hash, number)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
@@ -300,7 +300,7 @@ func ReadBodyRLP(db ethdb.Database, hash common.Hash, number uint64) rlp.RawValu
 	return bodyRlp
 }
 
-func ReadStorageBodyRLP(db ethdb.Getter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadStorageBodyRLP(db databaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -385,7 +385,7 @@ func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadBodyWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBodyWithoutTransactions(db databaseReader, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0
@@ -904,7 +904,7 @@ func FindCommonAncestor(db databaseReader, a, b *types.Header) *types.Header {
 	return a
 }
 
-func ReadBlockByNumber(db ethdb.Database, number uint64) (*types.Block, error) {
+func ReadBlockByNumber(db ethdb.Getter, number uint64) (*types.Block, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
@@ -928,7 +928,7 @@ func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block,
 	return ReadBlockWithSenders(db, hash, number)
 }
 
-func ReadBlockByHash(db ethdb.Database, hash common.Hash) (*types.Block, error) {
+func ReadBlockByHash(db ethdb.Getter, hash common.Hash) (*types.Block, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil

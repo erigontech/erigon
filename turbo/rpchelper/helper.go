@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database, pending *Pending) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Getter, pending *Pending) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()

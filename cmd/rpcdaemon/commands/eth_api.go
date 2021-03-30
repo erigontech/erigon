@@ -93,18 +93,18 @@ type BaseAPI struct {
 	_genesisSetOnce sync.Once
 }
 
-func (api *BaseAPI) chainConfig(db ethdb.Database) (*params.ChainConfig, error) {
+func (api *BaseAPI) chainConfig(db ethdb.Getter) (*params.ChainConfig, error) {
 	cfg, _, err := api.chainConfigWithGenesis(db)
 	return cfg, err
 }
 
 //nolint:unused
-func (api *BaseAPI) genesis(db ethdb.Database) (*types.Block, error) {
+func (api *BaseAPI) genesis(db ethdb.Getter) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(db)
 	return genesis, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConfig, *types.Block, error) {
+func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Getter) (*params.ChainConfig, *types.Block, error) {
 	if api._chainConfig != nil {
 		return api._chainConfig, api._genesis, nil
 	}

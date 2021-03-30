@@ -74,7 +74,7 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 	return ret, nil
 }
 
-func (api *TgImpl) getBlockByRPCNumber(db ethdb.Database, blockNr rpc.BlockNumber) (*types.Block, error) {
+func (api *TgImpl) getBlockByRPCNumber(db ethdb.Getter, blockNr rpc.BlockNumber) (*types.Block, error) {
 	blockNum, err := getBlockNumber(blockNr, db)
 	if err != nil {
 		return nil, err

@@ -14,10 +14,10 @@ import (
 )
 
 type chainContext struct {
-	db ethdb.Database
+	db ethdb.Getter
 }
 
-func NewChainContext(db ethdb.Database) *chainContext {
+func NewChainContext(db ethdb.Getter) *chainContext {
 	return &chainContext{
 		db: db,
 	}
