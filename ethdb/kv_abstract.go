@@ -38,6 +38,7 @@ var (
 	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
 )
 
+// Read-only version of KV.
 type RoKV interface {
 	View(ctx context.Context, f func(tx Tx) error) error
 	Close()
@@ -72,7 +73,7 @@ type RoKV interface {
 // }
 //
 // Common pattern for long-living transactions:
-//	tx, err := db.Begin(ethdb.RW)
+//	tx, err := db.Begin()
 //	if err != nil {
 //		return err
 //	}
@@ -85,7 +86,7 @@ type RoKV interface {
 //		return err
 //	}
 //
-type KV interface {
+type RwKV interface {
 	RoKV
 
 	Update(ctx context.Context, f func(tx RwTx) error) error

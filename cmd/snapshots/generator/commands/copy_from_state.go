@@ -38,7 +38,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 		return err
 	}
 
-	kv := db.KV()
+	kv := db.RwKV()
 	if snapshotDir != "" {
 		var mode snapshotsync.SnapshotMode
 		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
@@ -50,7 +50,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 			return err
 		}
 	}
-	db.SetKV(kv)
+	db.SetRwKV(kv)
 
 	err = os.RemoveAll(snapshotPath)
 	if err != nil {

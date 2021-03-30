@@ -29,7 +29,7 @@ func NewMemDatabase() *ObjectDatabase {
 	return NewObjectDatabase(NewMemKV())
 }
 
-func NewMemKV() KV {
+func NewMemKV() RwKV {
 	switch debug.TestDB() {
 	case "lmdb":
 		return NewLMDB().InMem().MustOpen()

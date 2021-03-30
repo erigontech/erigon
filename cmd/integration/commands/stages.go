@@ -771,13 +771,13 @@ func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig
 
 func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.SnapshotMode) error {
 	if len(snapshotDir) > 0 {
-		snapshotKV := db.(ethdb.HasKV).KV()
+		snapshotKV := db.(ethdb.HasRwKV).RwKV()
 		var err error
 		snapshotKV, err = snapshotsync.WrapBySnapshotsFromDir(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
-		db.(ethdb.HasKV).SetKV(snapshotKV)
+		db.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 	}
 	return nil
 }

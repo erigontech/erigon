@@ -40,7 +40,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return fmt.Errorf("open err: %w", err)
 	}
 
-	kv := db.KV()
+	kv := db.RwKV()
 	if snapshotDir != "" {
 		var mode snapshotsync.SnapshotMode
 		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
@@ -52,7 +52,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 			return err
 		}
 	}
-	db.SetKV(kv)
+	db.SetRwKV(kv)
 
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{

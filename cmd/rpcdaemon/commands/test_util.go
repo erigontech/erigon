@@ -183,12 +183,12 @@ func createTestDb() (ethdb.Database, error) {
 	return db, nil
 }
 
-func createTestKV() (ethdb.KV, error) {
+func createTestKV() (ethdb.RwKV, error) {
 	db, err := createTestDb()
 
 	if err != nil {
 		return nil, err
 	}
 
-	return db.(ethdb.HasKV).KV(), nil
+	return db.(ethdb.HasRwKV).RwKV(), nil
 }

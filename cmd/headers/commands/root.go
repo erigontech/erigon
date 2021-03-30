@@ -89,7 +89,7 @@ func openDatabase(path string) *ethdb.ObjectDatabase {
 	return db
 }
 
-func openKV(path string, exclusive bool) ethdb.KV {
+func openKV(path string, exclusive bool) ethdb.RwKV {
 	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
 		if exclusive {

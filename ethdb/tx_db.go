@@ -155,7 +155,7 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 }
 
 func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
-	kv := m.db.(HasKV).KV()
+	kv := m.db.(HasRwKV).RwKV()
 
 	var tx Tx
 	var err error
@@ -172,7 +172,7 @@ func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
 	return nil
 }
 
-func (m *TxDb) KV() KV {
+func (m *TxDb) RwKV() RwKV {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 

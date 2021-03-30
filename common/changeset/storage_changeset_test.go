@@ -217,7 +217,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tx, err := db.KV().BeginRw(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tx, err := db.KV().BeginRw(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tx, err := db.KV().BeginRw(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

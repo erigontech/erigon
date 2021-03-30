@@ -73,7 +73,7 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kv     ethdb.KV      // Interface to the database itself
+	kv     ethdb.RwKV    // Interface to the database itself
 	runner sync.Once     // Ensures we can start at most one expirer
 	quit   chan struct{} // Channel to signal the expiring thread to stop
 }
@@ -330,7 +330,7 @@ func (db *DB) DeleteNode(id ID) {
 	deleteRange(db.kv, nodeKey(id))
 }
 
-func deleteRange(db ethdb.KV, prefix []byte) {
+func deleteRange(db ethdb.RwKV, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c := tx.RwCursor(dbutils.InodesBucket)
 		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {

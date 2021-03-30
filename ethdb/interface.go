@@ -150,9 +150,9 @@ type DbWithPendingMutations interface {
 	BatchSize() int
 }
 
-type HasKV interface {
-	KV() KV
-	SetKV(kv KV)
+type HasRwKV interface {
+	RwKV() RwKV
+	SetRwKV(kv RwKV)
 }
 
 type HasTx interface {

@@ -1288,7 +1288,7 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 
 }
 
-func printBucket(kv KV, bucket string) {
+func printBucket(kv RwKV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
 		fmt.Println("-Print bucket", bucket)

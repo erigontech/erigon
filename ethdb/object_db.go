@@ -37,11 +37,11 @@ type DbCopier interface {
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
-	kv KV
+	kv RwKV
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
-func NewObjectDatabase(kv KV) *ObjectDatabase {
+func NewObjectDatabase(kv RwKV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
 	}
@@ -51,7 +51,7 @@ func MustOpen(path string) *ObjectDatabase {
 	return NewObjectDatabase(MustOpenKV(path))
 }
 
-func MustOpenKV(path string) KV {
+func MustOpenKV(path string) RwKV {
 	db, err := OpenKV(path, false)
 	if err != nil {
 		panic(err)
@@ -61,8 +61,8 @@ func MustOpenKV(path string) KV {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func OpenKV(path string, readOnly bool) (KV, error) {
-	var kv KV
+func OpenKV(path string, readOnly bool) (RwKV, error) {
+	var kv RwKV
 	var err error
 	testDB := debug.TestDB()
 	switch true {
@@ -299,11 +299,11 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *ObjectDatabase) KV() KV {
+func (db *ObjectDatabase) RwKV() RwKV {
 	return db.kv
 }
 
-func (db *ObjectDatabase) SetKV(kv KV) {
+func (db *ObjectDatabase) SetRwKV(kv RwKV) {
 	db.kv = kv
 }
 

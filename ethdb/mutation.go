@@ -46,9 +46,9 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
-func (m *mutation) KV() KV {
-	if casted, ok := m.db.(HasKV); ok {
-		return casted.KV()
+func (m *mutation) RwKV() RwKV {
+	if casted, ok := m.db.(HasRwKV); ok {
+		return casted.RwKV()
 	}
 	return nil
 }
@@ -285,7 +285,7 @@ func (m *mutation) Commit() error {
 			return err
 		}
 	} else {
-		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx RwTx) error {
+		if err := m.db.(HasRwKV).RwKV().Update(context.Background(), func(tx RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
 			return err
@@ -351,8 +351,8 @@ func (m *mutation) MemCopy() Database {
 	return m.db
 }
 
-func (m *mutation) SetKV(kv KV) {
-	m.db.(HasKV).SetKV(kv)
+func (m *mutation) SetRwKV(kv RwKV) {
+	m.db.(HasRwKV).SetRwKV(kv)
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

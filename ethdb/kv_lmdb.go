@@ -92,7 +92,7 @@ func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg 
 	return defaultBuckets
 }
 
-func (opts LmdbOpts) Open() (kv KV, err error) {
+func (opts LmdbOpts) Open() (kv RwKV, err error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 	return db, nil
 }
 
-func (opts LmdbOpts) MustOpen() KV {
+func (opts LmdbOpts) MustOpen() RwKV {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))

@@ -10,10 +10,10 @@ import (
 type DBServer struct {
 	remote.UnimplementedDBServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.KV
+	kv ethdb.RwKV
 }
 
-func NewDBServer(kv ethdb.KV) *DBServer {
+func NewDBServer(kv ethdb.RwKV) *DBServer {
 	return &DBServer{kv: kv}
 }
 

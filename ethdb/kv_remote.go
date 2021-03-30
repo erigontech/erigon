@@ -86,7 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -160,7 +160,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
 	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() KV {
+func (opts remoteOpts) MustOpen() RwKV {
 	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)

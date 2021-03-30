@@ -435,7 +435,7 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
-	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
+	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.HeadersBucket)
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
