@@ -1,7 +1,7 @@
 name: Continuous integration
 on: [ push ]
 jobs:
-  ci:
+  tests:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
