@@ -23,6 +23,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
 	OnNewPendingLogs(types.Logs)
+	OnNewPendingBlock(*types.Block)
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.

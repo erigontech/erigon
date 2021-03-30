@@ -13,6 +13,12 @@ import (
 
 // GetHeaderByNumber implements tg_getHeaderByNumber. Returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
 func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
+	// Pending block is only known by the miner
+	if blockNumber == rpc.PendingBlockNumber {
+		block := api.pending.Block()
+		return block.Header(), nil
+	}
+
 	tx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err

@@ -621,16 +621,6 @@ func (txn *Txn) errf(format string, v ...interface{}) {
 	log.Printf(format, v...)
 }
 
-func (txn *Txn) finalize() {
-	if txn._txn != nil {
-		if !txn.Pooled {
-			txn.errf("lmdb: aborting unreachable transaction %#x", uintptr(unsafe.Pointer(txn)))
-		}
-
-		txn.abort()
-	}
-}
-
 // TxnOp is an operation applied to a managed transaction.  The Txn passed to a
 // TxnOp is managed and the operation must not call Commit, Abort, Renew, or
 // Reset on it.

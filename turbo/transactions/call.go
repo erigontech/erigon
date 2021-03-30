@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig, pending *rpchelper.Pending) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -31,7 +31,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockN
 			return state, block.Header(), nil
 		}
 	*/
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, pending)
 	if err != nil {
 		return nil, err
 	}

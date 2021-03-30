@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database, pending *Pending) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -21,15 +21,20 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database
 		if number == rpc.LatestBlockNumber {
 			blockNumber, err = stages.GetStageProgress(dbReader, stages.Execution)
 			if err != nil {
-				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %v", err)
+				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
 			}
-
 		} else if number == rpc.EarliestBlockNumber {
 			blockNumber = 0
-
 		} else if number == rpc.PendingBlockNumber {
-			return 0, common.Hash{}, fmt.Errorf("pending blocks are not supported")
-
+			pendingBlock := pending.Block()
+			if pendingBlock == nil {
+				blockNumber, err = stages.GetStageProgress(dbReader, stages.Execution)
+				if err != nil {
+					return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
+				}
+			} else {
+				return pendingBlock.NumberU64(), pendingBlock.Hash(), nil
+			}
 		} else {
 			blockNumber = uint64(number.Int64())
 		}

@@ -57,7 +57,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return nil, err
 	}
 
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.pending)
 	if err != nil {
 		return nil, err
 	}
