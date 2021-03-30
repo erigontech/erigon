@@ -17,10 +17,10 @@ func APIList(ctx context.Context, kv ethdb.KV, eth core.ApiBackend, filters *fil
 
 	pending := rpchelper.NewPending(filters, ctx.Done())
 	ethImpl := NewEthAPI(ethdb.NewObjectDatabase(kv), eth, cfg.Gascap, filters, pending)
-	tgImpl := NewTgAPI(ethdb.NewObjectDatabase(kv), pending)
+	tgImpl := NewTgAPI(kv, pending)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(ethdb.NewObjectDatabase(kv), cfg.Gascap, pending)
-	traceImpl := NewTraceAPI(ethdb.NewObjectDatabase(kv), pending, &cfg)
+	traceImpl := NewTraceAPI(kv, pending, &cfg)
 	web3Impl := NewWeb3APIImpl()
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */

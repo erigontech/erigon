@@ -336,6 +336,10 @@ func (m *mutation) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutat
 	return m.db.Begin(ctx, flags)
 }
 
+func (m *mutation) BeginRO(ctx context.Context) (GetterTx, error) {
+	return m.db.BeginRO(ctx)
+}
+
 func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")

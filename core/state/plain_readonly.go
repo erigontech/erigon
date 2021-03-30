@@ -43,12 +43,12 @@ func (a *storageItem) Less(b llrb.Item) bool {
 
 // Implements StateReader by wrapping database only, without trie
 type PlainDBState struct {
-	db      ethdb.Database
+	db      ethdb.GetterBeginner
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainDBState(db ethdb.Database, blockNr uint64) *PlainDBState {
+func NewPlainDBState(db ethdb.GetterBeginner, blockNr uint64) *PlainDBState {
 	return &PlainDBState{
 		db:      db,
 		blockNr: blockNr,
@@ -69,7 +69,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation commo
 	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
 		tx = hasTx.Tx()
 	} else {
-		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		dbtx, err := dbs.db.BeginRO(context.Background())
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
 		tx = hasTx.Tx()
 	} else {
-		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		dbtx, err := dbs.db.BeginRO(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +188,7 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
 		tx = hasTx.Tx()
 	} else {
-		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		dbtx, err := dbs.db.BeginRO(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -211,7 +211,7 @@ func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uin
 	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
 		tx = hasTx.Tx()
 	} else {
-		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		dbtx, err := dbs.db.BeginRO(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64,
 	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
 		tx = hasTx.Tx()
 	} else {
-		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		dbtx, err := dbs.db.BeginRO(context.Background())
 		if err != nil {
 			return 0, err
 		}

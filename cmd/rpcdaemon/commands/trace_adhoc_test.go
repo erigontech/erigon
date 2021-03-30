@@ -11,7 +11,7 @@ import (
 )
 
 func TestEmptyQuery(t *testing.T) {
-	db, err := createTestDb()
+	db, err := createTestKV()
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	db, err := createTestDb()
+	db, err := createTestKV()
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}

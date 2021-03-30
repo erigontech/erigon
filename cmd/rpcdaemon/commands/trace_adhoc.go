@@ -436,13 +436,13 @@ const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.kv.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
 	if err != nil {
 		return nil, err
 	}
@@ -451,19 +451,19 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, ethdb.NewRoTxDb(dbtx), api.pending)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		stateReader = state.NewPlainStateReader(ethdb.NewRoTxDb(dbtx))
 	} else {
-		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -504,7 +504,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, ethdb.NewRoTxDb(dbtx))
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
@@ -547,13 +547,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 // CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.kv.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ethdb.NewRoTxDb(dbtx))
 	if err != nil {
 		return nil, err
 	}
@@ -562,22 +562,22 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, ethdb.NewRoTxDb(dbtx), api.pending)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		stateReader = state.NewPlainStateReader(ethdb.NewRoTxDb(dbtx))
 	} else {
-		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
 	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -651,7 +651,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, ethdb.NewRoTxDb(dbtx))
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 

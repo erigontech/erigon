@@ -32,12 +32,12 @@ type TgAPI interface {
 // TgImpl is implementation of the TgAPI interface
 type TgImpl struct {
 	*BaseAPI
-	db      ethdb.Database
+	db      ethdb.KV
 	pending *rpchelper.Pending
 }
 
 // NewTgAPI returns TgImpl instance
-func NewTgAPI(db ethdb.Database, pending *rpchelper.Pending) *TgImpl {
+func NewTgAPI(db ethdb.KV, pending *rpchelper.Pending) *TgImpl {
 	return &TgImpl{
 		BaseAPI: &BaseAPI{},
 		db:      db,

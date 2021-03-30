@@ -12,15 +12,16 @@ import (
 )
 
 // Implements ethdb.Getter for Tx
-type RoTxDb struct {
-	tx Tx
+type roTxDb struct {
+	top bool
+	tx  Tx
 }
 
-func NewRoTxDb(tx Tx) *RoTxDb {
-	return &RoTxDb{tx}
+func NewRoTxDb(tx Tx) *roTxDb {
+	return &roTxDb{tx: tx, top: true}
 }
 
-func (m *RoTxDb) Get(bucket string, key []byte) ([]byte, error) {
+func (m *roTxDb) Get(bucket string, key []byte) ([]byte, error) {
 	c := m.tx.Cursor(bucket)
 	defer c.Close()
 	_, v, err := c.SeekExact(key)
@@ -33,7 +34,7 @@ func (m *RoTxDb) Get(bucket string, key []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (m *RoTxDb) Has(bucket string, key []byte) (bool, error) {
+func (m *roTxDb) Has(bucket string, key []byte) (bool, error) {
 	c := m.tx.Cursor(bucket)
 	defer c.Close()
 	_, v, err := c.SeekExact(key)
@@ -41,10 +42,24 @@ func (m *RoTxDb) Has(bucket string, key []byte) (bool, error) {
 	return v != nil, err
 }
 
-func (m *RoTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	c := m.tx.Cursor(bucket)
 	defer c.Close()
 	return Walk(c, startkey, fixedbits, walker)
+}
+
+func (m *roTxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+	return &roTxDb{tx: m.tx, top: false}, nil
+}
+
+func (m *roTxDb) Rollback() {
+	if m.top {
+		m.tx.Rollback()
+	}
+}
+
+func (m *roTxDb) Tx() Tx {
+	return m.tx
 }
 
 // TxDb - provides Database interface around ethdb.Tx
@@ -78,6 +93,18 @@ func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations
 	}
 
 	if err := batch.begin(ctx, flags); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+func (m *TxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+	batch := m
+	if m.tx != nil {
+		panic("nested transactions not supported")
+	}
+
+	if err := batch.begin(ctx, RO); err != nil {
 		return nil, err
 	}
 	return batch, nil
