@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -132,16 +133,18 @@ type APIImpl struct {
 	db         ethdb.Database
 	GasCap     uint64
 	filters    *rpcfilters.Filters
+	pending    *rpchelper.Pending
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.Database, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
+func NewEthAPI(db ethdb.Database, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,
 		ethBackend: eth,
 		GasCap:     gascap,
 		filters:    filters,
+		pending:    pending,
 	}
 }
 

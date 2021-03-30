@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
@@ -35,14 +36,16 @@ type PrivateDebugAPIImpl struct {
 	*BaseAPI
 	dbReader ethdb.Database
 	GasCap   uint64
+	pending  *rpchelper.Pending
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(dbReader ethdb.Database, gascap uint64) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(dbReader ethdb.Database, gascap uint64, pending *rpchelper.Pending) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		BaseAPI:  &BaseAPI{},
 		dbReader: dbReader,
 		GasCap:   gascap,
+		pending:  pending,
 	}
 }
 

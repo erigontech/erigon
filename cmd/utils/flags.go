@@ -807,7 +807,7 @@ func makeDatabaseHandles() int {
 
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
-func setEtherbase(ctx *cli.Context, cfg *eth.Config) {
+func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
 		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
 		if sigkey != "" {
@@ -1007,12 +1007,12 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
+	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
 		panic(err)
-	}
-	if cfg.Enabled && len(cfg.Notify) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s is required", MinerNotifyFlag.Name))
 	}
 	extraDataStr, err := flags.GetString(MinerExtraDataFlag.Name)
 	if err != nil {
@@ -1059,11 +1059,11 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
 	}
+	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
-	}
-	if cfg.Enabled && len(cfg.Notify) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s is required", MinerNotifyFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.GlobalString(MinerExtraDataFlag.Name))

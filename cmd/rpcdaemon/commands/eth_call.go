@@ -34,7 +34,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, err
 	}
 
-	result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, overrides, api.GasCap, chainConfig)
+	result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig)
+		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.pending)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

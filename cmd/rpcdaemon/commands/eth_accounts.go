@@ -21,7 +21,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.pending)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}

@@ -233,18 +233,21 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 
-	// make a copy, the state caches the logs and these logs get "upgraded" from pending to mined
-	// logs by filling in the block hash when the block was mined by the local miner. This can
-	// cause a race condition if a log was "upgraded" before the PendingLogsEvent is processed.
-	cpy := make(types.Logs, len(logs))
-	for i, l := range logs {
-		cpy[i] = new(types.Log)
-		*cpy[i] = *l
+	if notifier == nil {
+		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
+		return
+	}
+	notifier.OnNewPendingLogs(logs)
+}
+
+func NotifyPendingBlock(logPrefix string, notifier ChainEventNotifier, block *types.Block) {
+	if block == nil {
+		return
 	}
 
 	if notifier == nil {
 		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
 		return
 	}
-	notifier.OnNewPendingLogs(logs)
+	notifier.OnNewPendingBlock(block)
 }

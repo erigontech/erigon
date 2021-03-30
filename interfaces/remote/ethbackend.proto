@@ -46,7 +46,8 @@ service ETHBACKEND {
 
 enum Event {
   HEADER = 0;
-  PENDING_LOG = 1;
+  PENDING_LOGS = 1;
+  PENDING_BLOCK = 2;
 }
 
 message TxRequest { bytes signedtx = 1; }
