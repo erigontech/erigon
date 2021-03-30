@@ -250,7 +250,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		return nil, fmt.Errorf("invalid parameters")
 	}
 
-	getter := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
+	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
@@ -359,7 +359,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
 func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	getter := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
+	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {

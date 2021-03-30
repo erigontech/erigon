@@ -57,7 +57,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	bc := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
+	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
@@ -215,7 +215,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	bc := adapter.NewBlockGetter(ethdb.NewRoTxDb(tx))
+	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(ethdb.NewRoTxDb(tx))
 	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
 	if err != nil {
