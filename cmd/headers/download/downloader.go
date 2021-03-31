@@ -137,11 +137,15 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 }
 
 func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, controlServer *ControlServerImpl) {
-	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(ctx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err3 != nil {
 		log.Error("Receive upload messages failed", "error", err3)
 		return
 	}
+
 	for inreq, err := receiveUploadClient.Recv(); ; inreq, err = receiveUploadClient.Recv() {
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -151,12 +155,6 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 			return
 		}
 
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
 		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
 			log.Error("Handling incoming message", "error", err)
 		}
@@ -164,7 +162,10 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 }
 
 func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, controlServer *ControlServerImpl) {
-	receiveClient, err2 := sentryClient.ReceiveMessages(ctx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	receiveClient, err2 := sentryClient.ReceiveMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err2 != nil {
 		log.Error("Receive messages failed", "error", err2)
 		return
@@ -177,11 +178,6 @@ func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, co
 				return
 			}
 			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		default:
 		}
 
 		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
@@ -363,17 +359,13 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_se
 					Data: b,
 				},
 			}
-			if err := sendMessageById(ctx, cs.sentryClient, &outreq); err != nil {
+
+			if _, err = cs.sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 				return fmt.Errorf("send header request: %v", err)
 			}
 		}
 	}
 	return nil
-}
-
-func sendMessageById(ctx context.Context, sentryClient proto_sentry.SentryClient, outreq *proto_sentry.SendMessageByIdRequest) error {
-	_, err := sentryClient.SendMessageById(ctx, outreq, &grpc.EmptyCallOption{})
-	return err
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
