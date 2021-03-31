@@ -17,10 +17,7 @@
 package tests
 
 import (
-	"context"
 	"testing"
-
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestBlockchain(t *testing.T) {
@@ -59,27 +56,12 @@ func TestBlockchain(t *testing.T) {
 	// FIXME: failing tests after Berlin rebase
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp.json.*`, "Needs to be fixed for TG (Berlin)")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		db := ethdb.NewMemDatabase()
-		defer db.Close()
-
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
-
-		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false, tx)); err != nil {
+		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false)); err != nil {
 			t.Errorf("test without snapshotter failed: %v", err)
 		}
-		tx.Rollback()
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := bt.checkFailure(t, test.Run(false, tx)); err != nil {
+		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)
 		}
-		tx.Rollback()
 	})
 
 	// There is also a LegacyTests folder, containing blockchain tests generated

@@ -351,20 +351,9 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if dbErr != nil {
 		return nil, nil, dbErr
 	}
-	block, statedb, err2 := g.Write(db, history)
+	block, statedb, err2 := g.WriteGenesisState(tx, history)
 	if err2 != nil {
 		return block, statedb, err2
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, nil, err
-	}
-	return block, statedb, nil
-}
-
-func (g *Genesis) Write(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := g.WriteGenesisState(tx, history)
-	if err != nil {
-		return nil, nil, err
 	}
 	config := g.Config
 	if config == nil {
@@ -394,6 +383,9 @@ func (g *Genesis) Write(tx ethdb.Database, history bool) (*types.Block, *state.I
 		return nil, nil, err
 	}
 
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
 	return block, statedb, nil
 }
 
