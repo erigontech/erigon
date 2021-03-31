@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -47,8 +48,50 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
+func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
+	db := ethdb.NewRoTxDb(tx)
+	if blockLabel, ok := blockNrOrHash.Number(); ok {
+		blockNum, err := getBlockNumber(blockLabel, tx)
+		if err != nil {
+			return nil, err
+		}
+		return rawdb.ReadHeaderByNumber(db, blockNum), nil
+	}
+	if hash, ok := blockNrOrHash.Hash(); ok {
+		header, err := rawdb.ReadHeaderByHash(db, hash)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
+			return nil, errors.New("header for hash not found")
+		}
+
+		if blockNrOrHash.RequireCanonical {
+			can, err := rawdb.ReadCanonicalHash(db, header.Number.Uint64())
+			if err != nil {
+				return nil, err
+			}
+			if can != hash {
+				return nil, errors.New("hash is not currently canonical")
+			}
+		}
+
+		h := rawdb.ReadHeader(db, hash, header.Number.Uint64())
+		if h == nil {
+			return nil, errors.New("header found, but block body is missing")
+		}
+		return h, nil
+	}
+	return nil, errors.New("invalid arguments; neither block nor hash specified")
+}
+
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
+func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
 	dbtx, err := api.db.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -64,6 +107,18 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 	// Use zero address if sender unspecified.
 	if args.From == nil {
 		args.From = new(common.Address)
+	}
+
+	// Determine the highest gas limit can be used during the estimation.
+	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
+		hi = uint64(*args.Gas)
+	} else {
+		// Retrieve the block to act as the gas ceiling
+		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		if err != nil {
+			return 0, err
+		}
+		hi = h.GasLimit
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
