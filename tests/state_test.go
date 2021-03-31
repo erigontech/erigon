@@ -64,12 +64,13 @@ func TestState(t *testing.T) {
 		legacyStateTestDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
+			db := ethdb.NewMemDatabase()
+			defer db.Close()
+
 			for _, subtest := range test.Subtests() {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 				t.Run(key, func(t *testing.T) {
-					db := ethdb.NewMemDatabase()
-					defer db.Close()
 
 					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
 						config, ok := Forks[subtest.Fork]
