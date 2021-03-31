@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestState(t *testing.T) {
@@ -67,13 +68,17 @@ func TestState(t *testing.T) {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 				t.Run(key, func(t *testing.T) {
+					db := ethdb.NewMemDatabase()
+					defer db.Close()
+
 					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
 						config, ok := Forks[subtest.Fork]
 						if !ok {
 							return UnsupportedForkError{subtest.Fork}
 						}
 						ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
-						_, err := test.Run(ctx, subtest, vmconfig)
+
+						_, err := test.Run(ctx, db, subtest, vmconfig)
 						return st.checkFailure(t, err)
 					})
 				})

@@ -151,8 +151,14 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
+func (t *StateTest) Run(ctx context.Context, db ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	state, root, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -169,7 +175,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -184,10 +190,6 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, _ := db.Begin(context.Background(), ethdb.RW)
-	defer tx.Rollback()
 	statedb, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -228,7 +230,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err = statedb.CommitBlock(ctx, state.NewDbStateWriter(tx, tds.GetBlockNr())); err != nil {
 		return nil, common.Hash{}, err
 	}
 
@@ -270,7 +272,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	}
 
 	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)
