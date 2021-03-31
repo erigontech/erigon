@@ -97,15 +97,19 @@ type btHeaderMarshaling struct {
 	Timestamp  math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run(_ bool) error {
+func (t *BlockTest) Run(_ bool, db ethdb.Database) error {
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
 	}
 
 	// import pre accounts & construct test genesis block & state root
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
 	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
 	if err != nil {
 		return err

@@ -18,6 +18,8 @@ package tests
 
 import (
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestBlockchain(t *testing.T) {
@@ -57,10 +59,12 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp.json.*`, "Needs to be fixed for TG (Berlin)")
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false)); err != nil {
+		db := ethdb.NewMemDatabase()
+		defer db.Close()
+		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false, db)); err != nil {
 			t.Errorf("test without snapshotter failed: %v", err)
 		}
-		if err := bt.checkFailure(t, test.Run(false)); err != nil {
+		if err := bt.checkFailure(t, test.Run(false, db)); err != nil {
 			t.Error(err)
 		}
 	})
