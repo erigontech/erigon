@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -121,24 +120,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		hi = h.GasLimit
 	}
 
-	chainConfig, err := api.chainConfig(dbtx)
-	if err != nil {
-		return 0, err
-	}
-
-	// Determine the highest gas limit can be used during the estimation.
-	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
-		hi = uint64(*args.Gas)
-	} else {
-		// Retrieve the block to act as the gas ceiling
-		var blockNumber uint64
-		blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(dbtx), stages.Execution)
-		if err != nil {
-			return 0, fmt.Errorf("could not get stage progress for Execution: %v", err)
-		}
-		header := rawdb.ReadHeaderByNumber(ethdb.NewRoTxDb(dbtx), blockNumber)
-		hi = header.GasLimit
-	}
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
 		stateReader := state.NewPlainStateReader(ethdb.NewRoTxDb(dbtx))
@@ -173,6 +154,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 	}
 	cap = hi
 	var lastBlockNum = rpc.LatestBlockNumber
+
+	chainConfig, err := api.chainConfig(dbtx)
+	if err != nil {
+		return 0, err
+	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
