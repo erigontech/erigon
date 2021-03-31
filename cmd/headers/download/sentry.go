@@ -178,9 +178,9 @@ func runPeer(
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
 	// Read handshake message
-	msg, err := rw.ReadMsg()
-	if err != nil {
-		return err
+	msg, err1 := rw.ReadMsg()
+	if err1 != nil {
+		return err1
 	}
 
 	if msg.Code != eth.StatusMsg {
@@ -193,9 +193,9 @@ func runPeer(
 	}
 	// Decode the handshake and make sure everything matches
 	var status eth.StatusPacket
-	if err = msg.Decode(&status); err != nil {
+	if err1 = msg.Decode(&status); err1 != nil {
 		msg.Discard()
-		return fmt.Errorf("decode message %v: %v", msg, err)
+		return fmt.Errorf("decode message %v: %v", msg, err1)
 	}
 	msg.Discard()
 	if status.NetworkID != networkID {
@@ -207,12 +207,17 @@ func runPeer(
 	if status.Genesis != genesisHash {
 		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
-	if err = forkFilter(status.ForkID); err != nil {
-		return fmt.Errorf("%v", err)
+	if err1 = forkFilter(status.ForkID); err1 != nil {
+		return fmt.Errorf("%v", err1)
 	}
 	//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
+		var err error
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+
 		if _, ok := peerRwMap.Load(peerID); !ok {
 			return fmt.Errorf("peer has been penalized")
 		}
