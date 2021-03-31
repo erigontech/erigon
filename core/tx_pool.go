@@ -274,23 +274,30 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reqPromoteCh:    make(chan *accountSet),
 		queueTxEventCh:  make(chan *types.Transaction),
 		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}),
+		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
 		chaindb:         chaindb,
+	}
+	pool.locals = newAccountSet(pool.signer)
+	for _, addr := range pool.config.Locals {
+		pool.locals.add(addr)
 	}
 
 	return pool
 }
 
 func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
-		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
+
 	pool.priced = newTxPricedList(pool.all)
 	pool.resetHead(gasLimit, headNumber)
 
