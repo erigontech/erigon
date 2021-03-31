@@ -233,7 +233,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 		return nil, common.Hash{}, err
 	}
 
-	root, err := trie.CalcRoot("test", db)
+	root, err := trie.CalcRoot("test", tx)
 	if err != nil {
 		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
