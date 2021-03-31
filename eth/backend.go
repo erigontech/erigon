@@ -410,6 +410,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					Certificates: []tls.Certificate{peerCert},
 					ClientCAs:    caCertPool,
 					ClientAuth:   tls.RequireAndVerifyClientCert,
+					MinVersion:   tls.VersionTLS12,
 				})
 			} else {
 				creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
