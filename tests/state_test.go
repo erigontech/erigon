@@ -71,7 +71,6 @@ func TestState(t *testing.T) {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 				t.Run(key, func(t *testing.T) {
-
 					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
 						config, ok := Forks[subtest.Fork]
 						if !ok {
@@ -79,7 +78,12 @@ func TestState(t *testing.T) {
 						}
 						ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
 
-						_, err := test.Run(ctx, db, subtest, vmconfig)
+						tx, err := db.Begin(context.Background(), ethdb.RW)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer tx.Rollback()
+						_, err = test.Run(ctx, tx, subtest, vmconfig)
 						return st.checkFailure(t, err)
 					})
 				})

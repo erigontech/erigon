@@ -151,13 +151,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, db ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
+func (t *StateTest) Run(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
 	state, root, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err

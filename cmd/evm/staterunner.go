@@ -102,6 +102,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
+
 			statedb, err := test.Run(context.Background(), db, st, cfg)
 			// print state root for evmlab tracing
 			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
