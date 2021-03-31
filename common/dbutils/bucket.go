@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"sort"
 	"strings"
-
-	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // Buckets
@@ -241,10 +239,10 @@ var (
 )
 
 // Metrics
-var (
-	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
-)
+//var (
+//PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
+//PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+//)
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.

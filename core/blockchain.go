@@ -71,9 +71,9 @@ var (
 	//blockExecutionNumber = metrics.NewRegisteredGauge("chain/execution/number", nil)
 	//blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
-	blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
-	blockReorgAddMeter      = metrics.NewRegisteredMeter("chain/reorg/add", nil)
-	blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+	//blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
+	//blockReorgAddMeter      = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+	//blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
 	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
 
 	//blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
@@ -1582,9 +1582,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		}
 		logFn(msg, "number", commonBlock.Number(), "hash", commonBlock.Hash(),
 			"drop", len(oldChain), "dropfrom", oldChain[0].Hash(), "add", len(newChain), "addfrom", newChain[0].Hash())
-		blockReorgAddMeter.Mark(int64(len(newChain)))
-		blockReorgDropMeter.Mark(int64(len(oldChain)))
-		blockReorgMeter.Mark(1)
+		//blockReorgAddMeter.Mark(int64(len(newChain)))
+		//blockReorgDropMeter.Mark(int64(len(oldChain)))
+		//blockReorgMeter.Mark(1)
 	} else {
 		log.Error("Impossible reorg, please file an issue", "oldnum", oldBlock.Number(), "oldhash", oldBlock.Hash(), "newnum", newBlock.Number(), "newhash", newBlock.Hash())
 	}
