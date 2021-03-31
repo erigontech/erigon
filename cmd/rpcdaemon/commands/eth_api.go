@@ -8,6 +8,7 @@ import (
 	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -138,6 +139,10 @@ type APIImpl struct {
 
 // NewEthAPI returns APIImpl instance
 func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+	if gascap == 0 {
+		gascap = uint64(math.MaxUint64 / 2)
+	}
+
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,
