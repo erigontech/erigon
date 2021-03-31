@@ -288,9 +288,6 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 }
 
 func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
 	pool.reorgShutdownCh = make(chan struct{}, 1)
 
 	pool.locals = newAccountSet(pool.signer)
