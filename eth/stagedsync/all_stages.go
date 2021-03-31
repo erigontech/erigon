@@ -352,11 +352,19 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, err
 	}
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
-	if err1 != nil {
-		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return false, nil
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
 		return false, err
@@ -365,8 +373,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
-		if err1 = tx.Commit(); err1 != nil {
-			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		if !useExternalTx {
+			if err1 := tx.Commit(); err1 != nil {
+				return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+			}
 		}
 		return false, nil // No change of the chain
 	}
@@ -411,8 +421,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-	if err1 = tx.Commit(); err1 != nil {
-		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+	if !useExternalTx {
+		if err1 := tx.Commit(); err1 != nil {
+			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		}
 	}
 	return true, nil
 }

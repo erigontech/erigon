@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
 
@@ -95,11 +96,14 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
 	results := make([]StatetestResult, 0, len(tests))
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, err := test.Run(context.Background(), st, cfg)
+
+			statedb, err := test.Run(context.Background(), db, st, cfg)
 			// print state root for evmlab tracing
 			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
 			//fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
