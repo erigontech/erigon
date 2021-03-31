@@ -331,15 +331,12 @@ func (s *PublicBlockChainAPI) GetStorageAt(ctx context.Context, address common.A
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From     *common.Address `json:"from"`
-	To       *common.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	Value    *hexutil.Big    `json:"value"`
-	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
-	// newer name and should be preferred by clients.
+	From       *common.Address   `json:"from"`
+	To         *common.Address   `json:"to"`
+	Gas        *hexutil.Uint64   `json:"gas"`
+	GasPrice   *hexutil.Big      `json:"gasPrice"`
+	Value      *hexutil.Big      `json:"value"`
 	Data       *hexutil.Bytes    `json:"data"`
-	Input      *hexutil.Bytes    `json:"input"`
 	AccessList *types.AccessList `json:"accessList"`
 }
 
@@ -371,18 +368,16 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 	if args.Value != nil {
 		value.SetFromBig(args.Value.ToInt())
 	}
+	var data []byte
+	if args.Data != nil {
+		data = *args.Data
+	}
 	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	var input []byte
-	if args.Input != nil {
-		input = *args.Input
-	} else if args.Data != nil {
-		input = *args.Data
-	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, accessList, false)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, data, accessList, false)
 	return msg
 }
 
@@ -1029,18 +1024,6 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
 	from, _ := types.Sender(signer, tx)
 
-	// Fill in the derived information in the logs
-	if receipt.Logs != nil {
-		for i, log := range receipt.Logs {
-			log.BlockNumber = blockNumber
-			log.TxHash = hash
-			log.TxIndex = uint(index)
-			log.BlockHash = blockHash
-			log.Index = uint(i)
-		}
-	}
-	// Now reconstruct the bloom filter
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	fields := map[string]interface{}{
 		"blockHash":         blockHash,
 		"blockNumber":       hexutil.Uint64(blockNumber),
