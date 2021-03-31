@@ -42,7 +42,7 @@ const (
 	blockLimit   = 64  // Maximum number of unique blocks a peer may have delivered
 )
 
-var (
+//var (
 //blockAnnounceInMeter   = metrics.NewRegisteredMeter("eth/fetcher/block/announces/in", nil)
 //blockAnnounceOutTimer = metrics.NewRegisteredTimer("eth/fetcher/block/announces/out", nil)
 //blockAnnounceDropMeter = metrics.NewRegisteredMeter("eth/fetcher/block/announces/drop", nil)
@@ -60,7 +60,7 @@ var (
 //headerFilterOutMeter = metrics.NewRegisteredMeter("eth/fetcher/block/filter/headers/out", nil)
 //bodyFilterInMeter  = metrics.NewRegisteredMeter("eth/fetcher/block/filter/bodies/in", nil)
 //bodyFilterOutMeter = metrics.NewRegisteredMeter("eth/fetcher/block/filter/bodies/out", nil)
-)
+//)
 
 var errTerminated = errors.New("terminated")
 
