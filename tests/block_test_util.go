@@ -110,7 +110,7 @@ func (t *BlockTest) Run(_ bool, db ethdb.Database) error {
 	}
 
 	// import pre accounts & construct test genesis block & state root
-	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
+	gblock, _, err := t.genesis(config).Commit(tx, false /* history */)
 	if err != nil {
 		return err
 	}
@@ -134,16 +134,11 @@ func (t *BlockTest) Run(_ bool, db ethdb.Database) error {
 			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
 		}
 	*/
-	validBlocks, err := t.insertBlocks(db, config, engine)
+	validBlocks, err := t.insertBlocks(tx, config, engine)
 	if err != nil {
 		return err
 	}
 
-	tx, err1 := db.Begin(context.Background(), ethdb.RO)
-	if err1 != nil {
-		return fmt.Errorf("blockTest create tx: %v", err1)
-	}
-	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(t.json.BestBlock) != cmlast {
 		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
