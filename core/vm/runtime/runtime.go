@@ -47,7 +47,8 @@ type Config struct {
 	EVMConfig   vm.Config
 
 	State     *state.IntraBlockState
-	TrieDbSt  *state.TrieDbState
+	r         state.StateReader
+	w         state.StateWriter
 	GetHashFn func(n uint64) common.Hash
 }
 
@@ -112,8 +113,9 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
 		defer db.Close()
-		cfg.TrieDbSt = state.NewTrieDbState(common.Hash{}, db, blockNr)
-		cfg.State = state.New(cfg.TrieDbSt)
+		cfg.r = state.NewDbStateReader(db)
+		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.State = state.New(cfg.r)
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
@@ -149,8 +151,9 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
 		defer db.Close()
-		cfg.TrieDbSt = state.NewTrieDbState(common.Hash{}, db, blockNr)
-		cfg.State = state.New(cfg.TrieDbSt)
+		cfg.r = state.NewDbStateReader(db)
+		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.State = state.New(cfg.r)
 	}
 	var (
 		vmenv  = NewEnv(cfg)

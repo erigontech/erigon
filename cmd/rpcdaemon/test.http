@@ -150,3 +150,22 @@ Content-Type: application/json
   "id": 537758
 }
 
+
+
+###
+
+POST localhost:8545
+Content-Type: application/json
+
+{
+  "id": 1,
+  "method": "eth_estimateGas",
+  "params": [
+    {
+      "to": "0x5fda30bb72b8dfe20e48a00dfc108d0915be9bb0",
+      "value": "0x1234"
+    },
+    "latest"
+  ]
+}
+
