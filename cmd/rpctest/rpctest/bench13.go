@@ -1,8 +1,10 @@
 package rpctest
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -18,6 +20,17 @@ func Bench13(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 	setRoutes(tgURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
+	}
+	var rec *bufio.Writer
+	if recordFile != "" {
+		f, err := os.Create(recordFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
+			return
+		}
+		defer f.Close()
+		rec = bufio.NewWriter(f)
+		defer rec.Flush()
 	}
 
 	var res CallResult
@@ -92,7 +105,9 @@ func Bench13(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 		}
 		reqGen.reqID++
 
-		res = reqGen.TurboGeth2("trace_callMany", reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1))
+		request := reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1)
+		recording := rec != nil // This flag will be set to false if recording is not to be performed
+		res = reqGen.TurboGeth2("trace_callMany", request)
 		if res.Err != nil {
 			fmt.Printf("Could not trace callMany (turbo-geth) %d: %v\n", bn, res.Err)
 			return
@@ -102,7 +117,7 @@ func Bench13(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 			return
 		}
 		if needCompare {
-			resg := reqGen.Geth2("trace_callMany", reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1))
+			resg := reqGen.Geth2("trace_callMany", request)
 			if resg.Err != nil {
 				fmt.Printf("Could not trace call (oe) %d: %v\n", bn, resg.Err)
 				return
@@ -119,6 +134,9 @@ func Bench13(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo ui
 					return
 				}
 			}
+		}
+		if recording {
+			fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 		}
 	}
 }
