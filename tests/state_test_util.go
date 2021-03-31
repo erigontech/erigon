@@ -152,7 +152,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 
 // Run executes a specific subtest and verifies the post-state and logs
 func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, _, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
+	state, root, err := t.RunNoVerify(ctx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -169,15 +169,15 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := t.genesis(config).ToBlock(false)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
 	readBlockNr := block.Number().Uint64()
@@ -190,14 +190,14 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	defer tx.Rollback()
 	statedb, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
 	if err != nil {
-		return nil, nil, common.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	// Prepare the EVM.
@@ -216,7 +216,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 
 	// Commit block
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
 	// Add 0-value mining reward. This only makes a difference in the cases
@@ -226,19 +226,19 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return nil, nil, common.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
-		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
 
 	root := roots[len(roots)-1]
-	return statedb, tds, root, nil
+	return statedb, root, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
