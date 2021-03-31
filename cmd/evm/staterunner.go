@@ -102,14 +102,14 @@ func stateTestCmd(ctx *cli.Context) error {
 			statedb, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
 			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-			//	fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
+			//fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
 			//}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
 					_ = statedb
-					//tx, err1 := tds.Database().(ethdb.HasRwKV).RwKV().Begin(context.Background())
+					//tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
 					//if err1 != nil {
 					//	return fmt.Errorf("transition cannot open tx: %v", err1)
 					//}

@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -598,112 +597,6 @@ func trieChart() {
 	tool.Check(err)
 }
 
-func extractTrie(block int) {
-	stateDb := ethdb.MustOpen("statedb")
-	defer stateDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	rebuiltRoot := tds.LastRoot()
-	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	filename := fmt.Sprintf("right_%d.txt", baseBlock.NumberU64())
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		tds.PrintTrie(f)
-	}
-}
-
-func testRewind(chaindata string, block, rewind int) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	if block == 1 {
-		block = int(currentBlockNr)
-	}
-	baseBlock := bc.GetBlockByNumber(uint64(block))
-	baseBlockNr := baseBlock.NumberU64()
-	fmt.Printf("Base block number: %d\n", baseBlockNr)
-	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
-	db := ethDb.NewBatch()
-	defer db.Rollback()
-	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
-	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	rebuiltRoot := tds.LastRoot()
-	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	startTime := time.Now()
-	rewindLen := uint64(rewind)
-
-	err = tds.UnwindTo(baseBlockNr - rewindLen)
-	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
-	tool.Check(err)
-	rewoundBlock1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
-	fmt.Printf("Rewound+1 block number: %d\n", rewoundBlock1.NumberU64())
-	fmt.Printf("Rewound+1 block hash: %x\n", rewoundBlock1.Hash())
-	fmt.Printf("Rewound+1 block root hash: %x\n", rewoundBlock1.Root())
-	fmt.Printf("Rewound+1 block parent hash: %x\n", rewoundBlock1.ParentHash())
-
-	rewoundBlock := bc.GetBlockByNumber(baseBlockNr - rewindLen)
-	fmt.Printf("Rewound block number: %d\n", rewoundBlock.NumberU64())
-	fmt.Printf("Rewound block hash: %x\n", rewoundBlock.Hash())
-	fmt.Printf("Rewound block root hash: %x\n", rewoundBlock.Root())
-	fmt.Printf("Rewound block parent hash: %x\n", rewoundBlock.ParentHash())
-	rewoundRoot := tds.LastRoot()
-	fmt.Printf("Calculated rewound root hash: %x\n", rewoundRoot)
-	/*
-		filename := fmt.Sprintf("root_%d.txt", rewoundBlock.NumberU64())
-		fmt.Printf("Generating deep snapshot of the wront tries... %s\n", filename)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			tds.PrintTrie(f)
-		}
-
-		{
-			tds, err = state.NewTrieDbState(rewoundBlock.Root(), db, rewoundBlock.NumberU64())
-			tds.SetHistorical(true)
-			check(err)
-			rebuiltRoot, err := tds.TrieRoot()
-			fmt.Printf("Rebuilt root: %x\n", rebuiltRoot)
-			check(err)
-		}
-	*/
-}
-
-func testStartup() {
-	startTime := time.Now()
-	//ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	fmt.Printf("Current block number: %d\n", currentBlockNr)
-	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	l := trie.NewSubTrieLoader(currentBlockNr)
-	rl := trie.NewRetainList(0)
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		fmt.Printf("%v\n", err1)
-	}
-	if subTries.Hashes[0] != currentBlock.Root() {
-		fmt.Printf("Hash mismatch, got %x, expected %x\n", subTries.Hashes[0], currentBlock.Root())
-	}
-	fmt.Printf("Took %v\n", time.Since(startTime))
-}
-
 func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -719,55 +612,6 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 	}); err != nil {
 		panic(err)
 	}
-}
-
-func testResolve(chaindata string) {
-	startTime := time.Now()
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-	//check(err)
-	/*
-		currentBlock := bc.CurrentBlock()
-		currentBlockNr := currentBlock.NumberU64()
-		fmt.Printf("Current block number: %d\n", currentBlockNr)
-		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
-		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-	*/
-	currentBlockNr := uint64(286798)
-	//var contract []byte
-	//contract = common.FromHex("8416044c93d8fdf2d06a5bddbea65234695a3d4d278d5c824776c8b31702505dfffffffffffffffe")
-	resolveHash := common.HexToHash("321131c74d582ebe29075d573023accd809234e4dbdee29e814bacedd3467279")
-	l := trie.NewSubTrieLoader(currentBlockNr)
-	key := common.FromHex("0a080d05070c0604040302030508050100020105040e05080c0a0f030d0d050f08070a050b0c08090b02040e0e0200030f0c0b0f0704060a0d0703050009010f")
-	rl := trie.NewRetainList(0)
-	rl.AddHex(key[:3])
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{{0xa8, 0xd0}}, []int{12}, true)
-	if err1 != nil {
-		fmt.Printf("Resolve error: %v\n", err1)
-	}
-	if subTries.Hashes[0] != resolveHash {
-		fmt.Printf("Has mismatch, got %x, expected %x\n", subTries.Hashes[0], resolveHash)
-	}
-	/*
-		var filename string
-		if err == nil {
-			filename = fmt.Sprintf("right_%d.txt", currentBlockNr)
-		} else {
-			filename = fmt.Sprintf("root_%d.txt", currentBlockNr)
-		}
-		fmt.Printf("Generating deep snapshot of the tries... %s\n", filename)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			t.Print(f)
-		}
-		if err != nil {
-			fmt.Printf("%v\n", err)
-		}
-	*/
-	fmt.Printf("Took %v\n", time.Since(startTime))
 }
 
 func hashFile() {
@@ -817,14 +661,6 @@ func printFullNodeRLPs() {
 	trie.Hash5()
 	trie.Hash6()
 	trie.Hash7()
-}
-
-func testDifficulty() {
-	genesisBlock, _, err := core.DefaultGenesisBlock().ToBlock(false)
-	tool.Check(err)
-	genesisHeader := genesisBlock.Header()
-	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)
-	fmt.Printf("Block 1 difficulty: %d\n", d1)
 }
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
@@ -1317,16 +1153,21 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err = loader.Reset(db, unfurl, trie.NewRetainList(0), nil /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+
+	loader := trie.NewFlatDBTrieLoader("checkRoots")
+	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
+		panic(err)
+	}
+	_, err = loader.CalcTrieRoot(db, nil, nil)
+	if err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
-	subTries, err1 := loader.LoadSubTries()
-	if err1 != nil {
-		return err1
+	root, err := loader.CalcTrieRoot(db, nil, nil)
+	if err != nil {
+		return err
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
@@ -1334,14 +1175,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	hash, err := rawdb.ReadCanonicalHash(db, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(db, hash, block)
-	tr := trie.New(common.Hash{})
-	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
-		fmt.Printf("Error hooking: %v\n", err)
-	}
 	runtime.ReadMemStats(&m)
-	log.Info("Constructed trie", "nodes", tr.NumberOfAccounts(),
+	log.Info("Constructed trie",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	fmt.Printf("Resulting root: %x (subTrie %x), expected root: %x\n", tr.Hash(), subTries.Hashes[0], header.Root)
+	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }
 
@@ -1702,32 +1539,6 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 	return nil
 }
 
-func indexKeySizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	keySizes := make(map[int]int)
-	count := 0
-	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.AccountsHistoryBucket)
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			keySizes[len(k)]++
-			count++
-			if count%1000000 == 0 {
-				log.Info("Processed", "records", count)
-			}
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	fmt.Printf("Key sizes: %v\n", keySizes)
-	return nil
-}
-
 func extractBodies(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1870,15 +1681,6 @@ func main() {
 	case "syncChart":
 		mychart()
 
-	case "testRewind":
-		testRewind(*chaindata, *block, *rewind)
-
-	case "testResolve":
-		testResolve(*chaindata)
-
-	case "testDifficulty":
-		testDifficulty()
-
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
 
@@ -1953,9 +1755,6 @@ func main() {
 	case "textInfo":
 		err = db.TextInfo(*chaindata, &strings.Builder{})
 
-	case "indexKeySizes":
-		err = indexKeySizes(*chaindata)
-
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
 
@@ -1983,17 +1782,11 @@ func main() {
 	case "hashFile":
 		hashFile()
 
-	case "testStartup":
-		testStartup()
-
 	case "trieChart":
 		trieChart()
 
 	case "printTxHashes":
 		printTxHashes()
-
-	case "extractTrie":
-		extractTrie(*block)
 
 	}
 
