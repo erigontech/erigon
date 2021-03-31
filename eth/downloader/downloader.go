@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
@@ -1870,28 +1869,21 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 // DeliverHeaders injects a new batch of block headers received from a remote
 // node into the download schedule.
 func (d *Downloader) DeliverHeaders(id string, headers []*types.Header) error {
-	return d.deliver(d.headerCh, &headerPack{id, headers}, headerInMeter, headerDropMeter)
+	return d.deliver(d.headerCh, &headerPack{id, headers})
 }
 
 // DeliverBodies injects a new batch of block bodies received from a remote node.
 func (d *Downloader) DeliverBodies(id string, transactions [][]*types.Transaction, uncles [][]*types.Header) error {
-	return d.deliver(d.bodyCh, &bodyPack{id, transactions, uncles}, bodyInMeter, bodyDropMeter)
+	return d.deliver(d.bodyCh, &bodyPack{id, transactions, uncles})
 }
 
 // DeliverReceipts injects a new batch of receipts received from a remote node.
 func (d *Downloader) DeliverReceipts(id string, receipts [][]*types.Receipt) error {
-	return d.deliver(d.receiptCh, &receiptPack{id, receipts}, receiptInMeter, receiptDropMeter)
+	return d.deliver(d.receiptCh, &receiptPack{id, receipts})
 }
 
 // deliver injects a new batch of data received from a remote node.
-func (d *Downloader) deliver(destCh chan dataPack, packet dataPack, inMeter, dropMeter metrics.Meter) (err error) {
-	// Update the delivery metrics for both good and failed deliveries
-	inMeter.Mark(int64(packet.Items()))
-	defer func() {
-		if err != nil {
-			dropMeter.Mark(int64(packet.Items()))
-		}
-	}()
+func (d *Downloader) deliver(destCh chan dataPack, packet dataPack) (err error) {
 	// Deliver or abort if the sync is canceled while queuing
 	d.cancelLock.RLock()
 	cancel := d.cancelCh
