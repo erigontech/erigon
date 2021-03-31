@@ -124,7 +124,6 @@ type callTracerTest struct {
 }
 
 func TestPrestateTracerCreate2(t *testing.T) {
-	t.Skip("to implement without trieDbState")
 	unsignedTx := types.NewTransaction(1, common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		uint256.NewInt(), 5000000, uint256.NewInt().SetUint64(1), []byte{})
 
@@ -209,8 +208,6 @@ func TestPrestateTracerCreate2(t *testing.T) {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracer(t *testing.T) {
-	t.Skip("to implement without trieDbState")
-
 	ctx := context.TODO()
 
 	files, filesErr := ioutil.ReadDir("testdata")
