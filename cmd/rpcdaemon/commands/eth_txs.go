@@ -22,7 +22,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), hash)
 	if txn == nil {
-		return nil, fmt.Errorf("transaction %#x not found", hash)
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 	return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 }
@@ -41,7 +41,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block %#x not found", blockHash)
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 
 	txs := block.Transactions()
@@ -71,7 +71,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block %d not found", blockNum)
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 
 	txs := block.Transactions()

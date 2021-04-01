@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -31,7 +30,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block not found: %d", blockNum)
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 	hash := block.Hash()
 	additionalFields := make(map[string]interface{})
@@ -63,7 +62,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block not found: %x", hash)
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
@@ -102,9 +101,10 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 	if err != nil {
 		return nil, err
 	}
-	if block != nil {
-		n = hexutil.Uint(len(block.Uncles()))
+	if block == nil {
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
+	n = hexutil.Uint(len(block.Uncles()))
 	return &n, nil
 }
 
@@ -121,8 +121,9 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	if err != nil {
 		return &n, err
 	}
-	if block != nil {
-		n = hexutil.Uint(len(block.Uncles()))
+	if block == nil {
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
+	n = hexutil.Uint(len(block.Uncles()))
 	return &n, nil
 }
