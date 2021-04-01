@@ -12,6 +12,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         with:
           msystem: MSYS
+      - name: Install gcc
+        run: pacman --noconfirm -S mingw64/mingw-w64-x86_64-gcc
       - uses: actions/checkout@v2
         with:
           submodules: recursive
