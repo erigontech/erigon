@@ -442,11 +442,11 @@ test1 - d5878339880cea7e07e9b7a6970d6be97301b1ea
 test2 - d5878339880cea7e07e9b7a6970d6be97301b1ea
  */
 func TestBodiesCanonical(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	snapshotPath1:="/media/b00ris/nvme/tmp/1/test"
 	snapshotPath2:="/media/b00ris/nvme/tmp/2/test"
 	dbPath:="/media/b00ris/nvme/fresh_sync/tg/chaindata/"
-	toBlock:=uint64(50000)
+	toBlock:=uint64(11500000)
 	err := os.RemoveAll(snapshotPath1)
 	if err != nil {
 		t.Fatal(err)
@@ -461,9 +461,9 @@ func TestBodiesCanonical(t *testing.T) {
 	snKV1 := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{}
 	}).Path(snapshotPath1).MustOpen()
-	snKV2 := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{}
-	}).Path(snapshotPath2).MustOpen()
+	//snKV2 := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	//	return dbutils.BucketsCfg{}
+	//}).Path(snapshotPath2).MustOpen()
 
 	db := ethdb.NewObjectDatabase(kv)
 	err = snKV1.Update(context.Background(), func(tx ethdb.RwTx) error {
@@ -478,21 +478,21 @@ func TestBodiesCanonical(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-	err = snKV2.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockBodyPrefix); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.EthTx); err != nil {
-			t.Fatal(err)
-		}
-		return nil
-	})
-	if err!=nil {
-		t.Fatal(err)
-	}
-
+	//err = snKV2.Update(context.Background(), func(tx ethdb.RwTx) error {
+	//	if err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockBodyPrefix); err != nil {
+	//		t.Fatal(err)
+	//	}
+	//	if err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.EthTx); err != nil {
+	//		t.Fatal(err)
+	//	}
+	//	return nil
+	//})
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
+	//
 	snDB1 := ethdb.NewObjectDatabase(snKV1)
-	snDB2 := ethdb.NewObjectDatabase(snKV2)
+	//snDB2 := ethdb.NewObjectDatabase(snKV2)
 	tx1,err:=snDB1.Begin(context.Background(), ethdb.RW)
 	if err!=nil {
 		t.Fatal(err)
@@ -500,13 +500,13 @@ func TestBodiesCanonical(t *testing.T) {
 
 	defer tx1.Rollback()
 
-	tx2,err:=snDB2.Begin(context.Background(), ethdb.RW)
-	if err!=nil {
-		t.Fatal(err)
-	}
-
-	defer tx2.Rollback()
-
+	//tx2,err:=snDB2.Begin(context.Background(), ethdb.RW)
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
+	//
+	//defer tx2.Rollback()
+	//
 	var hash common.Hash
 	var body []byte
 	for i := uint64(1); i <= toBlock; i++ {
@@ -525,15 +525,18 @@ func TestBodiesCanonical(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		fmt.Println(i, hash.String(), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+		if  i%100000 == 0 {
+			fmt.Println(i, hash.String(), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+		}
+
 		err = tx1.Append(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = tx2.Append(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body)
-		if err != nil {
-			t.Fatal(err)
-		}
+		//err = tx2.Append(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body)
+		//if err != nil {
+		//	t.Fatal(err)
+		//}
 
 		if bodyForStorage.TxAmount == 0 {
 			continue
@@ -547,10 +550,10 @@ func TestBodiesCanonical(t *testing.T) {
 			if innerErr!=nil {
 				return false, fmt.Errorf("%d %s %s err:%w",i, common.Bytes2Hex(k), common.Bytes2Hex(txRlp), innerErr)
 			}
-			innerErr= tx2.Append(dbutils.EthTx, common.CopyBytes(k), common.CopyBytes(txRlp))
-			if innerErr!=nil {
-				return false, fmt.Errorf("%d %s %s err:%w",i, common.Bytes2Hex(k), common.Bytes2Hex(txRlp), innerErr)
-			}
+			//innerErr= tx2.Append(dbutils.EthTx, common.CopyBytes(k), common.CopyBytes(txRlp))
+			//if innerErr!=nil {
+			//	return false, fmt.Errorf("%d %s %s err:%w",i, common.Bytes2Hex(k), common.Bytes2Hex(txRlp), innerErr)
+			//}
 			i++
 			return i < bodyForStorage.TxAmount, nil
 		}); err != nil {
@@ -562,22 +565,22 @@ func TestBodiesCanonical(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err=tx2.Commit()
-	if err!=nil {
-		t.Fatal(err)
-	}
+	//err=tx2.Commit()
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
 
 	snDB1.Close()
-	snDB2.Close()
+	//snDB2.Close()
 	if true {
 		err = rmMdbxLock(snapshotPath1)
 		if err!=nil {
 			t.Fatal(err)
 		}
-		err = rmMdbxLock(snapshotPath2)
-		if err!=nil {
-			t.Fatal(err)
-		}
+		//err = rmMdbxLock(snapshotPath2)
+		//if err!=nil {
+		//	t.Fatal(err)
+		//}
 
 	} else {
 		err = rmLmdbLock(snapshotPath1)
@@ -585,10 +588,10 @@ func TestBodiesCanonical(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = rmLmdbLock(snapshotPath2)
-		if err!=nil {
-			t.Fatal(err)
-		}
+		//err = rmLmdbLock(snapshotPath2)
+		//if err!=nil {
+		//	t.Fatal(err)
+		//}
 	}
 
 	info1, err := trnt.BuildInfoBytesForSnapshot(snapshotPath1, trnt.MdbxFilename)
@@ -601,15 +604,15 @@ func TestBodiesCanonical(t *testing.T) {
 	}
 	t.Log(metainfo.HashBytes(infoBytes1))
 
-	info2, err := trnt.BuildInfoBytesForSnapshot(snapshotPath2, trnt.MdbxFilename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	infoBytes2, err := bencode.Marshal(info2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log(metainfo.HashBytes(infoBytes2))
+	//info2, err := trnt.BuildInfoBytesForSnapshot(snapshotPath2, trnt.MdbxFilename)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//infoBytes2, err := bencode.Marshal(info2)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//t.Log(metainfo.HashBytes(infoBytes2))
 
 }
 

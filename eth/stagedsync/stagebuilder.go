@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"strings"
 	"time"
@@ -56,6 +57,7 @@ type StageParameters struct {
 	mining                *MiningStagesParameters
 	snapshotsDir		 string
 	btClient			 *bittorrent.Client
+	SnapshotBuilder		 *snapshotsync.SnapshotMigrator
 }
 
 type MiningStagesParameters struct {
@@ -528,13 +530,20 @@ func DefaultUnwindOrder() UnwindOrder {
 func WithSnapshotsStages() StageBuilders {
 	defaulStages:=DefaultStages()
 	blockHashesStageIndex:=-1
+	sendersStageIndex:=-1
+	hashedStateStageIndex:=-1
 	for i:=range defaulStages {
 		if bytes.Equal(defaulStages[i].ID,stages.Bodies) {
 			blockHashesStageIndex = i
-			break
+		}
+		if bytes.Equal(defaulStages[i].ID,stages.Senders) {
+			sendersStageIndex = i
+		}
+		if bytes.Equal(defaulStages[i].ID,stages.HashState) {
+			hashedStateStageIndex = i
 		}
 	}
-	if blockHashesStageIndex < 0 {
+	if blockHashesStageIndex < 0 || sendersStageIndex < 0 ||  hashedStateStageIndex < 0{
 		log.Error("Unrecognized block hashes stage")
 		return DefaultStages()
 	}
@@ -546,7 +555,7 @@ func WithSnapshotsStages() StageBuilders {
 		Build: func(world StageParameters) *Stage {
 			return &Stage{
 				ID:          stages.CreateHeadersSnapshot,
-				Description: "Create ",
+				Description: "Create headers snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
 					return SpawnHeadersSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
 				},
@@ -556,12 +565,60 @@ func WithSnapshotsStages() StageBuilders {
 			}
 		},
 	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[blockHashesStageIndex:]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[blockHashesStageIndex:sendersStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateBodiesSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateBodiesSnapshot,
+				Description: "Create bodies snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnBodiesSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[sendersStageIndex:hashedStateStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateStateSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateStateSnapshot,
+				Description: "Create state snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnStateSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[hashedStateStageIndex:]...)
 	return stagesWithSnapshots
 }
 
 
+//func DefaultUnwindOrder() UnwindOrder {
+//	return []int{
+//		0, 1, 2,
+//		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+//		// also tx pool is before senders because senders unwind is inside cycle transaction
+//		12, //tx lookup
+//		3, 4, //bodies, senders
+//		// Unwinding of IHashes needs to happen after unwinding HashState
+//		6, 5, // hashed state, execution
+//		7, 8, 9, 10, 11,
+//	}
+//}
+
 func UnwindOrderWithSnapshots() UnwindOrder {
+	//todo fix unwind order
 	return []int{
 		0, 1, 2, 3,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
@@ -570,7 +627,7 @@ func UnwindOrderWithSnapshots() UnwindOrder {
 		4, 5,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 7,
-		8, 9, 10, 11, 12,
+		8, 9, 10, 11, 13, 14,
 	}
 }
 

@@ -51,6 +51,8 @@ var (
 	MiningFinish      SyncStage = []byte("MiningFinish")
 
 	CreateHeadersSnapshot SyncStage = []byte("CreateHeadersSnapshot")
+	CreateBodiesSnapshot SyncStage = []byte("CreateBodiesSnapshot")
+	CreateStateSnapshot SyncStage = []byte("CreateStateSnapshot")
 )
 
 var AllStages = []SyncStage{

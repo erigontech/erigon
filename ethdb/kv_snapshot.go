@@ -19,6 +19,12 @@ var (
 	_ Cursor         = &snCursor{}
 )
 
+type SnapshotUpdater interface {
+	UpdateSnapshots(buckets []string, snapshotKV KV, done chan struct{})
+	WriteDB() KV
+	SnapshotKV(bucket string) KV
+}
+
 func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{}
 }
@@ -118,6 +124,13 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV KV, done chan 
 		wg.Wait()
 		close(done)
 	}()
+}
+
+func (s *SnapshotKV) WriteDB() KV {
+	return s.db
+}
+func (s *SnapshotKV) SnapshotDB(bucket string) KV {
+	return s.snapshots[bucket].snapshot
 }
 
 func (s *SnapshotKV) CollectMetrics() {
