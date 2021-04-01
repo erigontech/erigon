@@ -28,6 +28,7 @@ jobs:
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Build
         run: make all
+        shell: msys2 {0}
       - name: Lint
         uses: golangci/golangci-lint-action@v2
         with:
