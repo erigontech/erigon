@@ -313,11 +313,9 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	return
+	info, _ := db.env.Info()
+	dbSize.Update(int64(info.Geo.Current))
 	/*
-		info, _ := db.env.Info()
-		dbSize.Update(int64(info.Geo.Current))
-
 		if err := db.View(context.Background(), func(tx Tx) error {
 			stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
 			tableScsLeaf.Update(int64(stat.LeafPages))
