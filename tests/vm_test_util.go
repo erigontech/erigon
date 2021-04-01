@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -84,11 +85,10 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr)))
-	state, tds, err := MakePreState(ctx, db, t.json.Pre, blockNr)
+	state, err := MakePreState2(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}
-	tds.StartNewBuffer()
 	ret, gasRemaining, err := t.exec(state, vmconfig)
 	// err is not supposed to be checked here, because in VM tests, the failure
 	// is indicated by the absence of the post-condition section.
@@ -119,12 +119,12 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	roots, err := tds.ComputeTrieRoots()
+	root, err := trie.CalcRoot("test", db)
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}
-	if t.json.PostStateRoot != (common.Hash{}) && roots[len(roots)-1] != t.json.PostStateRoot {
-		return fmt.Errorf("post state root mismatch, got %x, want %x", roots[len(roots)-1], t.json.PostStateRoot)
+	if t.json.PostStateRoot != (common.Hash{}) && root != t.json.PostStateRoot {
+		return fmt.Errorf("post state root mismatch, got %x, want %x", root, t.json.PostStateRoot)
 	}
 	if logs := rlpHash(state.Logs()); logs != common.Hash(t.json.Logs) {
 		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, t.json.Logs)
