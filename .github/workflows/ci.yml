@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: msys2/setup-msys2@v2
         if: matrix.os == 'windows-latest'
+        with:
+          msystem: MSYS
       - uses: actions/checkout@v2
         with:
           submodules: recursive
@@ -28,7 +30,6 @@ jobs:
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Build
         run: make all
-        shell: msys2 {0}
       - name: Lint
         uses: golangci/golangci-lint-action@v2
         with:
