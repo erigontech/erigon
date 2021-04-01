@@ -144,18 +144,14 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, _ := core.NewBlockChain(db, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, txCacher1)
-	defer bc.Stop()
 
 	blocks, err := rawdb.ReadBlocksByHash(conDb, rawdb.ReadCurrentHeader(conDb).Hash(), int(rawdb.ReadCurrentHeader(conDb).Number.Uint64()))
 	require.NoError(t, err)
 	for j := 0; j < len(blocks)/2; j++ {
 		blocks[j], blocks[len(blocks)-1-j] = blocks[len(blocks)-1-j], blocks[j]
 	}
-	if _, err = bc.InsertChain(context.Background(), blocks); err != nil {
-		t.Fatalf("failed to import contra-fork chain for expansion: %v", err)
-	}
+	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &conConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
+	require.NoError(t, err)
 	blocks, _, err = core.GenerateChain(&proConf, conBc.CurrentBlock(), ethash.NewFaker(), conDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -167,9 +163,6 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	defer db.Close()
 	gspec.MustCommit(db)
-	txCacher = core.NewTxSenderCacher(runtime.NumCPU())
-	bc, _ = core.NewBlockChain(db, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	defer bc.Stop()
 
 	blocks, err = rawdb.ReadBlocksByHash(proDb, rawdb.ReadCurrentHeader(proDb).Hash(), int(rawdb.ReadCurrentHeader(proDb).Number.Uint64()))
 	require.NoError(t, err)
@@ -182,9 +175,6 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
-	//_, err = stagedsync.InsertBlocksInStages(proDb, ethdb.DefaultStorageMode, &proConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
-	//require.NoError(t, err)
-
 	if _, err = proBc.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("pro-fork chain didn't accept contra-fork block post-fork: %v", err)
 	}
