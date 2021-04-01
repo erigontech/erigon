@@ -224,9 +224,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 	accStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	accHistoryStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	addrs := make([]common.Address, numOfAccounts)
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	tds.SetBlockNr(2)
-	blockWriter := tds.PlainStateWriter()
+	blockWriter := NewPlainStateWriter(db, db, 2)
 	ctx := context.Background()
 	for i := range accHistory {
 		accHistory[i], addrs[i], _ = randomAccount(t)
