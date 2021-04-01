@@ -188,7 +188,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	statedb := state.New(tds)
+	statedb := state.New(state.NewDbStateReader(tx))
 	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
