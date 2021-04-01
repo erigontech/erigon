@@ -499,8 +499,7 @@ func TestAccessList(t *testing.T) {
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
+	state := New(NewPlainStateReader(db))
 	state.accessList = newAccessList()
 
 	verifyAddrs := func(astrings ...string) {

@@ -936,6 +936,23 @@ func ReadBlockByHash(db ethdb.Getter, hash common.Hash) (*types.Block, error) {
 	return ReadBlock(db, hash, *number), nil
 }
 
+func ReadBlocksByHash(db ethdb.Getter, hash common.Hash, n int) (blocks []*types.Block, err error) {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	for i := 0; i < n; i++ {
+		block := ReadBlock(db, hash, *number)
+		if block == nil {
+			break
+		}
+		blocks = append(blocks, block)
+		hash = block.ParentHash()
+		*number--
+	}
+	return
+}
+
 func ReadHeaderByNumber(db databaseReader, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {

@@ -163,8 +163,7 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		tds      = state.NewTrieDbState(common.Hash{}, db, 0)
-		statedb  = state.New(tds)
+		statedb  = state.New(state.NewPlainStateReader(db))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)

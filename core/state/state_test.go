@@ -168,13 +168,11 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
 
 	db := ethdb.NewMemDatabase()
 	ctx := context.TODO()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
-	tds.StartNewBuffer()
+	w := NewDbStateWriter(db, 0)
+	state := New(NewDbStateReader(db))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -195,19 +193,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.FinalizeTx(ctx, tds.TrieStateWriter())
+	err := state.FinalizeTx(ctx, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
+	w = NewDbStateWriter(db, 1)
 
-	_, err = tds.ComputeTrieRoots()
-	if err != nil {
-		t.Fatal("error while computing trie roots", err)
-	}
-
-	tds.SetBlockNr(1)
-
-	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	err = state.CommitBlock(ctx, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -293,12 +285,9 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
-
 	db := ethdb.NewMemDatabase()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
-	tds.StartNewBuffer()
+	w := NewPlainStateWriter(db, db, 0)
+	state := New(NewPlainStateReader(db))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -311,30 +300,21 @@ func TestDump(t *testing.T) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := tds.PlainStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = tds.PlainStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = state.FinalizeTx(ctx, tds.PlainStateWriter())
+	err = w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Log("last root", tds.LastRoot().String())
-	_, err = tds.ComputeTrieRoots()
-	t.Log("last root", tds.LastRoot().String())
+	err = state.FinalizeTx(ctx, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	tds.SetBlockNr(1)
-
-	blockWriter := tds.PlainStateWriter()
+	blockWriter := NewPlainStateWriter(db, db, 1)
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)
