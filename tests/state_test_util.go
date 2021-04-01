@@ -184,10 +184,11 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
-	statedb, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
+	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
+	statedb := state.New(tds)
 	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
@@ -210,6 +211,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 		statedb.RevertToSnapshot(snapshot)
 	}
 
+	w := state.NewDbStateWriter(tx, block.NumberU64())
 	// Commit block
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, common.Hash{}, err
@@ -224,7 +226,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(ctx, state.NewDbStateWriter(tx, tds.GetBlockNr())); err != nil {
+	if err = statedb.CommitBlock(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
 
@@ -264,12 +266,9 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		return nil, nil, err
 	}
-
-	tds.SetBlockNr(blockNr + 1)
 	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		return nil, nil, err
 	}
-	statedb = state.New(tds)
 	return statedb, tds, nil
 }
 
