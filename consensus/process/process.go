@@ -4,10 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"sort"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -284,47 +281,10 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 		headers = append(headers, req.Header) // todo maybe it's inefficient
 	}
 
-	if len(nums) == 1 {
-		req, _ := reqHeaders.Get(nums[0])
-
-		log.Debug(fmt.Sprint("VerifyRequestsCommonAncestor-XXX-1", reqID, req.Header.Number.Uint64(), req.KnownParents[0].Number.Uint64(), len(req.KnownParents)))
+	for _, num := range nums {
+		req, _ := reqHeaders.Get(num)
 
 		_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
-	} else {
-		idx := new(uint32)
-
-		workers := runtime.NumCPU()
-		if workers > len(nums) {
-			workers = len(nums)
-		}
-
-		var wg sync.WaitGroup
-
-		for i := 0; i < workers; i++ {
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
-				for {
-					idx := atomic.AddUint32(idx, 1) - 1
-					if int(idx) > len(nums)-1 {
-						return
-					}
-
-					num := nums[idx]
-
-					req, ok := reqHeaders.Get(num)
-					if !ok {
-						continue
-					}
-
-					_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
-				}
-			}()
-		}
-
-		wg.Wait()
 	}
 }
 

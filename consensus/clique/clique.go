@@ -25,13 +25,14 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	json "github.com/json-iterator/go"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -40,13 +41,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -144,15 +143,52 @@ var (
 // SignerFn hashes and signs the data to be signed by a backing account.
 type SignerFn func(signer common.Address, message []byte) ([]byte, error)
 
+type counter struct {
+	hit  *uint64
+	miss *uint64
+}
+
+func newCounter() *counter {
+	return &counter{new(uint64), new(uint64)}
+}
+
+func (c *counter) addMiss() {
+	atomic.AddUint64(c.miss, 1)
+}
+
+func (c *counter) addHit() {
+	atomic.AddUint64(c.hit, 1)
+}
+func (c *counter) getMiss() uint64 {
+	return atomic.LoadUint64(c.miss)
+}
+func (c *counter) getHit() uint64 {
+	return atomic.LoadUint64(c.hit)
+}
+
+func (c *counter) String() string {
+	h, m := c.getHit(), c.getMiss()
+	ratio := float64(m) / float64(h+m)
+
+	atomic.StoreUint64(c.hit, 0)
+	atomic.StoreUint64(c.miss, 0)
+
+	return fmt.Sprintf("counter: hit %d, miss %d, ratio %.4f", c.getHit(), c.getMiss(), ratio)
+}
+
+var sigcacheCounter = newCounter()
+
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.HashCache()
 
-	// fixme try to remove. It could be that hit rate is extremely low.
+	// hitrate while straight-forward sync if from 0.5 to 0.65
 	if address, known := sigcache.Get(hash); known {
+		sigcacheCounter.addHit()
 		return address.(common.Address), nil
 	}
+	sigcacheCounter.addMiss()
 
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
@@ -165,40 +201,26 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	if err != nil {
 		return common.Address{}, err
 	}
-
 	var signer common.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
-
 	return signer, nil
 }
 
-func ecrecoverWithContext(context *secp256k1.Context, header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
-	// If the signature's already cached, return that
-	hash := header.HashCache()
-	if address, known := sigcache.Get(hash); known {
-		return address.(common.Address), nil
+func ecrecovers(hs []*types.Header, sigcache *lru.ARCCache) ([]common.Address, error) {
+	res := make([]common.Address, 0, len(hs))
+
+	for _, h := range hs {
+		addr, err := ecrecover(h, sigcache)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, addr)
 	}
 
-	// Retrieve the signature from the header extra-data
-	if len(header.Extra) < extraSeal {
-		return common.Address{}, errMissingSignature
-	}
-	signature := header.Extra[len(header.Extra)-extraSeal:]
-
-	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.EcrecoverWithContext(context, SealHash(header).Bytes(), signature)
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
-
-	sigcache.Add(hash, signer)
-
-	return signer, nil
+	return res, nil
 }
 
 // Clique is the proof-of-authority consensus engine proposed to support the
@@ -208,10 +230,10 @@ type Clique struct {
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
 	db             ethdb.Database         // Database to store and retrieve snapshot checkpoints
 
+	signatures     *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents        *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	recentsNum     *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	snapshotBlocks *lru.ARCCache // blockNum -> hash
-	recoverSig     *recoverer
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -238,6 +260,7 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 	recents, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
 	recentsNum, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
 	snapshotBlocks, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
+	signatures, _ := lru.NewARC(snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
 
@@ -248,7 +271,7 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 		recents:        recents,
 		recentsNum:     recentsNum,
 		snapshotBlocks: snapshotBlocks,
-		recoverSig:     newRecoverer(snapshotConfig.InmemorySignatures, exitCh),
+		signatures:     signatures,
 		proposals:      make(map[common.Address]bool),
 		snapStorage:    newStorage(db, exitCh),
 		exitCh:         exitCh,
@@ -278,7 +301,7 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *Clique) Author(header *types.Header) (common.Address, error) {
-	return ecrecover(header, c.recoverSig.sigcache)
+	return ecrecover(header, c.signatures)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -416,137 +439,6 @@ func (c *Clique) recentsHas(hash common.Hash) bool {
 	return ok
 }
 
-type recoverer struct {
-	sigcache *lru.ARCCache
-	reqCh    chan recoverReq
-}
-
-type recoverReq struct {
-	h   []*types.Header
-	res chan recoverRes
-}
-
-type recoverRes struct {
-	addrs []common.Address
-	errs  []error
-}
-
-func newRecoverer(cacheSize int, exitCh chan struct{}) *recoverer {
-	signatures, _ := lru.NewARC(cacheSize)
-	requests := make(chan recoverReq, cacheSize)
-
-	r := &recoverer{
-		sigcache: signatures,
-		reqCh:    requests,
-	}
-
-	go func() {
-		numOfGoroutines := runtime.NumCPU()
-
-		for {
-			select {
-			case <-exitCh:
-				return
-			case req := <-requests:
-				if len(req.h) == 0 {
-					req.res <- recoverRes{nil, []error{errNoHeaders}}
-				}
-
-				addrs := make([]common.Address, len(req.h))
-				errs := make([]error, len(req.h))
-
-				done := true
-				for idx := range req.h {
-					if req.h[idx].Author() != (common.Address{}) {
-						addrs[idx] = req.h[idx].Author()
-						errs[idx] = nil
-					} else {
-						done = false
-						break
-					}
-				}
-				if done {
-					req.res <- recoverRes{addrs, errs}
-					continue
-				}
-
-				threads := numOfGoroutines
-				if threads > len(req.h) {
-					threads = len(req.h)
-				}
-
-				n := new(uint32)
-				wg := new(sync.WaitGroup)
-				wg.Add(threads)
-
-				for i := 0; i < threads; i++ {
-					go func(threadNo int) {
-						defer wg.Done()
-
-						for {
-							idx := atomic.AddUint32(n, 1) - 1
-							if idx > uint32(len(req.h)-1) {
-								return
-							}
-
-							if req.h[idx].Author() == (common.Address{}) {
-								addr, err := ecrecoverWithContext(secp256k1.ContextForThread(threadNo), req.h[idx], r.sigcache)
-
-								addrs[idx] = addr
-								errs[idx] = err
-							} else {
-								addrs[idx] = req.h[idx].Author()
-								errs[idx] = nil
-							}
-						}
-					}(i)
-				}
-
-				wg.Wait()
-
-				req.res <- recoverRes{addrs, errs}
-			}
-		}
-	}()
-
-	return r
-}
-
-func (r *recoverer) ecrecover(h *types.Header) (common.Address, error) {
-	acc := h.Author()
-	if acc == (common.Address{}) {
-		return ecrecover(h, r.sigcache)
-	}
-	return acc, nil
-}
-
-func (r *recoverer) ecrecovers(h []*types.Header) ([]common.Address, error) {
-	if len(h) == 1 {
-		addr, err := r.ecrecover(h[0])
-		return []common.Address{addr}, err
-	}
-
-	resCh := make(chan recoverRes, len(h))
-
-	r.reqCh <- recoverReq{h, resCh}
-	res := <-resCh
-
-	var errsMsg string
-	var isError bool
-	for _, err := range res.errs {
-		if err != nil {
-			isError = true
-			errsMsg = fmt.Sprintf("%s %s", errsMsg, err.Error())
-		}
-	}
-
-	if isError {
-		return res.addrs, errors.New(errsMsg)
-	}
-
-	return res.addrs, nil
-}
-
 func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, check bool, headers ...*types.Header) error {
 	if snap == nil {
 		return fmt.Errorf("can't create a new snapshot, a previous one is nil: %w", ErrNotFound)
@@ -568,7 +460,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, check bool, headers ...*t
 	}
 
 	if len(headers) > 0 && headers[len(headers)-1].Number.Uint64() > snap.Number {
-		if err := snap.apply(c.recoverSig, headers...); err != nil {
+		if err := snap.apply(c.signatures, headers...); err != nil {
 			return err
 		}
 	}
@@ -745,7 +637,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	// Resolve the authorization key and check against signers
-	signer, err := c.recoverSig.ecrecover(header)
+	signer, err := ecrecover(header, c.signatures)
 	if err != nil {
 		return err
 	}
@@ -972,6 +864,9 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 func (c *Clique) Close() error {
 	common.SafeClose(c.exitCh)
 	c.snapStorage.Close()
+
+	fmt.Println("!!!!!", sigcacheCounter)
+
 	return nil
 }
 

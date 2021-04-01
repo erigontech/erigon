@@ -275,7 +275,7 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	}
 
 	// Resolve the authorization key and check against signers
-	signer, err := c.recoverSig.ecrecover(header)
+	signer, err := ecrecover(header, c.signatures)
 	if err != nil {
 		return err
 	}
@@ -338,15 +338,6 @@ func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash c
 				break
 			}
 		}
-
-		//fixme check if it's needed
-		/*
-			if n <= int(highest) {
-					ok = true
-				} else {
-					n = 0
-				}
-		*/
 	}
 
 	if n < 0 {
