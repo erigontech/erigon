@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
@@ -131,7 +132,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
 
-	if sim.blockchain.Config() != params.AllEthashProtocolChanges {
+	if sim.config != params.AllEthashProtocolChanges {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
 	tx, err1 := sim.DB().Begin(context.Background(), ethdb.RO)
@@ -139,7 +140,8 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	statedb := state.New(state.NewPlainDBState(tx, sim.blockchain.CurrentBlock().NumberU64()))
+
+	statedb := state.New(state.NewPlainDBState(tx, rawdb.ReadCurrentBlock(sim.database).NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

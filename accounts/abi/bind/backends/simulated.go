@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"sync"
 	"time"
 
@@ -66,9 +65,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database   *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine     consensus.Engine
-	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
+	database     *ethdb.ObjectDatabase // In memory database to store our testing data
+	engine       consensus.Engine
+	chainContext *core.TinyChainContext
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -82,7 +81,6 @@ type SimulatedBackend struct {
 	events *filters.EventSystem // Event system for filtering log events live
 
 	config     *params.ChainConfig
-	txCacher   *core.TxSenderCacher
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
@@ -95,20 +93,16 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		panic(fmt.Sprintf("%v", err))
-	}
-	blockchain.EnableReceipts(true)
+	cc := &core.TinyChainContext{}
+	cc.SetDB(database)
+	cc.SetEngine(ethash.NewFaker())
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		blockchain:   blockchain,
+		chainContext: cc,
 		config:       genesis.Config,
-		txCacher:     txCacher,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -123,19 +117,11 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		panic(err)
-	}
-	blockchain.EnableReceipts(true)
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		blockchain:   blockchain,
 		config:       genesis.Config,
-		txCacher:     txCacher,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -153,7 +139,6 @@ func (b *SimulatedBackend) DB() ethdb.Database {
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
-	b.blockchain.Stop()
 	b.database.Close()
 	return nil
 }
@@ -164,7 +149,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.blockchain.Engine(), b.pendingBlock, false /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -630,7 +615,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.blockchain, nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.chainContext, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -646,8 +631,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	block := b.blockchain.CurrentBlock()
-	signer := types.MakeSigner(b.blockchain.Config(), block.Number())
+	block := rawdb.ReadCurrentBlock(b.database)
+	signer := types.MakeSigner(b.config, block.Number())
 	sender, senderErr := types.Sender(signer, tx)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
@@ -660,7 +645,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.blockchain,
+		b.config, b.chainContext,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -670,9 +655,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.blockchain, tx)
+			block.AddTxWithChain(b.chainContext, tx)
 		}
-		block.AddTxWithChain(b.blockchain, tx)
+		block.AddTxWithChain(b.chainContext, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -791,7 +776,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.blockchain, tx)
+			block.AddTxWithChain(b.chainContext, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)
@@ -802,11 +787,6 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	b.pendingHeader = b.pendingBlock.Header()
 
 	return nil
-}
-
-// Blockchain returns the underlying blockchain.
-func (b *SimulatedBackend) Blockchain() *core.BlockChain {
-	return b.blockchain
 }
 
 // callMsg implements core.Message to allow passing it as a transaction simulator.
