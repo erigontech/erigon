@@ -58,9 +58,6 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 
 	prefix, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, int(forkBlock.Int64()-1), func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	require.NoError(t, err)
-	if err != nil {
-		t.Fatalf("generate prefix chain: %v", err)
-	}
 
 	conDb := ethdb.NewMemDatabase()
 	defer conDb.Close()
@@ -95,17 +92,13 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &conConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 			require.NoError(t, err)
 			blocks, _, err = core.GenerateChain(&proConf, rawdb.ReadCurrentBlock(conDb), ethash.NewFaker(), conDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-			if err != nil {
-				t.Fatalf("generate blocks: %v", err)
-			}
+			require.NoError(t, err)
 			if _, err = conBc.InsertChain(context.Background(), blocks); err == nil {
 				t.Fatalf("contra-fork chain accepted pro-fork block: %v", blocks[0])
 			}
 			// Create a proper no-fork block for the contra-forker
 			blocks, _, err = core.GenerateChain(&conConf, rawdb.ReadCurrentBlock(conDb), ethash.NewFaker(), conDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-			if err != nil {
-				t.Fatalf("generate blocks: %v", err)
-			}
+			require.NoError(t, err)
 			if _, err = conBc.InsertChain(context.Background(), blocks); err != nil {
 				t.Fatalf("contra-fork chain didn't accepted no-fork block: %v", err)
 			}
@@ -124,17 +117,13 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 			_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &proConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 			require.NoError(t, err)
 			blocks, _, err = core.GenerateChain(&conConf, rawdb.ReadCurrentBlock(proDb), ethash.NewFaker(), proDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-			if err != nil {
-				t.Fatalf("generate blocks: %v", err)
-			}
+			require.NoError(t, err)
 			if _, err = proBc.InsertChain(context.Background(), blocks); err == nil {
 				t.Fatalf("pro-fork chain accepted contra-fork block: %v", blocks[0])
 			}
 			// Create a proper pro-fork block for the pro-forker
 			blocks, _, err = core.GenerateChain(&proConf, rawdb.ReadCurrentBlock(proDb), ethash.NewFaker(), proDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-			if err != nil {
-				t.Fatalf("generate blocks: %v", err)
-			}
+			require.NoError(t, err)
 			if _, err = proBc.InsertChain(context.Background(), blocks); err != nil {
 				t.Fatalf("pro-fork chain didn't accepted pro-fork block: %v", err)
 			}
@@ -153,9 +142,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &conConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 	require.NoError(t, err)
 	blocks, _, err = core.GenerateChain(&proConf, conBc.CurrentBlock(), ethash.NewFaker(), conDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
+	require.NoError(t, err)
 	if _, err = conBc.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("contra-fork chain didn't accept pro-fork block post-fork: %v", err)
 	}
@@ -172,9 +159,7 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &proConf, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 	require.NoError(t, err)
 	blocks, _, err = core.GenerateChain(&conConf, rawdb.ReadCurrentBlock(proDb), ethash.NewFaker(), proDb, 1, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
+	require.NoError(t, err)
 	if _, err = proBc.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatalf("pro-fork chain didn't accept contra-fork block post-fork: %v", err)
 	}
