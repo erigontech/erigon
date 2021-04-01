@@ -14,7 +14,7 @@ jobs:
           msystem: MSYS
       - name: Install gcc
         shell: msys2 {0}
-        run: pacman --noconfirm -S gcc g++
+        run: pacman --noconfirm -S base-devel mingw-w64-i686-toolchain mingw-w64-x86_64-toolchain
       - uses: actions/checkout@v2
         with:
           submodules: recursive
