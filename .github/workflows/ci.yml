@@ -24,6 +24,10 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Add Msys64 to PATH
+        if: matrix.os == 'windows-latest'
+        run: echo "::add-path::/c/msys64/mingw64/bin:/c/msys64/usr/bin"
+        shell: bash
       - name: Build
         run: make all
       - name: Lint
