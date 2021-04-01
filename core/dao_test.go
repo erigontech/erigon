@@ -71,12 +71,11 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 	conBc, _ := core.NewBlockChain(conDb, nil, &conConf, ethash.NewFaker(), vm.Config{}, nil, txCacherConBc)
 	defer conBc.Stop()
 
-	if _, err = proBc.InsertChain(context.Background(), prefix); err != nil {
-		t.Fatalf("pro-fork: failed to import chain prefix: %v", err)
-	}
-	if _, err = conBc.InsertChain(context.Background(), prefix); err != nil {
-		t.Fatalf("con-fork: failed to import chain prefix: %v", err)
-	}
+	_, err = proBc.InsertChain(context.Background(), prefix)
+	require.NoError(t, err)
+	_, err = conBc.InsertChain(context.Background(), prefix)
+	require.NoError(t, err)
+
 	// Try to expand both pro-fork and non-fork chains iteratively with other camp's blocks
 	for i := int64(0); i < params.DAOForkExtraRange.Int64(); i++ {
 		t.Run(strconv.Itoa(int(i)), func(t *testing.T) {
