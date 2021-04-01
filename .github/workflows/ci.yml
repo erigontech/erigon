@@ -13,6 +13,7 @@ jobs:
         with:
           msystem: MSYS
       - name: Install gcc
+        shell: msys2 {0}
         run: pacman --noconfirm -S mingw64/mingw-w64-x86_64-gcc
       - uses: actions/checkout@v2
         with:
