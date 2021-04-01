@@ -119,10 +119,6 @@ type Ethereum struct {
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
-	// Ensure configuration values are compatible and sane
-	if !config.SyncMode.IsValid() {
-		return nil, fmt.Errorf("invalid sync mode %d", config.SyncMode)
-	}
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -162,7 +158,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	var torrentClient *bittorrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
+	if config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		if config.ExternalSnapshotDownloaderAddr != "" {
 			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
 			if innerErr != nil {
@@ -346,12 +342,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.SyncMode != downloader.StagedSync {
-		_, err = eth.blockchain.GetTrieDbState()
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
 	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
@@ -446,7 +436,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Chain:      eth.blockchain,
 		TxPool:     eth.txPool,
 		Network:    config.NetworkID,
-		Sync:       config.SyncMode,
 		EventMux:   eth.eventMux,
 		Checkpoint: checkpoint,
 
@@ -455,10 +444,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}); err != nil {
 		return nil, err
 	}
-	//if config.SyncMode != downloader.StagedSync {
-	//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	//_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-	//}
 	eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
@@ -476,26 +461,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	if config.SyncMode != downloader.StagedSync {
-		eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
-		gpoParams := config.GPO
-		if gpoParams.Default == nil {
-			gpoParams.Default = config.Miner.GasPrice
-		}
-		eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	}
-
 	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
-	}
-	// Start the RPC service
-	if config.SyncMode != downloader.StagedSync {
-		id, err := eth.NetVersion()
-		if err != nil {
-			return nil, err
-		}
-		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
 	}
 
 	// Register the backend on the node
@@ -690,7 +658,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		th.SetThreads(threads)
 	}
 	// If the miner was not running, initialize it
-	if s.config.SyncMode == downloader.StagedSync || !s.IsMining() {
+	if !s.IsMining() {
 		// Propagate the initial price point to the transaction pool
 		s.lock.RLock()
 		price := s.gasPrice
@@ -730,10 +698,6 @@ func (s *Ethereum) StopMining() {
 	}
 	if th, ok := s.engine.(threaded); ok {
 		th.SetThreads(-1)
-	}
-	// Stop the block creating itself
-	if s.config.SyncMode != downloader.StagedSync {
-		s.miner.Stop()
 	}
 }
 

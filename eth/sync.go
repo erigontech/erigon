@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -163,7 +162,6 @@ type chainSyncer struct {
 
 // chainSyncOp is a scheduled sync operation.
 type chainSyncOp struct {
-	mode   downloader.SyncMode
 	peer   *eth.Peer
 	number uint64
 	head   common.Hash
@@ -261,21 +259,21 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	if peer == nil {
 		return nil
 	}
-	mode, ourNumber := cs.modeAndLocalHead()
-	op := peerToSyncOp(mode, peer)
+	ourNumber := cs.localHead()
+	op := peerToSyncOp(peer)
 	if op.number <= ourNumber {
 		return nil // We're in sync.
 	}
 	return op
 }
 
-func peerToSyncOp(mode downloader.SyncMode, p *eth.Peer) *chainSyncOp {
+func peerToSyncOp(p *eth.Peer) *chainSyncOp {
 	peerHead, peerNumber := p.Head()
-	return &chainSyncOp{mode: mode, peer: p, number: peerNumber, head: peerHead}
+	return &chainSyncOp{peer: p, number: peerNumber, head: peerHead}
 }
 
-func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, uint64) {
-	return downloader.StagedSync, atomic.LoadUint64(&cs.handler.currentHeight)
+func (cs *chainSyncer) localHead() uint64 {
+	return atomic.LoadUint64(&cs.handler.currentHeight)
 }
 
 // startSync launches doSync in a new goroutine.
@@ -288,7 +286,7 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 func (h *handler) doSync(op *chainSyncOp) error {
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
 	txPool, _ := h.txpool.(*core.TxPool)
-	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, op.mode, txPool, func() error { return nil })
+	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, txPool, func() error { return nil })
 	if err != nil {
 		return err
 	}
@@ -298,7 +296,7 @@ func (h *handler) doSync(op *chainSyncOp) error {
 	headNumber := rawdb.ReadHeaderNumber(h.database, headHash)
 	atomic.StoreUint64(&h.currentHeight, *headNumber) // this will be read by the block fetcher when required
 	head := rawdb.ReadBlock(h.database, headHash, *headNumber)
-	if *headNumber >= h.checkpointNumber && head != nil {
+	if head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
 		// for non-checkpointed (number = 0) private networks.
 		if head.Time() >= uint64(time.Now().AddDate(0, -1, 0).Unix()) {
