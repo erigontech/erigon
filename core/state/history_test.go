@@ -427,7 +427,6 @@ func TestUnwindTruncateHistory(t *testing.T) {
 func TestWalkAsOfStatePlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	emptyVal := uint256.NewInt()
 	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
@@ -458,7 +457,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		return expectedKey
 	}
 
-	writeStorageBlockData(t, tds, 3, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 3), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -482,7 +481,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		},
 	})
 
-	writeStorageBlockData(t, tds, 5, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 5), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -596,7 +595,6 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	emptyVal := uint256.NewInt()
 	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
@@ -628,7 +626,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		return expectedKey
 	}
 
-	writeStorageBlockData(t, tds, 3, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 3), []storageData{
 		{
 			addr:   addr1,
 			inc:    changeset.DefaultIncarnation,
@@ -659,7 +657,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		},
 	})
 
-	writeStorageBlockData(t, tds, 5, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 5), []storageData{
 		{
 			addr:   addr1,
 			inc:    changeset.DefaultIncarnation,
@@ -1121,7 +1119,6 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
 
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)
@@ -1135,7 +1132,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	emptyVal := uint256.NewInt()
 
 	val := uint256.NewInt().SetBytes([]byte("block 1"))
-	writeStorageBlockData(t, tds, 1, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 1), []storageData{
 		{
 			addr:   addrs[0],
 			inc:    1,
@@ -1162,7 +1159,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	prev := val
 	for i := 2; i < 1100; i++ {
 		val = uint256.NewInt().SetBytes([]byte("block " + strconv.Itoa(i)))
-		writeStorageBlockData(t, tds, uint64(i), []storageData{
+		writeStorageBlockData(t, NewPlainStateWriter(db, db, uint64(i)), []storageData{
 			{
 				addr:   addrs[0],
 				inc:    1,
@@ -1190,7 +1187,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 	val = uint256.NewInt().SetBytes([]byte("block 1100"))
 
-	writeStorageBlockData(t, tds, 1100, []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(db, db, 1100), []storageData{
 		{
 			addr:   addrs[0],
 			inc:    1,
@@ -1293,9 +1290,7 @@ type storageData struct {
 	newVal *uint256.Int
 }
 
-func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []storageData) {
-	tds.SetBlockNr(blockNum)
-	var blockWriter = tds.PlainStateWriter()
+func writeStorageBlockData(t *testing.T, blockWriter *PlainStateWriter, data []storageData) {
 
 	for i := range data {
 		if err := blockWriter.WriteAccountStorage(context.Background(),
