@@ -26,7 +26,7 @@ jobs:
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Add Msys64 to PATH
         if: matrix.os == 'windows-latest'
-        run: echo "::add-path::/c/msys64/mingw64/bin:/c/msys64/usr/bin"
+        run: echo "/c/msys64/mingw64/bin:/c/msys64/usr/bin" >> $GITHUB_PATH
         shell: bash
       - name: Build
         run: make all
