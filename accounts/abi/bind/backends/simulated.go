@@ -95,7 +95,7 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	engine := ethash.NewFaker()
 	cc := &core.TinyChainContext{}
 	cc.SetDB(database)
-	cc.SetEngine(ethash.NewFaker())
+	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
@@ -116,12 +116,16 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
+	cc := &core.TinyChainContext{}
+	cc.SetDB(database)
+	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
 		config:       genesis.Config,
+		chainContext: cc,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
