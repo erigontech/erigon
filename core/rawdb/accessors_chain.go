@@ -171,27 +171,6 @@ func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
 	}
 }
 
-// ReadFastTrieProgress retrieves the number of tries nodes fast synced to allow
-// reporting correct numbers across restarts.
-func ReadFastTrieProgress(db databaseReader) uint64 {
-	data, err := db.Get(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("ReadFastTrieProgress failed", "err", err)
-	}
-	if len(data) == 0 {
-		return 0
-	}
-	return new(big.Int).SetBytes(data).Uint64()
-}
-
-// WriteFastTrieProgress stores the fast sync trie process counter to support
-// retrieving it across restarts.
-func WriteFastTrieProgress(db DatabaseWriter, count uint64) {
-	if err := db.Put(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey), new(big.Int).SetUint64(count).Bytes()); err != nil {
-		log.Crit("Failed to store fast sync trie progress", "err", err)
-	}
-}
-
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db databaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.Get(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash))
