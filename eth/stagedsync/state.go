@@ -212,9 +212,9 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
-	if err := printBucketsSize(tx); err != nil {
-		return err
-	}
+	//if err := printBucketsSize(tx); err != nil {
+	//	return err
+	//}
 	return nil
 }
 

@@ -313,43 +313,46 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	info, _ := db.env.Info()
-	dbSize.Update(int64(info.Geo.Current))
+	return
+	/*
+		info, _ := db.env.Info()
+		dbSize.Update(int64(info.Geo.Current))
 
-	if err := db.View(context.Background(), func(tx Tx) error {
-		stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
-		tableScsLeaf.Update(int64(stat.LeafPages))
-		tableScsBranch.Update(int64(stat.BranchPages))
-		tableScsOverflow.Update(int64(stat.OverflowPages))
-		tableScsEntries.Update(int64(stat.Entries))
+		if err := db.View(context.Background(), func(tx Tx) error {
+			stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
+			tableScsLeaf.Update(int64(stat.LeafPages))
+			tableScsBranch.Update(int64(stat.BranchPages))
+			tableScsOverflow.Update(int64(stat.OverflowPages))
+			tableScsEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
-		tableStateLeaf.Update(int64(stat.LeafPages))
-		tableStateBranch.Update(int64(stat.BranchPages))
-		tableStateOverflow.Update(int64(stat.OverflowPages))
-		tableStateEntries.Update(int64(stat.Entries))
+			stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
+			tableStateLeaf.Update(int64(stat.LeafPages))
+			tableStateBranch.Update(int64(stat.BranchPages))
+			tableStateOverflow.Update(int64(stat.OverflowPages))
+			tableStateEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
-		tableLogLeaf.Update(int64(stat.LeafPages))
-		tableLogBranch.Update(int64(stat.BranchPages))
-		tableLogOverflow.Update(int64(stat.OverflowPages))
-		tableLogEntries.Update(int64(stat.Entries))
+			stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
+			tableLogLeaf.Update(int64(stat.LeafPages))
+			tableLogBranch.Update(int64(stat.BranchPages))
+			tableLogOverflow.Update(int64(stat.OverflowPages))
+			tableLogEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
-		tableTxLeaf.Update(int64(stat.LeafPages))
-		tableTxBranch.Update(int64(stat.BranchPages))
-		tableTxOverflow.Update(int64(stat.OverflowPages))
-		tableTxEntries.Update(int64(stat.Entries))
+			stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
+			tableTxLeaf.Update(int64(stat.LeafPages))
+			tableTxBranch.Update(int64(stat.BranchPages))
+			tableTxOverflow.Update(int64(stat.OverflowPages))
+			tableTxEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat("gc")
-		tableGcLeaf.Update(int64(stat.LeafPages))
-		tableGcBranch.Update(int64(stat.BranchPages))
-		tableGcOverflow.Update(int64(stat.OverflowPages))
-		tableGcEntries.Update(int64(stat.Entries))
-		return nil
-	}); err != nil {
-		log.Error("collecting metrics failed", "err", err)
-	}
+			stat, _ = tx.(*MdbxTx).BucketStat("gc")
+			tableGcLeaf.Update(int64(stat.LeafPages))
+			tableGcBranch.Update(int64(stat.BranchPages))
+			tableGcOverflow.Update(int64(stat.OverflowPages))
+			tableGcEntries.Update(int64(stat.Entries))
+			return nil
+		}); err != nil {
+			log.Error("collecting metrics failed", "err", err)
+		}
+	*/
 }
 
 func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
