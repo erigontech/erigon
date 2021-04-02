@@ -29,7 +29,12 @@ jobs:
         run: make all
       - name: Build (windows)
         if: matrix.os == 'windows-latest'
-        run: go build -trimpath -o bin/tg.exe ./cmd/tg
+        run: |
+          go build -trimpath -o bin/tg.exe ./cmd/tg
+          go build -trimpath -o bin/rpcdaemon.exe ./cmd/rpcdaemon
+          go build -trimpath -o bin/rpctest.exe ./cmd/rpctest
+          go build -trimpath -o bin/integration.exe ./cmd/integration
+          go build -trimpath -o bin/headers.ext ./cmd/headers
       - name: Lint
         if: matrix.os != 'windows-latest'
         uses: golangci/golangci-lint-action@v2
@@ -39,9 +44,12 @@ jobs:
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
-      - name: Test
+      - name: Test (non-windows)
         if: matrix.os != 'windows-latest'
         run: make test
+      - name: Test (windows)
+        if: matrix.os == 'windows-latest'
+        run: go test ./... -p 1 --tags 'mdbx'
   docker:
     runs-on: ubuntu-latest
     steps:
