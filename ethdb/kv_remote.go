@@ -54,13 +54,12 @@ type remoteTx struct {
 }
 
 type remoteCursor struct {
-	initialized bool
-	id          uint32
-	ctx         context.Context
-	stream      remote.KV_TxClient
-	tx          *remoteTx
-	bucketName  string
-	bucketCfg   dbutils.BucketConfigItem
+	id         uint32
+	ctx        context.Context
+	stream     remote.KV_TxClient
+	tx         *remoteTx
+	bucketName string
+	bucketCfg  dbutils.BucketConfigItem
 }
 
 type remoteCursorDupSort struct {
@@ -286,16 +285,10 @@ func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (c *remoteCursor) SeekExact(key []byte) (k, val []byte, err error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.seekExact(key)
 }
 
 func (c *remoteCursor) Prev() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prev()
 }
 
@@ -303,23 +296,15 @@ func (tx *remoteTx) Cursor(bucket string) (Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
-	return c, nil
-}
-
-func (c *remoteCursor) initCursor() error {
-	if c.initialized {
-		return nil
-	}
 	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_OPEN, BucketName: c.bucketName}); err != nil {
-		return err
+		return nil, err
 	}
 	msg, err := c.stream.Recv()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.id = msg.CursorID
-	c.initialized = true
-	return nil
+	return c, nil
 }
 
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
@@ -482,40 +467,25 @@ func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
 }
 
 func (c *remoteCursor) Current() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.getCurrent()
 }
 
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.setRange(seek)
 }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.first()
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.next()
 }
 
 func (c *remoteCursor) Last() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.last()
 }
 
@@ -549,11 +519,13 @@ func (tx *remoteTx) closeGrpcStream() {
 }
 
 func (c *remoteCursor) Close() {
-	if c.initialized {
-		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
-			_, _ = c.stream.Recv()
-		}
-		c.initialized = false
+	if c.stream == nil {
+		return
+	}
+	st := c.stream
+	c.stream = nil
+	if err := st.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
+		_, _ = st.Recv()
 	}
 }
 
@@ -565,33 +537,11 @@ func (tx *remoteTx) CursorDupSort(bucket string) (CursorDupSort, error) {
 	return &remoteCursorDupSort{remoteCursor: c.(*remoteCursor)}, nil
 }
 
-//func (c *remoteCursorDupSort) initCursor() error {
-//	if c.initialized {
-//		return nil
-//	}
-//
-//	if c.bucketCfg.AutoDupSortKeysConversion {
-//		return fmt.Errorf("class remoteCursorDupSort not compatible with AutoDupSortKeysConversion buckets")
-//	}
-//
-//	if c.bucketCfg.Flags&dbutils.DupSort == 0 {
-//		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag dbutils.DupSort")
-//	}
-//
-//	return c.remoteCursor.initCursor()
-//}
-
 func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.seekBothExact(key, value)
 }
 
 func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.getBothRange(key, value)
 }
 
@@ -602,38 +552,20 @@ func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error       { panic("not
 func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)     { panic("not supported") }
 
 func (c *remoteCursorDupSort) FirstDup() ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.firstDup()
 }
 func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.nextDup()
 }
 func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.nextNoDup()
 }
 func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prevDup()
 }
 func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prevNoDup()
 }
 func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.lastDup()
 }
