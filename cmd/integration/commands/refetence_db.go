@@ -328,7 +328,10 @@ MainLoop:
 			panic("bucket not parse")
 		}
 
-		c := dstTx.RwCursor(bucket)
+		c, err := dstTx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
 
 		var prevK []byte
 		for {
@@ -435,7 +438,10 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 			continue
 		}
 
-		c := dstTx.RwCursor(name)
+		c, err := dstTx.RwCursor(name)
+		if err != nil {
+			return err
+		}
 		srcC := srcTx.Cursor(name)
 		var prevK []byte
 		casted, isDupsort := c.(ethdb.RwCursorDupSort)
@@ -474,7 +480,10 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 				if err != nil {
 					return err
 				}
-				c = dstTx.RwCursor(name)
+				c, err = dstTx.RwCursor(name)
+				if err != nil {
+					return err
+				}
 				casted, isDupsort = c.(ethdb.RwCursorDupSort)
 			default:
 			}

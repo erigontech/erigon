@@ -42,7 +42,10 @@ func nothing(kv ethdb.RwKV, _ ethdb.RwTx) (bool, error) {
 
 // Generates a database with single table and two key-value pair in "t" DBI, and returns the file name
 func generate2(tx ethdb.RwTx, entries int) error {
-	c := tx.RwCursor("t")
+	c, err := tx.RwCursor("t")
+	if err != nil {
+		return err
+	}
 	defer c.Close()
 	for i := 0; i < entries; i++ {
 		k := fmt.Sprintf("%05d", i)
@@ -66,7 +69,10 @@ func generate3(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 
 // Generates a database with one table, containing 1 short and 1 long (more than one page) values
 func generate4(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursor("t")
+	c, err := tx.RwCursor("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	if err := c.Append([]byte("k1"), []byte("very_short_value")); err != nil {
 		return false, err
@@ -132,9 +138,15 @@ func dropT(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 }
 
 func generate7(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
-	c1 := tx.RwCursor("t1")
+	c1, err := tx.RwCursor("t1")
+	if err != nil {
+		return false, err
+	}
 	defer c1.Close()
-	c2 := tx.RwCursor("t2")
+	c2, err := tx.RwCursor("t2")
+	if err != nil {
+		return false, err
+	}
 	defer c2.Close()
 	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
@@ -177,7 +189,10 @@ func generate9(tx ethdb.RwTx, entries int) error {
 	var cs []ethdb.RwCursor
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		c := tx.RwCursor(k)
+		c, err := tx.RwCursor(k)
+		if err != nil {
+			return err
+		}
 		defer c.Close()
 		cs = append(cs, c)
 	}
@@ -217,7 +232,10 @@ func dropGradually(kv ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 }
 
 func change1(tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursor("t")
+	c, err := tx.RwCursor("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
@@ -229,7 +247,10 @@ func change1(tx ethdb.RwTx) (bool, error) {
 }
 
 func change2(tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursor("t")
+	c, err := tx.RwCursor("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
@@ -241,7 +262,10 @@ func change2(tx ethdb.RwTx) (bool, error) {
 }
 
 func change3(tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursor("t")
+	c, err := tx.RwCursor("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)

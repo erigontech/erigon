@@ -132,10 +132,13 @@ type Tx interface {
 type RwTx interface {
 	Tx
 
-	RwCursor(bucket string) RwCursor
+	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) RwCursorDupSort
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+
+	Put(bucket string, k, v []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

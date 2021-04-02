@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -226,7 +227,8 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
 
 	clear := func() {
-		c := tx.RwCursor(bkt)
+		c, err := tx.RwCursor(bkt)
+		require.NoError(t, err)
 		defer c.Close()
 		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
 			if err != nil {
@@ -256,7 +258,8 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
 
 	clear := func() {
-		c := tx.RwCursor(bkt)
+		c, err := tx.RwCursor(bkt)
+		require.NoError(t, err)
 		defer c.Close()
 		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
 			if err != nil {
@@ -308,9 +311,10 @@ func doTestFind(
 			}
 		}
 
-		c := tx.RwCursor(bucket)
+		c, err := tx.RwCursor(bucket)
+		require.NoError(t, err)
 
-		err := encodeFunc(1, ch, func(k, v []byte) error {
+		err = encodeFunc(1, ch, func(k, v []byte) error {
 			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
 				return err2
 			}

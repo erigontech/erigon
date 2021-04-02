@@ -73,7 +73,10 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 		}
 		bucketName := string(tuples[bucketStart])
-		c := tx.RwCursor(bucketName)
+		c, err := tx.RwCursor(bucketName)
+		if err != nil {
+			return err
+		}
 
 		// move cursor to a first element in batch
 		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)

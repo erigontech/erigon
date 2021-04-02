@@ -25,12 +25,15 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			if innerErr != nil {
 				panic(innerErr)
 			}
-			innerErr = tx.RwCursor(dbutils.HeadersBucket).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			innerErr = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if innerErr != nil {
 				panic(innerErr)
 			}
 		}
-		c := tx.RwCursor(dbutils.HeadersSnapshotInfoBucket)
+		c, err := tx.RwCursor(dbutils.HeadersSnapshotInfoBucket)
+		if err != nil {
+			return err
+		}
 		innerErr := c.Put([]byte(dbutils.SnapshotHeadersHeadHash), headers[len(headers)-1].Hash().Bytes())
 		if innerErr != nil {
 			return innerErr

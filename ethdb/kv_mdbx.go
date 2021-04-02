@@ -729,6 +729,32 @@ func (c *MdbxCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
+func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
+	b := tx.db.buckets[bucket]
+	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
+		c, err := tx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
+		return c.Put(k, v)
+	}
+
+	return tx.tx.Put(mdbx.DBI(b.DBI), k, v, mdbx.Upsert)
+}
+
+func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
+	b := tx.db.buckets[bucket]
+	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
+		c, err := tx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
+		return c.Delete(k, v)
+	}
+
+	return tx.tx.Del(mdbx.DBI(b.DBI), k, v)
+}
+
 func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
@@ -790,7 +816,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c := tx.RwCursor(dbutils.Sequence)
+	c, _ := tx.RwCursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !mdbx.IsNotFound(err) {
@@ -849,21 +875,22 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	return st, nil
 }
 
-func (tx *MdbxTx) RwCursor(bucket string) RwCursor {
+func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
-		return tx.stdCursor(bucket)
+		return tx.stdCursor(bucket), nil
 	}
 
 	if b.Flags&dbutils.DupSort != 0 {
-		return tx.RwCursorDupSort(bucket)
+		return tx.RwCursorDupSort(bucket), nil
 	}
 
-	return tx.stdCursor(bucket)
+	return tx.stdCursor(bucket), nil
 }
 
 func (tx *MdbxTx) Cursor(bucket string) Cursor {
-	return tx.RwCursor(bucket)
+	c, _ := tx.RwCursor(bucket)
+	return c
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) RwCursor {

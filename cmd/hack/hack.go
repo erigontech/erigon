@@ -835,7 +835,10 @@ func repairCurrent() {
 	defer currentDb.Close()
 	tool.Check(historyDb.ClearBuckets(dbutils.HashedStorageBucket))
 	tool.Check(historyDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-		newB := tx.RwCursor(dbutils.HashedStorageBucket)
+		newB, err := tx.RwCursor(dbutils.HashedStorageBucket)
+		if err != nil {
+			return err
+		}
 		count := 0
 		if err := currentDb.RwKV().View(context.Background(), func(ctx ethdb.Tx) error {
 			c := ctx.Cursor(dbutils.HashedStorageBucket)

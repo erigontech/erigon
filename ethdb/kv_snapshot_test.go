@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/stretchr/testify/require"
 )
 
 //func TestSnapshotGet(t *testing.T) {
@@ -336,7 +337,10 @@ func TestSnapshot2Get(t *testing.T) {
 		}
 	}).InMem().MustOpen()
 	err := sn1.Update(context.Background(), func(tx RwTx) error {
-		bucket := tx.RwCursor(dbutils.HeadersBucket)
+		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
 		innerErr := bucket.Put(dbutils.HeaderKey(1, common.Hash{1}), []byte{1})
 		if innerErr != nil {
 			return innerErr
@@ -358,7 +362,8 @@ func TestSnapshot2Get(t *testing.T) {
 		}
 	}).InMem().MustOpen()
 	err = sn2.Update(context.Background(), func(tx RwTx) error {
-		bucket := tx.RwCursor(dbutils.BlockBodyPrefix)
+		bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
+		require.NoError(t, err)
 		innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
 		if innerErr != nil {
 			return innerErr
@@ -376,7 +381,10 @@ func TestSnapshot2Get(t *testing.T) {
 
 	mainDB := NewLMDB().InMem().MustOpen()
 	err = mainDB.Update(context.Background(), func(tx RwTx) error {
-		bucket := tx.RwCursor(dbutils.HeadersBucket)
+		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
 		innerErr := bucket.Put(dbutils.HeaderKey(2, common.Hash{2}), []byte{22})
 		if innerErr != nil {
 			return innerErr
@@ -386,7 +394,11 @@ func TestSnapshot2Get(t *testing.T) {
 			return innerErr
 		}
 
-		bucket = tx.RwCursor(dbutils.BlockBodyPrefix)
+		bucket, err = tx.RwCursor(dbutils.BlockBodyPrefix)
+		if err != nil {
+			return err
+		}
+
 		innerErr = bucket.Put(dbutils.BlockBodyKey(2, common.Hash{2}), []byte{22})
 		if innerErr != nil {
 			return innerErr
@@ -510,7 +522,10 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	}).InMem().MustOpen()
 	{
 		err := sn1.Update(context.Background(), func(tx RwTx) error {
-			bucket := tx.RwCursor(dbutils.HeadersBucket)
+			bucket, err := tx.RwCursor(dbutils.HeadersBucket)
+			if err != nil {
+				return err
+			}
 			innerErr := bucket.Put(dbutils.HeaderKey(1, common.Hash{1}), []byte{1})
 			if innerErr != nil {
 				return innerErr
@@ -534,7 +549,10 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	}).InMem().MustOpen()
 	{
 		err := sn2.Update(context.Background(), func(tx RwTx) error {
-			bucket := tx.RwCursor(dbutils.BlockBodyPrefix)
+			bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
+			if err != nil {
+				return err
+			}
 			innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
 			if innerErr != nil {
 				return innerErr
@@ -577,11 +595,11 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 			t.Fatal(v)
 		}
 
-		err = tx.RwCursor(dbutils.BlockBodyPrefix).Put(dbutils.BlockBodyKey(4, common.Hash{4}), []byte{4})
+		err = tx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(4, common.Hash{4}), []byte{4})
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = tx.RwCursor(dbutils.HeadersBucket).Put(dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
+		err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -691,7 +709,8 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := tx.RwCursor(dbutils.PlainStateBucket)
+	c, err := tx.RwCursor(dbutils.PlainStateBucket)
+	require.NoError(t, err)
 	replaceKey := dbutils.PlainGenerateCompositeStorageKey([]byte{2}, 1, []byte{4})
 	replaceValue := []byte{2, 4, 4}
 	newKey := dbutils.PlainGenerateCompositeStorageKey([]byte{2}, 1, []byte{5})
@@ -760,7 +779,8 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	deleteCursor := tx.RwCursor(dbutils.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(dbutils.PlainStateBucket)
+	require.NoError(t, err)
 
 	//get first correct k&v
 	k, v, err := c.First()
@@ -833,7 +853,8 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	deleteCursor := tx.RwCursor(dbutils.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(dbutils.PlainStateBucket)
+	require.NoError(t, err)
 
 	//get first correct k&v
 	k, v, err := c.Last()
@@ -1220,7 +1241,8 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	deleteCursor := tx.RwCursor(dbutils.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(dbutils.PlainStateBucket)
+	require.NoError(t, err)
 
 	//get first correct k&v
 	k, v, err := c.First()

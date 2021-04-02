@@ -24,7 +24,10 @@ func TestHeaderPrefix(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		c := tx.RwCursor(dbutils.HeaderPrefixOld)
+		c, err := tx.RwCursor(dbutils.HeaderPrefixOld)
+		if err != nil {
+			return err
+		}
 		for i := uint64(0); i < 10; i++ {
 			//header
 			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))

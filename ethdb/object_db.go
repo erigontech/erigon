@@ -96,7 +96,7 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Put(key, value)
+		return tx.Put(bucket, key, value)
 	})
 	return err
 }
@@ -104,7 +104,11 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Append(key, value)
+		c, err := tx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
+		return c.Append(key, value)
 	})
 	return err
 }
@@ -214,7 +218,7 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Delete(k, v)
+		return tx.Delete(bucket, k, v)
 	})
 	return err
 }
@@ -321,7 +325,10 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		for _, name := range dbutils.Buckets {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx RwTx) error {
-				newBucketToWrite := writeTx.RwCursor(name)
+				newBucketToWrite, err := writeTx.RwCursor(name)
+				if err != nil {
+					return err
+				}
 				defer newBucketToWrite.Close()
 				readC := readTx.Cursor(name)
 				defer readC.Close()
