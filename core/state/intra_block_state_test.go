@@ -41,6 +41,7 @@ import (
 // Tests that updating a state trie does not leak any database writes prior to
 // actually committing the state.
 func TestUpdateLeaks(t *testing.T) {
+	t.Skip("no TDS in TG")
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
