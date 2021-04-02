@@ -731,7 +731,7 @@ func (c *MdbxCursor) Prefetch(v uint) Cursor {
 
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
+	if b.AutoDupSortKeysConversion {
 		c, err := tx.RwCursor(bucket)
 		if err != nil {
 			return err
@@ -744,7 +744,7 @@ func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 
 func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
+	if b.AutoDupSortKeysConversion {
 		c, err := tx.RwCursor(bucket)
 		if err != nil {
 			return err
