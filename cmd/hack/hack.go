@@ -311,7 +311,10 @@ func accountSavings(db ethdb.RwKV) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	tool.Check(db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HashedAccountsBucket)
+		c, err := tx.Cursor(dbutils.HashedAccountsBucket)
+		if err != nil {
+			return err
+		}
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -601,7 +604,10 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket)
+		c, err := tx.Cursor(bucket)
+		if err != nil {
+			return err
+		}
 		for k, v, err := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -773,7 +779,10 @@ func readAccount(chaindata string, account common.Address) error {
 	}
 	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainStateBucket)
+		c, err := tx.Cursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
 		for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
 			if e != nil {
 				return e
@@ -835,10 +844,16 @@ func repairCurrent() {
 	defer currentDb.Close()
 	tool.Check(historyDb.ClearBuckets(dbutils.HashedStorageBucket))
 	tool.Check(historyDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-		newB := tx.RwCursor(dbutils.HashedStorageBucket)
+		newB, err := tx.RwCursor(dbutils.HashedStorageBucket)
+		if err != nil {
+			return err
+		}
 		count := 0
 		if err := currentDb.RwKV().View(context.Background(), func(ctx ethdb.Tx) error {
-			c := ctx.Cursor(dbutils.HashedStorageBucket)
+			c, err := ctx.Cursor(dbutils.HashedStorageBucket)
+			if err != nil {
+				return err
+			}
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -861,7 +876,10 @@ func dumpStorage() {
 	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.StorageHistoryBucket)
+		c, err := tx.Cursor(dbutils.StorageHistoryBucket)
+		if err != nil {
+			return err
+		}
 		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			fmt.Printf("%x %x\n", k, v)
 			return true, nil
@@ -880,7 +898,10 @@ func printBucket(chaindata string) {
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.StorageHistoryBucket)
+		c, err := tx.Cursor(dbutils.StorageHistoryBucket)
+		if err != nil {
+			return err
+		}
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1189,7 +1210,10 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	stAccounts := 0
 	stStorage := 0
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainStateBucket)
+		c, err := tx.Cursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
 		k, _, e := c.First()
 		for ; k != nil && e == nil; k, _, e = c.Next() {
 			if len(k) > 28 {
@@ -1278,7 +1302,10 @@ func supply(chaindata string) error {
 	supply := uint256.NewInt()
 	var a accounts.Account
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainStateBucket)
+		c, err := tx.Cursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1308,7 +1335,10 @@ func extractCode(chaindata string) error {
 	defer db.Close()
 	var contractCount int
 	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CodeBucket)
+		c, err := tx.Cursor(dbutils.CodeBucket)
+		if err != nil {
+			return err
+		}
 		// This is a mapping of CodeHash => Byte code
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -1334,7 +1364,10 @@ func iterateOverCode(chaindata string) error {
 	var codeHashTotalLength int
 	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
 	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainContractCodeBucket)
+		c, err := tx.Cursor(dbutils.PlainContractCodeBucket)
+		if err != nil {
+			return err
+		}
 		// This is a mapping of contractAddress + incarnation => CodeHash
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -1343,7 +1376,10 @@ func iterateOverCode(chaindata string) error {
 			contractKeyTotalLength += len(k)
 			contractValTotalLength += len(v)
 		}
-		c = tx.Cursor(dbutils.CodeBucket)
+		c, err = tx.Cursor(dbutils.CodeBucket)
+		if err != nil {
+			return err
+		}
 		// This is a mapping of CodeHash => Byte code
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -1379,7 +1415,11 @@ func mint(chaindata string, block uint64) error {
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	canonical := make(map[common.Hash]struct{})
 	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderCanonicalBucket)
+		c, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+		if err != nil {
+			return err
+		}
+
 		// This is a mapping of contractAddress + incarnation => CodeHash
 		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -1392,7 +1432,10 @@ func mint(chaindata string, block uint64) error {
 			}
 		}
 		log.Info("Read canonical hashes", "count", len(canonical))
-		c = tx.Cursor(dbutils.BlockBodyPrefix)
+		c, err = tx.Cursor(dbutils.BlockBodyPrefix)
+		if err != nil {
+			return err
+		}
 		var prevBlock uint64
 		var burntGas uint64
 		for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
@@ -1547,7 +1590,10 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		return err
+	}
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {

@@ -269,14 +269,14 @@ func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 }
 
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
-	c := tx.Cursor(bucket)
+	c, _ := tx.Cursor(bucket)
 	defer c.Close()
 	_, val, err = c.SeekExact(key)
 	return val, err
 }
 
 func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
-	c := tx.Cursor(bucket)
+	c, _ := tx.Cursor(bucket)
 	defer c.Close()
 	k, _, err := c.Seek(key)
 	if err != nil {
@@ -299,11 +299,11 @@ func (c *remoteCursor) Prev() ([]byte, []byte, error) {
 	return c.prev()
 }
 
-func (tx *remoteTx) Cursor(bucket string) Cursor {
+func (tx *remoteTx) Cursor(bucket string) (Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
-	return c
+	return c, nil
 }
 
 func (c *remoteCursor) initCursor() error {
@@ -557,8 +557,12 @@ func (c *remoteCursor) Close() {
 	}
 }
 
-func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
-	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
+func (tx *remoteTx) CursorDupSort(bucket string) (CursorDupSort, error) {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteCursorDupSort{remoteCursor: c.(*remoteCursor)}, nil
 }
 
 //func (c *remoteCursorDupSort) initCursor() error {

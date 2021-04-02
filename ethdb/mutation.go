@@ -233,7 +233,12 @@ func (m *mutation) doCommit(tx RwTx) error {
 			if c != nil {
 				c.Close()
 			}
-			c = tx.RwCursor(mi.table)
+			var err error
+			c, err = tx.RwCursor(mi.table)
+			if err != nil {
+				innerErr = err
+				return false
+			}
 			prevTable = mi.table
 			firstKey, _, err := c.Seek(mi.key)
 			if err != nil {

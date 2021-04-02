@@ -48,10 +48,10 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
-	// test low-level data layout
+	c, err := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
 	require.NoError(err)
 
+	// test low-level data layout
 	keyLen := common.HashLength + common.IncarnationLength
 	v, err = c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])
 	require.NoError(err)
@@ -102,7 +102,8 @@ func TestDupSortPlainState(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+	c, err := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+	require.NoError(err)
 	_, v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
 	require.Equal([]byte{1}, v)

@@ -1,6 +1,19 @@
 run:
   deadline: 10m
 
+linters:
+  disable-all: true
+  enable:
+    - deadcode
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - structcheck
+    - unused
+    - varcheck
+
 linters-settings:
   govet:
     disable:

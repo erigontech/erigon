@@ -53,7 +53,9 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(migrator.CreateBucket(deprecatedBucket))
 	require.True(migrator.ExistsBucket(deprecatedBucket))
 
-	err = tx.RwCursor(deprecatedBucket).Put([]byte{1}, []byte{1})
+	c, err := tx.RwCursor(deprecatedBucket)
+	require.NoError(err)
+	err = c.Put([]byte{1}, []byte{1})
 	require.NoError(err)
 	v, err := tx.GetOne(deprecatedBucket, []byte{1})
 	require.NoError(err)
@@ -78,9 +80,7 @@ func TestBucketCRUD(t *testing.T) {
 func TestReadOnlyMode(t *testing.T) {
 	path := os.TempDir() + "/tm1"
 	err := os.RemoveAll(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	db1 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
@@ -95,13 +95,10 @@ func TestReadOnlyMode(t *testing.T) {
 	}).MustOpen()
 
 	tx, err := db2.Begin(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	c := tx.Cursor(dbutils.HeadersBucket)
+	c, err := tx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
 	_, _, err = c.Seek([]byte("some prefix"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 }

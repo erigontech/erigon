@@ -153,7 +153,7 @@ func (s *sn2TX) ExistingBuckets() ([]string, error) {
 	panic("implement me")
 }
 
-func (s *sn2TX) Cursor(bucket string) Cursor {
+func (s *sn2TX) Cursor(bucket string) (Cursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -162,17 +162,29 @@ func (s *sn2TX) Cursor(bucket string) Cursor {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.Cursor(bucket)
 	}
-	return &snCursor2{
-		dbCursor: s.dbTX.Cursor(bucket),
-		snCursor: tx.Cursor(bucket),
+	dbCursor, err := s.dbTX.Cursor(bucket)
+	if err != nil {
+		return nil, err
 	}
+	snCursor, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &snCursor2{
+		dbCursor: dbCursor,
+		snCursor: snCursor,
+	}, nil
 }
 
-func (s *sn2TX) RwCursor(bucket string) RwCursor {
-	return s.Cursor(bucket).(RwCursor)
+func (s *sn2TX) RwCursor(bucket string) (RwCursor, error) {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursor), nil
 }
 
-func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
+func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -181,8 +193,14 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.CursorDupSort(bucket)
 	}
-	dbc := s.dbTX.CursorDupSort(bucket)
-	sncbc := tx.CursorDupSort(bucket)
+	dbc, err := s.dbTX.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	sncbc, err := tx.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
 	return &snCursor2Dup{
 		snCursor2{
 			dbCursor: dbc,
@@ -190,11 +208,15 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 		},
 		dbc,
 		sncbc,
-	}
+	}, nil
 }
 
-func (s *sn2TX) RwCursorDupSort(bucket string) RwCursorDupSort {
-	return s.CursorDupSort(bucket).(RwCursorDupSort)
+func (s *sn2TX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+	c, err := s.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursorDupSort), nil
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
@@ -222,6 +244,15 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	}
 	return v, nil
 }
+
+func (s *sn2TX) Put(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).Put(bucket, k, v)
+}
+
+func (s *sn2TX) Delete(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).Delete(bucket, k, v)
+}
+
 func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
@@ -647,7 +678,10 @@ func GenStateData(data []KvData) (RwKV, error) {
 	}).InMem().MustOpen()
 
 	err := snapshot.Update(context.Background(), func(tx RwTx) error {
-		c := tx.RwCursor(dbutils.PlainStateBucket)
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
 		for i := range data {
 			innerErr := c.Put(data[i].K, data[i].V)
 			if innerErr != nil {

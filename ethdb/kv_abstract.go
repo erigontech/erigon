@@ -108,8 +108,8 @@ type Tx interface {
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
 	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
-	Cursor(bucket string) Cursor
-	CursorDupSort(bucket string) CursorDupSort // CursorDupSort - can be used if bucket has lmdb.DupSort flag
+	Cursor(bucket string) (Cursor, error)
+	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	GetOne(bucket string, key []byte) (val []byte, err error)
 	HasOne(bucket string, key []byte) (bool, error)
 
@@ -132,10 +132,13 @@ type Tx interface {
 type RwTx interface {
 	Tx
 
-	RwCursor(bucket string) RwCursor
-	RwCursorDupSort(bucket string) RwCursorDupSort
+	RwCursor(bucket string) (RwCursor, error)
+	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+
+	Put(bucket string, k, v []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

@@ -139,7 +139,10 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
 			for bucketName := range bucketLabels {
 				bucketName := bucketName
-				c := readTx.Cursor(bucketName)
+				c, err := readTx.Cursor(bucketName)
+				if err != nil {
+					return err
+				}
 				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db

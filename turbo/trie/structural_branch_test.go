@@ -63,7 +63,8 @@ func TestIHCursor(t *testing.T) {
 
 	integrity.Trie(tx, false, nil)
 
-	cursor := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	cursor, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	require.NoError(err)
 	rl := trie.NewRetainList(0)
 	rl.AddHex(common.FromHex("01"))
 	rl.AddHex(common.FromHex("0101"))

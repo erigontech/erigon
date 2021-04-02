@@ -91,8 +91,10 @@ func TestManagedTx(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c := tx.RwCursor(bucket1)
-		c1 := tx.RwCursor(bucket2)
+		c, err := tx.RwCursor(bucket1)
+		require.NoError(t, err)
+		c1, err := tx.RwCursor(bucket2)
+		require.NoError(t, err)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
@@ -180,7 +182,10 @@ func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
 	defer cancel()
 
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket1)
+		c, err := tx.Cursor(bucket1)
+		if err != nil {
+			return err
+		}
 		for {
 			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -197,8 +202,14 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c1 := tx.Cursor(bucket1)
-		c2 := tx.Cursor(bucket2)
+		c1, err := tx.Cursor(bucket1)
+		if err != nil {
+			return err
+		}
+		c2, err := tx.Cursor(bucket2)
+		if err != nil {
+			return err
+		}
 
 		k1, v1, err := c1.First()
 		assert.NoError(err)

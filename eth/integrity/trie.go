@@ -30,7 +30,18 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 	buf2 := make([]byte, 256)
 
 	{
-		c, trieAcc2, accC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.HashedAccountsBucket)
+		c, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		if err != nil {
+			panic(err)
+		}
+		trieAcc2, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		if err != nil {
+			panic(err)
+		}
+		accC, err := tx.Cursor(dbutils.HashedAccountsBucket)
+		if err != nil {
+			panic(err)
+		}
 		defer c.Close()
 		defer trieAcc2.Close()
 		defer accC.Close()
@@ -128,7 +139,18 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 		}
 	}
 	{
-		c, trieStorage, storageC := tx.Cursor(dbutils.TrieOfStorageBucket), tx.Cursor(dbutils.TrieOfStorageBucket), tx.Cursor(dbutils.HashedStorageBucket)
+		c, err := tx.Cursor(dbutils.TrieOfStorageBucket)
+		if err != nil {
+			panic(err)
+		}
+		trieStorage, err := tx.Cursor(dbutils.TrieOfStorageBucket)
+		if err != nil {
+			panic(err)
+		}
+		storageC, err := tx.Cursor(dbutils.HashedStorageBucket)
+		if err != nil {
+			panic(err)
+		}
 		defer c.Close()
 		defer trieStorage.Close()
 		defer storageC.Close()
