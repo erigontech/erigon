@@ -133,14 +133,14 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
 		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		bm, err := bitmapdb.Get64(tx.(ethdb.HasTx).Tx(), indexBucket, hashes[0], 1999, math.MaxUint32)
+		bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
 			t.Fatal(bm.Maximum())
 		}
-		bm, err = bitmapdb.Get64(tx.(ethdb.HasTx).Tx(), indexBucket, hashes[1], 1999, math.MaxUint32)
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,14 +158,14 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bm, err = bitmapdb.Get64(tx.(ethdb.HasTx).Tx(), indexBucket, hashes[0], 999, math.MaxUint32)
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
 			t.Fatal()
 		}
-		bm, err = bitmapdb.Get64(tx.(ethdb.HasTx).Tx(), indexBucket, hashes[1], 999, math.MaxUint32)
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
