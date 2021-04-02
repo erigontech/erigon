@@ -32,7 +32,7 @@ var dupSortHashState = Migration{
 
 		if err := etl.Transform(
 			"dupsort_hash_state",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.CurrentStateBucketOld1,
 			dbutils.CurrentStateBucketOld2,
 			tmpdir,
@@ -68,7 +68,7 @@ var dupSortPlainState = Migration{
 
 		if err := etl.Transform(
 			"dupsort_plain_state",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.PlainStateBucketOld1,
 			dbutils.PlainStateBucket,
 			tmpdir,
@@ -233,12 +233,12 @@ var splitHashStateBucket = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorS.Load(logPrefix, db, dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err = collectorS.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = collectorA.Load(logPrefix, db, dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err = collectorA.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
@@ -277,7 +277,7 @@ var splitIHBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpdir, expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {
@@ -319,7 +319,7 @@ var deleteExtensionHashesFromTrieBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpdir, expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {

@@ -46,7 +46,7 @@ func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addres
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64, quit <-chan struct{}) (map[string][]byte, map[string][]byte, error) {
+func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, quit <-chan struct{}) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered
 	collector := newRewindDataCollector()
 
@@ -94,9 +94,14 @@ func (c *rewindDataCollector) StorageWalker(k, v []byte) error {
 	return nil
 }
 
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
 	fromDBFormat := FromDBFormat(Mapper[bucket].KeySize)
-	return db.Walk(bucket, dbutils.EncodeBlockNumber(timestampDst), 0, func(dbKey, dbValue []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return ethdb.Walk(c, dbutils.EncodeBlockNumber(timestampDst), 0, func(dbKey, dbValue []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}

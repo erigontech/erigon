@@ -77,7 +77,7 @@ type TransformArgs struct {
 
 func Transform(
 	logPrefix string,
-	db ethdb.Database,
+	db ethdb.RwTx,
 	fromBucket string,
 	toBucket string,
 	tmpdir string,
@@ -107,7 +107,7 @@ func Transform(
 
 func extractBucketIntoFiles(
 	logPrefix string,
-	db ethdb.Database,
+	db ethdb.Tx,
 	bucket string,
 	startkey []byte,
 	endkey []byte,
@@ -121,7 +121,12 @@ func extractBucketIntoFiles(
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	if err := db.Walk(bucket, startkey, fixedBits, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := ethdb.Walk(c, startkey, fixedBits, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quit); err != nil {
 			return false, err
 		}
@@ -167,12 +172,12 @@ func disposeProviders(logPrefix string, providers []dataProvider) {
 }
 
 type currentTableReader struct {
-	getter ethdb.Getter
+	getter ethdb.Tx
 	bucket string
 }
 
 func (s *currentTableReader) Get(key []byte) ([]byte, error) {
-	return s.getter.Get(s.bucket, key)
+	return s.getter.GetOne(s.bucket, key)
 }
 
 // IdentityLoadFunc loads entries as they are, without transformation

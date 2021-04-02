@@ -179,29 +179,7 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //    SkipAccounts:
 //		use(AccTrie)
 //	}
-func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <-chan struct{}) (common.Hash, error) {
-	var (
-		tx ethdb.Tx
-	)
-
-	var txDB ethdb.DbWithPendingMutations
-	var useExternalTx bool
-
-	// If method executed within transaction - use it, or open new read transaction
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		txDB = hasTx.(ethdb.DbWithPendingMutations)
-		tx = hasTx.Tx()
-		useExternalTx = true
-	} else {
-		var err error
-		txDB, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return EmptyRoot, err
-		}
-
-		defer txDB.Rollback()
-		tx = txDB.(ethdb.HasTx).Tx()
-	}
+func (l *FlatDBTrieLoader) CalcTrieRoot(tx ethdb.Tx, prefix []byte, quit <-chan struct{}) (common.Hash, error) {
 
 	accC, err := tx.Cursor(dbutils.HashedAccountsBucket)
 	if err != nil {
@@ -317,12 +295,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		return EmptyRoot, err
 	}
 
-	if !useExternalTx {
-		err := txDB.Commit()
-		if err != nil {
-			return EmptyRoot, err
-		}
-	}
 	return l.receiver.Root(), nil
 }
 
@@ -1810,30 +1782,7 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 	return EmptyRoot, nil
 }
 
-func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) (common.Hash, error) {
-	var (
-		tx ethdb.Tx
-	)
-
-	var txDB ethdb.DbWithPendingMutations
-	var useExternalTx bool
-
-	// If method executed within transaction - use it, or open new read transaction
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		txDB = hasTx.(ethdb.DbWithPendingMutations)
-		tx = hasTx.Tx()
-		useExternalTx = true
-	} else {
-		var err error
-		txDB, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return EmptyRoot, err
-		}
-
-		defer txDB.Rollback()
-		tx = txDB.(ethdb.HasTx).Tx()
-	}
-
+func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(tx ethdb.Tx, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) (common.Hash, error) {
 	accsC, err := tx.Cursor(dbutils.HashedAccountsBucket)
 	if err != nil {
 		return EmptyRoot, err
@@ -1874,12 +1823,6 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 	if _, err := l.post(ss, trieStorage, prefix, cache, quit); err != nil {
 		return EmptyRoot, err
 	}
-	if !useExternalTx {
-		err := txDB.Commit()
-		if err != nil {
-			return EmptyRoot, err
-		}
-	}
 	//fmt.Printf("%d,%d,%d,%d\n", i1, i2, i3, i4)
 	return l.receiver.Root(), nil
 }
@@ -1915,5 +1858,36 @@ func CalcRoot(logPrefix string, db ethdb.Database) (common.Hash, error) {
 	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
 		return EmptyRoot, err
 	}
-	return loader.CalcTrieRoot(db, nil, nil)
+
+	var tx ethdb.Tx
+	var txDB ethdb.DbWithPendingMutations
+	var useExternalTx bool
+
+	// If method executed within transaction - use it, or open new read transaction
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		txDB = hasTx.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx()
+		useExternalTx = true
+	} else {
+		var err error
+		txDB, err = db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return EmptyRoot, err
+		}
+
+		defer txDB.Rollback()
+		tx = txDB.(ethdb.HasTx).Tx()
+	}
+	h, err := loader.CalcTrieRoot(tx, nil, nil)
+	if err != nil {
+		return EmptyRoot, err
+	}
+
+	if !useExternalTx {
+		err := txDB.Commit()
+		if err != nil {
+			return EmptyRoot, err
+		}
+	}
+	return h, nil
 }

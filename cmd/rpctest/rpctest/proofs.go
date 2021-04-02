@@ -1,6 +1,7 @@
 package rpctest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,8 +17,14 @@ import (
 
 func Proofs(chaindata string, url string, block uint64) {
 	fileName := "trie.txt"
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		panic(err1)
+	}
+	defer tx.Rollback()
+
 	var t *trie.Trie
 	if _, errf := os.Stat(fileName); errf != nil {
 		if os.IsNotExist(errf) {
@@ -27,7 +34,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			if err := loader.Reset(rl, nil, nil, false); err != nil {
 				panic(err)
 			}
-			root, err := loader.CalcTrieRoot(ethDb, []byte{}, nil)
+			root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), []byte{}, nil)
 			if err != nil {
 				panic(err)
 			}
@@ -83,7 +90,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			}
 			var account common.Address
 			var found bool
-			err := ethDb.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
+			err := tx.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
 				if len(v) == common.AddressLength {
 					copy(account[:], v)
 					found = true

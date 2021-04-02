@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
@@ -124,7 +125,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil /* hashCollector */, false)
 	loader.SetStreamReceiver(r)
-	_, err = loader.CalcTrieRoot(db, []byte{}, nil)
+	_, err = loader.CalcTrieRoot(db.(ethdb.HasTx).Tx().(ethdb.RwTx), []byte{}, nil)
 	if err != nil {
 		panic(err)
 	}

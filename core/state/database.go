@@ -831,10 +831,13 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr, nil)
+	tx, _ := tds.db.Begin(context.Background(), ethdb.RO)
+	defer tx.Rollback()
+	accountMap, storageMap, err := changeset.RewindData(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tds.blockNr, blockNr, nil)
 	if err != nil {
 		return err
 	}
+	tx.Rollback()
 	for plainKey, value := range accountMap {
 		var addrHash, err = common.HashData([]byte(plainKey))
 		if err != nil {

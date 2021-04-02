@@ -2,6 +2,7 @@ package etl
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -81,13 +82,19 @@ func TestNextKeyErr(t *testing.T) {
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 
-	generateTestData(t, db, sourceBucket, 10)
+	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(1))
 
-	err := extractBucketIntoFiles("logPrefix", db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -112,11 +119,17 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
-	generateTestData(t, db, sourceBucket, 10)
+	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
-	err := extractBucketIntoFiles("logPrefix", db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -131,12 +144,19 @@ func TestRAMDataProviders(t *testing.T) {
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 20)
-	err := Transform(
+	generateTestData(t, tx, sourceBucket, 20)
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -145,22 +165,28 @@ func TestTransformRAMOnly(t *testing.T) {
 		TransformArgs{},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, nil)
+	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 20)
+	generateTestData(t, tx, sourceBucket, 20)
 
 	numberOfCalls := 0
 	finalized := false
 
-	err := Transform(
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -178,7 +204,7 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, nil)
+	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 
 	assert.Equal(t, 1, numberOfCalls)
 	assert.True(t, finalized)
@@ -187,16 +213,22 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 20)
+	generateTestData(t, tx, sourceBucket, 20)
 
 	numberOfCalls := 0
 	finalized := false
 
-	err := Transform(
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -213,7 +245,7 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, nil)
+	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 
 	assert.Equal(t, 1, numberOfCalls)
 	assert.True(t, finalized)
@@ -221,11 +253,17 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	err := Transform(
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -234,18 +272,24 @@ func TestEmptySourceBucket(t *testing.T) {
 		TransformArgs{},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, nil)
+	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-	err := Transform(
+	generateTestData(t, tx, sourceBucket, 10)
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -254,18 +298,24 @@ func TestTransformExtractStartKey(t *testing.T) {
 		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
+	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-	err := Transform(
+	generateTestData(t, tx, sourceBucket, 10)
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -276,18 +326,24 @@ func TestTransformThroughFiles(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	compareBuckets(t, db, sourceBucket, destBucket, nil)
+	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-	err := Transform(
+	generateTestData(t, tx, sourceBucket, 10)
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -296,18 +352,24 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 		TransformArgs{},
 	)
 	assert.Nil(t, err)
-	compareBucketsDouble(t, db, sourceBucket, destBucket)
+	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
 	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	generateTestData(t, db, sourceBucket, 10)
-	err := Transform(
+	generateTestData(t, tx, sourceBucket, 10)
+	err = Transform(
 		"logPrefix",
-		db,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -316,7 +378,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 		TransformArgs{},
 	)
 	assert.Nil(t, err)
-	compareBucketsDouble(t, db, sourceBucket, destBucket)
+	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
 func generateTestData(t *testing.T, db ethdb.Putter, bucket string, count int) {
