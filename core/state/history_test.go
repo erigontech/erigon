@@ -99,13 +99,15 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	numOfAccounts := 5
 	numOfStateKeys := 5
 
-	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, db, numOfAccounts, numOfStateKeys)
-
-	tx, err1 := db.RwKV().Begin(context.Background())
+	objtx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
-	defer tx.Rollback()
+	defer objtx.Rollback()
+
+	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, NewPlainStateWriter(objtx, objtx, 2), numOfAccounts, numOfStateKeys)
+	tx := objtx.(ethdb.HasTx).Tx().(ethdb.RwTx)
+
 	plainState, err := tx.Cursor(dbutils.PlainStateBucket)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +227,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	assert.Equal(t, cs, expectedChangeSet)
 }
 
-func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Address, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
+func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainStateWriter, numOfAccounts, numOfStateKeys int) ([]common.Address, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
 	t.Helper()
 
 	accHistory := make([]*accounts.Account, numOfAccounts)
@@ -233,7 +235,6 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 	accStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	accHistoryStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	addrs := make([]common.Address, numOfAccounts)
-	blockWriter := NewPlainStateWriter(db, db, 2)
 	ctx := context.Background()
 	for i := range accHistory {
 		accHistory[i], addrs[i], _ = randomAccount(t)
