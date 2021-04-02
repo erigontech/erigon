@@ -49,7 +49,7 @@ jobs:
         run: make test
       - name: Test (windows)
         if: matrix.os == 'windows-latest'
-        run: go test ./... -p 1 --tags 'mdbx'
+        run: go test ./... -p 1
   docker:
     runs-on: ubuntu-latest
     steps:
