@@ -12,6 +12,10 @@ jobs:
         if: matrix.os == 'windows-latest'
         with:
           msystem: MSYS
+      - name: Remove mingw
+        if: matrix.os == 'windows-latest'
+        run: choco uninstall mingw
+        shell: bash
       - name: Install toolchains
         shell: msys2 {0}
         run: pacman --noconfirm -S mingw-w64-x86_64-toolchain
