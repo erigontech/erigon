@@ -4,7 +4,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ windows-latest ]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,7 +25,7 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Build
-        run: make all
+        run: go build -trimpath -o bin/tg.exe ./cmd/tg
       - name: Lint
         uses: golangci/golangci-lint-action@v2
         with:
