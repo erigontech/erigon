@@ -39,9 +39,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: echo "/c/msys64/mingw64/bin:/c/msys64/usr/bin" >> $GITHUB_PATH
         shell: bash
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: Build
         run: make all
-        shell: bash
       - name: Lint
         uses: golangci/golangci-lint-action@v2
         with:
