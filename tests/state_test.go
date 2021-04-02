@@ -93,7 +93,7 @@ func TestState(t *testing.T) {
 }
 
 // Transactions with gasLimit above this value will not get a VM trace on failure.
-const traceErrorLimit = 400000
+const traceErrorLimit = 4000000000
 
 func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	// Use config from command line arguments.

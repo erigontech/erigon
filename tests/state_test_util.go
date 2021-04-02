@@ -185,11 +185,13 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
 	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
+	//_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	statedb := state.New(state.NewDbStateReader(tx))
 	tds.StartNewBuffer()
+	w := state.NewDbStateWriter(tx, readBlockNr+1)
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
@@ -211,7 +213,6 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 		statedb.RevertToSnapshot(snapshot)
 	}
 
-	w := state.NewDbStateWriter(tx, block.NumberU64())
 	// Commit block
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, common.Hash{}, err
@@ -273,7 +274,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 }
 
 func MakePreState2(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -287,9 +288,9 @@ func MakePreState2(ctx context.Context, db ethdb.Database, accounts core.Genesis
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, w); err != nil {
-		return nil, err
-	}
+	//if err := statedb.FinalizeTx(ctx, state.NewNoopWriter()); err != nil {
+	//	return nil, err
+	//}
 	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		return nil, err
 	}
