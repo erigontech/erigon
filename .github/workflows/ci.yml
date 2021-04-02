@@ -41,7 +41,7 @@ jobs:
         shell: bash
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Build
-        run: make all
+        run: go build -trimpath -o bin/tg.exe ./cmd/tg
       - name: Lint
         uses: golangci/golangci-lint-action@v2
         with:
