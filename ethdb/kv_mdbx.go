@@ -889,7 +889,7 @@ func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
 	}
 
 	if b.Flags&dbutils.DupSort != 0 {
-		return tx.RwCursorDupSort(bucket), nil
+		return tx.RwCursorDupSort(bucket)
 	}
 
 	return tx.stdCursor(bucket), nil
@@ -905,12 +905,12 @@ func (tx *MdbxTx) stdCursor(bucket string) RwCursor {
 	return &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
 }
 
-func (tx *MdbxTx) RwCursorDupSort(bucket string) RwCursorDupSort {
+func (tx *MdbxTx) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
 	basicCursor := tx.stdCursor(bucket).(*MdbxCursor)
-	return &MdbxDupSortCursor{MdbxCursor: basicCursor}
+	return &MdbxDupSortCursor{MdbxCursor: basicCursor}, nil
 }
 
-func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
+func (tx *MdbxTx) CursorDupSort(bucket string) (CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
 }
 

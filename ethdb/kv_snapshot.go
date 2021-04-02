@@ -172,7 +172,7 @@ func (s *sn2TX) RwCursor(bucket string) (RwCursor, error) {
 	return s.Cursor(bucket).(RwCursor), nil
 }
 
-func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
+func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -181,8 +181,14 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.CursorDupSort(bucket)
 	}
-	dbc := s.dbTX.CursorDupSort(bucket)
-	sncbc := tx.CursorDupSort(bucket)
+	dbc, err := s.dbTX.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	sncbc, err := tx.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
 	return &snCursor2Dup{
 		snCursor2{
 			dbCursor: dbc,
@@ -190,11 +196,15 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 		},
 		dbc,
 		sncbc,
-	}
+	}, nil
 }
 
-func (s *sn2TX) RwCursorDupSort(bucket string) RwCursorDupSort {
-	return s.CursorDupSort(bucket).(RwCursorDupSort)
+func (s *sn2TX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+	c, err := s.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursorDupSort), nil
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {

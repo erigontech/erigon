@@ -85,7 +85,10 @@ func generate4(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 
 // Generates a database with one table, containing some DupSort values
 func generate5(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursorDupSort("t")
+	c, err := tx.RwCursorDupSort("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	if err := c.AppendDup([]byte("key1"), []byte("value11")); err != nil {
 		return false, err
@@ -110,7 +113,10 @@ func generate5(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 
 // Generate a database with one table, containing lots of dupsort values
 func generate6(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
-	c := tx.RwCursorDupSort("t")
+	c, err := tx.RwCursorDupSort("t")
+	if err != nil {
+		return false, err
+	}
 	defer c.Close()
 	for i := 0; i < 1000; i++ {
 		v := fmt.Sprintf("dupval_%05d", i)

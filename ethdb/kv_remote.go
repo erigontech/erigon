@@ -557,8 +557,8 @@ func (c *remoteCursor) Close() {
 	}
 }
 
-func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
-	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
+func (tx *remoteTx) CursorDupSort(bucket string) (CursorDupSort, error) {
+	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}, nil
 }
 
 //func (c *remoteCursorDupSort) initCursor() error {

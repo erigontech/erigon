@@ -219,12 +219,12 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tx, err := db.RwKV().BeginRw(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
-	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+	c, err := tx.CursorDupSort(bkt)
+	require.NoError(t, err)
+	cs := m.WalkerAdapter(c).(StorageChangeSetPlain)
 
 	clear := func() {
 		c, err := tx.RwCursor(bkt)
@@ -250,12 +250,12 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tx, err := db.RwKV().BeginRw(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
-	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+	c, err := tx.CursorDupSort(bkt)
+	require.NoError(t, err)
+	cs := m.WalkerAdapter(c).(StorageChangeSetPlain)
 
 	clear := func() {
 		c, err := tx.RwCursor(bkt)
@@ -416,12 +416,12 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tx, err := db.RwKV().BeginRw(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
-	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+	c1, err := tx.CursorDupSort(bkt)
+	require.NoError(t, err)
+	cs := m.WalkerAdapter(c1).(StorageChangeSetPlain)
 
 	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
 	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
@@ -443,7 +443,8 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	val5 := common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000")
 	val6 := common.FromHex("0xec89478783348038046b42cc126a3c4e351977b5f4cf5e3c4f4d8385adbf8046")
 
-	c := tx.RwCursorDupSort(bkt)
+	c, err := tx.RwCursorDupSort(bkt)
+	require.NoError(t, err)
 
 	ch := NewStorageChangeSetPlain()
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()), val1))

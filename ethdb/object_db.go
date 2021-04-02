@@ -116,7 +116,11 @@ func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error 
 // AppendDup appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursorDupSort(bucket).AppendDup(key, value)
+		c, err := tx.RwCursorDupSort(bucket)
+		if err != nil {
+			return err
+		}
+		return c.AppendDup(key, value)
 	})
 	return err
 }

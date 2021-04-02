@@ -621,7 +621,11 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		return true, nil
 	}
-	ih := NewIHCursor2(NewFilterCursor2(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucketOld2)))
+	c1, err := tx.CursorDupSort(dbutils.IntermediateTrieHashBucketOld2)
+	if err != nil {
+		return SubTries{}, err
+	}
+	ih := NewIHCursor2(NewFilterCursor2(filter, c1))
 	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
 	}

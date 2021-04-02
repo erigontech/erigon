@@ -206,8 +206,12 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	accC := tx.Cursor(dbutils.HashedAccountsBucket)
 	defer accC.Close()
 	accs := NewStateCursor(accC, quit)
-	trieAccC, trieStorageC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.CursorDupSort(dbutils.TrieOfStorageBucket)
+	trieAccC := tx.Cursor(dbutils.TrieOfAccountsBucket)
 	defer trieAccC.Close()
+	trieStorageC, err := tx.CursorDupSort(dbutils.TrieOfStorageBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer trieStorageC.Close()
 
 	var canUse = func(prefix []byte) (bool, []byte) {
@@ -217,7 +221,10 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	accTrie := AccTrie(canUse, l.hc, trieAccC, quit)
 	storageTrie := StorageTrie(canUse, l.shc, trieStorageC, quit)
 
-	ss := tx.CursorDupSort(dbutils.HashedStorageBucket)
+	ss, err := tx.CursorDupSort(dbutils.HashedStorageBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer ss.Close()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -1833,7 +1840,10 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 	}
 	trieStorage := StorageTrie(canUse, l.shc, trieStorageC, quit)
 
-	ss := tx.CursorDupSort(dbutils.HashedStorageBucket)
+	ss, err := tx.CursorDupSort(dbutils.HashedStorageBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer ss.Close()
 	_ = trieStorageC
 	_ = stC
