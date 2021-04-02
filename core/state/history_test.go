@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"math/rand"
 	"reflect"
 	"sort"
@@ -281,129 +280,6 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 		t.Fatal(err)
 	}
 	return &acc, addr, addrHash
-}
-
-func TestUnwindTruncateHistory(t *testing.T) {
-	t.Skip("tds.Unwind is not supported")
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	mutDB := db.NewBatch()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	ctx := context.Background()
-	acc1 := accounts.NewAccount()
-	acc := &acc1
-	acc.Initialised = true
-	var addr common.Address = common.HexToAddress("0x1234567890")
-	acc.Balance.SetUint64(0)
-	// We will so that balance (in wei) always matches the block number
-	// We will also insert a extra storage item every block
-	for blockNumber := uint64(1); blockNumber < uint64(100); blockNumber++ {
-		tds.StartNewBuffer()
-		newAcc := acc.SelfCopy()
-		newAcc.Balance.SetUint64(blockNumber)
-		tds.SetBlockNr(blockNumber)
-		txWriter := tds.TrieStateWriter()
-		blockWriter := tds.DbStateWriter()
-		if blockNumber == 1 {
-			err := txWriter.CreateContract(addr)
-			if err != nil {
-				t.Fatal(err)
-			}
-			newAcc.Incarnation = FirstContractIncarnation
-		}
-		var oldValue uint256.Int
-		var newValue uint256.Int
-		newValue[0] = 1
-		var location common.Hash
-		location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
-		if err := txWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
-			t.Fatal(err)
-		}
-		if err := txWriter.UpdateAccountData(ctx, addr, acc /* original */, newAcc /* new account */); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tds.ComputeTrieRoots(); err != nil {
-			t.Fatal(err)
-		}
-		if blockNumber == 1 {
-			err := blockWriter.CreateContract(addr)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := blockWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
-			t.Fatal(err)
-		}
-		if err := blockWriter.UpdateAccountData(ctx, addr, acc /* original */, newAcc /* new account */); err != nil {
-			t.Fatal(err)
-		}
-		if err := blockWriter.WriteChangeSets(); err != nil {
-			t.Fatal(err)
-		}
-		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
-		acc = newAcc
-	}
-	// Recreate tds not to rely on the trie
-	tds = NewTrieDbState(tds.LastRoot(), mutDB, tds.blockNr)
-	a, err := tds.ReadAccountData(addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Balance.Uint64() != 99 {
-		t.Errorf("wrong balance on the account, expected %d, got %d", 99, a.Balance.Uint64())
-	}
-	// Check 100 storage locations
-	for l := 0; l <= 100; l++ {
-		var location common.Hash
-		location.SetBytes(big.NewInt(int64(l)).Bytes())
-		enc, err1 := tds.ReadAccountStorage(addr, a.Incarnation, &location)
-		if err1 != nil {
-			t.Fatal(err1)
-		}
-		if l > 0 && l < 100 {
-			if len(enc) == 0 {
-				t.Errorf("expected non-empty storage at location %d, got empty", l)
-			}
-		} else {
-			if len(enc) > 0 {
-				t.Errorf("expected empty storage at location %d, got non-empty", l)
-			}
-		}
-	}
-	// New we are goint to unwind 50 blocks back and check the balance
-	if err = tds.UnwindTo(50); err != nil {
-		t.Fatal(err)
-	}
-	if err = mutDB.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	a, err = tds.ReadAccountData(addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Balance.Uint64() != 50 {
-		t.Errorf("wrong balance on the account, expected %d, got %d", 50, a.Balance.Uint64())
-	}
-	// Check 100 storage locations
-	for l := 0; l <= 100; l++ {
-		var location common.Hash
-		location.SetBytes(big.NewInt(int64(l)).Bytes())
-		enc, err1 := tds.ReadAccountStorage(addr, a.Incarnation, &location)
-		if err1 != nil {
-			t.Fatal(err1)
-		}
-		if l > 0 && l <= 50 {
-			if len(enc) == 0 {
-				t.Errorf("expected non-empty storage at location %d, got empty", l)
-			}
-		} else {
-			if len(enc) > 0 {
-				t.Errorf("expected empty storage at location %d, got non-empty", l)
-			}
-		}
-	}
 }
 
 /*
@@ -808,7 +684,6 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 func TestWalkAsOfAccountPlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
@@ -842,7 +717,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	writeBlockData(t, tds, 3, []accData{
+	writeBlockData(t, NewPlainStateWriter(db, db, 3), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: &emptyValAcc,
@@ -860,7 +735,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	})
 
-	writeBlockData(t, tds, 5, []accData{
+	writeBlockData(t, NewPlainStateWriter(db, db, 5), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: block3ValAcc,
@@ -962,7 +837,6 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
 	emptyValAcc.EncodeForStorage(emptyVal)
@@ -1000,7 +874,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 
 	var addr1New, addr2New, addr3New *accounts.Account
 
-	writeBlockData(t, tds, 1, []accData{
+	writeBlockData(t, NewPlainStateWriter(db, db, 1), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: &emptyValAcc,
@@ -1025,7 +899,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		addr2New.Nonce = uint64(i)
 		addr3New = addr3Old.SelfCopy()
 		addr3New.Nonce = uint64(i)
-		writeBlockData(t, tds, uint64(i), []accData{
+		writeBlockData(t, NewPlainStateWriter(db, db, uint64(i)), []accData{
 			{
 				addr:   addrs[0],
 				oldVal: addr1Old,
@@ -1054,7 +928,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	addr3New = addr3Old.SelfCopy()
 	addr3New.Nonce = 1100
 
-	writeBlockData(t, tds, 1100, []accData{
+	writeBlockData(t, NewPlainStateWriter(db, db, 1100), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: addr1Old,
@@ -1258,10 +1132,7 @@ type accData struct {
 	newVal *accounts.Account
 }
 
-func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData) {
-	tds.SetBlockNr(blockNum)
-	var blockWriter = tds.PlainStateWriter()
-
+func writeBlockData(t *testing.T, blockWriter *PlainStateWriter, data []accData) {
 	for i := range data {
 		if data[i].newVal != nil {
 			if err := blockWriter.UpdateAccountData(context.Background(), data[i].addr, data[i].oldVal, data[i].newVal); err != nil {
