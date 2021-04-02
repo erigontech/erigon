@@ -390,7 +390,10 @@ func (db *DB) expireNodes() {
 	)
 	var toDelete [][]byte
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.InodesBucket)
+		c, err := tx.Cursor(dbutils.InodesBucket)
+		if err != nil {
+			return err
+		}
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
@@ -520,7 +523,10 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	)
 
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.InodesBucket)
+		c, err := tx.Cursor(dbutils.InodesBucket)
+		if err != nil {
+			return err
+		}
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// Seek to a random entry. The first byte is incremented by a

@@ -717,7 +717,11 @@ func (tx *lmdbTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		c := tx.Cursor(bucket).(*LmdbCursor)
+		c1, err := tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		c := c1.(*LmdbCursor)
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
@@ -749,7 +753,11 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		c := tx.Cursor(bucket).(*LmdbCursor)
+		c1, err := tx.Cursor(bucket)
+		if err != nil {
+			return false, err
+		}
+		c := c1.(*LmdbCursor)
 		if err := c.initCursor(); err != nil {
 			return false, err
 		}
@@ -796,7 +804,7 @@ func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *lmdbTx) ReadSequence(bucket string) (uint64, error) {
-	c := tx.Cursor(dbutils.Sequence)
+	c, _ := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -842,9 +850,9 @@ func (tx *lmdbTx) RwCursor(bucket string) (RwCursor, error) {
 	return tx.stdCursor(bucket), nil
 }
 
-func (tx *lmdbTx) Cursor(bucket string) Cursor {
+func (tx *lmdbTx) Cursor(bucket string) (Cursor, error) {
 	c, _ := tx.RwCursor(bucket)
-	return c
+	return c, nil
 }
 
 func (tx *lmdbTx) stdCursor(bucket string) RwCursor {

@@ -143,7 +143,11 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 
 			for _, c := range cursors { // restore all cursors position
-				c.c = tx.Cursor(c.bucket)
+				var err error
+				c.c, err = tx.Cursor(c.bucket)
+				if err != nil {
+					return err
+				}
 				switch casted := c.c.(type) {
 				case ethdb.CursorDupSort:
 					v, err := casted.SeekBothRange(c.k, c.v)
@@ -176,9 +180,14 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		switch in.Op {
 		case remote.Op_OPEN:
 			CursorID++
+			var err error
+			c, err = tx.Cursor(in.BucketName)
+			if err != nil {
+				return err
+			}
 			cursors[CursorID] = &CursorInfo{
 				bucket: in.BucketName,
-				c:      tx.Cursor(in.BucketName),
+				c:      c,
 			}
 			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)

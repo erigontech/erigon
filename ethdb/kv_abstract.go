@@ -108,7 +108,7 @@ type Tx interface {
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
 	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
-	Cursor(bucket string) Cursor
+	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	GetOne(bucket string, key []byte) (val []byte, err error)
 	HasOne(bucket string, key []byte) (bool, error)

@@ -80,7 +80,10 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit
 	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	logs := tx.Cursor(dbutils.Log)
+	logs, err := tx.Cursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
 	defer logs.Close()
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()

@@ -49,7 +49,10 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		hBucket = dbutils.AccountsHistoryBucket
 	}
 
-	ch := tx.Cursor(hBucket)
+	ch, err := tx.Cursor(hBucket)
+	if err != nil {
+		return nil, err
+	}
 	defer ch.Close()
 	k, v, seekErr := ch.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if seekErr != nil {
@@ -136,7 +139,10 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	copy(startkeyNoInc[common.AddressLength:], startLocation.Bytes())
 
 	//for storage
-	mCursor := tx.Cursor(dbutils.PlainStateBucket)
+	mCursor, err := tx.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
+		return err
+	}
 	defer mCursor.Close()
 	mainCursor := ethdb.NewSplitCursor(
 		mCursor,
@@ -148,7 +154,10 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	)
 
 	//for historic data
-	shCursor := tx.Cursor(dbutils.StorageHistoryBucket)
+	shCursor, err := tx.Cursor(dbutils.StorageHistoryBucket)
+	if err != nil {
+		return err
+	}
 	defer shCursor.Close()
 	var hCursor = ethdb.NewSplitCursor(
 		shCursor,
@@ -247,9 +256,15 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 }
 
 func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	mainCursor := tx.Cursor(dbutils.PlainStateBucket)
+	mainCursor, err := tx.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
+		return err
+	}
 	defer mainCursor.Close()
-	ahCursor := tx.Cursor(dbutils.AccountsHistoryBucket)
+	ahCursor, err := tx.Cursor(dbutils.AccountsHistoryBucket)
+	if err != nil {
+		return err
+	}
 	defer ahCursor.Close()
 	var hCursor = ethdb.NewSplitCursor(
 		ahCursor,

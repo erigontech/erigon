@@ -603,7 +603,10 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		defer fstl.tx.Rollback()
 	}
 	tx := fstl.tx
-	c := tx.Cursor(dbutils.CurrentStateBucketOld2)
+	c, err := tx.Cursor(dbutils.CurrentStateBucketOld2)
+	if err != nil {
+		return SubTries{}, err
+	}
 	var filter = func(k []byte) (bool, error) {
 
 		if fstl.rl.Retain(k) {

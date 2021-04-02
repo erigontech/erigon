@@ -197,7 +197,11 @@ func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	var key, value []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		k, v, err := tx.Cursor(bucket).Last()
+		c, err := tx.Cursor(bucket)
+		if err != nil {
+			return err
+		}
+		k, v, err := c.Last()
 		if err != nil {
 			return err
 		}
@@ -213,7 +217,11 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		return Walk(tx.Cursor(bucket), startkey, fixedbits, walker)
+		c, err := tx.Cursor(bucket)
+		if err != nil {
+			return err
+		}
+		return Walk(c, startkey, fixedbits, walker)
 	})
 	return err
 }
@@ -292,12 +300,19 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
-			return ForEach(tx.Cursor(name), func(k, _ []byte) (bool, error) {
+			c, err := tx.Cursor(name)
+			if err != nil {
+				return err
+			}
+			err = ForEach(c, func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
 				return true, nil
 			})
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -334,7 +349,10 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 					return err
 				}
 				defer newBucketToWrite.Close()
-				readC := readTx.Cursor(name)
+				readC, err := readTx.Cursor(name)
+				if err != nil {
+					return err
+				}
 				defer readC.Close()
 				return ForEach(readC, func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {

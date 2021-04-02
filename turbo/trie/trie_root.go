@@ -203,10 +203,16 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
-	accC := tx.Cursor(dbutils.HashedAccountsBucket)
+	accC, err := tx.Cursor(dbutils.HashedAccountsBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer accC.Close()
 	accs := NewStateCursor(accC, quit)
-	trieAccC := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	trieAccC, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer trieAccC.Close()
 	trieStorageC, err := tx.CursorDupSort(dbutils.TrieOfStorageBucket)
 	if err != nil {
@@ -1828,11 +1834,25 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
-	accsC, stC := tx.Cursor(dbutils.HashedAccountsBucket), tx.Cursor(dbutils.HashedStorageBucket)
+	accsC, err := tx.Cursor(dbutils.HashedAccountsBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer accsC.Close()
+	stC, err := tx.Cursor(dbutils.HashedStorageBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer stC.Close()
-	trieAccC, trieStorageC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfStorageBucket)
+	trieAccC, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer trieAccC.Close()
+	trieStorageC, err := tx.Cursor(dbutils.TrieOfStorageBucket)
+	if err != nil {
+		return EmptyRoot, err
+	}
 	defer trieStorageC.Close()
 	var canUse = func(prefix []byte) (bool, []byte) {
 		retain, nextCreated := l.rd.RetainWithMarker(prefix)

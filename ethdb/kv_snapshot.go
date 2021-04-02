@@ -153,7 +153,7 @@ func (s *sn2TX) ExistingBuckets() ([]string, error) {
 	panic("implement me")
 }
 
-func (s *sn2TX) Cursor(bucket string) Cursor {
+func (s *sn2TX) Cursor(bucket string) (Cursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -162,14 +162,26 @@ func (s *sn2TX) Cursor(bucket string) Cursor {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.Cursor(bucket)
 	}
-	return &snCursor2{
-		dbCursor: s.dbTX.Cursor(bucket),
-		snCursor: tx.Cursor(bucket),
+	dbCursor, err := s.dbTX.Cursor(bucket)
+	if err != nil {
+		return nil, err
 	}
+	snCursor, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &snCursor2{
+		dbCursor: dbCursor,
+		snCursor: snCursor,
+	}, nil
 }
 
 func (s *sn2TX) RwCursor(bucket string) (RwCursor, error) {
-	return s.Cursor(bucket).(RwCursor), nil
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursor), nil
 }
 
 func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {

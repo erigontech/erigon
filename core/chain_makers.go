@@ -259,7 +259,10 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}); err != nil {
 				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
-			c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			if err != nil {
+				return nil, nil, err
+			}
 			h := common.NewHasher()
 			defer common.ReturnHasherToPool(h)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {

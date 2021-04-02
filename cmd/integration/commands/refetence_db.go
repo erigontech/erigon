@@ -210,12 +210,18 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, refB string) error {
 	count := 0
-	c := tx.Cursor(b)
+	c, err := tx.Cursor(b)
+	if err != nil {
+		return err
+	}
 	k, v, e := c.First()
 	if e != nil {
 		return e
 	}
-	refC := refTx.Cursor(refB)
+	refC, err := refTx.Cursor(refB)
+	if err != nil {
+		return err
+	}
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr
@@ -442,7 +448,10 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 		if err != nil {
 			return err
 		}
-		srcC := srcTx.Cursor(name)
+		srcC, err := srcTx.Cursor(name)
+		if err != nil {
+			return err
+		}
 		var prevK []byte
 		casted, isDupsort := c.(ethdb.RwCursorDupSort)
 

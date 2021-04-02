@@ -284,15 +284,19 @@ func change3(tx ethdb.RwTx) (bool, error) {
 
 func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
-	tx1, err := kv.Begin(context.Background())
-	if err != nil {
-		return false, err
+	tx1, err1 := kv.Begin(context.Background())
+	if err1 != nil {
+		return false, err1
 	}
 	// Wait for the signal to start reading
 	go func() {
 		defer tx1.Rollback()
 		<-startCh
-		c := tx1.Cursor("t")
+		c, err := tx1.Cursor("t")
+		if err != nil {
+			errorCh <- err
+			return
+		}
 		defer c.Close()
 		for i := 0; i < 1000; i++ {
 			k := fmt.Sprintf("%05d", i)
