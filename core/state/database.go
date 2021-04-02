@@ -30,10 +30,8 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -943,26 +941,26 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 }
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
-	for plainKey := range accountMap {
-		key, err := common.HashData([]byte(plainKey)[:])
-		if err != nil {
-			return err
-		}
-
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
-			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
-		}
-	}
-	for plainKey := range storageMap {
-		key, err := common.HashData([]byte(plainKey)[:])
-		if err != nil {
-			return err
-		}
-
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
-			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
-		}
-	}
+	//for plainKey := range accountMap {
+	//	key, err := common.HashData([]byte(plainKey)[:])
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
+	//		return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
+	//	}
+	//}
+	//for plainKey := range storageMap {
+	//	key, err := common.HashData([]byte(plainKey)[:])
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
+	//		return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
+	//	}
+	//}
 	return nil
 }
 

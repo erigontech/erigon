@@ -135,10 +135,15 @@ func FromDBFormat(addrSize int) func(dbKey, dbValue []byte) (blockN uint64, k, v
 	}
 }
 
-func Walk(db ethdb.Getter, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
+func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
 	fromDBFormat := FromDBFormat(Mapper[bucket].KeySize)
 	var blockN uint64
-	return db.Walk(bucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		blockN, k, v = fromDBFormat(k, v)
 		return walker(blockN, k, v)
 	})

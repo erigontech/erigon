@@ -885,6 +885,10 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 }
 
 func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
+	if len(bucket) == 0 {
+		panic(1)
+	}
+
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)

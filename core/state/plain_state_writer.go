@@ -152,7 +152,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, db)
+	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, db.(ethdb.HasTx).Tx().(ethdb.RwTx))
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, db)
+	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, db.(ethdb.HasTx).Tx().(ethdb.RwTx))
 	if err != nil {
 		return err
 	}
