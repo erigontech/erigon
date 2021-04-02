@@ -4,7 +4,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ windows-latest ]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -24,9 +24,14 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
-      - name: Build
+      - name: Build (non-windows)
+        if: matrix.os != 'windows-latest'
+        run: make all
+      - name: Build (windows)
+        if: matrix.os == 'windows-latest'
         run: go build -trimpath -o bin/tg.exe ./cmd/tg
       - name: Lint
+        if: matrix.os != 'windows-latest'
         uses: golangci/golangci-lint-action@v2
         with:
           version: latest
@@ -35,6 +40,7 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
       - name: Test
+        if: matrix.os != 'windows-latest'
         run: make test
   docker:
     runs-on: ubuntu-latest
