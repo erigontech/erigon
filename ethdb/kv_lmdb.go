@@ -702,8 +702,15 @@ func (tx *lmdbTx) Delete(bucket string, k, v []byte) error {
 		}
 		return c.Delete(k, v)
 	}
+	err := tx.tx.Del(lmdb.DBI(b.DBI), k, v)
+	if err != nil {
+		if lmdb.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
 
-	return tx.tx.Del(lmdb.DBI(b.DBI), k, v)
+	return nil
 }
 
 func (tx *lmdbTx) GetOne(bucket string, key []byte) ([]byte, error) {

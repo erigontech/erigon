@@ -752,7 +752,14 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 		return c.Delete(k, v)
 	}
 
-	return tx.tx.Del(mdbx.DBI(b.DBI), k, v)
+	err := tx.tx.Del(mdbx.DBI(b.DBI), k, v)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
