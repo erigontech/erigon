@@ -236,6 +236,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, innerErr
 			}
 			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
+
 			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
@@ -269,7 +270,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					return nil, innerErr
 				}
 				chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
+				tx, err := chainDb.Begin(context.Background(), ethdb.RW)
+				if err != nil {
+					return nil, err
+				}
+				defer tx.Rollback()
 				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
+				if err = tx.Commit(); err != nil {
+					return nil, err
+				}
 				if innerErr != nil {
 					return nil, innerErr
 				}

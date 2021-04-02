@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"time"
@@ -18,6 +19,12 @@ func RegenerateTxLookup(chaindata string) error {
 	if err := db.ClearBuckets(dbutils.TxLookupPrefix); err != nil {
 		return err
 	}
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	startTime := time.Now()
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
@@ -27,13 +34,13 @@ func RegenerateTxLookup(chaindata string) error {
 		close(quitCh)
 	}()
 
-	lastExecutedBlock, err := stages.GetStageProgress(db, stages.Execution)
+	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		//There could be headers without block in the end
 		log.Error("Cant get last executed block", "err", err)
 	}
 	log.Info("TxLookup generation started", "start time", startTime)
-	err = stagedsync.TxLookupTransform("txlookup", db, dbutils.EncodeBlockNumber(0), dbutils.EncodeBlockNumber(lastExecutedBlock+1), quitCh, os.TempDir())
+	err = stagedsync.TxLookupTransform("txlookup", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.EncodeBlockNumber(0), dbutils.EncodeBlockNumber(lastExecutedBlock+1), quitCh, os.TempDir())
 	if err != nil {
 		return err
 	}

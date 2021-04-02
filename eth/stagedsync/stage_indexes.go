@@ -205,7 +205,7 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 		return nil
 	}
 
-	if err := collectorUpdates.Load(logPrefix, db, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorUpdates.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil

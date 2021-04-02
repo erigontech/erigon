@@ -76,24 +76,24 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return err
 	}
 	defer tx.Rollback()
-	hash, err := rawdb.ReadCanonicalHash(db, block)
+	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	if err != nil {
 		return err
 	}
 
-	syncHeadHeader := rawdb.ReadHeader(db, hash, block)
+	syncHeadHeader := rawdb.ReadHeader(tx, hash, block)
 	if syncHeadHeader == nil {
 		return fmt.Errorf("empty header")
 	}
 	expectedRootHash := syncHeadHeader.Root
 	tt := time.Now()
-	err = stagedsync.PromoteHashedStateCleanly("", tx, os.TempDir(), ctx.Done())
+	err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), os.TempDir(), ctx.Done())
 	fmt.Println("Promote took", time.Since(tt))
 	if err != nil {
 		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, os.TempDir(), expectedRootHash, ctx.Done())
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, os.TempDir(), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}

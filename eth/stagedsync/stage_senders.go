@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -31,7 +32,21 @@ type Stage3Config struct {
 }
 
 func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
-	prevStageProgress, errStart := stages.GetStageProgress(db, stages.Bodies)
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
 	if errStart != nil {
 		return errStart
 	}
@@ -53,7 +68,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	if err := db.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	if err := tx.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -120,7 +135,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}()
 
-	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	if err := tx.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -135,7 +150,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			// non-canonical case
 			return true, nil
 		}
-		body := rawdb.ReadBody(db, blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 
 		select {
 		case err := <-errCh:
@@ -159,7 +174,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}
 
-	if err := collectorSenders.Load(logPrefix, db,
+	if err := collectorSenders.Load(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		dbutils.Senders,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -172,7 +187,16 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		return err
 	}
 
-	return s.DoneAndUpdate(db, to)
+	if err := s.DoneAndUpdate(tx, to); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type senderRecoveryJob struct {

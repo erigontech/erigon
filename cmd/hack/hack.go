@@ -1043,18 +1043,24 @@ func (r *Receiver) Result() trie.SubTries {
 func regenerate(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tool.Check(stagedsync.ResetIH(db))
-	to, err := stages.GetStageProgress(db, stages.HashState)
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		return err
 	}
-	hash, err := rawdb.ReadCanonicalHash(db, to)
+	defer tx.Rollback()
+
+	tool.Check(stagedsync.ResetIH(tx))
+	to, err := stages.GetStageProgress(tx, stages.HashState)
 	if err != nil {
 		return err
 	}
-	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
+	hash, err := rawdb.ReadCanonicalHash(tx, to)
+	if err != nil {
+		return err
+	}
+	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, "", expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
@@ -1071,6 +1077,11 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	block := *headNumber - uint64(rewind)
@@ -1179,14 +1190,14 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
 		panic(err)
 	}
-	_, err = loader.CalcTrieRoot(db, nil, nil)
+	_, err = loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
 	if err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
-	root, err := loader.CalcTrieRoot(db, nil, nil)
+	root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
 	if err != nil {
 		return err
 	}
