@@ -26,5 +26,5 @@ func getRUsage(p *process.Process) (inBlock, outBlocks, nvcsw, nivcsw int64) {
 
 // getProcessCPUTime retrieves the process' CPU time since program startup.
 func getProcessCPUTime() int64 {
-	0
+	return 0
 }
