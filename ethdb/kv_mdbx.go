@@ -685,6 +685,7 @@ func (tx *MdbxTx) Rollback() {
 	tx.tx.Abort()
 }
 
+//nolint
 func (tx *MdbxTx) printDebugInfo() {
 	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
 		txInfo, err := tx.tx.Info(true)
