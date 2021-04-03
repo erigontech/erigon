@@ -26,6 +26,13 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
+type TxFlags uint
+
+const (
+	RW TxFlags = 0x00 // default
+	RO TxFlags = 0x02
+)
+
 // Getter wraps the database read operations.
 type Getter interface {
 	// Get returns the value for a given key if it's present.

@@ -91,13 +91,6 @@ type RwKV interface {
 	BeginRw(ctx context.Context) (RwTx, error)
 }
 
-type TxFlags uint
-
-const (
-	RW TxFlags = 0x00 // default
-	RO TxFlags = 0x02
-)
-
 type StatelessReadTx interface {
 	GetOne(bucket string, key []byte) (val []byte, err error)
 	HasOne(bucket string, key []byte) (bool, error)
