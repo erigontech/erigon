@@ -38,7 +38,6 @@ type remoteOpts struct {
 type RemoteKV struct {
 	opts     remoteOpts
 	remoteKV remote.KVClient
-	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
@@ -147,7 +146,6 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 		opts:     opts,
 		conn:     conn,
 		remoteKV: remote.NewKVClient(conn),
-		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
 	}
@@ -190,14 +188,6 @@ func (db *RemoteKV) Close() {
 		}
 		db.conn = nil
 	}
-}
-
-func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
-	sizeReply, err := db.remoteDB.Size(ctx, &remote.SizeRequest{})
-	if err != nil {
-		return 0, err
-	}
-	return sizeReply.Size, nil
 }
 
 func (db *RemoteKV) CollectMetrics() {}
@@ -257,14 +247,6 @@ func (c *remoteCursor) Prefix(v []byte) Cursor {
 
 func (c *remoteCursor) Prefetch(v uint) Cursor {
 	return c
-}
-
-func (tx *remoteTx) BucketSize(name string) (uint64, error) {
-	sizeReply, err := tx.db.remoteDB.BucketSize(tx.ctx, &remote.BucketSizeRequest{BucketName: name})
-	if err != nil {
-		return 0, err
-	}
-	return sizeReply.Size, nil
 }
 
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {

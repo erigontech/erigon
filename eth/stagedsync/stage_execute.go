@@ -219,9 +219,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
-					if err = printBucketsSize(tx); err != nil {
-						return err
-					}
 					chainContext.SetDB(tx)
 				}
 			}
@@ -240,9 +237,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				log.Info("CommitCache", "in", time.Since(start))
 				if !useExternalTx {
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
-						return err
-					}
-					if err = printBucketsSize(tx); err != nil {
 						return err
 					}
 					chainContext.SetDB(tx)

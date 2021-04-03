@@ -15,27 +15,7 @@ var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
-	dbSize             = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)
-	tableScsLeaf       = metrics.GetOrRegisterGauge("table/scs/leaf", metrics.DefaultRegistry)       //nolint
-	tableScsBranch     = metrics.GetOrRegisterGauge("table/scs/branch", metrics.DefaultRegistry)     //nolint
-	tableScsOverflow   = metrics.GetOrRegisterGauge("table/scs/overflow", metrics.DefaultRegistry)   //nolint
-	tableScsEntries    = metrics.GetOrRegisterGauge("table/scs/entries", metrics.DefaultRegistry)    //nolint
-	tableStateLeaf     = metrics.GetOrRegisterGauge("table/state/leaf", metrics.DefaultRegistry)     //nolint
-	tableStateBranch   = metrics.GetOrRegisterGauge("table/state/branch", metrics.DefaultRegistry)   //nolint
-	tableStateOverflow = metrics.GetOrRegisterGauge("table/state/overflow", metrics.DefaultRegistry) //nolint
-	tableStateEntries  = metrics.GetOrRegisterGauge("table/state/entries", metrics.DefaultRegistry)  //nolint
-	tableLogLeaf       = metrics.GetOrRegisterGauge("table/log/leaf", metrics.DefaultRegistry)       //nolint
-	tableLogBranch     = metrics.GetOrRegisterGauge("table/log/branch", metrics.DefaultRegistry)     //nolint
-	tableLogOverflow   = metrics.GetOrRegisterGauge("table/log/overflow", metrics.DefaultRegistry)   //nolint
-	tableLogEntries    = metrics.GetOrRegisterGauge("table/log/entries", metrics.DefaultRegistry)    //nolint
-	tableTxLeaf        = metrics.GetOrRegisterGauge("table/tx/leaf", metrics.DefaultRegistry)        //nolint
-	tableTxBranch      = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)      //nolint
-	tableTxOverflow    = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)    //nolint
-	tableTxEntries     = metrics.GetOrRegisterGauge("table/tx/entries", metrics.DefaultRegistry)     //nolint
-	tableGcLeaf        = metrics.GetOrRegisterGauge("table/gc/leaf", metrics.DefaultRegistry)        //nolint
-	tableGcBranch      = metrics.GetOrRegisterGauge("table/gc/branch", metrics.DefaultRegistry)      //nolint
-	tableGcOverflow    = metrics.GetOrRegisterGauge("table/gc/overflow", metrics.DefaultRegistry)    //nolint
-	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
+	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
 )
 
 // Read-only version of KV.
@@ -115,8 +95,6 @@ type Tx interface {
 
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
-
-	BucketSize(name string) (uint64, error)
 
 	Comparator(bucket string) dbutils.CmpFunc
 
@@ -215,5 +193,6 @@ type RwCursorDupSort interface {
 }
 
 type HasStats interface {
+	BucketSize(name string) (uint64, error)
 	DiskSize(context.Context) (uint64, error) // db size
 }

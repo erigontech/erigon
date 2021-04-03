@@ -138,17 +138,6 @@ func (m *mutation) Has(table string, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	if m.db == nil {
-		return 0, nil
-	}
-	sz, err := m.db.(HasStats).DiskSize(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return common.StorageSize(sz), nil
-}
-
 func (m *mutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
