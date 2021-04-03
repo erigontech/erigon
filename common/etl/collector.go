@@ -143,15 +143,17 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 			panic(eee)
 		}
 	}
-	c, err := db.RwCursor(bucket)
-	if err != nil {
-		return err
-	}
+	var c ethdb.RwCursor
 
 	currentTable := &currentTableReader{db, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
 	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
+		var err error
+		c, err = db.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
 		var errLast error
 		lastKey, _, errLast = c.Last()
 		if errLast != nil {
