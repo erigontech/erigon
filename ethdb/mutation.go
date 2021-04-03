@@ -349,17 +349,6 @@ func (m *mutation) SetRwKV(kv RwKV) {
 	m.db.(HasRwKV).SetRwKV(kv)
 }
 
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (m *mutation) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (m *mutation) TruncateAncients(items uint64) error {
-	return errNotSupported
-}
-
 func NewRWDecorator(db Database) *RWCounterDecorator {
 	return &RWCounterDecorator{
 		db,

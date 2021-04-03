@@ -334,17 +334,6 @@ func (m *TxDb) panicOnEmptyDB() {
 	}
 }
 
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (m *TxDb) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (m *TxDb) TruncateAncients(items uint64) error {
-	return errNotSupported
-}
-
 func (m *TxDb) BucketExists(name string) (bool, error) {
 	exists := false
 	migrator, ok := m.tx.(BucketMigrator)

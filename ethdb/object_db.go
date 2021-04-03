@@ -396,17 +396,6 @@ func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendi
 	return batch, nil
 }
 
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (db *ObjectDatabase) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (db *ObjectDatabase) TruncateAncients(items uint64) error {
-	return errNotSupported
-}
-
 // Type which expecting sequence of triplets: dbi, key, value, ....
 // It sorts entries by dbi name, then inside dbi clusters sort by keys
 type MultiPutTuples [][]byte
