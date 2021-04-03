@@ -1077,13 +1077,14 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return err
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	if err1 != nil {
+		return err1
 	}
 	defer tx.Rollback()
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
@@ -1091,7 +1092,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1121,7 +1122,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainStorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1150,7 +1151,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err1 := tx.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
 					return err1
@@ -1204,9 +1205,9 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	hash, err := rawdb.ReadCanonicalHash(db, block)
+	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
-	header := rawdb.ReadHeader(db, hash, block)
+	header := rawdb.ReadHeader(tx, hash, block)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed trie",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
@@ -1217,6 +1218,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
 	fmt.Printf("State stats\n")
 	stAccounts := 0
 	stStorage := 0
@@ -1243,7 +1245,12 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
 	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+	defer tx.Rollback()
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= block2 {
 			return false, nil
 		}
@@ -1257,7 +1264,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	}
 
 	storage := make(map[string]struct{})
-	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= block2 {
 			return false, nil
 		}
@@ -1278,7 +1285,13 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+	defer tx.Rollback()
+
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -1293,7 +1306,12 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching storage changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+	defer tx.Rollback()
+	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}

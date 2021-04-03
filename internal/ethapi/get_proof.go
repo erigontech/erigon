@@ -2,16 +2,10 @@ package ethapi
 
 import (
 	"bytes"
-	"context"
-	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
@@ -31,6 +25,7 @@ type StorageResult struct {
 	Proof []string     `json:"proof"`
 }
 
+/*TODO: to support proofs
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
 	block := uint64(blockNr.Int64()) + 1
 	db := s.b.ChainDb()
@@ -123,13 +118,12 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		panic(err)
 	}
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	r.defaultReceiver.Reset(rl, nil /* hashCollector */, false)
+	r.defaultReceiver.Reset(rl, nil, false)
 	loader.SetStreamReceiver(r)
 	_, err = loader.CalcTrieRoot(db.(ethdb.HasTx).Tx().(ethdb.RwTx), []byte{}, nil)
 	if err != nil {
 		panic(err)
 	}
-	/*TODO: to support proofs
 	hash, err := rawdb.ReadCanonicalHash(db, block-1)
 	if err != nil {
 		return nil, err
@@ -173,9 +167,9 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 		StorageHash:  acc.Root,
 		StorageProof: storageProof,
 	}, nil
-	*/
 	return &AccountResult{}, nil
 }
+*/
 
 type Receiver struct {
 	defaultReceiver *trie.DefaultReceiver

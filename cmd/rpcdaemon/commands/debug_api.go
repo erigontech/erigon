@@ -169,7 +169,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return changeset.GetModifiedAccounts(ethdb.NewRoTxDb(tx), startNum, endNum)
+	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
@@ -205,7 +205,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return changeset.GetModifiedAccounts(ethdb.NewRoTxDb(tx), startNum, endNum)
+	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
