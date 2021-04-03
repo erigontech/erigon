@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
@@ -314,6 +315,9 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 func TestWalkAsOfStatePlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	emptyVal := uint256.NewInt()
 	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
@@ -344,7 +348,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		return expectedKey
 	}
 
-	writeStorageBlockData(t, NewPlainStateWriter(db, db, 3), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 3), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -368,7 +372,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		},
 	})
 
-	writeStorageBlockData(t, NewPlainStateWriter(db, db, 5), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 5), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -396,15 +400,8 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	//walk and collect walkAsOf result
-	var err error
-	tx, err1 := db.RwKV().Begin(context.Background())
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err = WalkAsOfStorage(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -420,7 +417,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err = WalkAsOfStorage(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -451,7 +448,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err = WalkAsOfStorage(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
