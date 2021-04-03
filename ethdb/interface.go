@@ -26,12 +26,6 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
-// Putter wraps the database write operations.
-type Putter interface {
-	// Put inserts or updates a single entry.
-	Put(bucket string, key, value []byte) error
-}
-
 // Getter wraps the database read operations.
 type Getter interface {
 	// Get returns the value for a given key if it's present.
@@ -62,12 +56,6 @@ type GetterBeginner interface {
 type GetterPutter interface {
 	Getter
 	Putter
-}
-
-// Deleter wraps the database delete operations.
-type Deleter interface {
-	// Delete removes a single entry.
-	Delete(bucket string, k, v []byte) error
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.

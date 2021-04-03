@@ -18,6 +18,18 @@ var (
 	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
 )
 
+// Putter wraps the database write operations.
+type Putter interface {
+	// Put inserts or updates a single entry.
+	Put(bucket string, key, value []byte) error
+}
+
+// Deleter wraps the database delete operations.
+type Deleter interface {
+	// Delete removes a single entry.
+	Delete(bucket string, k, v []byte) error
+}
+
 type Closer interface {
 	Close()
 }
@@ -101,10 +113,10 @@ type StatelessReadTx interface {
 }
 
 type StatelessWriteTx interface {
-	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	Putter
+	Deleter
 
-	Put(bucket string, k, v []byte) error
-	Delete(bucket string, k, v []byte) error
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
 }
 
 type StatelessRwTx interface {
