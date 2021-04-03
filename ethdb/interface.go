@@ -69,9 +69,6 @@ type Deleter interface {
 	// Delete removes a single entry.
 	Delete(bucket string, k, v []byte) error
 }
-type Closer interface {
-	Close()
-}
 
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {

@@ -18,10 +18,15 @@ var (
 	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
 )
 
+type Closer interface {
+	Close()
+}
+
 // Read-only version of KV.
 type RoKV interface {
+	Closer
+
 	View(ctx context.Context, f func(tx Tx) error) error
-	Close()
 
 	// BeginRo - creates transaction
 	// 	tx may be discarded by .Rollback() method
