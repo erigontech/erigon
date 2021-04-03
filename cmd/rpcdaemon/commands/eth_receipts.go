@@ -57,7 +57,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var begin, end uint64
 	var logs []*types.Log //nolint:prealloc
 
-	tx, beginErr := api.db.Begin(ctx)
+	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
 		return returnLogs(logs), beginErr
 	}
@@ -194,7 +194,7 @@ func getTopicsBitmap(c ethdb.Tx, topics [][]common.Hash, from, to uint32) (*roar
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}

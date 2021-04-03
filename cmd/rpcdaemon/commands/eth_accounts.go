@@ -15,7 +15,7 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	tx, err1 := api.db.Begin(ctx)
+	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
@@ -39,7 +39,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	tx, err1 := api.db.Begin(ctx)
+	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
@@ -59,7 +59,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	tx, err1 := api.db.Begin(ctx)
+	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
 	}
@@ -85,7 +85,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 
-	tx, err1 := api.db.Begin(ctx)
+	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err1
 	}

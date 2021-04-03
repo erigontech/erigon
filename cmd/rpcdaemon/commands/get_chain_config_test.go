@@ -16,7 +16,7 @@ func TestGetChainConfig(t *testing.T) {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
 
-	tx, txErr := db.Begin(context.Background())
+	tx, txErr := db.BeginRo(context.Background())
 	if txErr != nil {
 		t.Fatalf("error starting tx: %v", txErr)
 	}

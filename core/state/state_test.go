@@ -65,7 +65,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := s.kv.Begin(context.Background())
+	tx, err1 := s.kv.BeginRo(context.Background())
 	if err1 != nil {
 		c.Fatalf("create tx: %v", err1)
 	}
@@ -329,7 +329,7 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := db.RwKV().Begin(context.Background())
+	tx, err1 := db.RwKV().BeginRo(context.Background())
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}

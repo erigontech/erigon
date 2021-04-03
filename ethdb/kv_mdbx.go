@@ -184,7 +184,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 
 	// Open or create buckets
 	if opts.flags&mdbx.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background())
+		tx, innerErr := db.BeginRo(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -196,7 +196,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 				return nil, err
 			}
 		}
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		if err != nil {
 			return nil, err
 		}
@@ -354,7 +354,7 @@ func (db *MdbxKV) CollectMetrics() {
 	*/
 }
 
-func (db *MdbxKV) Begin(_ context.Context) (txn Tx, err error) {
+func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -463,7 +463,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -488,7 +488,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 	if err != nil {
 		return err
 	}
-	err = tx.Commit(ctx)
+	err = tx.Commit()
 	if err != nil {
 		return err
 	}
@@ -623,7 +623,7 @@ func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 	return false
 }
 
-func (tx *MdbxTx) Commit(ctx context.Context) error {
+func (tx *MdbxTx) Commit() error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}

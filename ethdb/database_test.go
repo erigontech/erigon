@@ -143,7 +143,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 }
 
 func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasRwKV).RwKV().Begin(context.Background())
+	tx, err := db.(HasRwKV).RwKV().BeginRo(context.Background())
 	require.NoError(t, err)
 	writeTx, err := db.(HasRwKV).RwKV().BeginRw(context.Background())
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
 	err = writeTx.Put(dbutils.Buckets[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
-	err = writeTx.Commit(context.Background())
+	err = writeTx.Commit()
 	require.NoError(t, err)
 	_, err = tx.GetOne(dbutils.Buckets[0], []byte{1})
 	require.NoError(t, err)

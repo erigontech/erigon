@@ -63,7 +63,7 @@ type SnapshotKV2 struct {
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	snTX, err := s.Begin(ctx)
+	snTX, err := s.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
 
 	err = f(tx)
 	if err == nil {
-		return tx.Commit(ctx)
+		return tx.Commit()
 	}
 	return err
 }
@@ -96,8 +96,8 @@ func (s *SnapshotKV2) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV2) Begin(ctx context.Context) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx)
+func (s *SnapshotKV2) BeginRo(ctx context.Context) (Tx, error) {
+	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	var err error
-	tx, err = sn.snapshot.Begin(context.TODO())
+	tx, err = sn.snapshot.BeginRo(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -300,11 +300,11 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 	return v, nil
 }
 
-func (s *sn2TX) Commit(ctx context.Context) error {
+func (s *sn2TX) Commit() error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
-	return s.dbTX.Commit(ctx)
+	return s.dbTX.Commit()
 }
 
 func (s *sn2TX) Rollback() {

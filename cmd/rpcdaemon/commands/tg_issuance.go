@@ -35,7 +35,7 @@ import (
 
 // Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Issuance{}, err
 	}

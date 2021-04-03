@@ -26,11 +26,12 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
-// Putter wraps the database write operations.
-type Putter interface {
-	// Put inserts or updates a single entry.
-	Put(bucket string, key, value []byte) error
-}
+type TxFlags uint
+
+const (
+	RW TxFlags = 0x00 // default
+	RO TxFlags = 0x02
+)
 
 // Getter wraps the database read operations.
 type Getter interface {
@@ -56,21 +57,12 @@ type GetterTx interface {
 type GetterBeginner interface {
 	Getter
 
-	BeginRO(ctx context.Context) (GetterTx, error)
+	BeginGetter(ctx context.Context) (GetterTx, error)
 }
 
 type GetterPutter interface {
 	Getter
 	Putter
-}
-
-// Deleter wraps the database delete operations.
-type Deleter interface {
-	// Delete removes a single entry.
-	Delete(bucket string, k, v []byte) error
-}
-type Closer interface {
-	Close()
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.
