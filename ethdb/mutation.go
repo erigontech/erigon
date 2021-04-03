@@ -37,6 +37,13 @@ type MutationItem struct {
 	value []byte
 }
 
+func NewBatch(kv RwKV) StatelessRwTx {
+	return &mutation{
+		db:   NewObjectDatabase(kv),
+		puts: btree.New(32),
+	}
+}
+
 func (mi *MutationItem) Less(than btree.Item) bool {
 	i := than.(*MutationItem)
 	c := strings.Compare(mi.table, i.table)
@@ -103,17 +110,37 @@ func (m *mutation) ReadSequence(bucket string) (res uint64, err error) {
 }
 
 // Can only be called from the worker thread
-func (m *mutation) Get(table string, key []byte) ([]byte, error) {
+func (m *mutation) GetOne(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {
 		if value == nil {
-			return nil, ErrKeyNotFound
+			return nil, nil
 		}
 		return value, nil
 	}
 	if m.db != nil {
-		return m.db.Get(table, key)
+		// TODO: simplify when tx can no longer be parent of mutation
+		value, err := m.db.Get(table, key)
+		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+			return nil, err
+		}
+
+		return value, nil
 	}
-	return nil, ErrKeyNotFound
+	return nil, nil
+}
+
+// Can only be called from the worker thread
+func (m *mutation) Get(table string, key []byte) ([]byte, error) {
+	value, err := m.GetOne(table, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if value == nil {
+		return nil, ErrKeyNotFound
+	}
+
+	return value, nil
 }
 
 func (m *mutation) Last(table string) ([]byte, []byte, error) {
@@ -128,7 +155,7 @@ func (m *mutation) hasMem(table string, key []byte) bool {
 	return m.puts.Has(&m.searchItem)
 }
 
-func (m *mutation) Has(table string, key []byte) (bool, error) {
+func (m *mutation) HasOne(table string, key []byte) (bool, error) {
 	if m.hasMem(table, key) {
 		return true, nil
 	}
@@ -136,6 +163,10 @@ func (m *mutation) Has(table string, key []byte) (bool, error) {
 		return m.db.Has(table, key)
 	}
 	return false, nil
+}
+
+func (m *mutation) Has(table string, key []byte) (bool, error) {
+	return m.HasOne(table, key)
 }
 
 func (m *mutation) Put(table string, key []byte, value []byte) error {
