@@ -37,7 +37,6 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 	}
 
 	kv2Srv := NewKvServer(kv)
-	dbSrv := NewDBServer(kv)
 	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -71,7 +70,6 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 		opts = append(opts, grpc.Creds(*creds))
 	}
 	grpcServer = grpc.NewServer(opts...)
-	remote.RegisterDBServer(grpcServer, dbSrv)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	remote.RegisterKVServer(grpcServer, kv2Srv)
 

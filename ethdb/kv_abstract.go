@@ -116,8 +116,6 @@ type Tx interface {
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
 
-	BucketSize(name string) (uint64, error)
-
 	Comparator(bucket string) dbutils.CmpFunc
 
 	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
@@ -215,5 +213,6 @@ type RwCursorDupSort interface {
 }
 
 type HasStats interface {
+	BucketSize(name string) (uint64, error)
 	DiskSize(context.Context) (uint64, error) // db size
 }
