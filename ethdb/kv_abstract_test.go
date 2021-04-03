@@ -109,7 +109,7 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		require.NoError(t, err)
 	}
 

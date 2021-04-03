@@ -80,7 +80,7 @@ func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
 
 	err = f(tx)
 	if err == nil {
-		return tx.Commit(ctx)
+		return tx.Commit()
 	}
 	return err
 }
@@ -300,11 +300,11 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 	return v, nil
 }
 
-func (s *sn2TX) Commit(ctx context.Context) error {
+func (s *sn2TX) Commit() error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
-	return s.dbTX.Commit(ctx)
+	return s.dbTX.Commit()
 }
 
 func (s *sn2TX) Rollback() {

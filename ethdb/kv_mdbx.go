@@ -196,7 +196,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 				return nil, err
 			}
 		}
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		if err != nil {
 			return nil, err
 		}
@@ -488,7 +488,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 	if err != nil {
 		return err
 	}
-	err = tx.Commit(ctx)
+	err = tx.Commit()
 	if err != nil {
 		return err
 	}
@@ -623,7 +623,7 @@ func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 	return false
 }
 
-func (tx *MdbxTx) Commit(ctx context.Context) error {
+func (tx *MdbxTx) Commit() error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}

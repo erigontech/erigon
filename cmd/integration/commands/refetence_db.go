@@ -385,7 +385,7 @@ MainLoop:
 			panic(err)
 		}
 	}
-	err = dstTx.Commit(context.Background())
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -393,7 +393,7 @@ MainLoop:
 	if err != nil {
 		return err
 	}
-	err = dstTx.Commit(ctx)
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -482,7 +482,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 				return ctx.Err()
 			case <-commitEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
-				if err2 := dstTx.Commit(ctx); err2 != nil {
+				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
 				dstTx, err = dst.BeginRw(ctx)
@@ -509,7 +509,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 		//	return err
 		//}
 	}
-	err := dstTx.Commit(context.Background())
+	err := dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -517,7 +517,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 	if err != nil {
 		return err
 	}
-	err = dstTx.Commit(ctx)
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}

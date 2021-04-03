@@ -301,7 +301,7 @@ func (m *TxDb) Commit() error {
 	if m.tx == nil {
 		return fmt.Errorf("second call .Commit() on same transaction")
 	}
-	if err := m.tx.Commit(context.Background()); err != nil {
+	if err := m.tx.Commit(); err != nil {
 		return err
 	}
 	m.tx = nil

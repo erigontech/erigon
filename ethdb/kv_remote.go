@@ -230,7 +230,7 @@ func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
 
-func (tx *remoteTx) Commit(ctx context.Context) error {
+func (tx *remoteTx) Commit() error {
 	panic("remote db is read-only")
 }
 

@@ -177,7 +177,7 @@ func (w *PlainStateWriter) WriteHistory() error {
 	}
 
 	if !externalTx {
-		tx.Commit(context.Background())
+		tx.Commit()
 	}
 
 	return nil

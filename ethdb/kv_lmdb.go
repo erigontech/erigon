@@ -198,7 +198,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 				return nil, err
 			}
 		}
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		if err != nil {
 			return nil, err
 		}
@@ -496,7 +496,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 	if err != nil {
 		return err
 	}
-	err = tx.Commit(ctx)
+	err = tx.Commit()
 	if err != nil {
 		return err
 	}
@@ -612,7 +612,7 @@ func (tx *lmdbTx) ExistsBucket(bucket string) bool {
 	return false
 }
 
-func (tx *lmdbTx) Commit(ctx context.Context) error {
+func (tx *lmdbTx) Commit() error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}

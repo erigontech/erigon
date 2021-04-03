@@ -578,7 +578,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		require.NoError(t, err)
 		err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
 		require.NoError(t, err)
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		require.NoError(t, err)
 	}
 	tx, err := kv.Begin(context.Background())

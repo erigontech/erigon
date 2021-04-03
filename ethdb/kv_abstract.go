@@ -85,8 +85,8 @@ type StatelessReadTx interface {
 	GetOne(bucket string, key []byte) (val []byte, err error)
 	HasOne(bucket string, key []byte) (bool, error)
 
-	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
-	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
+	Commit() error // Commit all the operations of a transaction into the database.
+	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
 
 	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
