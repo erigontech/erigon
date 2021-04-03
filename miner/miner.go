@@ -58,7 +58,7 @@ func New(eth Backend, config *params.MiningConfig, chainConfig *params.ChainConf
 		exitCh:  make(chan struct{}),
 		startCh: make(chan common.Address),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}, false),
+		worker:  newWorker(config, chainConfig, engine, eth, hooks{isLocalBlock: isLocalBlock}, false),
 	}
 	go miner.update()
 

@@ -28,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -38,7 +37,6 @@ import (
 
 // Node is a container on which services can be registered.
 type Node struct {
-	eventmux      *event.TypeMux
 	config        *Config
 	log           log.Logger
 	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
@@ -95,7 +93,6 @@ func New(conf *Config) (*Node, error) {
 	node := &Node{
 		config:        conf,
 		inprocHandler: rpc.NewServer(),
-		eventmux:      new(event.TypeMux),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		server:        &p2p.Server{Config: conf.P2P},
@@ -536,12 +533,6 @@ func (n *Node) WSEndpoint() string {
 		return "ws://" + n.http.listenAddr() + n.http.wsConfig.prefix
 	}
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
-}
-
-// EventMux retrieves the event multiplexer used by all the network services in
-// the current protocol stack.
-func (n *Node) EventMux() *event.TypeMux {
-	return n.eventmux
 }
 
 // OpenDatabase opens an existing database with the given name (or creates one if no

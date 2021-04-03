@@ -80,7 +80,6 @@ type handlerConfig struct {
 	TxPool     txPool                    // Transaction pool to propagate from
 	Network    uint64                    // Network identifier to adfvertise
 	BloomCache uint64                    // Megabytes to alloc for fast sync bloom
-	EventMux   *event.TypeMux            // Legacy event mux, deprecate for `feed`
 	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
 	Whitelist  map[uint64]common.Hash    // Hard coded whitelist for sync challenged
 	Mining     *params.MiningConfig
@@ -102,10 +101,8 @@ type handler struct {
 	txFetcher    *fetcher.TxFetcher
 	peers        *peerSet
 
-	eventMux      *event.TypeMux
-	txsCh         chan core.NewTxsEvent
-	txsSub        event.Subscription
-	minedBlockSub *event.TypeMuxSubscription
+	txsCh  chan core.NewTxsEvent
+	txsSub event.Subscription
 
 	whitelist map[uint64]common.Hash
 
@@ -127,13 +124,8 @@ type handler struct {
 
 // newHandler returns a handler for all Ethereum chain management protocol.
 func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
-	// Create the protocol manager with the base fields
-	if config.EventMux == nil {
-		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
-	}
 	h := &handler{
 		networkID: config.Network,
-		eventMux:  config.EventMux,
 		database:  config.Database,
 		txpool:    config.TxPool,
 		chain:     config.Chain,
@@ -158,7 +150,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(config.Database, h.eventMux, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm)
+	h.downloader = downloader.New(config.Database, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
 	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
@@ -325,11 +317,6 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
-	// broadcast mined blocks
-	h.wg.Add(1)
-	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go h.minedBroadcastLoop()
-
 	// start sync handlers
 	h.wg.Add(2)
 	go h.chainSync.loop()
@@ -337,8 +324,7 @@ func (h *handler) Start(maxPeers int) {
 }
 
 func (h *handler) Stop() {
-	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
-	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
@@ -433,18 +419,6 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 	log.Debug("Transaction broadcast", "txs", len(txs),
 		"announce packs", annoPeers, "announced hashes", annoCount,
 		"tx packs", directPeers, "broadcast txs", directCount)
-}
-
-// minedBroadcastLoop sends mined blocks to connected peers.
-func (h *handler) minedBroadcastLoop() {
-	defer h.wg.Done()
-
-	for obj := range h.minedBlockSub.Chan() {
-		if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
-			h.BroadcastBlock(ev.Block, true)  // First propagate block to peers
-			h.BroadcastBlock(ev.Block, false) // Only then announce to the rest
-		}
-	}
 }
 
 // txBroadcastLoop announces new transactions to connected peers.

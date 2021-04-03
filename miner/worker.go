@@ -118,7 +118,6 @@ type worker struct {
 	pendingLogsFeed event.Feed
 
 	// Subscriptions
-	mux          *event.TypeMux
 	txsCh        chan core.NewTxsEvent
 	txsSub       event.Subscription
 	chainHeadCh  chan core.ChainHeadEvent
@@ -169,13 +168,12 @@ type hooks struct {
 	isLocalBlock func(block *types.Block) bool // Function used to determine whether the specified block is mined by local miner.
 }
 
-func newWorker(config *params.MiningConfig, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
+func newWorker(config *params.MiningConfig, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, h hooks, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		engine:             engine,
 		eth:                eth,
-		mux:                mux,
 		chain:              eth.BlockChain(),
 		hooks:              h,
 		uncles:             newUncles(),

@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
@@ -104,8 +103,6 @@ type Downloader struct {
 	// see https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
 	rttEstimate   uint64 // Round trip time to target for download requests
 	rttConfidence uint64 // Confidence in the estimated RTT (unit: millionths to allow atomic ops)
-
-	mux *event.TypeMux // Event multiplexer to announce sync operation events
 
 	queue *queue   // Scheduler for selecting the hashes to download
 	peers *peerSet // Set of active peers from which download can proceed
@@ -234,10 +231,9 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, chain BlockChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, chain BlockChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	dl := &Downloader{
 		stateDB:       stateDB,
-		mux:           mux,
 		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
 		peers:         newPeerSet(),
 		rttEstimate:   uint64(rttMaxEstimate),
@@ -444,16 +440,6 @@ func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.s
 func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, txPool *core.TxPool, poolStart func() error) (err error) {
-	_ = d.mux.Post(StartEvent{})
-	defer func() {
-		// reset on error
-		if err != nil {
-			_ = d.mux.Post(FailedEvent{err})
-		} else {
-			latest := d.blockchain.CurrentHeader()
-			_ = d.mux.Post(DoneEvent{latest})
-		}
-	}()
 	if p.version < 64 {
 		return fmt.Errorf("%w: advertized %d < required %d", errTooOld, p.version, 64)
 	}
