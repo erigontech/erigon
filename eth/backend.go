@@ -436,7 +436,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Chain:      eth.blockchain,
 		TxPool:     eth.txPool,
 		Network:    config.NetworkID,
-		EventMux:   eth.eventMux,
 		Checkpoint: checkpoint,
 
 		Whitelist: config.Whitelist,
