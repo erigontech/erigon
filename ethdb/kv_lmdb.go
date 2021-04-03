@@ -321,10 +321,10 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) CollectMetrics() {
-	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
-	dbSize.Update(fileInfo.Size())
 	/*
-		if err := db.View(context.Background(), func(tx Tx) error {
+		fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+			dbSize.Update(fileInfo.Size())
+			if err := db.View(context.Background(), func(tx Tx) error {
 			stat, _ := tx.(*lmdbTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
 			tableScsLeaf.Update(int64(stat.LeafPages))
 			tableScsBranch.Update(int64(stat.BranchPages))
