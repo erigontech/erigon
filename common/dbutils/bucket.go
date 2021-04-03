@@ -197,8 +197,6 @@ var (
 	// Transaction senders - stored separately from the block bodies
 	Senders = "txSenders"
 
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	FastTrieProgressKey = "TrieSync"
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
@@ -272,7 +270,6 @@ var Buckets = []string{
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
 	Senders,
-	FastTrieProgressKey,
 	HeadBlockKey,
 	HeadFastBlockKey,
 	HeadHeaderKey,

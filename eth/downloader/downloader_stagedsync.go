@@ -116,7 +116,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	}
 	log.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix), "count", hashCount)
 	from := origin + 1
-	d.queue.Prepare(from, d.getMode())
+	d.queue.Prepare(from)
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
 	to := from + uint64(hashCount)
 

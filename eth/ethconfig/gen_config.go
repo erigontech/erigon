@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -19,7 +18,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               uint64
-		SyncMode                downloader.SyncMode
 		EthDiscoveryURLs        []string
 		Pruning                 bool
 		NoPrefetch              bool
@@ -53,7 +51,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	var enc Config
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
-	enc.SyncMode = c.SyncMode
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Pruning = c.Pruning
 	enc.NoPrefetch = c.NoPrefetch
@@ -90,7 +87,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               *uint64
-		SyncMode                *downloader.SyncMode
 		EthDiscoveryURLs        []string
 		Pruning                 *bool
 		NoPrefetch              *bool
@@ -130,9 +126,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.NetworkID != nil {
 		c.NetworkID = *dec.NetworkID
-	}
-	if dec.SyncMode != nil {
-		c.SyncMode = *dec.SyncMode
 	}
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
