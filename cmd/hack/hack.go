@@ -1077,7 +1077,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return err1
 	}
