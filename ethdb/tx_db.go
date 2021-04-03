@@ -57,7 +57,7 @@ func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func
 	return Walk(c, startkey, fixedbits, walker)
 }
 
-func (m *roTxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+func (m *roTxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
 	return &roTxDb{tx: m.tx, top: false}, nil
 }
 
@@ -107,7 +107,7 @@ func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations
 	return batch, nil
 }
 
-func (m *TxDb) BeginRO(ctx context.Context) (GetterTx, error) {
+func (m *TxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
 	batch := m
 	if m.tx != nil {
 		panic("nested transactions not supported")

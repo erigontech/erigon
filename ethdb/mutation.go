@@ -330,8 +330,8 @@ func (m *mutation) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutat
 	return m.db.Begin(ctx, flags)
 }
 
-func (m *mutation) BeginRO(ctx context.Context) (GetterTx, error) {
-	return m.db.BeginRO(ctx)
+func (m *mutation) BeginGetter(ctx context.Context) (GetterTx, error) {
+	return m.db.BeginGetter(ctx)
 }
 
 func (m *mutation) panicOnEmptyDB() {

@@ -56,7 +56,7 @@ type GetterTx interface {
 type GetterBeginner interface {
 	Getter
 
-	BeginRO(ctx context.Context) (GetterTx, error)
+	BeginGetter(ctx context.Context) (GetterTx, error)
 }
 
 type GetterPutter interface {

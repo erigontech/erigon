@@ -380,7 +380,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
-func (db *ObjectDatabase) BeginRO(ctx context.Context) (GetterTx, error) {
+func (db *ObjectDatabase) BeginGetter(ctx context.Context) (GetterTx, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, RO); err != nil {
 		return batch, err
