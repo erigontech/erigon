@@ -798,7 +798,7 @@ func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
+func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen

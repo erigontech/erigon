@@ -35,11 +35,10 @@ const (
 
 // Getter wraps the database read operations.
 type Getter interface {
+	Has
+
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
-
-	// Has indicates whether a key exists in the database.
-	Has(bucket string, key []byte) (bool, error)
 
 	// Walk iterates over entries with keys greater or equal to startkey.
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
