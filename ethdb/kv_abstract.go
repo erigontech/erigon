@@ -18,6 +18,11 @@ var (
 	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
 )
 
+type Has interface {
+	// Has indicates whether a key exists in the database.
+	Has(bucket string, key []byte) (bool, error)
+}
+
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
@@ -92,8 +97,9 @@ type RwKV interface {
 }
 
 type StatelessReadTx interface {
+	Has
+
 	GetOne(bucket string, key []byte) (val []byte, err error)
-	HasOne(bucket string, key []byte) (bool, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.

@@ -181,7 +181,7 @@ func ReadHeaderRLP(db databaseReader, hash common.Hash, number uint64) rlp.RawVa
 }
 
 // HasHeader verifies the existence of a block header corresponding to the hash.
-func HasHeader(db databaseReader, hash common.Hash, number uint64) bool {
+func HasHeader(db ethdb.Has, hash common.Hash, number uint64) bool {
 	if has, err := db.Has(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash)); !has || err != nil {
 		return false
 	}
@@ -342,7 +342,7 @@ func WriteBodyRLP(db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.Ra
 }
 
 // HasBody verifies the existence of a block body corresponding to the hash.
-func HasBody(db databaseReader, hash common.Hash, number uint64) bool {
+func HasBody(db ethdb.Has, hash common.Hash, number uint64) bool {
 	if has, err := db.Has(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash)); !has || err != nil {
 		return false
 	}
@@ -486,7 +486,7 @@ func DeleteTd(db DatabaseDeleter, hash common.Hash, number uint64) error {
 
 // HasReceipts verifies the existence of all the transaction receipts belonging
 // to a block.
-func HasReceipts(db databaseReader, hash common.Hash, number uint64) bool {
+func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
 	if has, err := db.Has(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number)); !has || err != nil {
 		return false
 	}

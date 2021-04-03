@@ -256,7 +256,7 @@ func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	return val, err
 }
 
-func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
+func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
 	c, _ := tx.Cursor(bucket)
 	defer c.Close()
 	k, _, err := c.Seek(key)
