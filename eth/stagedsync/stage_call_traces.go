@@ -100,11 +100,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.CallFromIndex)
+			sz, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
 			if err != nil {
 				return err
 			}
-			sz2, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.CallToIndex)
+			sz2, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
 			if err != nil {
 				return err
 			}
