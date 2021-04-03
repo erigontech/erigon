@@ -13,7 +13,7 @@ import (
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 
 // GetTransactionByBlockHashAndIndex implements eth_getTransactionByBlockHashAndIndex. Returns information about a transaction given the block's hash and a transaction index.
 func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 
 // GetTransactionByBlockNumberAndIndex implements eth_getTransactionByBlockNumberAndIndex. Returns information about a transaction given a block number and transaction index.
 func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}

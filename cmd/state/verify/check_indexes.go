@@ -15,7 +15,7 @@ import (
 func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.RwKV().Begin(context.Background())
+	tx, err := db.RwKV().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}

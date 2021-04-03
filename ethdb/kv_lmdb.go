@@ -186,7 +186,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background())
+		tx, innerErr := db.BeginRo(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -361,7 +361,7 @@ func (db *LmdbKV) CollectMetrics() {
 	*/
 }
 
-func (db *LmdbKV) Begin(_ context.Context) (txn Tx, err error) {
+func (db *LmdbKV) BeginRo(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -471,7 +471,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}

@@ -423,7 +423,7 @@ func mdbxToMdbx(ctx context.Context, from, to string) error {
 }
 
 func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
-	srcTx, err1 := src.Begin(ctx)
+	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
 	}

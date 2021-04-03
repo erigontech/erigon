@@ -192,7 +192,7 @@ func (db *RemoteKV) Close() {
 
 func (db *RemoteKV) CollectMetrics() {}
 
-func (db *RemoteKV) Begin(ctx context.Context) (Tx, error) {
+func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -207,7 +207,7 @@ func (db *RemoteKV) BeginRw(ctx context.Context) (RwTx, error) {
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}

@@ -94,7 +94,7 @@ func TestReadOnlyMode(t *testing.T) {
 		}
 	}).MustOpen()
 
-	tx, err := db2.Begin(context.Background())
+	tx, err := db2.BeginRo(context.Background())
 	require.NoError(t, err)
 
 	c, err := tx.Cursor(dbutils.HeadersBucket)

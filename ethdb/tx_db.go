@@ -189,7 +189,7 @@ func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
 	var tx Tx
 	var err error
 	if flags&RO != 0 {
-		tx, err = kv.Begin(ctx)
+		tx, err = kv.BeginRo(ctx)
 	} else {
 		tx, err = kv.BeginRw(ctx)
 	}

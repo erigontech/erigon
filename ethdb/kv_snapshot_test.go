@@ -417,7 +417,7 @@ func TestSnapshot2Get(t *testing.T) {
 	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.HeadersBucket}, sn1).
 		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).MustOpen()
 
-	tx, err := kv.Begin(context.Background())
+	tx, err := kv.BeginRo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 	}
-	tx, err := kv.Begin(context.Background())
+	tx, err := kv.BeginRo(context.Background())
 	require.NoError(t, err)
 	c, err := tx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)

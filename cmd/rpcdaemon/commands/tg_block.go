@@ -19,7 +19,7 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 		return block.Header(), nil
 	}
 
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 
 // GetHeaderByHash implements tg_getHeaderByHash. Returns a block's header given a block's hash.
 func (api *TgImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.db.Begin(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}

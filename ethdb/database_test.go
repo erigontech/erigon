@@ -143,7 +143,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 }
 
 func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasRwKV).RwKV().Begin(context.Background())
+	tx, err := db.(HasRwKV).RwKV().BeginRo(context.Background())
 	require.NoError(t, err)
 	writeTx, err := db.(HasRwKV).RwKV().BeginRw(context.Background())
 	require.NoError(t, err)

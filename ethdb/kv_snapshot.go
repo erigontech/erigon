@@ -63,7 +63,7 @@ type SnapshotKV2 struct {
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	snTX, err := s.Begin(ctx)
+	snTX, err := s.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,8 +96,8 @@ func (s *SnapshotKV2) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV2) Begin(ctx context.Context) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx)
+func (s *SnapshotKV2) BeginRo(ctx context.Context) (Tx, error) {
+	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	var err error
-	tx, err = sn.snapshot.Begin(context.TODO())
+	tx, err = sn.snapshot.BeginRo(context.TODO())
 	if err != nil {
 		return nil, err
 	}

@@ -436,7 +436,7 @@ const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
-	dbtx, err := api.kv.Begin(ctx)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +547,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 // CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
-	dbtx, err := api.kv.Begin(ctx)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}

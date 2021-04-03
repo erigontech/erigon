@@ -23,7 +23,7 @@ type RoKV interface {
 	View(ctx context.Context, f func(tx Tx) error) error
 	Close()
 
-	// Begin - creates transaction
+	// BeginRo - creates transaction
 	// 	tx may be discarded by .Rollback() method
 	//
 	// A transaction and its cursors must only be used by a single
@@ -36,7 +36,7 @@ type RoKV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context) (Tx, error)
+	BeginRo(ctx context.Context) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 
 	CollectMetrics()

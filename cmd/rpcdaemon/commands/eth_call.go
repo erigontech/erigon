@@ -23,7 +23,7 @@ import (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	dbtx, err := api.db.Begin(ctx)
+	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		bNrOrHash = *blockNrOrHash
 	}
 
-	dbtx, err := api.db.Begin(ctx)
+	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
