@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -62,12 +61,6 @@ func (b *EthAPIBackend) SetHead(number uint64) {
 }
 
 func (b *EthAPIBackend) resolveBlockNumber(blockNr rpc.BlockNumber) uint64 {
-	// Pending block is only known by the miner
-	if blockNr == rpc.PendingBlockNumber {
-		block := b.eth.miner.PendingBlock()
-		return block.NumberU64()
-	}
-
 	if blockNr == rpc.LatestBlockNumber {
 		return b.eth.blockchain.CurrentBlock().NumberU64()
 	}
@@ -75,12 +68,6 @@ func (b *EthAPIBackend) resolveBlockNumber(blockNr rpc.BlockNumber) uint64 {
 }
 
 func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
-	// Pending block is only known by the miner
-	if blockNr == rpc.PendingBlockNumber {
-		block := b.eth.miner.PendingBlock()
-		return block.Header(), nil
-	}
-	// Otherwise resolve and return the block
 	bn := b.resolveBlockNumber(blockNr)
 	return b.eth.blockchain.GetHeaderByNumber(bn), nil
 }
@@ -107,12 +94,6 @@ func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*ty
 }
 
 func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Block, error) {
-	// Pending block is only known by the miner
-	if blockNr == rpc.PendingBlockNumber {
-		block := b.eth.miner.PendingBlock()
-		return block, nil
-	}
-	// Otherwise resolve and return the block
 	bn := b.resolveBlockNumber(blockNr)
 	return b.eth.blockchain.GetBlockByNumber(bn), nil
 }
@@ -143,12 +124,6 @@ func (b *EthAPIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash r
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.IntraBlockState, *types.Header, error) {
-	// Pending state is only known by the miner
-	if blockNr == rpc.PendingBlockNumber {
-		block, state, _ := b.eth.miner.Pending()
-		return state, block.Header(), nil
-	}
-	// Otherwise resolve the block number and return its state
 	bn := b.resolveBlockNumber(blockNr)
 	header, err := b.HeaderByNumber(ctx, blockNr)
 	if err != nil {
@@ -265,10 +240,6 @@ func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEven
 	return b.eth.BlockChain().SubscribeRemovedLogsEvent(ch)
 }
 
-func (b *EthAPIBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return b.eth.miner.SubscribePendingLogs(ch)
-}
-
 func (b *EthAPIBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
 	return b.eth.BlockChain().SubscribeChainEvent(ch)
 }
@@ -342,10 +313,6 @@ func (b *EthAPIBackend) ChainDb() ethdb.Database {
 	return b.eth.ChainDb()
 }
 
-func (b *EthAPIBackend) EventMux() *event.TypeMux {
-	return b.eth.EventMux()
-}
-
 func (b *EthAPIBackend) ExtRPCEnabled() bool {
 	return b.extRPCEnabled
 }
@@ -378,10 +345,6 @@ func (b *EthAPIBackend) Engine() consensus.Engine {
 
 func (b *EthAPIBackend) CurrentHeader() *types.Header {
 	return b.eth.blockchain.CurrentHeader()
-}
-
-func (b *EthAPIBackend) Miner() *miner.Miner {
-	return b.eth.Miner()
 }
 
 func (b *EthAPIBackend) StartMining(threads int) error {

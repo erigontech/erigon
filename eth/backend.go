@@ -56,10 +56,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -91,14 +89,12 @@ type Ethereum struct {
 	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
-	eventMux *event.TypeMux
-	engine   consensus.Engine
+	engine consensus.Engine
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
 	APIBackend *EthAPIBackend
 
-	miner     *miner.Miner
 	gasPrice  *uint256.Int
 	etherbase common.Address
 	signer    *ecdsa.PrivateKey
@@ -288,7 +284,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config:        config,
 		chainDb:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
-		eventMux:      stack.EventMux(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:     config.NetworkID,
 		etherbase:     config.Miner.Etherbase,
@@ -436,7 +431,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Chain:      eth.blockchain,
 		TxPool:     eth.txPool,
 		Network:    config.NetworkID,
-		EventMux:   eth.eventMux,
 		Checkpoint: checkpoint,
 
 		Whitelist: config.Whitelist,
@@ -638,8 +632,6 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.lock.Lock()
 	s.etherbase = etherbase
 	s.lock.Unlock()
-
-	s.miner.SetEtherbase(etherbase)
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
@@ -684,7 +676,6 @@ func (s *Ethereum) StartMining(threads int) error {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
-		//go s.miner.Start(eb)
 	}
 	return nil
 }
@@ -701,12 +692,10 @@ func (s *Ethereum) StopMining() {
 	}
 }
 
-func (s *Ethereum) IsMining() bool      { return s.config.Miner.Enabled }
-func (s *Ethereum) Miner() *miner.Miner { return s.miner }
+func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
 func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
-func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) ChainKV() ethdb.RwKV                { return s.chainKV }
@@ -760,7 +749,6 @@ func (s *Ethereum) Stop() error {
 	//s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()
-	s.eventMux.Stop()
 	if s.txPool != nil {
 		s.txPool.Stop()
 	}

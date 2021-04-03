@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -45,7 +44,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
 		panic(err)
 	}
-	tester.downloader = New(tester.db, new(event.TypeMux), params.TestChainConfig, nil, tester, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(tester.db, params.TestChainConfig, nil, tester, tester.dropPeer, ethdb.DefaultStorageMode)
 	//tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetBatchSize(0 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetStagedSync(
