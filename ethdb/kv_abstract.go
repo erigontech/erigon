@@ -81,7 +81,35 @@ const (
 	RO TxFlags = 0x02
 )
 
+type StatelessReadTx interface {
+	GetOne(bucket string, key []byte) (val []byte, err error)
+	HasOne(bucket string, key []byte) (bool, error)
+
+	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
+	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
+
+	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
+	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
+	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
+	// Starts from 0.
+	ReadSequence(bucket string) (uint64, error)
+}
+
+type StatelessWriteTx interface {
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
+
+	Put(bucket string, k, v []byte) error
+	Delete(bucket string, k, v []byte) error
+}
+
+type StatelessRwTx interface {
+	StatelessReadTx
+	StatelessWriteTx
+}
+
 type Tx interface {
+	StatelessReadTx
+
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
 	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
 	// Otherwise - object of interface Cursor created
@@ -90,33 +118,18 @@ type Tx interface {
 	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
-	GetOne(bucket string, key []byte) (val []byte, err error)
-	HasOne(bucket string, key []byte) (bool, error)
-
-	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
-	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
 
 	Comparator(bucket string) dbutils.CmpFunc
-
-	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
-	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
-	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
-	// Starts from 0.
-	ReadSequence(bucket string) (uint64, error)
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 type RwTx interface {
 	Tx
+	StatelessWriteTx
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
-
-	IncrementSequence(bucket string, amount uint64) (uint64, error)
-
-	Put(bucket string, k, v []byte) error
-	Delete(bucket string, k, v []byte) error
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
