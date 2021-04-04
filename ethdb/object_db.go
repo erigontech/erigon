@@ -38,18 +38,22 @@ type DbCopier interface {
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
-	kv KV
+	kv RwKV
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
-func NewObjectDatabase(kv KV) *ObjectDatabase {
+func NewObjectDatabase(kv RwKV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
 	}
 }
 
 func MustOpen(path string) *ObjectDatabase {
-	db, err := Open(path, false)
+	return NewObjectDatabase(MustOpenKV(path))
+}
+
+func MustOpenKV(path string) RwKV {
+	db, err := OpenKV(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -58,8 +62,8 @@ func MustOpen(path string) *ObjectDatabase {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string, readOnly bool) (*ObjectDatabase, error) {
-	var kv KV
+func OpenKV(path string, readOnly bool) (RwKV, error) {
+	var kv RwKV
 	var err error
 	testDB := debug.TestDB()
 	switch true {
@@ -78,13 +82,22 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
+	return kv, nil
+}
+
+func Open(path string, readOnly bool) (*ObjectDatabase, error) {
+	kv, kvErr := OpenKV(path, readOnly)
+	if kvErr != nil {
+		return nil, kvErr
+	}
+
 	return NewObjectDatabase(kv), nil
 }
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Put(key, value)
+		return tx.Put(bucket, key, value)
 	})
 	return err
 }
@@ -92,7 +105,11 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Append(key, value)
+		c, err := tx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
+		return c.Append(key, value)
 	})
 	return err
 }
@@ -100,7 +117,11 @@ func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error 
 // AppendDup appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursorDupSort(bucket).AppendDup(key, value)
+		c, err := tx.RwCursorDupSort(bucket)
+		if err != nil {
+			return err
+		}
+		return c.AppendDup(key, value)
 	})
 	return err
 }
@@ -177,7 +198,11 @@ func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	var key, value []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		k, v, err := tx.Cursor(bucket).Last()
+		c, err := tx.Cursor(bucket)
+		if err != nil {
+			return err
+		}
+		k, v, err := c.Last()
 		if err != nil {
 			return err
 		}
@@ -193,7 +218,11 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		return Walk(tx.Cursor(bucket), startkey, fixedbits, walker)
+		c, err := tx.Cursor(bucket)
+		if err != nil {
+			return err
+		}
+		return Walk(c, startkey, fixedbits, walker)
 	})
 	return err
 }
@@ -202,7 +231,7 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return tx.RwCursor(bucket).Delete(k, v)
+		return tx.Delete(bucket, k, v)
 	})
 	return err
 }
@@ -272,12 +301,19 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
-			return ForEach(tx.Cursor(name), func(k, _ []byte) (bool, error) {
+			c, err := tx.Cursor(name)
+			if err != nil {
+				return err
+			}
+			err = ForEach(c, func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
 				return true, nil
 			})
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -287,11 +323,11 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *ObjectDatabase) KV() KV {
+func (db *ObjectDatabase) RwKV() RwKV {
 	return db.kv
 }
 
-func (db *ObjectDatabase) SetKV(kv KV) {
+func (db *ObjectDatabase) SetRwKV(kv RwKV) {
 	db.kv = kv
 }
 
@@ -309,9 +345,15 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		for _, name := range dbutils.Buckets {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx RwTx) error {
-				newBucketToWrite := writeTx.RwCursor(name)
+				newBucketToWrite, err := writeTx.RwCursor(name)
+				if err != nil {
+					return err
+				}
 				defer newBucketToWrite.Close()
-				readC := readTx.Cursor(name)
+				readC, err := readTx.Cursor(name)
+				if err != nil {
+					return err
+				}
 				defer readC.Close()
 				return ForEach(readC, func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
@@ -339,23 +381,20 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
+func (db *ObjectDatabase) BeginGetter(ctx context.Context) (GetterTx, error) {
+	batch := &TxDb{db: db}
+	if err := batch.begin(ctx, RO); err != nil {
+		return batch, err
+	}
+	return batch, nil
+}
+
 func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, flags); err != nil {
 		return batch, err
 	}
 	return batch, nil
-}
-
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (db *ObjectDatabase) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (db *ObjectDatabase) TruncateAncients(items uint64) error {
-	return errNotSupported
 }
 
 // Type which expecting sequence of triplets: dbi, key, value, ....
@@ -381,23 +420,6 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i3], t[j3] = t[j3], t[i3]
 	t[i3+1], t[j3+1] = t[j3+1], t[i3+1]
 	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
-}
-
-func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
-	// Retrieve the key and increment the miss counter if not found
-	var dat []byte
-	v, err := tx.GetOne(bucket, key)
-	if err != nil {
-		return nil, err
-	}
-	if v != nil {
-		dat = make([]byte, len(v))
-		copy(dat, v)
-	}
-	if dat == nil {
-		return nil, ErrKeyNotFound
-	}
-	return dat, err
 }
 
 func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {

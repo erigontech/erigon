@@ -48,7 +48,7 @@ type FlatDbSubTrieLoader struct {
 	masks              []byte
 	cutoffs            []int
 	tx                 ethdb.Tx
-	kv                 ethdb.KV
+	kv                 ethdb.RwKV
 	nextAccountKey     [32]byte
 	k, v               []byte
 	ihK, ihV           []byte
@@ -129,8 +129,8 @@ func (fstl *FlatDbSubTrieLoader) Reset(db ethdb.Database, rl RetainDecider, rece
 	if hasTx, ok := db.(ethdb.HasTx); ok {
 		fstl.tx = hasTx.Tx()
 	} else {
-		if hasKV, ok := db.(ethdb.HasKV); ok {
-			fstl.kv = hasKV.KV()
+		if HasRwKV, ok := db.(ethdb.HasRwKV); ok {
+			fstl.kv = HasRwKV.RwKV()
 		} else {
 			return fmt.Errorf("database doest not implement KV: %T", db)
 		}
@@ -299,8 +299,8 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor2, first 
 			fstl.storageKey = nil
 			fstl.storageValue = nil
 			fstl.hashValue = nil
-			if err := fstl.accountValue.DecodeForStorage(fstl.v); err != nil {
-				return fmt.Errorf("fail DecodeForStorage: %w", err)
+			if e := fstl.accountValue.DecodeForStorage(fstl.v); e != nil {
+				return fmt.Errorf("fail DecodeForStorage: %w", e)
 			}
 			copy(fstl.accAddrHashWithInc[:], fstl.k)
 			binary.BigEndian.PutUint64(fstl.accAddrHashWithInc[32:], fstl.accountValue.Incarnation)
@@ -596,14 +596,17 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 	}
 	if fstl.tx == nil {
 		var err error
-		fstl.tx, err = fstl.kv.Begin(context.Background())
+		fstl.tx, err = fstl.kv.BeginRo(context.Background())
 		if err != nil {
 			return SubTries{}, err
 		}
 		defer fstl.tx.Rollback()
 	}
 	tx := fstl.tx
-	c := tx.Cursor(dbutils.CurrentStateBucketOld2)
+	c, err := tx.Cursor(dbutils.CurrentStateBucketOld2)
+	if err != nil {
+		return SubTries{}, err
+	}
 	var filter = func(k []byte) (bool, error) {
 
 		if fstl.rl.Retain(k) {
@@ -621,7 +624,11 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		return true, nil
 	}
-	ih := NewIHCursor2(NewFilterCursor2(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucketOld2)))
+	c1, err := tx.CursorDupSort(dbutils.IntermediateTrieHashBucketOld2)
+	if err != nil {
+		return SubTries{}, err
+	}
+	ih := NewIHCursor2(NewFilterCursor2(filter, c1))
 	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
 	}

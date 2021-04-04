@@ -39,22 +39,6 @@ type revision struct {
 	journalIndex int
 }
 
-var (
-	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.Keccak256Hash(nil)
-
-	// emptyCode is the known hash of the empty EVM bytecode.
-	// DESCRIBED: docs/programmers_guide/guide.md#code-hash
-	emptyCode = crypto.Keccak256Hash(nil)
-)
-
-type proofList [][]byte
-
-func (n *proofList) Put(key []byte, value []byte) error {
-	*n = append(*n, value)
-	return nil
-}
-
 type StateTracer interface {
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
@@ -182,13 +166,6 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.Lock()
 	defer sdb.Unlock()
 	sdb.trace = trace
-}
-
-// setError remembers the first non-nil error it is called with.
-func (sdb *IntraBlockState) setError(err error) {
-	sdb.Lock()
-	defer sdb.Unlock()
-	sdb.setErrorUnsafe(err)
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -647,9 +624,6 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 
 	return true
 }
-
-var nullLocation = common.Hash{}
-var nullValue = common.Big0
 
 // do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.

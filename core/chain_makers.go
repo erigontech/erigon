@@ -204,7 +204,7 @@ var GenerateTrace bool
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db *ethdb.ObjectDatabase, n int, gen func(int, *BlockGen),
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen),
 	intermediateHashes bool,
 ) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
@@ -259,7 +259,10 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}); err != nil {
 				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
-			c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			if err != nil {
+				return nil, nil, err
+			}
 			h := common.NewHasher()
 			defer common.ReturnHasherToPool(h)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -305,14 +308,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				}
 				fmt.Printf("===============================\n")
 			}
-			var hashCollector func(keyHex []byte, _, _, _ uint16, hashes []byte, rootHash []byte) error
-			var storageHashCollector func(addrWithInc []byte, keyHex []byte, _, _, _ uint16, hashes []byte, rootHash []byte) error
-			unfurl := trie.NewRetainList(0)
-			loader := trie.NewFlatDBTrieLoader("GenerateChain")
-			if err := loader.Reset(unfurl, hashCollector, storageHashCollector, false); err != nil {
-				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
-			}
-			if hash, err := loader.CalcTrieRoot(tx, []byte{}, nil); err == nil {
+			if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)

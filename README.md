@@ -7,6 +7,7 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
 - [Usage](#usage)
     + [Getting Started](#getting-started)
     + [Testnets](#testnets)
+    + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 - [Key features](#key-features)
@@ -39,9 +40,9 @@ System Requirements
 
 Recommend 2Tb storage space on a single partition: 1Tb state, 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). 
 
-RAM: 16GB, 64-bit architecture, (Golang version >= 1.15.6](https://golang.org/doc/install)
+RAM: 16GB, 64-bit architecture, [Golang version >= 1.15.6](https://golang.org/doc/install)
 
-<code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
+<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
 Usage
 =====
@@ -66,6 +67,24 @@ If you would like to give turbo-geth a try, but do not have spare 2Tb on your dr
 ```
 
 Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory.
+
+### Mining
+
+Support only remote-miners.
+
+* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
+* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
+  , `--miner.gastarget`
+* RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+* RPCDaemon supports websocket methods: newPendingTransaction
+* TODO:
+    + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/turbo-geth/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+    + eth_newPendingTransactionFilter
+    + eth_newBlockFilter
+    + eth_newFilter
+    + websocket Logs
+
+<code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
 
 ### Windows
 

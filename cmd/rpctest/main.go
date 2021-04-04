@@ -200,6 +200,16 @@ func main() {
 	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
 	with(fixStateCmd, withGethUrl)
 
+	var replayCmd = &cobra.Command{
+		Use:   "replay",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.Replay(tgURL, recordFile)
+		},
+	}
+	with(replayCmd, withTGUrl, withRecord)
+
 	var tmpDataDir, tmpDataDirOrig string
 	var notRegenerateGethData bool
 	var compareAccountRange = &cobra.Command{
@@ -238,6 +248,7 @@ func main() {
 		proofsCmd,
 		fixStateCmd,
 		compareAccountRange,
+		replayCmd,
 	)
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
 		fmt.Println(err)

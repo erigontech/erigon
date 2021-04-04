@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	_ KV             = &SnapshotKV2{}
+	_ RwKV           = &SnapshotKV2{}
 	_ Tx             = &sn2TX{}
 	_ BucketMigrator = &sn2TX{}
 	_ Cursor         = &snCursor2{}
@@ -24,14 +24,14 @@ func NewSnapshot2KV() snapshotOpts2 {
 
 type snapshotData struct {
 	buckets  []string
-	snapshot KV
+	snapshot RwKV
 }
 type snapshotOpts2 struct {
-	db        KV
+	db        RwKV
 	snapshots []snapshotData
 }
 
-func (opts snapshotOpts2) SnapshotDB(buckets []string, db KV) snapshotOpts2 {
+func (opts snapshotOpts2) SnapshotDB(buckets []string, db RwKV) snapshotOpts2 {
 	opts.snapshots = append(opts.snapshots, snapshotData{
 		buckets:  buckets,
 		snapshot: db,
@@ -39,12 +39,12 @@ func (opts snapshotOpts2) SnapshotDB(buckets []string, db KV) snapshotOpts2 {
 	return opts
 }
 
-func (opts snapshotOpts2) DB(db KV) snapshotOpts2 {
+func (opts snapshotOpts2) DB(db RwKV) snapshotOpts2 {
 	opts.db = db
 	return opts
 }
 
-func (opts snapshotOpts2) MustOpen() KV {
+func (opts snapshotOpts2) MustOpen() RwKV {
 	snapshots := make(map[string]snapshotData)
 	for i, v := range opts.snapshots {
 		for _, bucket := range v.buckets {
@@ -58,12 +58,12 @@ func (opts snapshotOpts2) MustOpen() KV {
 }
 
 type SnapshotKV2 struct {
-	db        KV
+	db        RwKV
 	snapshots map[string]snapshotData
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	snTX, err := s.Begin(ctx)
+	snTX, err := s.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
 
 	err = f(tx)
 	if err == nil {
-		return tx.Commit(ctx)
+		return tx.Commit()
 	}
 	return err
 }
@@ -96,8 +96,8 @@ func (s *SnapshotKV2) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV2) Begin(ctx context.Context) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx)
+func (s *SnapshotKV2) BeginRo(ctx context.Context) (Tx, error) {
+	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (s *sn2TX) ExistingBuckets() ([]string, error) {
 	panic("implement me")
 }
 
-func (s *sn2TX) Cursor(bucket string) Cursor {
+func (s *sn2TX) Cursor(bucket string) (Cursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -162,17 +162,29 @@ func (s *sn2TX) Cursor(bucket string) Cursor {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.Cursor(bucket)
 	}
-	return &snCursor2{
-		dbCursor: s.dbTX.Cursor(bucket),
-		snCursor: tx.Cursor(bucket),
+	dbCursor, err := s.dbTX.Cursor(bucket)
+	if err != nil {
+		return nil, err
 	}
+	snCursor, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &snCursor2{
+		dbCursor: dbCursor,
+		snCursor: snCursor,
+	}, nil
 }
 
-func (s *sn2TX) RwCursor(bucket string) RwCursor {
-	return s.Cursor(bucket).(RwCursor)
+func (s *sn2TX) RwCursor(bucket string) (RwCursor, error) {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursor), nil
 }
 
-func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
+func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -181,8 +193,14 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.CursorDupSort(bucket)
 	}
-	dbc := s.dbTX.CursorDupSort(bucket)
-	sncbc := tx.CursorDupSort(bucket)
+	dbc, err := s.dbTX.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	sncbc, err := tx.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
 	return &snCursor2Dup{
 		snCursor2{
 			dbCursor: dbc,
@@ -190,11 +208,15 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 		},
 		dbc,
 		sncbc,
-	}
+	}, nil
 }
 
-func (s *sn2TX) RwCursorDupSort(bucket string) RwCursorDupSort {
-	return s.CursorDupSort(bucket).(RwCursorDupSort)
+func (s *sn2TX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+	c, err := s.CursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return c.(RwCursorDupSort), nil
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
@@ -222,6 +244,15 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	}
 	return v, nil
 }
+
+func (s *sn2TX) Put(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).Put(bucket, k, v)
+}
+
+func (s *sn2TX) Delete(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).Delete(bucket, k, v)
+}
+
 func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
@@ -232,7 +263,7 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	var err error
-	tx, err = sn.snapshot.Begin(context.TODO())
+	tx, err = sn.snapshot.BeginRo(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +272,8 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	return tx, nil
 }
 
-func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
-	v, err := s.dbTX.HasOne(bucket, key)
+func (s *sn2TX) Has(bucket string, key []byte) (bool, error) {
+	v, err := s.dbTX.Has(bucket, key)
 	if err != nil {
 		return false, err
 	}
@@ -269,11 +300,11 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 	return v, nil
 }
 
-func (s *sn2TX) Commit(ctx context.Context) error {
+func (s *sn2TX) Commit() error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
-	return s.dbTX.Commit(ctx)
+	return s.dbTX.Commit()
 }
 
 func (s *sn2TX) Rollback() {
@@ -639,7 +670,7 @@ type KvData struct {
 	V []byte
 }
 
-func GenStateData(data []KvData) (KV, error) {
+func GenStateData(data []KvData) (RwKV, error) {
 	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
@@ -647,7 +678,10 @@ func GenStateData(data []KvData) (KV, error) {
 	}).InMem().MustOpen()
 
 	err := snapshot.Update(context.Background(), func(tx RwTx) error {
-		c := tx.RwCursor(dbutils.PlainStateBucket)
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
 		for i := range data {
 			innerErr := c.Put(data[i].K, data[i].V)
 			if innerErr != nil {

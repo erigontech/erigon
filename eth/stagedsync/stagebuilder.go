@@ -23,6 +23,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
 	OnNewPendingLogs(types.Logs)
+	OnNewPendingBlock(*types.Block)
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
@@ -66,15 +67,18 @@ type MiningStagesParameters struct {
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
 	noempty      bool
-	PendingTxs   map[common.Address]types.Transactions
+	PendingTxs   types.TransactionsGroupedBySender
 	TxPoolLocals []common.Address
+
+	resultCh     chan<- *types.Block
+	miningCancel <-chan struct{}
 
 	// runtime dat
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
 
 }
 
@@ -440,8 +444,8 @@ func MiningStages() StageBuilders {
 							world.ChainConfig,
 							world.vmConfig,
 							world.chainContext,
-							world.mining.Block.localTxs,
-							world.mining.Block.remoteTxs,
+							world.mining.Block.LocalTxs,
+							world.mining.Block.RemoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
 							world.notifier,
@@ -489,11 +493,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
-						if err != nil {
-							return err
-						}
-						return nil
+						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.mining.resultCh, world.mining.miningCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

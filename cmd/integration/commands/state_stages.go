@@ -233,6 +233,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
+	miningResultCh := make(chan *types.Block, 1)
+	defer close(miningResultCh)
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -279,7 +281,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 
 		if integrityFast {
-			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
+			if err := checkChanges(expectedAccountChanges, tx.(ethdb.HasTx).Tx(), expectedStorageChanges, execAtBlock, sm.History); err != nil {
 				return err
 			}
 			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, quit)
@@ -302,10 +304,8 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			panic(err)
 		}
 
-		if miningConfig.Enabled && nextBlock.Header().Coinbase != (common.Address{}) {
-			unordered, ordered := miningTransactions(nextBlock)
-			_ = ordered //TODO: test failing because non-determined order of transactions, need somehow inject order
-			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, unordered, nil)
+		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
+			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil, miningResultCh, quit)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -313,7 +313,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err != nil {
 				panic(err)
 			}
-			var minedBlock *types.Block
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
@@ -332,16 +331,16 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				miningWorld.Block.Header.GasLimit = nextBlock.Header().GasLimit
 				miningWorld.Block.Header.Difficulty = nextBlock.Header().Difficulty
 				miningWorld.Block.Header.Nonce = nextBlock.Header().Nonce
+				miningWorld.Block.LocalTxs = types.NewTransactionsFixedOrder(nextBlock.Transactions())
+				miningWorld.Block.RemoteTxs = types.NewTransactionsFixedOrder(nil)
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
-			miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-				//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
-				//debugprint.Receipts(receiptsInDB, miningWorld.Block.Receipts)
-				var err error
-				minedBlock, err = stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
-				return err
-			})
+			//miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+			//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+			//debugprint.Receipts(miningWorld.Block.Receipts, receiptsInDB)
+			//return stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
+			//})
 
 			if err := miningStages.Run(db, tx); err != nil {
 				return err
@@ -349,6 +348,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			if err := tx.RollbackAndBegin(context.Background()); err != nil {
 				return err
 			}
+			minedBlock := <-miningResultCh
 			checkMinedBlock(nextBlock, minedBlock, chainConfig)
 		}
 
@@ -370,7 +370,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
+func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Tx, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
 	for blockN := range expectedAccountChanges {
 		if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
@@ -390,14 +390,21 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func miningTransactions(nextBlock *types.Block) (map[common.Address]types.Transactions, types.Transactions) {
-	localTxs := make(map[common.Address]types.Transactions, nextBlock.Transactions().Len())
+func miningTransactions(nextBlock *types.Block) types.TransactionsGroupedBySender {
+	idx := map[common.Address]int{}
+	groups := types.TransactionsGroupedBySender{}
 	senders := nextBlock.Body().SendersFromTxs()
-	for i, txn := range nextBlock.Transactions() {
-		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
-		localTxs[senders[i]] = append(localTxs[senders[i]], txn)
+	for txId, txn := range nextBlock.Transactions() {
+		from := senders[txId]
+		i, ok := idx[from]
+		if ok {
+			groups[i] = append(groups[i], txn)
+		} else {
+			idx[from] = len(groups)
+			groups = append(groups, types.Transactions{txn})
+		}
 	}
-	return localTxs, nextBlock.Transactions()
+	return groups
 }
 
 func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
@@ -542,7 +549,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	}
 }
 
-func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
+func checkChangeSet(db ethdb.Tx, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
 	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
@@ -595,7 +602,7 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 	return nil
 }
 
-func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) error {
+func checkHistory(db ethdb.Tx, changeSetBucket string, blockNum uint64) error {
 	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
 	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
 	if err := changeset.Walk(db, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {

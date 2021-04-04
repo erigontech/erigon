@@ -83,9 +83,9 @@ func newTestBackend(t *testing.T) *testBackend {
 	// Generate testing blocks
 	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		tx, err := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt().SetUint64(100), 21000, uint256.NewInt().SetUint64(uint64(int64(i+1)*params.GWei)), nil), signer, key)
-		if err != nil {
-			t.Fatalf("failed to create tx: %v", err)
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt().SetUint64(100), 21000, uint256.NewInt().SetUint64(uint64(int64(i+1)*params.GWei)), nil), signer, key)
+		if txErr != nil {
+			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
 	}, false)

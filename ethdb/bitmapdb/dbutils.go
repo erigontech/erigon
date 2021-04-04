@@ -214,7 +214,7 @@ func WalkChunkWithKeys64(k []byte, m *roaring64.Bitmap, sizeLimit uint64, f func
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TruncateRange64(db ethdb.Database, bucket string, key []byte, to uint64) error {
+func TruncateRange64(db ethdb.RwTx, bucket string, key []byte, to uint64) error {
 	chunkKey := make([]byte, len(key)+8)
 	copy(chunkKey, key)
 	binary.BigEndian.PutUint64(chunkKey[len(chunkKey)-8:], to)
@@ -227,11 +227,21 @@ func TruncateRange64(db ethdb.Database, bucket string, key []byte, to uint64) er
 		bm.RemoveRange(to, bm.Maximum()+1)
 	}
 
-	if err := db.Walk(bucket, chunkKey, 0, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	cDel, err := db.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer cDel.Close()
+	if err := ethdb.Walk(c, chunkKey, 0, func(k, v []byte) (bool, error) {
 		if !bytes.HasPrefix(k, key) {
 			return false, nil
 		}
-		if err := db.Delete(bucket, k, nil); err != nil {
+		if err := cDel.Delete(k, nil); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -251,14 +261,19 @@ func TruncateRange64(db ethdb.Database, bucket string, key []byte, to uint64) er
 
 // Get - reading as much chunks as needed to satisfy [from, to] condition
 // join all chunks to 1 bitmap by Or operator
-func Get64(db ethdb.Getter, bucket string, key []byte, from, to uint64) (*roaring64.Bitmap, error) {
+func Get64(db ethdb.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bitmap, error) {
 	var chunks []*roaring64.Bitmap
 
 	fromKey := make([]byte, len(key)+8)
 	copy(fromKey, key)
 	binary.BigEndian.PutUint64(fromKey[len(fromKey)-8:], from)
 
-	if err := db.Walk(bucket, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
 		bm := roaring64.New()
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {

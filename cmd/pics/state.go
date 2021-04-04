@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -24,7 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -34,17 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
-
-func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
-	codeMap := make(map[common.Hash][]byte)
-	if err := tds.Database().Walk(dbutils.CodeBucket, make([]byte, 32), 0, func(k, v []byte) (bool, error) {
-		codeMap[common.BytesToHash(k)] = common.CopyBytes(v)
-		return true, nil
-	}); err != nil {
-		return nil, err
-	}
-	return codeMap, nil
-}
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
 	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
@@ -84,38 +71,6 @@ func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	}
 	return t, nil
 }*/
-
-func keyTape(t *trie.Trie, number int) error {
-	filename := fmt.Sprintf("state_%d.dot", number)
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	visual.StartGraph(f, false)
-	fk := trie.FullKeys(t)
-	sort.Strings(fk)
-	for i, key := range fk {
-		if len(key) == 129 {
-			visual.Vertical(f, []byte(key), 0, fmt.Sprintf("q_%x", key), visual.QuadIndexColors, visual.QuadFontColors, 110)
-		} else {
-			visual.Vertical(f, []byte(key[128:]), 0, fmt.Sprintf("q_%x", key), visual.QuadIndexColors, visual.QuadFontColors, 100)
-		}
-		visual.Circle(f, fmt.Sprintf("e_%d", i), "...", false)
-		fmt.Fprintf(f,
-			`q_%x -> e_%d;
-`, key, i)
-	}
-	visual.EndGraph(f)
-	if err := f.Close(); err != nil {
-		return err
-	}
-	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("error: %v, output: %s\n", err, output)
-	}
-	return nil
-}
 
 var bucketLabels = map[string]string{
 	dbutils.BlockReceiptsPrefix:         "Receipts",
@@ -170,7 +125,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error {
+func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -186,7 +141,10 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
 			for bucketName := range bucketLabels {
 				bucketName := bucketName
-				c := readTx.Cursor(bucketName)
+				c, err := readTx.Cursor(bucketName)
+				if err != nil {
+					return err
+				}
 				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
@@ -315,7 +273,6 @@ func initialState1() error {
 	// Configure and generate a sample block chain
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	kv := db.KV()
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -336,7 +293,7 @@ func initialState1() error {
 		signer = types.HomesteadSigner{}
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, _, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return err
 	}
@@ -384,7 +341,7 @@ func initialState1() error {
 		case 4:
 			tx, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
 		case 5:
-			// Muliple transactions sending small amounts of ether to various accounts
+			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
@@ -412,7 +369,7 @@ func initialState1() error {
 				panic(err)
 			}
 			txs = append(txs, tx)
-			// Muliple transactions sending small amounts of ether to various accounts
+			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
@@ -462,10 +419,10 @@ func initialState1() error {
 	db.Close()
 	// We reset the DB and use the generated blocks
 	db = ethdb.NewMemDatabase()
-	kv = db.KV()
+	kv := db.RwKV()
 	snapshotDB := db.MemCopy()
 
-	_, _, _, err = core.SetupGenesisBlock(db, gspec, true, false)
+	_, _, err = core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return err
 	}
@@ -487,15 +444,7 @@ func initialState1() error {
 		return err
 	}
 
-	/*if _, err = statePicture(t, 0, 0, false, false, false, false, nil); err != nil {
-		return err
-	}
-
-	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
-		return err
-	}*/
-
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 0); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 0); err != nil {
 		return err
 	}
 
@@ -511,13 +460,10 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 1); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 1); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
-		return err
-	}*/
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
@@ -525,13 +471,11 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 2); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 2); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
-		return err
-	}*/
+
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
@@ -539,21 +483,11 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 3); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 3); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*
-		if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
-			return err
-		}
-		if _, err = statePicture(t, 5, 48, true, false, false, false, nil); err != nil {
-			return err
-		}
-		if _, err = statePicture(t, 6, 48, true, true, false, false, nil); err != nil {
-			return err
-		}
-	*/
+
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
@@ -561,13 +495,10 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 4); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 4); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
-		return err
-	}*/
 
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
@@ -576,15 +507,10 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 5); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 5); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*
-		if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
-			return err
-		}
-	*/
 
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
@@ -593,19 +519,10 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 6); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 6); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-
-	/*
-		if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
-			return err
-		}
-		if _, err = statePicture(t, 10, 110, true, true, true, true, nil); err != nil {
-			return err
-		}
-	*/
 
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
@@ -614,16 +531,14 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 7); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 7); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	// _, err = statePicture(t, 11, 110, true, true, true, true, nil)
 	if err != nil {
 		return err
 	}
 
-	// tds.SetResolveReads(true)
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
@@ -631,55 +546,12 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.KV(), kv, 8); err != nil {
+	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 8); err != nil {
 		return err
 	}
 	snapshotDB.Close()
-	/*
-		if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
-			return err
-		}
 
-		rl := trie.NewRetainList(0)
-		touches, storageTouches := tds.ExtractTouches()
-		var touchQuads = make([][]byte, len(touches))
-		for _, touch := range touches {
-			touchQuad := trie.KeyToQuad(touch)
-			rl.AddHex(touchQuad)
-			touchQuads = append(touchQuads, touchQuad)
-		}
-		for _, touch := range storageTouches {
-			touchQuad := trie.KeyToQuad(touch)
-			rl.AddHex(touchQuad)
-			touchQuads = append(touchQuads, touchQuad)
-		}
-
-		var witness *trie.Witness
-
-		if witness, err = quadTrie.ExtractWitness(false, rl); err != nil {
-			return err
-		}
-
-		var witnessTrie *trie.Trie
-
-		if witnessTrie, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
-			return err
-		}
-		if _, err = statePicture(witnessTrie, 13, 110, true, true, false, true, touchQuads); err != nil {
-			return err
-		}
-
-		if err = keyTape(witnessTrie, 14); err != nil {
-			return err
-		}
-
-		// Repeat the block witness illustration, but without any highlighted keys
-		if _, err = statePicture(witnessTrie, 15, 110, true, true, false, true, nil); err != nil {
-			return err
-		}
-	*/
-
-	kv2 := ethdb.NewMemDatabase().KV()
+	kv2 := ethdb.NewMemDatabase().RwKV()
 	defer kv2.Close()
 	if err = stateDatabaseComparison(kv2, kv, 9); err != nil {
 		return err

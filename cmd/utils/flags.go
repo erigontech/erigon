@@ -346,11 +346,6 @@ var (
 		Name:  "mine",
 		Usage: "Enable mining",
 	}
-	MinerThreadsFlag = cli.IntFlag{
-		Name:  "miner.threads",
-		Usage: "Number of CPU threads to use for mining",
-		Value: 0,
-	}
 	MinerNotifyFlag = cli.StringFlag{
 		Name:  "miner.notify",
 		Usage: "Comma separated HTTP URL list to notify of new work packages",
@@ -627,39 +622,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	MetricsEnableInfluxDBFlag = cli.BoolFlag{
-		Name:  "metrics.influxdb",
-		Usage: "Enable metrics export/push to an external InfluxDB database",
-	}
-	MetricsInfluxDBEndpointFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.endpoint",
-		Usage: "InfluxDB API endpoint to report metrics to",
-		Value: metrics.DefaultConfig.InfluxDBEndpoint,
-	}
-	MetricsInfluxDBDatabaseFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.database",
-		Usage: "InfluxDB database name to push reported metrics to",
-		Value: metrics.DefaultConfig.InfluxDBDatabase,
-	}
-	MetricsInfluxDBUsernameFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.username",
-		Usage: "Username to authorize access to the database",
-		Value: metrics.DefaultConfig.InfluxDBUsername,
-	}
-	MetricsInfluxDBPasswordFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.password",
-		Usage: "Password to authorize access to the database",
-		Value: metrics.DefaultConfig.InfluxDBPassword,
-	}
-	// Tags are part of every measurement sent to InfluxDB. Queries on tags are faster in InfluxDB.
-	// For example `host` tag could be used so that we can group all nodes and average a measurement
-	// across all of them, but also so that we can select a specific node and inspect its measurements.
-	// https://docs.influxdata.com/influxdb/v1.4/concepts/key_concepts/#tag-key
-	MetricsInfluxDBTagsFlag = cli.StringFlag{
-		Name:  "metrics.influxdb.tags",
-		Usage: "Comma-separated InfluxDB tags (key/values) attached to all measurements",
-		Value: metrics.DefaultConfig.InfluxDBTags,
-	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -863,7 +825,7 @@ func makeDatabaseHandles() int {
 
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
-func setEtherbase(ctx *cli.Context, cfg *eth.Config) {
+func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
 		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
 		if sigkey != "" {
@@ -1063,6 +1025,9 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	if err != nil {
 		panic(err)
 	}
+	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1102,7 +1067,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	}
 
 	// Convert the etherbase into an address and configure it
-	if etherbase != "" {
+	if etherbase == "" {
 		Fatalf("No etherbase configured")
 	}
 	cfg.Etherbase = common.HexToAddress(etherbase)
@@ -1123,6 +1088,9 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdb
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
+	}
+	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
+		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")

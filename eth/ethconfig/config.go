@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -60,7 +59,6 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: downloader.StagedSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -123,7 +121,6 @@ type Config struct {
 
 	// Protocol options
 	NetworkID uint64 // Network ID to use for selecting peers to connect to
-	SyncMode  downloader.SyncMode
 
 	// This can be set to list of enrtree:// URLs which will be queried for
 	// for nodes to connect to.

@@ -26,15 +26,19 @@ func NewMemoryDatabase() *ObjectDatabase {
 }
 
 func NewMemDatabase() *ObjectDatabase {
+	return NewObjectDatabase(NewMemKV())
+}
+
+func NewMemKV() RwKV {
 	switch debug.TestDB() {
 	case "lmdb":
-		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+		return NewLMDB().InMem().MustOpen()
 	case "mdbx": //nolint:goconst
-		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
+		return NewMDBX().InMem().MustOpen()
 	default:
 		// mdbx is too slow for our tests currently, so we keep
 		// lmdb as our in-mem db
 		// with mdbx tests time out, especially ./tests package
-		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+		return NewLMDB().InMem().MustOpen()
 	}
 }

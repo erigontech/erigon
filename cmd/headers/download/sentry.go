@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -55,22 +54,6 @@ func nodeKey() *ecdsa.PrivateKey {
 		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
 	}
 	return key
-}
-
-// SentryMsg declares ID fields necessary for communicating with the sentry
-type SentryMsg struct {
-	sentryId  int
-	requestId int
-}
-
-type BlockHeadersFromSentry struct {
-	SentryMsg
-	headers []*types.Header
-}
-
-type PenaltyMsg struct {
-	SentryMsg
-	penalty headerdownload.Penalty
 }
 
 func makeP2PServer(
@@ -163,10 +146,6 @@ func makeP2PServer(
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
-func errResp(code int, format string, v ...interface{}) error {
-	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
-}
-
 func runPeer(
 	ctx context.Context,
 	peerHeightMap *sync.Map,
@@ -199,9 +178,9 @@ func runPeer(
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
 	// Read handshake message
-	msg, err := rw.ReadMsg()
-	if err != nil {
-		return err
+	msg, err1 := rw.ReadMsg()
+	if err1 != nil {
+		return err1
 	}
 
 	if msg.Code != eth.StatusMsg {
@@ -214,9 +193,9 @@ func runPeer(
 	}
 	// Decode the handshake and make sure everything matches
 	var status eth.StatusPacket
-	if err = msg.Decode(&status); err != nil {
+	if err1 = msg.Decode(&status); err1 != nil {
 		msg.Discard()
-		return fmt.Errorf("decode message %v: %v", msg, err)
+		return fmt.Errorf("decode message %v: %v", msg, err1)
 	}
 	msg.Discard()
 	if status.NetworkID != networkID {
@@ -228,12 +207,17 @@ func runPeer(
 	if status.Genesis != genesisHash {
 		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
-	if err = forkFilter(status.ForkID); err != nil {
-		return fmt.Errorf("%v", err)
+	if err1 = forkFilter(status.ForkID); err1 != nil {
+		return fmt.Errorf("%v", err1)
 	}
 	//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
+		var err error
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return err
+		}
+
 		if _, ok := peerRwMap.Load(peerID); !ok {
 			return fmt.Errorf("peer has been penalized")
 		}

@@ -15,11 +15,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var ErrUnknownParent = errors.New("unknown parent")
+var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
 	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
@@ -130,9 +132,9 @@ Error: %v
 	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
 		return false, false, 0, fmt.Errorf("%s: unknown parent %x", logPrefix, headers[0].ParentHash)
 	}
-	parentTd, err := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	if err != nil {
-		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
+	parentTd, pErr := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+	if pErr != nil {
+		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, pErr)
 	}
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
@@ -145,9 +147,9 @@ Error: %v
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	localTd, err := rawdb.ReadTd(db, headHash, *headNumber)
-	if err != nil {
-		return false, false, 0, err
+	localTd, tdErr := rawdb.ReadTd(db, headHash, *headNumber)
+	if tdErr != nil {
+		return false, false, 0, tdErr
 	}
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -165,9 +167,9 @@ Error: %v
 	}
 
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
-	ch, err := rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1)
-	if err != nil {
-		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
+	ch, chErr := rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1)
+	if chErr != nil {
+		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, chErr)
 	}
 	if newCanonical && headers[0].ParentHash != ch {
 		deepFork = true
@@ -188,9 +190,9 @@ Error: %v
 			continue
 		}
 		number := header.Number.Uint64()
-		ch, err := rawdb.ReadCanonicalHash(batch, number)
-		if err != nil {
-			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
+		ch, chErr := rawdb.ReadCanonicalHash(batch, number)
+		if chErr != nil {
+			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, chErr)
 		}
 		hashesMatch := header.HashCache() == ch
 		if newCanonical && !deepFork && !fork && !hashesMatch {
@@ -201,13 +203,13 @@ Error: %v
 			fork = true
 		}
 		if newCanonical {
-			if err = rawdb.WriteCanonicalHash(batch, header.HashCache(), header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteCanonicalHash(batch, header.HashCache(), header.Number.Uint64()); err != nil {
 				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			return false, false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
+		data, rlpErr := rlp.EncodeToBytes(header)
+		if rlpErr != nil {
+			return false, false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, rlpErr)
 		}
 		if err := rawdb.WriteTd(batch, header.HashCache(), header.Number.Uint64(), td); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
@@ -215,6 +217,7 @@ Error: %v
 		if err := batch.Put(dbutils.HeadersBucket, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
+		stageHeadersGauge.Update(int64(lastHeader.Number.Uint64()))
 	}
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -236,8 +239,7 @@ Error: %v
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
-		err = rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-		if err != nil {
+		if err := rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1); err != nil {
 			return false, false, 0, err
 		}
 	}
@@ -245,15 +247,13 @@ Error: %v
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
-			err = rawdb.DeleteCanonicalHash(batch, i)
-			if err != nil {
+			if err := rawdb.DeleteCanonicalHash(batch, i); err != nil {
 				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
 	}
 	if newCanonical {
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
-
 		if err := batch.Put(dbutils.HeaderNumberBucket, lastHeader.Hash().Bytes(), encoded); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] failed to store hash to number mapping: %w", logPrefix, err)
 		}

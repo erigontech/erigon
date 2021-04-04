@@ -21,7 +21,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +64,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 		t.Fatal("no error for wrong origin")
 	}
 	wantErr := wsHandshakeError{websocket.ErrBadHandshake, "403 Forbidden"}
-	if !reflect.DeepEqual(err, wantErr) {
+	if err != nil && err.Error() != wantErr.Error() {
 		t.Fatalf("wrong error for wrong origin: %q", err)
 	}
 
@@ -89,9 +88,9 @@ func TestWebsocketLargeCall(t *testing.T) {
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, err := DialWebsocket(context.Background(), wsURL, "")
-	if err != nil {
-		t.Fatalf("can't dial: %v", err)
+	client, clientErr := DialWebsocket(context.Background(), wsURL, "")
+	if clientErr != nil {
+		t.Fatalf("can't dial: %v", clientErr)
 	}
 	defer client.Close()
 
@@ -107,8 +106,7 @@ func TestWebsocketLargeCall(t *testing.T) {
 
 	// This call sends twice the allowed size and shouldn't work.
 	arg = strings.Repeat("x", maxRequestContentLength*2)
-	err = client.Call(&result, "test_echo", arg)
-	if err == nil {
+	if err := client.Call(&result, "test_echo", arg); err == nil {
 		t.Fatal("no error for too large call")
 	}
 }

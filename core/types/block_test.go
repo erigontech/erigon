@@ -18,7 +18,6 @@ package types
 
 import (
 	"bytes"
-	"hash"
 	"math/big"
 	"reflect"
 	"testing"
@@ -153,26 +152,6 @@ func BenchmarkEncodeBlock(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-}
-
-// testHasher is the helper tool for transaction/receipt list hashing.
-// The original hasher is trie, in order to get rid of import cycle,
-// use the testing hasher instead.
-type testHasher struct {
-	hasher hash.Hash
-}
-
-func (h *testHasher) Reset() {
-	h.hasher.Reset()
-}
-
-func (h *testHasher) Update(key, val []byte) {
-	h.hasher.Write(key) //nolint: errcheck
-	h.hasher.Write(val) //nolint: errcheck
-}
-
-func (h *testHasher) Hash() common.Hash {
-	return common.BytesToHash(h.hasher.Sum(nil))
 }
 
 func makeBenchBlock() *Block {

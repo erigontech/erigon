@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -47,7 +46,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 		panic(err)
 	}
 	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig, 1)
-	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, nil, tester, tester.dropPeer, ethdb.DefaultStorageMode, eng)
+	tester.downloader = New(tester.db, params.TestChainConfig, nil, tester, tester.dropPeer, ethdb.DefaultStorageMode, eng)
 	//tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetBatchSize(0 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetStagedSync(
@@ -214,7 +213,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, number, StagedSync, nil, func() error { return nil })
+	err := st.downloader.synchronise(id, hash, number, nil, func() error { return nil })
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle

@@ -27,14 +27,14 @@ type miningBlock struct {
 	Txs      []*types.Transaction
 	Receipts types.Receipts
 
-	localTxs  *types.TransactionsByPriceAndNonce
-	remoteTxs *types.TransactionsByPriceAndNonce
+	LocalTxs  types.TransactionsStream
+	RemoteTxs types.TransactionsStream
 }
 
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs types.TransactionsGroupedBySender, quit <-chan struct{}) error {
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -212,15 +212,29 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	current.Uncles = makeUncles(env.uncles)
 
 	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pendingTxs
-	for _, account := range txPoolLocals {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
+	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+	for _, txs := range pendingTxs {
+		if len(txs) == 0 {
+			continue
+		}
+		from, _ := types.Sender(signer, txs[0])
+		isLocal := false
+		for _, local := range txPoolLocals {
+			if local == from {
+				isLocal = true
+				break
+			}
+		}
+
+		if isLocal {
+			localTxs = append(localTxs, txs)
+		} else {
+			remoteTxs = append(remoteTxs, txs)
 		}
 	}
-	current.localTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
-	current.remoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
+
+	current.LocalTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
+	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
 	s.Done()
 	return nil
 }

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"sort"
 	"strings"
-
-	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // Buckets
@@ -201,8 +199,6 @@ var (
 	// Transaction senders - stored separately from the block bodies
 	Senders = "txSenders"
 
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	FastTrieProgressKey = "TrieSync"
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
@@ -243,10 +239,10 @@ var (
 )
 
 // Metrics
-var (
-	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
-)
+//var (
+//PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
+//PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+//)
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
@@ -278,7 +274,6 @@ var Buckets = []string{
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
 	Senders,
-	FastTrieProgressKey,
 	HeadBlockKey,
 	HeadFastBlockKey,
 	HeadHeaderKey,

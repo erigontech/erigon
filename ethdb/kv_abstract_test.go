@@ -91,8 +91,10 @@ func TestManagedTx(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c := tx.RwCursor(bucket1)
-		c1 := tx.RwCursor(bucket2)
+		c, err := tx.RwCursor(bucket1)
+		require.NoError(t, err)
+		c1, err := tx.RwCursor(bucket2)
+		require.NoError(t, err)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
@@ -107,7 +109,7 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-		err = tx.Commit(context.Background())
+		err = tx.Commit()
 		require.NoError(t, err)
 	}
 
@@ -133,8 +135,8 @@ func TestManagedTx(t *testing.T) {
 	}
 }
 
-func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
-	writeDBs = []ethdb.KV{
+func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV, close func()) {
+	writeDBs = []ethdb.RwKV{
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
@@ -143,7 +145,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 	conn := bufconn.Listen(1024 * 1024)
 
 	rdb := ethdb.NewRemote().InMem(conn).MustOpen()
-	readDBs = []ethdb.KV{
+	readDBs = []ethdb.RwKV{
 		writeDBs[0],
 		writeDBs[1],
 		rdb,
@@ -174,13 +176,16 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 	}
 }
 
-func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
+func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket1)
+		c, err := tx.Cursor(bucket1)
+		if err != nil {
+			return err
+		}
 		for {
 			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -193,12 +198,18 @@ func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 string) {
+func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c1 := tx.Cursor(bucket1)
-		c2 := tx.Cursor(bucket2)
+		c1, err := tx.Cursor(bucket1)
+		if err != nil {
+			return err
+		}
+		c2, err := tx.Cursor(bucket2)
+		if err != nil {
+			return err
+		}
 
 		k1, v1, err := c1.First()
 		assert.NoError(err)

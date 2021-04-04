@@ -272,7 +272,9 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 		interpreter.hasher.Reset()
 	}
 	interpreter.hasher.Write(data)
-	interpreter.hasher.Read(interpreter.hasherBuf[:])
+	if _, err := interpreter.hasher.Read(interpreter.hasherBuf[:]); err != nil {
+		panic(err)
+	}
 
 	evm := interpreter.evm
 	if evm.vmConfig.EnablePreimageRecording {
@@ -583,10 +585,6 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 
 func opJumpdest(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	return nil, nil
-}
-
-func opBeginSub(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	return nil, ErrInvalidSubroutineEntry
 }
 
 func opPc(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {

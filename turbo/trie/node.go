@@ -139,67 +139,6 @@ func (n *duoNode) childrenIdx() (i1 byte, i2 byte) {
 	return i1, i2
 }
 
-func (n *fullNode) copy() *fullNode {
-	c := *n
-	return &c
-}
-
-func (n *fullNode) mask() uint32 {
-	var m uint32
-	for i, child := range n.Children {
-		if child != nil {
-			m |= (uint32(1) << uint(i))
-		}
-	}
-	return m
-}
-
-func (n *fullNode) duoCopy() *duoNode {
-	c := duoNode{}
-	first := true
-	for i, child := range n.Children {
-		if child == nil {
-			continue
-		}
-		if first {
-			first = false
-			c.mask |= (uint32(1) << uint(i))
-			c.child1 = child
-		} else {
-			c.mask |= (uint32(1) << uint(i))
-			c.child2 = child
-			break
-		}
-	}
-	if n.ref.len > 0 {
-		copy(c.ref.data[:], n.ref.data[:])
-	}
-	c.ref.len = n.ref.len
-	return &c
-}
-
-func (n *duoNode) fullCopy() *fullNode {
-	c := fullNode{}
-	i1, i2 := n.childrenIdx()
-	c.Children[i1] = n.child1
-	c.Children[i2] = n.child2
-	if n.ref.len > 0 {
-		copy(c.ref.data[:], n.ref.data[:])
-	}
-	c.ref.len = n.ref.len
-	return &c
-}
-
-func (n *duoNode) copy() *duoNode {
-	c := *n
-	return &c
-}
-
-func (n *shortNode) copy() *shortNode {
-	c := *n
-	return &c
-}
-
 func resetRefs(nd node) {
 	switch n := nd.(type) {
 	case *shortNode:

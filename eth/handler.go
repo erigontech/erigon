@@ -50,10 +50,6 @@ const (
 	txChanSize = 4096
 )
 
-var (
-	syncChallengeTimeout = 15 * time.Second // Time allowance for a node to reply to the sync progress challenge
-)
-
 // txPool defines the methods needed from a transaction pool implementation to
 // support all the operations needed by the Ethereum chain protocols.
 type txPool interface {
@@ -70,7 +66,7 @@ type txPool interface {
 
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.
-	Pending() (map[common.Address]types.Transactions, error)
+	Pending() (types.TransactionsGroupedBySender, error)
 
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
@@ -84,9 +80,7 @@ type handlerConfig struct {
 	Chain      *core.BlockChain          // Blockchain to serve data from
 	TxPool     txPool                    // Transaction pool to propagate from
 	Network    uint64                    // Network identifier to adfvertise
-	Sync       downloader.SyncMode       // Whether to fast or full sync
 	BloomCache uint64                    // Megabytes to alloc for fast sync bloom
-	EventMux   *event.TypeMux            // Legacy event mux, deprecate for `feed`
 	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
 	Whitelist  map[uint64]common.Hash    // Hard coded whitelist for sync challenged
 	Mining     *params.MiningConfig
@@ -98,9 +92,6 @@ type handler struct {
 
 	acceptTxs uint32 // Flag whether we're considered synchronised (enables transaction processing)
 
-	checkpointNumber uint64      // Block number for the sync progress validator to cross reference
-	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
-
 	database ethdb.Database
 	txpool   txPool
 	chain    *core.BlockChain
@@ -111,10 +102,8 @@ type handler struct {
 	txFetcher    *fetcher.TxFetcher
 	peers        *peerSet
 
-	eventMux      *event.TypeMux
-	txsCh         chan core.NewTxsEvent
-	txsSub        event.Subscription
-	minedBlockSub *event.TypeMuxSubscription
+	txsCh  chan core.NewTxsEvent
+	txsSub event.Subscription
 
 	whitelist map[uint64]common.Hash
 
@@ -136,13 +125,8 @@ type handler struct {
 
 // newHandler returns a handler for all Ethereum chain management protocol.
 func newHandler(config *handlerConfig, engine *process.RemoteEngine) (*handler, error) { //nolint:unparam
-	// Create the protocol manager with the base fields
-	if config.EventMux == nil {
-		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
-	}
 	h := &handler{
 		networkID: config.Network,
-		eventMux:  config.EventMux,
 		database:  config.Database,
 		txpool:    config.TxPool,
 		chain:     config.Chain,
@@ -167,7 +151,7 @@ func newHandler(config *handlerConfig, engine *process.RemoteEngine) (*handler, 
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm, engine)
+	h.downloader = downloader.New(config.Database, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm, engine)
 	h.downloader.SetTmpDir(h.tmpdir)
 	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
@@ -283,25 +267,6 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// after this will be sent via broadcasts.
 	h.syncTransactions(peer)
 
-	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
-	if h.checkpointHash != (common.Hash{}) {
-		// Request the peer's checkpoint header for chain height/weight validation
-		if err := peer.RequestHeadersByNumber(h.checkpointNumber, 1, 0, false); err != nil {
-			return err
-		}
-		// Start a timer to disconnect if the peer doesn't reply in time
-		p.syncDrop = time.AfterFunc(syncChallengeTimeout, func() {
-			peer.Log().Warn("Checkpoint challenge timed out, dropping", "addr", peer.RemoteAddr(), "type", peer.Name())
-			h.removePeer(peer.ID())
-		})
-		// Make sure it's cleaned up if the peer dies off
-		defer func() {
-			if p.syncDrop != nil {
-				p.syncDrop.Stop()
-				p.syncDrop = nil
-			}
-		}()
-	}
 	// If we have any explicit whitelist block hashes, request them
 	for number := range h.whitelist {
 		if err := peer.RequestHeadersByNumber(number, 1, 0, false); err != nil {
@@ -353,11 +318,6 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
-	// broadcast mined blocks
-	h.wg.Add(1)
-	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go h.minedBroadcastLoop()
-
 	// start sync handlers
 	h.wg.Add(2)
 	go h.chainSync.loop()
@@ -365,8 +325,7 @@ func (h *handler) Start(maxPeers int) {
 }
 
 func (h *handler) Stop() {
-	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
-	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
@@ -461,18 +420,6 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 	log.Debug("Transaction broadcast", "txs", len(txs),
 		"announce packs", annoPeers, "announced hashes", annoCount,
 		"tx packs", directPeers, "broadcast txs", directCount)
-}
-
-// minedBroadcastLoop sends mined blocks to connected peers.
-func (h *handler) minedBroadcastLoop() {
-	defer h.wg.Done()
-
-	for obj := range h.minedBlockSub.Chan() {
-		if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
-			h.BroadcastBlock(ev.Block, true)  // First propagate block to peers
-			h.BroadcastBlock(ev.Block, false) // Only then announce to the rest
-		}
-	}
 }
 
 // txBroadcastLoop announces new transactions to connected peers.

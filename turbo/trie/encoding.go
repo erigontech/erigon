@@ -58,10 +58,6 @@ func hexToCompact(hex []byte) []byte {
 	return buf
 }
 
-func compactLen(compact []byte) int {
-	return 2*len(compact) - 2 + int((compact[0]&0x10)>>4)
-}
-
 func compactToHex(compact []byte) []byte {
 	if len(compact) == 0 {
 		return compact

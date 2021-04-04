@@ -20,8 +20,7 @@ import (
 )
 
 var (
-	dbCommitBigBatchTimer   = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
-	dbCommitSmallBatchTimer = metrics.NewRegisteredTimer("db/commit/small_batch", nil)
+	dbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
 )
 
 type mutation struct {
@@ -47,9 +46,9 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
-func (m *mutation) KV() KV {
-	if casted, ok := m.db.(HasKV); ok {
-		return casted.KV()
+func (m *mutation) RwKV() RwKV {
+	if casted, ok := m.db.(HasRwKV); ok {
+		return casted.RwKV()
 	}
 	return nil
 }
@@ -139,17 +138,6 @@ func (m *mutation) Has(table string, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	if m.db == nil {
-		return 0, nil
-	}
-	sz, err := m.db.(HasStats).DiskSize(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return common.StorageSize(sz), nil
-}
-
 func (m *mutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -234,7 +222,12 @@ func (m *mutation) doCommit(tx RwTx) error {
 			if c != nil {
 				c.Close()
 			}
-			c = tx.RwCursor(mi.table)
+			var err error
+			c, err = tx.RwCursor(mi.table)
+			if err != nil {
+				innerErr = err
+				return false
+			}
 			prevTable = mi.table
 			firstKey, _, err := c.Seek(mi.key)
 			if err != nil {
@@ -286,7 +279,7 @@ func (m *mutation) Commit() error {
 			return err
 		}
 	} else {
-		if err := m.db.(HasKV).KV().Update(context.Background(), func(tx RwTx) error {
+		if err := m.db.(HasRwKV).RwKV().Update(context.Background(), func(tx RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
 			return err
@@ -337,6 +330,10 @@ func (m *mutation) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutat
 	return m.db.Begin(ctx, flags)
 }
 
+func (m *mutation) BeginGetter(ctx context.Context) (GetterTx, error) {
+	return m.db.BeginGetter(ctx)
+}
+
 func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
@@ -348,19 +345,8 @@ func (m *mutation) MemCopy() Database {
 	return m.db
 }
 
-func (m *mutation) SetKV(kv KV) {
-	m.db.(HasKV).SetKV(kv)
-}
-
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (m *mutation) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (m *mutation) TruncateAncients(items uint64) error {
-	return errNotSupported
+func (m *mutation) SetRwKV(kv RwKV) {
+	m.db.(HasRwKV).SetRwKV(kv)
 }
 
 func NewRWDecorator(db Database) *RWCounterDecorator {

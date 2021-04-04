@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Forks is a data type to record a list of forks passed by this node
@@ -16,7 +15,7 @@ type Forks struct {
 
 // Forks implements tg_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *TgImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Forks{}, err
 	}

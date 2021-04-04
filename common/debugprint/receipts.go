@@ -71,7 +71,7 @@ func Receipts(rs1, rs2 types.Receipts) {
 			fmt.Printf("  Logs[%d].Topic:   %x, %x\n", j, l1.Topics, l2.Topics)
 			fmt.Printf("  Logs[%d].Data:    %x, %x\n", j, l1.Data, l2.Data)
 		}
-		fmt.Printf(" Bloom: %x, %x\n", r1.Bloom, r1.Bloom)
+		//fmt.Printf(" Bloom: %x, %x\n", r1.Bloom, r1.Bloom)
 	}
 }
 

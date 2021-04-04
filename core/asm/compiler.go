@@ -120,9 +120,9 @@ func (c *Compiler) Compile() (string, []error) {
 // next returns the next token and increments the
 // position.
 func (c *Compiler) next() token {
-	token := c.tokens[c.pos]
+	t := c.tokens[c.pos]
 	c.pos++
-	return token
+	return t
 }
 
 // compileLine compiles a single line instruction e.g.

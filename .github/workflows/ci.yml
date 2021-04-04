@@ -1,0 +1,57 @@
+name: Continuous integration
+on: [ push ]
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16.x
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt update && sudo apt install build-essential
+          fi
+        shell: bash
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Build (non-windows)
+        if: matrix.os != 'windows-latest'
+        run: make all
+      - name: Build (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          go build -trimpath -o bin/tg.exe ./cmd/tg
+          go build -trimpath -o bin/rpcdaemon.exe ./cmd/rpcdaemon
+          go build -trimpath -o bin/rpctest.exe ./cmd/rpctest
+          go build -trimpath -o bin/integration.exe ./cmd/integration
+          go build -trimpath -o bin/headers.ext ./cmd/headers
+      - name: Lint
+        if: matrix.os != 'windows-latest'
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: latest
+          args: "--build-tags=mdbx"
+          skip-go-installation: true
+          skip-pkg-cache: true
+          skip-build-cache: true
+      - name: Test (non-windows)
+        if: matrix.os != 'windows-latest'
+        run: make test
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Docker
+        run: docker build .

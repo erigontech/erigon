@@ -279,7 +279,9 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		return err
 	}
 	rawdb.WriteHeadBlockHash(db, newHeadHash)
-	rawdb.WriteHeadHeaderHash(db, newHeadHash)
+	if writeErr := rawdb.WriteHeadHeaderHash(db, newHeadHash); writeErr != nil {
+		return writeErr
+	}
 	if err = stages.SaveStageProgress(db, stages.Headers, newHead); err != nil {
 		return err
 	}
@@ -352,11 +354,19 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
 		return false, err
 	}
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
-	if err1 != nil {
-		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return false, nil
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers, time.Since(t))
 	if err != nil {
 		return false, err
@@ -365,8 +375,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
-		if err1 = tx.Commit(); err1 != nil {
-			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		if !useExternalTx {
+			if err1 := tx.Commit(); err1 != nil {
+				return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+			}
 		}
 		return false, nil // No change of the chain
 	}
@@ -412,12 +424,39 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-	if err1 = tx.Commit(); err1 != nil {
-		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+	if !useExternalTx {
+		if err1 := tx.Commit(); err1 != nil {
+			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		}
 	}
 	return true, nil
 }
 
 func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, block *types.Block, checkRoot bool) (bool, error) {
 	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, cons, engine, []*types.Block{block}, checkRoot)
+}
+
+// UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
+// need to fix it in future
+func UpdateMetrics(db ethdb.Getter) error {
+	var progress uint64
+	var err error
+	progress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	stageHeadersGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	stageBodiesGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return err
+	}
+	stageExecutionGauge.Update(int64(progress))
+	return nil
 }

@@ -30,10 +30,8 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -693,12 +691,12 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
-	// Retrive the list of inserted/updated/deleted storage items (keys and values)
+	// Retrieve the list of inserted/updated/deleted storage items (keys and values)
 	storageKeys, sValues := tds.buildStorageWrites()
 	if trace {
 		fmt.Printf("len(storageKeys)=%d, len(sValues)=%d\n", len(storageKeys), len(sValues))
 	}
-	// Retrive the list of inserted/updated/deleted accounts (keys and values)
+	// Retrieve the list of inserted/updated/deleted accounts (keys and values)
 	accountKeys, aValues, aCodes := tds.buildAccountWrites()
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
@@ -831,10 +829,13 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr, nil)
+	tx, _ := tds.db.Begin(context.Background(), ethdb.RO)
+	defer tx.Rollback()
+	accountMap, storageMap, err := changeset.RewindData(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tds.blockNr, blockNr, nil)
 	if err != nil {
 		return err
 	}
+	tx.Rollback()
 	for plainKey, value := range accountMap {
 		var addrHash, err = common.HashData([]byte(plainKey))
 		if err != nil {
@@ -871,7 +872,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		}
 		var key = append(addrHash[:], []byte(plainKey)[common.AddressLength:]...)
 		var keyHash common.Hash
-		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
+		copy(keyHash[:], key[common.HashLength+common.IncarnationLength:])
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
 			m = make(map[common.Hash][]byte)
@@ -879,7 +880,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		}
 		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64(key[common.HashLength:])
 		var storageKey common.StorageKey
-		copy(storageKey[:], []byte(key))
+		copy(storageKey[:], key)
 		b.storageReads[storageKey] = struct{}{}
 		if len(value) > 0 {
 			m[keyHash] = value
@@ -940,26 +941,26 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 }
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
-	for plainKey := range accountMap {
-		key, err := common.HashData([]byte(plainKey)[:])
-		if err != nil {
-			return err
-		}
-
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
-			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
-		}
-	}
-	for plainKey := range storageMap {
-		key, err := common.HashData([]byte(plainKey)[:])
-		if err != nil {
-			return err
-		}
-
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
-			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
-		}
-	}
+	//for plainKey := range accountMap {
+	//	key, err := common.HashData([]byte(plainKey)[:])
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
+	//		return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
+	//	}
+	//}
+	//for plainKey := range storageMap {
+	//	key, err := common.HashData([]byte(plainKey)[:])
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
+	//		return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
+	//	}
+	//}
 	return nil
 }
 
@@ -1150,8 +1151,6 @@ func (tds *TrieDbState) ReadAccountIncarnation(address common.Address) (uint64, 
 	}
 }
 
-var prevMemStats runtime.MemStats
-
 type TrieStateWriter struct {
 	tds *TrieDbState
 }
@@ -1251,7 +1250,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
-	if err != err {
+	if err != nil {
 		return err
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil

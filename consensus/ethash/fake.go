@@ -160,14 +160,12 @@ func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Hea
 }
 
 // If we're running a fake PoW, simply return a 0 nonce immediately
-func (f *FakeEthash) Seal(ctx consensus.Cancel, _ consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
 	header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 
 	select {
-	case <-stop:
-		ctx.CancelFunc()
-	case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
+	case results <- block.WithSeal(header):
 		// nothing to do
 	default:
 		f.Ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", f.Ethash.SealHash(block.Header()))

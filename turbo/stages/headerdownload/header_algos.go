@@ -142,20 +142,20 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	var prevLink *Link
+	// var prevLink *Link
 	for link != nil && !link.preverified {
 		link.preverified = true
-		if prevLink != nil && len(link.next) > 1 {
-			// Remove all non-canonical links
-			var toRemove []*Link
-			for _, n := range link.next {
-				if n != prevLink {
-					toRemove = append(toRemove, n)
-				}
-			}
-			hd.removeUpwards(toRemove)
-			link.next = append(link.next[:0], prevLink)
-		}
+		// if prevLink != nil && len(link.next) > 1 {
+		// 	// Remove all non-canonical links
+		// 	var toRemove []*Link
+		// 	for _, n := range link.next {
+		// 		if n != prevLink {
+		// 			toRemove = append(toRemove, n)
+		// 		}
+		// 	}
+		// 	hd.removeUpwards(toRemove)
+		// 	link.next = append(link.next[:0], prevLink)
+		// }
 		link = hd.links[link.header.ParentHash]
 	}
 }
@@ -439,8 +439,11 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
-	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeadersBucket)
+	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {

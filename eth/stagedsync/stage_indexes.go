@@ -52,7 +52,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainAccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -99,7 +99,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainStorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -115,7 +115,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	return nil
 }
 
-func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string, start, stop uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
+func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, start, stop uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -125,7 +125,7 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 
 	collectorUpdates := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-	if err := changeset.Walk(db, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= stop {
 			return false, nil
 		}
@@ -190,7 +190,7 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 
-			currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
+			currentBitmap.Or(lastChunk) // merge last existing chunk from tx - next loop will overwrite it
 		}
 		if err = bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
@@ -205,7 +205,7 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 		return nil
 	}
 
-	if err := collectorUpdates.Load(logPrefix, db, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorUpdates.Load(logPrefix, tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -227,7 +227,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainAccountChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -259,7 +259,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainStorageChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -275,7 +275,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	return nil
 }
 
-func unwindHistory(logPrefix string, db ethdb.Database, csBucket string, to uint64, quitCh <-chan struct{}) error {
+func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, quitCh <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -330,7 +330,7 @@ func flushBitmaps64(c *etl.Collector, inMem map[string]*roaring64.Bitmap) error 
 	return nil
 }
 
-func truncateBitmaps64(tx ethdb.Database, bucket string, inMem map[string]struct{}, to uint64) error {
+func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)

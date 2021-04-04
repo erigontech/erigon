@@ -109,16 +109,24 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFr
 		}
 	}
 
-	tgTx, err := resultsKV.Begin(context.Background())
+	tgTx, err := resultsKV.BeginRo(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	gethTx, err := gethKV.Begin(context.Background())
+	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	tgCursor := tgTx.Cursor(dbutils.AccountsHistoryBucket)
-	gethCursor := gethTx.Cursor(dbutils.AccountsHistoryBucket)
+	tgCursor, err := tgTx.Cursor(dbutils.AccountsHistoryBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer tgCursor.Close()
+	gethCursor, err := gethTx.Cursor(dbutils.AccountsHistoryBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer gethCursor.Close()
 
 	tgKey, tgVal, err1 := tgCursor.Next()
 	if err1 != nil {

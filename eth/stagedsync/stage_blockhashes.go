@@ -53,7 +53,7 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
-		tx,
+		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
 		dbutils.HeadersBucket,
 		dbutils.HeaderNumberBucket,
 		tmpdir,

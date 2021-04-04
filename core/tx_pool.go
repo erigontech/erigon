@@ -212,17 +212,15 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 // current state) and future transactions. Transactions move between those
 // two states over time as they are received and processed.
 type TxPool struct {
-	config       TxPoolConfig
-	chainconfig  *params.ChainConfig
-	chaindb      ethdb.Database
-	gasPrice     *uint256.Int
-	txFeed       event.Feed
-	scope        event.SubscriptionScope
-	chainHeadCh  chan ChainHeadEvent
-	chainHeadSub event.Subscription
-	signer       types.Signer
-	senderCacher *TxSenderCacher
-	mu           sync.RWMutex
+	config      TxPoolConfig
+	chainconfig *params.ChainConfig
+	chaindb     ethdb.Database
+	gasPrice    *uint256.Int
+	txFeed      event.Feed
+	scope       event.SubscriptionScope
+	chainHeadCh chan ChainHeadEvent
+	signer      types.Signer
+	mu          sync.RWMutex
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -276,10 +274,14 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reqPromoteCh:    make(chan *accountSet),
 		queueTxEventCh:  make(chan *types.Transaction),
 		reorgDoneCh:     make(chan chan struct{}),
-		reorgShutdownCh: make(chan struct{}),
+		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
 		chaindb:         chaindb,
+	}
+	pool.locals = newAccountSet(pool.signer)
+	for _, addr := range pool.config.Locals {
+		pool.locals.add(addr)
 	}
 
 	return pool
@@ -290,9 +292,9 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
-		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
+
 	pool.priced = newTxPricedList(pool.all)
 	pool.resetHead(gasLimit, headNumber)
 
@@ -507,15 +509,16 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce. The returned transaction set is a copy and can be
 // freely modified by calling code.
-func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
-	pending := make(map[common.Address]types.Transactions)
+func (pool *TxPool) Pending() (types.TransactionsGroupedBySender, error) {
+	var pending types.TransactionsGroupedBySender
 	if !pool.IsStarted() {
 		return pending, nil
 	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	for addr, list := range pool.pending {
-		pending[addr] = list.Flatten()
+	pending = make(types.TransactionsGroupedBySender, len(pool.pending))
+	for _, list := range pool.pending {
+		pending = append(pending, list.Flatten())
 	}
 	return pending, nil
 }
@@ -1501,10 +1504,6 @@ func newAccountSet(signer types.Signer, addrs ...common.Address) *accountSet {
 func (as *accountSet) contains(addr common.Address) bool {
 	_, exist := as.accounts[addr]
 	return exist
-}
-
-func (as *accountSet) empty() bool {
-	return len(as.accounts) == 0
 }
 
 // containsTx checks if the sender of a given tx is within the set. If the sender

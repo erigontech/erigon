@@ -228,11 +228,11 @@ func StarkStats(witness *Witness, w io.Writer, trace bool) error {
 			}
 
 			// Incarnation is always needed for a hashbuilder.
-			// but it is just our implementation detail needed for contract self-descruction suport with our
+			// but it is just our implementation detail needed for contract self-destruction support with our
 			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
-			incarnaton := uint64(0)
+			incarnation := uint64(0)
 
-			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnaton, fieldSet); err != nil {
+			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnation, fieldSet); err != nil {
 				return err
 			}
 		case *OperatorEmptyRoot:

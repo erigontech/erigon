@@ -1,53 +1,46 @@
-# This file configures github.com/golangci/golangci-lint.
-
 run:
-  timeout: 3m
-  tests: true
-  # default is true. Enables skipping of directories:
-  #   vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs-use-default: true
-  skip-files:
-    - core/genesis_alloc.go
+  deadline: 10m
 
 linters:
   disable-all: true
   enable:
     - deadcode
-    - goconst
-    - goimports
+    - errcheck
     - gosimple
     - govet
     - ineffassign
-    - misspell
-    # - staticcheck
-    - unconvert
-    # - unused
+    - staticcheck
+    - structcheck
+    - unused
     - varcheck
 
 linters-settings:
-  gofmt:
-    simplify: true
+  govet:
+    disable:
+      - deepequalerrors
+      - fieldalignment
+      - shadow
+      - unsafeptr
   goconst:
-    min-len: 3 # minimum length of string constant
-    min-occurrences: 6 # minimum number of occurrences
+    min-len: 2
+    min-occurrences: 2
+  gofmt:
+    auto-fix: false
 
 issues:
   exclude-rules:
-    - path: crypto/blake2b/
+    - linters:
+        - golint
+      text: "should be"
+    - linters:
+        - errcheck
+      text: "not checked"
+    - linters:
+        - staticcheck
+      text: "SA(1019|1029|5011)"
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
       linters:
+        - gosec
+        - unused
         - deadcode
-    - path: crypto/bn256/cloudflare
-      linters:
-        - deadcode
-    - path: p2p/discv5/
-      linters:
-        - deadcode
-    - path: core/vm/instructions_test.go
-      linters:
-        - goconst
-    - path: cmd/faucet/
-      linters:
-        - deadcode
-  exclude:
-    # gosec: Profiling endpoint is automatically exposed on /debug/pprof
-    - G108

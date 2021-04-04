@@ -29,7 +29,7 @@ func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error
 }
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
-func GetModifiedAccounts(db ethdb.Database, startNum, endNum uint64) ([]common.Address, error) {
+func GetModifiedAccounts(db ethdb.Tx, startNum, endNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
 	if err := Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > endNum {

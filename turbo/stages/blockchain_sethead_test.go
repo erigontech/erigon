@@ -23,9 +23,7 @@
 package stages
 
 import (
-	"fmt"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -55,99 +53,6 @@ type rewindTest struct {
 	expHeadHeader      uint64 // Block number of the expected head header
 	expHeadFastBlock   uint64 // Block number of the expected head fast sync block
 	expHeadBlock       uint64 // Block number of the expected head full block
-}
-
-func (tt *rewindTest) dump(crash bool) string {
-	buffer := new(strings.Builder)
-
-	fmt.Fprint(buffer, "Chain:\n  G")
-	for i := 0; i < tt.canonicalBlocks; i++ {
-		fmt.Fprintf(buffer, "->C%d", i+1)
-	}
-	fmt.Fprint(buffer, " (HEAD)\n")
-	if tt.sidechainBlocks > 0 {
-		fmt.Fprintf(buffer, "  └")
-		for i := 0; i < tt.sidechainBlocks; i++ {
-			fmt.Fprintf(buffer, "->S%d", i+1)
-		}
-		fmt.Fprintf(buffer, "\n")
-	}
-	fmt.Fprintf(buffer, "\n")
-
-	if tt.canonicalBlocks > int(tt.freezeThreshold) {
-		fmt.Fprint(buffer, "Frozen:\n  G")
-		for i := 0; i < tt.canonicalBlocks-int(tt.freezeThreshold); i++ {
-			fmt.Fprintf(buffer, "->C%d", i+1)
-		}
-		fmt.Fprintf(buffer, "\n\n")
-	} else {
-		fmt.Fprintf(buffer, "Frozen: none\n")
-	}
-	fmt.Fprintf(buffer, "Commit: G")
-	if tt.commitBlock > 0 {
-		fmt.Fprintf(buffer, ", C%d", tt.commitBlock)
-	}
-	fmt.Fprint(buffer, "\n")
-
-	if tt.pivotBlock == nil {
-		fmt.Fprintf(buffer, "Pivot : none\n")
-	} else {
-		fmt.Fprintf(buffer, "Pivot : C%d\n", *tt.pivotBlock)
-	}
-	if crash {
-		fmt.Fprintf(buffer, "\nCRASH\n\n")
-	} else {
-		fmt.Fprintf(buffer, "\nSetHead(%d)\n\n", tt.setheadBlock)
-	}
-	fmt.Fprintf(buffer, "------------------------------\n\n")
-
-	if tt.expFrozen > 0 {
-		fmt.Fprint(buffer, "Expected in freezer:\n  G")
-		for i := 0; i < tt.expFrozen-1; i++ {
-			fmt.Fprintf(buffer, "->C%d", i+1)
-		}
-		fmt.Fprintf(buffer, "\n\n")
-	}
-	if tt.expFrozen > 0 {
-		if tt.expFrozen >= tt.expCanonicalBlocks {
-			fmt.Fprintf(buffer, "Expected in leveldb: none\n")
-		} else {
-			fmt.Fprintf(buffer, "Expected in leveldb:\n  C%d)", tt.expFrozen-1)
-			for i := tt.expFrozen - 1; i < tt.expCanonicalBlocks; i++ {
-				fmt.Fprintf(buffer, "->C%d", i+1)
-			}
-			fmt.Fprint(buffer, "\n")
-			if tt.expSidechainBlocks > tt.expFrozen {
-				fmt.Fprintf(buffer, "  └")
-				for i := tt.expFrozen - 1; i < tt.expSidechainBlocks; i++ {
-					fmt.Fprintf(buffer, "->S%d", i+1)
-				}
-				fmt.Fprintf(buffer, "\n")
-			}
-		}
-	} else {
-		fmt.Fprint(buffer, "Expected in leveldb:\n  G")
-		for i := tt.expFrozen; i < tt.expCanonicalBlocks; i++ {
-			fmt.Fprintf(buffer, "->C%d", i+1)
-		}
-		fmt.Fprint(buffer, "\n")
-		if tt.expSidechainBlocks > tt.expFrozen {
-			fmt.Fprintf(buffer, "  └")
-			for i := tt.expFrozen; i < tt.expSidechainBlocks; i++ {
-				fmt.Fprintf(buffer, "->S%d", i+1)
-			}
-			fmt.Fprintf(buffer, "\n")
-		}
-	}
-	fmt.Fprintf(buffer, "\n")
-	fmt.Fprintf(buffer, "Expected head header    : C%d\n", tt.expHeadHeader)
-	fmt.Fprintf(buffer, "Expected head fast block: C%d\n", tt.expHeadFastBlock)
-	if tt.expHeadBlock == 0 {
-		fmt.Fprintf(buffer, "Expected head block     : G\n")
-	} else {
-		fmt.Fprintf(buffer, "Expected head block     : C%d\n", tt.expHeadBlock)
-	}
-	return buffer.String()
 }
 
 // Tests a sethead for a short canonical chain where a recent block was already
@@ -717,140 +622,6 @@ func TestLongShallowSetHead(t *testing.T) {
 	})
 }
 
-// Tests a sethead for a long canonical chain with frozen blocks where a recent
-// block - older than the ancient limit - was already committed to disk and then
-// sethead was called. In this case we expect the full chain to be rolled back
-// to the committed block. Since the ancient limit was underflown, everything
-// needs to be deleted onwards to avoid creating a gap.
-func TestLongDeepSetHead(t *testing.T) {
-	t.Skip("no freezer in turbo-geth")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : none
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    0,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         nil,
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks where the fast
-// sync pivot point - newer than the ancient limit - was already committed, after
-// which sethead was called. In this case we expect the full chain to be rolled
-// back to the committed block. Everything above the sethead point should be
-// deleted. In between the committed block and the requested head the data can
-// remain as "fast sync" data to avoid redownloading it.
-func TestLongFastSyncedShallowSetHead(t *testing.T) {
-	t.Skip("no freezer in turbo-geth")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18 (HEAD)
-	//
-	// Frozen:
-	//   G->C1->C2
-	//
-	// Commit: G, C4
-	// Pivot : C4
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2
-	//
-	// Expected in leveldb:
-	//   C2)->C3->C4->C5->C6
-	//
-	// Expected head header    : C6
-	// Expected head fast block: C6
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    18,
-		sidechainBlocks:    0,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         uint64ptr(4),
-		setheadBlock:       6,
-		expCanonicalBlocks: 6,
-		expSidechainBlocks: 0,
-		expFrozen:          3,
-		expHeadHeader:      6,
-		expHeadFastBlock:   6,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks where the fast
-// sync pivot point - older than the ancient limit - was already committed, after
-// which sethead was called. In this case we expect the full chain to be rolled
-// back to the committed block. Since the ancient limit was underflown, everything
-// needs to be deleted onwards to avoid creating a gap.
-func TestLongFastSyncedDeepSetHead(t *testing.T) {
-	t.Skip("no freezer in turbo-geth")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : C4
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    0,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         uint64ptr(4),
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
-		expHeadBlock:       4,
-	})
-}
-
 // Tests a sethead for a long canonical chain with frozen blocks where the fast
 // sync pivot point - newer than the ancient limit - was not yet committed, but
 // sethead was called. In this case we expect the chain to detect that it was fast
@@ -985,52 +756,6 @@ func TestLongOldForkedShallowSetHead(t *testing.T) {
 	})
 }
 
-// Tests a sethead for a long canonical chain with frozen blocks and a shorter side
-// chain, where a recent block - older than the ancient limit - was already committed
-// to disk and then sethead was called. In this case we expect the canonical full
-// chain to be rolled back to the committed block. Since the ancient limit was
-// underflown, everything needs to be deleted onwards to avoid creating a gap. The
-// side chain is nuked by the freezer.
-func TestLongOldForkedDeepSetHead(t *testing.T) {
-	t.Skip("no freezer in turbo-geth")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : none
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    3,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         nil,
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
-		expHeadBlock:       4,
-	})
-}
-
 // Tests a sethead for a long canonical chain with frozen blocks and a shorter
 // side chain, where the fast sync pivot point - newer than the ancient limit -
 // was already committed to disk and then sethead was called. In this test scenario
@@ -1075,53 +800,6 @@ func TestLongOldForkedFastSyncedShallowSetHead(t *testing.T) {
 		expFrozen:          3,
 		expHeadHeader:      6,
 		expHeadFastBlock:   6,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks and a shorter
-// side chain, where the fast sync pivot point - older than the ancient limit -
-// was already committed to disk and then sethead was called. In this test scenario
-// the side chain is below the committed block. In this case we expect the canonical
-// full chain to be rolled back to the committed block. Since the ancient limit was
-// underflown, everything needs to be deleted onwards to avoid creating a gap. The
-// side chain is nuked by the freezer.
-func TestLongOldForkedFastSyncedDeepSetHead(t *testing.T) {
-	t.Skip("turbo-geth doesn't have a freezer")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : C4
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4->C5->C6
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C6
-	// Expected head fast block: C6
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    3,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         uint64ptr(4),
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
 		expHeadBlock:       4,
 	})
 }
@@ -1265,51 +943,6 @@ func TestLongNewerForkedShallowSetHead(t *testing.T) {
 }
 
 // Tests a sethead for a long canonical chain with frozen blocks and a shorter
-// side chain, where a recent block - older than the ancient limit - was already
-// committed to disk and then sethead was called. In this test scenario the side
-// chain is above the committed block. In this case the freezer will delete the
-// sidechain since it's dangling, reverting to TestLongDeepSetHead.
-func TestLongNewerForkedDeepSetHead(t *testing.T) {
-	t.Skip("turbo-geth doesn't have a freezer")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3->S4->S5->S6->S7->S8->S9->S10->S11->S12
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : none
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    12,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         nil,
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks and a shorter
 // side chain, where the fast sync pivot point - newer than the ancient limit -
 // was already committed to disk and then sethead was called. In this test scenario
 // the side chain is above the committed block. In this case the freezer will delete
@@ -1350,51 +983,6 @@ func TestLongNewerForkedFastSyncedShallowSetHead(t *testing.T) {
 		expFrozen:          3,
 		expHeadHeader:      6,
 		expHeadFastBlock:   6,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks and a shorter
-// side chain, where the fast sync pivot point - older than the ancient limit -
-// was already committed to disk and then sethead was called. In this test scenario
-// the side chain is above the committed block. In this case the freezer will delete
-// the sidechain since it's dangling, reverting to TestLongFastSyncedDeepSetHead.
-func TestLongNewerForkedFastSyncedDeepSetHead(t *testing.T) {
-	t.Skip("turbo-geth doesn't have a freezer")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3->S4->S5->S6->S7->S8->S9->S10->S11->S12
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : C4
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    12,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         uint64ptr(4),
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
 		expHeadBlock:       4,
 	})
 }
@@ -1532,50 +1120,6 @@ func TestLongReorgedShallowSetHead(t *testing.T) {
 	})
 }
 
-// Tests a sethead for a long canonical chain with frozen blocks and a longer side
-// chain, where a recent block - older than the ancient limit - was already committed
-// to disk and then sethead was called. In this case the freezer will delete the
-// sidechain since it's dangling, reverting to TestLongDeepSetHead.
-func TestLongReorgedDeepSetHead(t *testing.T) {
-	t.Skip("turbo-geth has no freezer")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3->S4->S5->S6->S7->S8->S9->S10->S11->S12->S13->S14->S15->S16->S17->S18->S19->S20->S21->S22->S23->S24->S25->S26
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : none
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    26,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         nil,
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
-		expHeadBlock:       4,
-	})
-}
-
 // Tests a sethead for a long canonical chain with frozen blocks and a longer
 // side chain, where the fast sync pivot point - newer than the ancient limit -
 // was already committed to disk and then sethead was called. In this case the
@@ -1617,51 +1161,6 @@ func TestLongReorgedFastSyncedShallowSetHead(t *testing.T) {
 		expFrozen:          3,
 		expHeadHeader:      6,
 		expHeadFastBlock:   6,
-		expHeadBlock:       4,
-	})
-}
-
-// Tests a sethead for a long canonical chain with frozen blocks and a longer
-// side chain, where the fast sync pivot point - older than the ancient limit -
-// was already committed to disk and then sethead was called. In this case the
-// freezer will delete the sidechain since it's dangling, reverting to
-// TestLongFastSyncedDeepSetHead.
-func TestLongReorgedFastSyncedDeepSetHead(t *testing.T) {
-	t.Skip("turbo-geth has no freezer")
-	// Chain:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8->C9->C10->C11->C12->C13->C14->C15->C16->C17->C18->C19->C20->C21->C22->C23->C24 (HEAD)
-	//   └->S1->S2->S3->S4->S5->S6->S7->S8->S9->S10->S11->S12->S13->S14->S15->S16->S17->S18->S19->S20->S21->S22->S23->S24->S25->S26
-	//
-	// Frozen:
-	//   G->C1->C2->C3->C4->C5->C6->C7->C8
-	//
-	// Commit: G, C4
-	// Pivot : C4
-	//
-	// SetHead(6)
-	//
-	// ------------------------------
-	//
-	// Expected in freezer:
-	//   G->C1->C2->C3->C4
-	//
-	// Expected in leveldb: none
-	//
-	// Expected head header    : C4
-	// Expected head fast block: C4
-	// Expected head block     : C4
-	testSetHead(t, &rewindTest{
-		canonicalBlocks:    24,
-		sidechainBlocks:    26,
-		freezeThreshold:    16,
-		commitBlock:        4,
-		pivotBlock:         uint64ptr(4),
-		setheadBlock:       6,
-		expCanonicalBlocks: 4,
-		expSidechainBlocks: 0,
-		expFrozen:          5,
-		expHeadHeader:      4,
-		expHeadFastBlock:   4,
 		expHeadBlock:       4,
 	})
 }
@@ -1758,10 +1257,6 @@ func TestLongReorgedFastSyncingDeepSetHead(t *testing.T) {
 }
 
 func testSetHead(t *testing.T, tt *rewindTest) {
-	// It's hard to follow the test case, visualize the input
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	//fmt.Println(tt.dump(false))
-
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 

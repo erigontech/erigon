@@ -11,7 +11,7 @@ func OpenDatabase(path string, inmem bool, mdbx bool) *ethdb.ObjectDatabase {
 	return db
 }
 
-func openKV(path string, inmem bool, mdbx bool) ethdb.KV {
+func openKV(path string, inmem bool, mdbx bool) ethdb.RwKV {
 	if mdbx {
 		opts := ethdb.NewMDBX()
 		if inmem {

@@ -34,17 +34,17 @@ import (
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
 	// Create a simple chain to verify
-	testdb := ethdb.NewMemDatabase()
-	defer testdb.Close()
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
 	var (
 		gspec   = &core.Genesis{Config: params.TestChainConfig}
-		genesis = gspec.MustCommit(testdb)
+		genesis = gspec.MustCommit(db)
 	)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, _ := core.NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
-	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil, false /* intemediateHashes */)
+	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -83,8 +83,7 @@ func TestHeaderVerification(t *testing.T) {
 		}
 		engine := ethash.NewFaker()
 		eng := process.NewRemoteEngine(engine, params.TestChainConfig, 1)
-
-		if _, err = stagedsync.InsertBlocksInStages(testdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 

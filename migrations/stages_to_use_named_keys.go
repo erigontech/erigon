@@ -50,7 +50,7 @@ var stagesToUseNamedKeys = Migration{
 
 		if err := etl.Transform(
 			"stages_to_use_named_keys",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.SyncStageProgressOld1,
 			dbutils.SyncStageProgress,
 			tmpdir,
@@ -95,7 +95,7 @@ var unwindStagesToUseNamedKeys = Migration{
 
 		if err := etl.Transform(
 			"unwind_stages_to_use_named_keys",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.SyncStageUnwindOld1,
 			dbutils.SyncStageUnwind,
 			tmpdir,

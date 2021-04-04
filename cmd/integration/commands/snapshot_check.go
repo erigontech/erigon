@@ -82,18 +82,18 @@ var cmdSnapshotCheck = &cobra.Command{
 
 		kv := ethdb.NewSnapshot2KV().
 			DB(tmpDb).
-			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.KV()).
+			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
 			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
 			MustOpen()
 
 		db := ethdb.NewObjectDatabase(kv)
+		defer db.Close()
 		if isNew {
 			err = ethdb.SetStorageModeIfNotExist(db, ethdb.StorageMode{})
 			if err != nil {
 				return err
 			}
 		}
-
 		if err := snapshotCheck(ctx, db, isNew, os.TempDir()); err != nil {
 			log.Error("snapshotCheck error", "err", err)
 			return err
@@ -137,18 +137,17 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		if innerErr != nil {
 			return innerErr
 		}
+		defer tx.Rollback()
 
 		tt := time.Now()
-		err = stagedsync.PromoteHashedStateCleanly("", tx, tmpDir, ctx.Done())
+		err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tmpDir, ctx.Done())
 		log.Info("Promote took", "t", time.Since(tt))
 		if err != nil {
-			tx.Rollback()
 			return fmt.Errorf("promote state err: %w", err)
 		}
 		tt = time.Now()
 		err = tx.Commit()
 		if err != nil {
-			tx.Rollback()
 			return fmt.Errorf("commit promote state err: %w", err)
 		}
 		log.Info("promote committed", "t", time.Since(tt))
@@ -160,31 +159,28 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		if innerErr != nil {
 			return innerErr
 		}
+		defer tx.Rollback()
 
 		hash, innerErr := rawdb.ReadCanonicalHash(tx, snapshotBlock)
 		if innerErr != nil {
-			tx.Rollback()
 			return innerErr
 		}
 
 		syncHeadHeader := rawdb.ReadHeader(tx, hash, snapshotBlock)
 		if syncHeadHeader == nil {
-			tx.Rollback()
 			return fmt.Errorf("empty header for %v", snapshotBlock)
 		}
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, tmpDir, expectedRootHash, ctx.Done())
+		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
-			tx.Rollback()
 			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 		}
 		log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
 		tt = time.Now()
 		err = tx.Commit()
 		if err != nil {
-			tx.Rollback()
 			return err
 		}
 		log.Info("Commit", "t", time.Since(tt))

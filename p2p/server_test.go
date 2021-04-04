@@ -174,18 +174,18 @@ func TestServerDial(t *testing.T) {
 
 			// Test AddTrustedPeer/RemoveTrustedPeer and changing Trusted flags
 			// Particularly for race conditions on changing the flag state.
-			if peer := srv.Peers()[0]; peer.Info().Network.Trusted {
-				t.Errorf("peer is trusted prematurely: %v", peer)
+			if p := srv.Peers()[0]; p.Info().Network.Trusted {
+				t.Errorf("peer is trusted prematurely: %v", p)
 			}
 			done := make(chan bool)
 			go func() {
 				srv.AddTrustedPeer(node)
-				if peer := srv.Peers()[0]; !peer.Info().Network.Trusted {
-					t.Errorf("peer is not trusted after AddTrustedPeer: %v", peer)
+				if p := srv.Peers()[0]; !p.Info().Network.Trusted {
+					t.Errorf("peer is not trusted after AddTrustedPeer: %v", p)
 				}
 				srv.RemoveTrustedPeer(node)
-				if peer := srv.Peers()[0]; peer.Info().Network.Trusted {
-					t.Errorf("peer is trusted after RemoveTrustedPeer: %v", peer)
+				if p := srv.Peers()[0]; p.Info().Network.Trusted {
+					t.Errorf("peer is trusted after RemoveTrustedPeer: %v", p)
 				}
 				done <- true
 			}()

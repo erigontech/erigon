@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1615349256966,
+  "iteration": 1616929111437,
   "links": [],
   "panels": [
     {
@@ -73,11 +73,11 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "chain_execution_number{instance=~\"$instance\"}",
+          "expr": "stage_execution{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "execution: {{quantile}},  {{instance}}",
+          "legendFormat": "execution: {{instance}}",
           "refId": "A"
         }
       ],
@@ -179,7 +179,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(chain_execution_number{instance=~\"$instance\"}[1m])",
+          "expr": "rate(stage_execution{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -283,11 +283,11 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "chain_execution{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "stage_execution{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "execution: {{quantile}},  {{instance}}",
+          "legendFormat": "execution: {{instance}}",
           "refId": "A"
         }
       ],
@@ -503,7 +503,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Size",
+      "title": "DB Size",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -3274,7 +3274,7 @@
         "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
-            "mean"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -3285,11 +3285,11 @@
       "pluginVersion": "7.4.3",
       "targets": [
         {
-          "expr": "chain_head_header{instance=~\"$instance\"}",
+          "expr": "stage_headers{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{instance}}",
+          "legendFormat": "Header: {{instance}}",
           "refId": "A"
         }
       ],
@@ -3430,7 +3430,7 @@
         "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
-            "mean"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -3441,11 +3441,11 @@
       "pluginVersion": "7.4.3",
       "targets": [
         {
-          "expr": "chain_head_block{instance=~\"$instance\"}",
+          "expr": "stage_headers{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{instance}}",
+          "legendFormat": "blocks:{{instance}}",
           "refId": "A"
         }
       ],
@@ -4222,7 +4222,7 @@
       "type": "row"
     }
   ],
-  "refresh": false,
+  "refresh": "10s",
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4342,14 +4342,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "tags": [],
-          "text": [
-            "192.168.255.138:6060"
-          ],
-          "value": [
-            "192.168.255.138:6060"
-          ]
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "system_cpu_sysload",
@@ -4378,7 +4373,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-12h",
     "to": "now"
   },
   "timepicker": {
@@ -4408,5 +4403,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 21
+  "version": 49
 }

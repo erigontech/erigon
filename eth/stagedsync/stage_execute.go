@@ -23,10 +23,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 )
+
+var stageExecutionGauge = metrics.NewRegisteredGauge("stage/execution", nil)
 
 const (
 	logInterval = 30 * time.Second
@@ -216,9 +219,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
-					if err = printBucketsSize(tx); err != nil {
-						return err
-					}
 					chainContext.SetDB(tx)
 				}
 			}
@@ -239,9 +239,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
-					if err = printBucketsSize(tx); err != nil {
-						return err
-					}
 					chainContext.SetDB(tx)
 				}
 				//start = time.Now()
@@ -255,6 +252,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		case <-logEvery.C:
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch, cache)
 		}
+		stageExecutionGauge.Update(int64(blockNum))
 	}
 
 	if cache == nil {
@@ -390,7 +388,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
-	accountMap, storageMap, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, quit)
+	accountMap, storageMap, errRewind := changeset.RewindData(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), s.BlockNumber, u.UnwindPoint, quit)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
@@ -402,7 +400,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashPlain(&acc, tx, key)
+			recoverCodeHashPlain(&acc, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), key)
 			if err := writeAccountPlain(logPrefix, tx, key, acc); err != nil {
 				return err
 			}
@@ -504,11 +502,11 @@ func cleanupContractCodeBucket(
 	return nil
 }
 
-func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Getter, key string) {
+func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key string) {
 	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
+		if codeHash, err2 := db.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}

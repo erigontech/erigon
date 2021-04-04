@@ -121,7 +121,7 @@ var historyAccBitmap = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorB.Load(logPrefix, db, dbutils.AccountsHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.AccountsHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the bodies table: %w", err)
@@ -238,7 +238,7 @@ var historyStorageBitmap = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorB.Load(logPrefix, db, dbutils.StorageHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.StorageHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the bodies table: %w", err)

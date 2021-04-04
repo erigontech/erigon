@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -141,7 +142,7 @@ var (
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer common.Address, message []byte) ([]byte, error)
+type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
 
 type counter struct {
 	hit  *uint64
@@ -766,7 +767,7 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
 
 	// Sealing the genesis block is not supported
@@ -812,7 +813,7 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(signer, CliqueRLP(header))
+	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
@@ -827,7 +828,7 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 		}
 
 		select {
-		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
+		case results <- block.WithSeal(header):
 		default:
 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
@@ -1014,27 +1015,31 @@ func (c *Clique) getSnapshot(num uint64, hash *common.Hash) (*Snapshot, bool) {
 }
 
 func (c *Clique) lookupSnapshot(num uint64) bool {
-	var ok bool
 
 	prefix := dbutils.EncodeBlockNumber(num)
-
-	if err := c.db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		cur := tx.Cursor(dbutils.CliqueBucket)
-		defer cur.Close()
-
-		k, _, err := cur.Seek(prefix)
-		if err != nil {
-			return err
-		}
-
-		ok = bytes.HasPrefix(k, prefix)
-
-		return nil
-	}); err != nil {
+	var tx ethdb.Tx
+	if dbtx, err := c.db.Begin(context.Background(), ethdb.RO); err == nil {
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	} else {
+		log.Error("Lookup snapshot - opening RO tx", "error", err)
 		return false
 	}
 
-	return ok
+	cur, err := tx.Cursor(dbutils.CliqueBucket)
+	if err != nil {
+		log.Error("Lookup snapshot - opening cursor", "error", err)
+		return false
+	}
+	defer cur.Close()
+
+	k, _, err1 := cur.Seek(prefix)
+	if err1 != nil {
+		log.Error("Lookup snapshot - seek", "error", err1)
+		return false
+	}
+
+	return bytes.HasPrefix(k, prefix)
 }
 
 func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
@@ -1042,39 +1047,42 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 		return nil, nil
 	}
 
-	res := make([]*Snapshot, 0, total)
-
 	blockEncoded := dbutils.EncodeBlockNumber(latest)
 
-	if errCursor := c.db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		cur := tx.Cursor(dbutils.CliqueBucket)
-		defer cur.Close()
+	var tx ethdb.Tx
+	if dbtx, err := c.db.Begin(context.Background(), ethdb.RO); err == nil {
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	} else {
+		return nil, err
+	}
+	cur, err1 := tx.Cursor(dbutils.CliqueBucket)
+	if err1 != nil {
+		return nil, err1
+	}
+	defer cur.Close()
 
-		for k, v, err := cur.Seek(blockEncoded); k != nil; k, v, err = cur.Prev() {
-			if err != nil {
-				return err
-			}
-
-			s := new(Snapshot)
-			err = json.Unmarshal(v, s)
-			if err != nil {
-				return err
-			}
-
-			s.config = c.config
-			s.snapStorage = c.snapStorage
-
-			res = append(res, s)
-
-			total--
-			if total == 0 {
-				return nil
-			}
+	res := make([]*Snapshot, 0, total)
+	for k, v, err := cur.Seek(blockEncoded); k != nil; k, v, err = cur.Prev() {
+		if err != nil {
+			return nil, err
 		}
 
-		return nil
-	}); errCursor != nil {
-		return nil, errCursor
+		s := new(Snapshot)
+		err = json.Unmarshal(v, s)
+		if err != nil {
+			return nil, err
+		}
+
+		s.config = c.config
+		s.snapStorage = c.snapStorage
+
+		res = append(res, s)
+
+		total--
+		if total == 0 {
+			break
+		}
 	}
 
 	return res, nil
