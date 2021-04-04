@@ -229,11 +229,12 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 
 // testBlockChainImport tries to process a chain of blocks, writing them into
 // the database if successful.
-func testBlockChainImport(hain types.Blocks, db ethdb.Database) error {
+func testBlockChainImport(chain types.Blocks, db ethdb.Database) error {
 	exit1 := make(chan struct{})
-	eng1 := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit1, 1)
+	cons := ethash.NewFullFaker()
+	eng1 := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit1, 1)
 	defer common.SafeClose(exit1)
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, ethash.NewFaker(), eng1, chain, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), eng1, chain, true /* checkRoot */); err != nil {
 		return err
 	}
 	return nil
@@ -243,7 +244,8 @@ func testBlockChainImport(hain types.Blocks, db ethdb.Database) error {
 // the database if successful.
 func testHeaderChainImport(chain []*types.Header, db ethdb.Database) error {
 	exit1 := make(chan struct{})
-	eng1 := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit1, 1)
+	cons := ethash.NewFullFaker()
+	eng1 := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit1, 1)
 	defer common.SafeClose(exit1)
 	if _, _, _, err := stagedsync.InsertHeadersInStages(db, eng1, chain); err != nil {
 		return err
@@ -1105,12 +1107,16 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	}
 	defer db.Close()
 
-	chain, _, err2 := core.GenerateChain(params.AllEthashProtocolChanges, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+	exit := make(chan struct{})
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit, 1)
+	defer common.SafeClose(exit)
+	chain, _, err2 := core.GenerateChain(params.AllEthashProtocolChanges, genesis, cons, db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err2 != nil {
 		t.Fatalf("generate chain: %v", err2)
 	}
 
-	ok, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), chain, true)
+	ok, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, cons, eng, chain, true)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -1258,8 +1264,7 @@ func TestEIP155Transition(t *testing.T) {
 	cons3 := ethash.NewFaker()
 	eng3 := process.NewConsensusProcess(cons3, params.AllEthashProtocolChanges, exit3, 1)
 	defer common.SafeClose(exit3)
-	_, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons3, eng3, blocks, true /* checkRoot */); !errors.Is(err, types.ErrInvalidChainId) {
-	if !errors.Is(err, types.ErrInvalidChainId) {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons3, eng3, blocks, true /* checkRoot */); !errors.Is(err, types.ErrInvalidChainId) {
 		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
 	}
 }

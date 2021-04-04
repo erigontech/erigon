@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -49,7 +50,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 	headerRecs := decodeHeaders(verifyHardCodedHeadersEthash)
 	headers := toHeaders(headerRecs)
 
-	engine := ethash.New(ethash.Config{
+	cons := ethash.New(ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
 		DatasetDir:       "ethash",
@@ -57,7 +58,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
 	}, nil, false)
-	engine.SetThreads(-1)
+	cons.SetThreads(-1)
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -66,9 +67,12 @@ func TestVerifyHeadersEthash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(cons, config, exit, 1)
+	defer common.SafeClose(exit)
 
 	tn := time.Now()
-	err = VerifyHeaders(db, headers[1:], config, engine, 1)
+	err = VerifyHeaders(db, headers[1:], eng, 1)
 	if err != nil {
 		t.Fatal("on VerifyHeaders", err)
 	}
@@ -83,15 +87,17 @@ func TestVerifyHeadersClique(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	engine := clique.New(params.RinkebyChainConfig.Clique, db)
-
 	config, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
+	cons := clique.New(config.Clique, params.CliqueSnapshot, db)
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(cons, config, exit, 1)
+	defer common.SafeClose(exit)
 
 	tn := time.Now()
-	err = VerifyHeaders(db, headers[1:], config, engine, 1)
+	err = VerifyHeaders(db, headers[1:], eng, 1)
 	if err != nil {
 		t.Fatal("on VerifyHeaders", err)
 	}

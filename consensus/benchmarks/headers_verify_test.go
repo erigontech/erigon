@@ -210,7 +210,7 @@ func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis
 	engine := engineConstr(db)
 	defer engine.Close()
 
-	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
+	config, _, err := core.SetupGenesisBlock(db, genesis, false, false)
 	if err != nil {
 		t.Errorf("setting up genensis block: %v", err)
 	}
@@ -283,7 +283,7 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
+	config, _, err := core.SetupGenesisBlock(db, genesis, false, false)
 	if err != nil {
 		t.Errorf("setting up genensis block: %v", err)
 	}

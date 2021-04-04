@@ -143,11 +143,11 @@ func TestSetupGenesis(t *testing.T) {
 				eng := process.NewConsensusProcess(cons, oldcustomg.Config, exit, 1)
 				defer common.SafeClose(exit)
 				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
-					return nil, common.Hash{}, nil, err
+					return nil, common.Hash{}, err
 				}
 				// This should return a compatibility error.
-				conf, hash, state, err := core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
-				return conf, hash, state, err
+				conf, hash, err := core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				return conf, hash, err
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
