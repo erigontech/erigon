@@ -1,5 +1,3 @@
-//+build mdbx lmdb
-
 package db
 
 import (
