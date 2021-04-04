@@ -258,18 +258,3 @@ func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPe
 
 	return now
 }
-
-type chainReader struct {
-	config *params.ChainConfig
-	batch  ethdb.DbWithPendingMutations
-}
-
-func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
-func (cr chainReader) CurrentHeader() *types.Header { panic("") }
-func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(cr.batch, hash, number)
-}
-func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
-	return rawdb.ReadHeaderByNumber(cr.batch, number)
-}
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }
