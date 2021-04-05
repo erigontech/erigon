@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -620,7 +619,7 @@ func printAppliedMigrations(db ethdb.Database, _ context.Context) error {
 	return nil
 }
 
-func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
+func removeMigration(db ethdb.Deleter, _ context.Context) error {
 	if err := db.Delete(dbutils.Migrations, []byte(migration), nil); err != nil {
 		return err
 	}

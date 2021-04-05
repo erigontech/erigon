@@ -55,7 +55,7 @@ func WriteCanonicalHash(db ethdb.Putter, hash common.Hash, number uint64) error 
 }
 
 // DeleteCanonicalHash removes the number to hash canonical mapping.
-func DeleteCanonicalHash(db DatabaseDeleter, number uint64) error {
+func DeleteCanonicalHash(db ethdb.Deleter, number uint64) error {
 	if err := db.Delete(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number), nil); err != nil {
 		return fmt.Errorf("failed to delete number to hash mapping: %w", err)
 	}
@@ -88,7 +88,7 @@ func WriteHeaderNumber(db ethdb.Putter, hash common.Hash, number uint64) {
 }
 
 // DeleteHeaderNumber removes hash->number mapping.
-func DeleteHeaderNumber(db DatabaseDeleter, hash common.Hash) {
+func DeleteHeaderNumber(db ethdb.Deleter, hash common.Hash) {
 	if err := db.Delete(dbutils.HeaderNumberBucket, hash[:], nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
@@ -241,7 +241,7 @@ func WriteHeader(ctx context.Context, db ethdb.Putter, header *types.Header) {
 }
 
 // DeleteHeader removes all block header data associated with a hash.
-func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
+func DeleteHeader(db ethdb.Deleter, hash common.Hash, number uint64) {
 	if err := db.Delete(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -415,7 +415,7 @@ func WriteSenders(ctx context.Context, db ethdb.Putter, hash common.Hash, number
 }
 
 // DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db DatabaseDeleter, hash common.Hash, number uint64) {
+func DeleteBody(db ethdb.Deleter, hash common.Hash, number uint64) {
 	if err := db.Delete(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
@@ -458,7 +458,7 @@ func WriteTd(db ethdb.Putter, hash common.Hash, number uint64, td *big.Int) erro
 }
 
 // DeleteTd removes all block total difficulty data associated with a hash.
-func DeleteTd(db DatabaseDeleter, hash common.Hash, number uint64) error {
+func DeleteTd(db ethdb.Deleter, hash common.Hash, number uint64) error {
 	if err := db.Delete(dbutils.HeaderTDBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
 		return fmt.Errorf("failed to delete block total difficulty: %w", err)
 	}

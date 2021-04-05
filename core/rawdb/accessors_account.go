@@ -44,7 +44,7 @@ func WriteAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) e
 	return db.Put(dbutils.HashedAccountsBucket, addrHashBytes, value)
 }
 
-func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
+func DeleteAccount(db ethdb.Deleter, addrHash common.Hash) error {
 	return db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil)
 }
 
@@ -66,6 +66,6 @@ func PlainWriteAccount(db ethdb.Putter, address common.Address, acc accounts.Acc
 	return db.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
-func PlainDeleteAccount(db DatabaseDeleter, address common.Address) error {
+func PlainDeleteAccount(db ethdb.Deleter, address common.Address) error {
 	return db.Delete(dbutils.PlainStateBucket, address[:], nil)
 }
