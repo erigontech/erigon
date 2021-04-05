@@ -294,7 +294,7 @@ func verifyHeaders(db ethdb.Getter, engine consensus.EngineAPI, headers []*types
 	}
 
 	id := rand.Uint64() //nolint
-	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
+	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{ID: id, Headers: headers, Seal: seals, Deadline: nil}
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
@@ -349,9 +349,9 @@ func verifyHeaders(db ethdb.Getter, engine consensus.EngineAPI, headers []*types
 			if err != nil {
 				resp.Headers = nil
 				resp.BlockError = consensus.BlockError{
-					parentHash,
-					uint64(parentNumber + 1),
-					err,
+					Hash:   parentHash,
+					Number: uint64(parentNumber + 1),
+					Err:    err,
 				}
 			}
 
