@@ -32,11 +32,11 @@ import (
 func TestLookupStorage(t *testing.T) {
 	tests := []struct {
 		name                 string
-		writeTxLookupEntries func(DatabaseWriter, *types.Block)
+		writeTxLookupEntries func(ethdb.Putter, *types.Block)
 	}{
 		{
 			"DatabaseV6",
-			func(db DatabaseWriter, block *types.Block) {
+			func(db ethdb.Putter, block *types.Block) {
 				WriteTxLookupEntries(db, block)
 			},
 		},

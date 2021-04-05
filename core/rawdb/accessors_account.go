@@ -36,7 +36,7 @@ func ReadAccount(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Ac
 	return true, nil
 }
 
-func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account) error {
+func WriteAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
 	//fmt.Printf("WriteAccount: %x %x\n", addrHash, acc.Root)
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
@@ -59,7 +59,7 @@ func PlainReadAccount(db ethdb.DatabaseReader, address common.Address, acc *acco
 	return true, nil
 }
 
-func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.Account) error {
+func PlainWriteAccount(db ethdb.Putter, address common.Address, acc accounts.Account) error {
 	//fmt.Printf("PlainWriteAccount: %x %x\n", addrHash, acc.Root)
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)

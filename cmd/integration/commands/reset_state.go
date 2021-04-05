@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -63,7 +62,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(db rawdb.DatabaseWriter, _ context.Context) error {
+func clearUnwindStack(db ethdb.Putter, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0); err != nil {
 			return err

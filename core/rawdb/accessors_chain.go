@@ -47,7 +47,7 @@ func ReadCanonicalHash(db ethdb.DatabaseReader, number uint64) (common.Hash, err
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) error {
+func WriteCanonicalHash(db ethdb.Putter, hash common.Hash, number uint64) error {
 	if err := db.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
@@ -80,7 +80,7 @@ func ReadHeaderNumber(db ethdb.DatabaseReader, hash common.Hash) *uint64 {
 }
 
 // WriteHeaderNumber stores the hash->number mapping.
-func WriteHeaderNumber(db DatabaseWriter, hash common.Hash, number uint64) {
+func WriteHeaderNumber(db ethdb.Putter, hash common.Hash, number uint64) {
 	enc := dbutils.EncodeBlockNumber(number)
 	if err := db.Put(dbutils.HeaderNumberBucket, hash[:], enc); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
@@ -107,7 +107,7 @@ func ReadHeadHeaderHash(db ethdb.DatabaseReader) common.Hash {
 }
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
-func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) error {
+func WriteHeadHeaderHash(db ethdb.Putter, hash common.Hash) error {
 	if err := db.Put(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store last header's hash: %w", err)
 	}
@@ -127,7 +127,7 @@ func ReadHeadBlockHash(db ethdb.DatabaseReader) common.Hash {
 }
 
 // WriteHeadBlockHash stores the head block's hash.
-func WriteHeadBlockHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadBlockHash(db ethdb.Putter, hash common.Hash) {
 	if err := db.Put(dbutils.HeadBlockKey, []byte(dbutils.HeadBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
 	}
@@ -146,7 +146,7 @@ func ReadHeadFastBlockHash(db ethdb.DatabaseReader) common.Hash {
 }
 
 // WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
-func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadFastBlockHash(db ethdb.Putter, hash common.Hash) {
 	if err := db.Put(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last fast block's hash", "err", err)
 	}
@@ -218,7 +218,7 @@ func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
+func WriteHeader(ctx context.Context, db ethdb.Putter, header *types.Header) {
 	var (
 		hash    = header.Hash()
 		number  = header.Number.Uint64()
@@ -316,7 +316,7 @@ func WriteTransactions(db ethdb.Database, txs []*types.Transaction, baseTxId uin
 }
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
-func WriteBodyRLP(db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
+func WriteBodyRLP(db ethdb.Putter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
 	}
@@ -400,7 +400,7 @@ func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.B
 	return nil
 }
 
-func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, senders []common.Address) error {
+func WriteSenders(ctx context.Context, db ethdb.Putter, hash common.Hash, number uint64, senders []common.Address) error {
 	if common.IsCanceled(ctx) {
 		return ctx.Err()
 	}
@@ -446,7 +446,7 @@ func ReadTdByHash(db ethdb.Getter, hash common.Hash) (*big.Int, error) {
 }
 
 // WriteTd stores the total difficulty of a block into the database.
-func WriteTd(db DatabaseWriter, hash common.Hash, number uint64, td *big.Int) error {
+func WriteTd(db ethdb.Putter, hash common.Hash, number uint64, td *big.Int) error {
 	data, err := rlp.EncodeToBytes(td)
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
@@ -544,7 +544,7 @@ func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) error {
+func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		if len(r.Logs) == 0 {
@@ -956,6 +956,6 @@ func ReadHeaderByHash(db ethdb.DatabaseReader, hash common.Hash) (*types.Header,
 
 // FIXME: implement in Turbo-Geth
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlock(db DatabaseWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {
+func WriteAncientBlock(db ethdb.Putter, block *types.Block, receipts types.Receipts, td *big.Int) int {
 	panic("not implemented")
 }

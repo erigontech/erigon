@@ -16,11 +16,6 @@
 
 package rawdb
 
-// DatabaseWriter wraps the Put method of a backing data store.
-type DatabaseWriter interface {
-	Put(bucket string, key []byte, value []byte) error
-}
-
 // DatabaseDeleter wraps the Delete method of a backing data store.
 type DatabaseDeleter interface {
 	Delete(bucket string, k, v []byte) error

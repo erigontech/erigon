@@ -47,7 +47,7 @@ func ReadDatabaseVersion(db ethdb.DatabaseReader) *uint64 {
 }
 
 // WriteDatabaseVersion stores the version number of the database
-func WriteDatabaseVersion(db DatabaseWriter, version uint64) error {
+func WriteDatabaseVersion(db ethdb.Putter, version uint64) error {
 	enc, err := rlp.EncodeToBytes(version)
 	if err != nil {
 		return fmt.Errorf("failed to encode database version: %w", err)
@@ -75,7 +75,7 @@ func ReadChainConfig(db ethdb.DatabaseReader, hash common.Hash) (*params.ChainCo
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConfig) error {
+func WriteChainConfig(db ethdb.Putter, hash common.Hash, cfg *params.ChainConfig) error {
 	if cfg == nil {
 		return nil
 	}
