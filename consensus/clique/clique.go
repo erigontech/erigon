@@ -137,8 +137,6 @@ var (
 	// errRecentlySigned is returned if a header is signed by an authorized entity
 	// that already signed a header recently, thus is temporarily not allowed to.
 	errRecentlySigned = errors.New("recently signed")
-
-	errNoHeaders = errors.New("no any headers to restore signatures")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.

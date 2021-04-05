@@ -49,7 +49,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 				select {
 				case req := <-c.API.VerifyHeaderRequests:
 					if len(req.Headers) == 0 {
-						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, errEmptyHeader}
+						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: req.ID, Hash: common.Hash{}, Err: errEmptyHeader}
 						continue
 					}
 
@@ -78,13 +78,13 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 					tn := time.Now()
 					for i, header := range req.Headers {
 						if header == nil {
-							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, errEmptyHeader}
+							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: req.ID, Hash: common.Hash{}, Err: errEmptyHeader}
 							continue eventLoop
 						}
 
 						// Short circuit if the header is known
 						if h := c.API.GetCachedHeader(header.HashCache(), header.Number.Uint64()); h != nil {
-							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, header.HashCache(), nil}
+							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: req.ID, Hash: header.HashCache(), Err: nil}
 							continue
 						}
 
@@ -126,7 +126,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 						log.Debug(fmt.Sprint("PARENT-FROM-CLIENT", parentResp.ID, parentResp.Number, parentResp.Err))
 					}
 					if parentResp.Err != nil {
-						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
+						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: parentResp.ID, Hash: parentResp.Hash, Err: parentResp.Err}
 
 						c.API.ProcessingRequestsMu.Lock()
 						delete(c.API.ProcessingRequests, parentResp.ID)
@@ -224,7 +224,7 @@ func (c *Consensus) cleanup() {
 		reqBlocks.RLock()
 		for _, req := range reqBlocks.Storage {
 			if req.Deadline.Before(now) {
-				c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.HashCache(), errRequestTimeout}
+				c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: reqID, Hash: req.Header.HashCache(), Err: errRequestTimeout}
 
 				c.API.ProcessingRequestsMu.Lock()
 				delete(c.API.ProcessingRequests, reqID)
@@ -301,11 +301,11 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	}
 	log.Debug(fmt.Sprint("in verifyByRequest-1", reqID, header.Number.Uint64(), time.Since(t)))
 
-	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.HashCache(), err}
+	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: reqID, Hash: header.HashCache(), Err: err}
 
 	if c.inProcessing(reqID, header.Number.Uint64()) {
 		// remove finished request
-		finishedRequest := consensus.FinishedRequest{reqID, header.Number.Uint64()}
+		finishedRequest := consensus.FinishedRequest{ReqID: reqID, BlockNumber: header.Number.Uint64()}
 
 		select {
 		case c.CleanupCh <- finishedRequest:
@@ -345,14 +345,14 @@ func (c *Consensus) cleanupRequest(reqID uint64, number uint64) {
 
 func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) *consensus.VerifyRequest {
 	return &consensus.VerifyRequest{
-		reqID,
-		header,
-		seal,
-		deadline,
-		knownParents,
-		parentsToValidate,
-		header.Number.Uint64() - uint64(parentsToValidate),
-		header.Number.Uint64() - uint64(len(knownParents)) - 1,
+		ID:              reqID,
+		Header:          header,
+		Seal:            seal,
+		Deadline:        deadline,
+		KnownParents:    knownParents,
+		ParentsExpected: parentsToValidate,
+		From:            header.Number.Uint64() - uint64(parentsToValidate),
+		To:              header.Number.Uint64() - uint64(len(knownParents)) - 1,
 	}
 }
 
@@ -506,10 +506,10 @@ func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64
 	}
 
 	return known, &consensus.HeadersRequest{
-		reqID,
-		highestParentHash,
-		highestParentNumber,
-		parentsToGet - uint64(len(known)),
+		ID:                 reqID,
+		HighestHash:        highestParentHash,
+		HighestBlockNumber: highestParentNumber,
+		Number:             parentsToGet - uint64(len(known)),
 	}
 }
 
@@ -542,10 +542,10 @@ func sumHeadersRequestsInRange(reqID uint64, from uint64, reqs ...consensus.Head
 	}
 
 	return consensus.HeadersRequest{
-		reqID,
-		maxBlockHash,
-		maxBlockNumber,
-		maxBlockNumber - minBlockToGet + 1,
+		ID:                 reqID,
+		HighestHash:        maxBlockHash,
+		HighestBlockNumber: maxBlockNumber,
+		Number:             maxBlockNumber - minBlockToGet + 1,
 	}, nil
 }
 
