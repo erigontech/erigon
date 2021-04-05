@@ -317,7 +317,7 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetSenders(db); err != nil {
+		if err := db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetSenders(tx) }); err != nil {
 			return err
 		}
 	}
@@ -371,7 +371,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		return resetExec(db)
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) })
 	}
 	vmConfig := bc.GetVMConfig()
 	if txtrace {
@@ -418,20 +418,13 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 	_, bc, _, _, _, cache, progress := newSync(ctx.Done(), db, tx, nil)
 	defer bc.Stop()
 
+	if reset {
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetIH(tx) })
+	}
 	var err1 error
 	tx, err1 = tx.Begin(ctx, ethdb.RW)
 	if err1 != nil {
 		return err1
-	}
-
-	if reset {
-		if err := stagedsync.ResetIH(tx); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			panic(err)
-		}
-		return nil
 	}
 
 	stage4 := progress(stages.Execution)
@@ -464,10 +457,7 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := stagedsync.ResetHashState(db); err != nil {
-			return err
-		}
-		return nil
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetHashState(tx) })
 	}
 
 	stage5 := progress(stages.IntermediateHashes)
@@ -490,10 +480,7 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetLogIndex(db); err != nil {
-			return err
-		}
-		return nil
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetLogIndex(tx) })
 	}
 	execStage := progress(stages.Execution)
 	s := progress(stages.LogIndex)
@@ -519,10 +506,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetCallTraces(db); err != nil {
-			return err
-		}
-		return nil
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetCallTraces(tx) })
 	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -565,10 +549,7 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetHistory(db); err != nil {
-			return err
-		}
-		return nil
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetHistory(tx) })
 	}
 	execStage := progress(db, stages.Execution)
 	stageStorage := stage(st, db, stages.StorageHistoryIndex)
@@ -604,10 +585,7 @@ func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := resetTxLookup(db); err != nil {
-			return err
-		}
-		return nil
+		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetTxLookup(tx) })
 	}
 	stage9 := progress(stages.TxLookup)
 	log.Info("Stage9", "progress", stage9.BlockNumber)

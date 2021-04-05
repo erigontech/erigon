@@ -643,9 +643,19 @@ func DeleteReceipts(db ethdb.Database, number uint64) error {
 }
 
 // DeleteNewerReceipts removes all receipt for given block number or newer
-func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
-	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), 0, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.BlockReceiptsPrefix, k, nil); err != nil {
+func DeleteNewerReceipts(db ethdb.RwTx, number uint64) error {
+	receipts, err := db.Cursor(dbutils.BlockReceiptsPrefix)
+	if err != nil {
+		return err
+	}
+	defer receipts.Close()
+	receiptsDel, err := db.RwCursor(dbutils.BlockReceiptsPrefix)
+	if err != nil {
+		return err
+	}
+	defer receiptsDel.Close()
+	if err := ethdb.Walk(receipts, dbutils.ReceiptsKey(number), 0, func(k, v []byte) (bool, error) {
+		if err := receiptsDel.Delete(k, nil); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -653,8 +663,18 @@ func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
 		return fmt.Errorf("delete newer receipts failed: %d, %w", number, err)
 	}
 
-	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 0, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.Log, k, nil); err != nil {
+	logs, err := db.Cursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
+	defer logs.Close()
+	logsDel, err := db.RwCursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
+	defer logsDel.Close()
+	if err := ethdb.Walk(logs, dbutils.LogKey(number, 0), 0, func(k, v []byte) (bool, error) {
+		if err := logsDel.Delete(k, nil); err != nil {
 			return false, err
 		}
 		return true, nil

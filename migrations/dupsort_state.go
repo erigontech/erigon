@@ -253,7 +253,7 @@ var splitIHBucket = Migration{
 		logPrefix := "db_migration: split_ih_bucket"
 
 		const loadStep = "load"
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(db.(ethdb.HasTx).Tx().(ethdb.RwTx)); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
@@ -295,7 +295,7 @@ var deleteExtensionHashesFromTrieBucket = Migration{
 		logPrefix := "db_migration: delete_extension_hashes_from_trie"
 
 		const loadStep = "load"
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(db.(ethdb.HasTx).Tx().(ethdb.RwTx)); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {

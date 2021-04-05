@@ -56,7 +56,7 @@ type ExecuteBlockStageParams struct {
 	SilkwormExecutionFunc unsafe.Pointer
 }
 
-func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
+func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -381,14 +381,30 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 		defer tx.Rollback()
 	}
-
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
+	if err := unwindExecutionStage(u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), quit, params); err != nil {
+		return err
+	}
+	if err := u.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+	logPrefix := s.state.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
-	accountMap, storageMap, errRewind := changeset.RewindData(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), s.BlockNumber, u.UnwindPoint, quit)
+	accountMap, storageMap, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, quit)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
@@ -400,7 +416,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashPlain(&acc, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), key)
+			recoverCodeHashPlain(&acc, tx, key)
 			if err := writeAccountPlain(logPrefix, tx, key, acc); err != nil {
 				return err
 			}
@@ -436,7 +452,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err := changeset.Truncate(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), u.UnwindPoint+1); err != nil {
+	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -446,19 +462,10 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc accounts.Account) error {
+func writeAccountPlain(logPrefix string, db ethdb.RwTx, key string, acc accounts.Account) error {
 	var address common.Address
 	copy(address[:], key)
 	if err := cleanupContractCodeBucket(
@@ -466,8 +473,8 @@ func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc acco
 		db,
 		dbutils.PlainContractCodeBucket,
 		acc,
-		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
-			return rawdb.PlainReadAccount(db, address, out)
+		func(db ethdb.Tx, out *accounts.Account) (bool, error) {
+			return rawdb.PlainReadAccount(ethdb.NewRoTxDb(db), address, out)
 		},
 		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
@@ -479,10 +486,10 @@ func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc acco
 
 func cleanupContractCodeBucket(
 	logPrefix string,
-	db ethdb.Database,
+	db ethdb.RwTx,
 	bucket string,
 	acc accounts.Account,
-	readAccountFunc func(ethdb.Getter, *accounts.Account) (bool, error),
+	readAccountFunc func(ethdb.Tx, *accounts.Account) (bool, error),
 	getKeyForIncarnationFunc func(uint64) []byte,
 ) error {
 	var original accounts.Account
