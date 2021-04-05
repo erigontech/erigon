@@ -180,8 +180,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
 		if incarnation > 0 {
-			codeHash, err := ethdb.Get(d.db, dbutils.PlainContractCodeBucket, storagePrefix)
-			if err != nil && err != ethdb.ErrKeyNotFound {
+			codeHash, err := d.db.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+			if err != nil {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
 			if codeHash != nil {
