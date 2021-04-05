@@ -8,6 +8,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -33,6 +34,8 @@ func StageLoop(
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
+	propagateNewBlockHashes func(ctx context.Context, hash common.Hash, number uint64),
+	broadcastNewBlock func(ctx context.Context, b *types.Block, td *uint256.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
@@ -68,7 +71,10 @@ func StageLoop(
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+			tx, err = tx.Begin(context.Background(), ethdb.RW)
+			if err != nil {
+				return err
+			}
 			defer tx.Rollback()
 			writeDB = tx
 		} else {
@@ -83,59 +89,17 @@ func StageLoop(
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
 
-		// begin tx at stage right after head/body download Or at first unwind stage
-		// it's temporary solution
-		st.BeforeStageRun(stages.Senders, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-
-			var errTx error
-			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-			return errTx
-		})
-		st.OnBeforeUnwind(func(id stages.SyncStage) error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-			if st.IsAfter(id, stages.TxPool) {
-				return nil
-			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-				return nil
-			}
-			var errTx error
-			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-			return errTx
-		})
-		st.BeforeStageUnwind(stages.Bodies, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-				return nil
-			}
-			log.Info("Commit cycle")
-			errCommit := tx.Commit()
-			return errCommit
-		})
-
 		err = st.Run(db, writeDB)
 		if err != nil {
 			return err
 		}
 		if canRunCycleInOneTransaction {
-			if hasTx, ok := tx.(ethdb.HasTx); !ok || hasTx.Tx() != nil {
-				commitStart := time.Now()
-				errTx := tx.Commit()
-				if errTx == nil {
-					log.Info("Commit cycle", "in", time.Since(commitStart))
-				} else {
-					return errTx
-				}
+			commitStart := time.Now()
+			errTx := tx.Commit()
+			if errTx != nil {
+				return errTx
 			}
+			log.Info("Commit cycle", "in", time.Since(commitStart))
 		}
 		initialCycle = false
 		select {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +127,8 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
+		controlServer.propagateNewBlockHashes,
+		controlServer.broadcastNewBlock,
 		controlServer.requestWakeUpBodies,
 		timeout,
 	); err != nil {
@@ -233,6 +234,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
+		controlServer.propagateNewBlockHashes,
+		controlServer.broadcastNewBlock,
 		controlServer.requestWakeUpBodies,
 		timeout,
 	); err != nil {
@@ -298,7 +301,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 		1024*1024, /* tipLimit */
 		engine,
 	)
-	if err = hd.RecoverFromDb(db); err != nil {
+	if err = hd.RecoverFromDb(db.(ethdb.HasRwKV).RwKV()); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
 	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chain)
@@ -792,68 +795,6 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 		return nil
 	}
 	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-}
-
-//nolint
-func BroadcastBlock(ctx context.Context, cs *ControlServerImpl, db ethdb.Getter, block *types.Block) error {
-	var td *big.Int
-	parentTd, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1)
-	if err != nil {
-		return fmt.Errorf("broadcastBlock: %w\n", err)
-	}
-	td = new(big.Int).Add(block.Difficulty(), parentTd)
-	err = cs.broadcastBlock(ctx, block, td, true) // First propagate block to peers
-	if err != nil {
-		return fmt.Errorf("broadcastBlock: %w\n", err)
-	}
-	err = cs.broadcastBlock(ctx, block, td, false) //  Only then announce to the rest
-	if err != nil {
-		return fmt.Errorf("broadcastBlock: %w\n", err)
-	}
-	return nil
-}
-
-func (cs *ControlServerImpl) broadcastBlock(ctx context.Context, block *types.Block, td *big.Int, propagate bool) error {
-	var req proto_sentry.SendMessageToRandomPeersRequest
-	// If propagation is requested, send to a subset of the peer
-	if propagate {
-		data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-			Block: block,
-			TD:    td,
-		})
-		if err != nil {
-			return err
-		}
-		req = proto_sentry.SendMessageToRandomPeersRequest{
-			MaxPeers: 1024,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_NewBlock,
-				Data: data,
-			},
-		}
-	} else {
-		data, err := rlp.EncodeToBytes(&eth.NewBlockHashesPacket{
-			{
-				Hash:   block.Hash(),
-				Number: block.NumberU64(),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		req = proto_sentry.SendMessageToRandomPeersRequest{
-			MaxPeers: 1024,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_NewBlockHashes,
-				Data: data,
-			},
-		}
-	}
-	_, err := cs.sentryClient.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{})
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
