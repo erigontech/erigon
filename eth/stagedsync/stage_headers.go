@@ -32,7 +32,7 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 // Implements consensus.ChainReader
 type ChainReader struct {
 	config *params.ChainConfig
-	db     ethdb.Database
+	db     ethdb.Getter
 }
 
 // Config retrieves the blockchain's chain configuration.
@@ -73,7 +73,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func VerifyHeaders(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
+func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
 	if checkFreq != 0 {

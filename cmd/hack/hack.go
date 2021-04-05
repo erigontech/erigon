@@ -1043,24 +1043,24 @@ func (r *Receiver) Result() trie.SubTries {
 func regenerate(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	tool.Check(stagedsync.ResetIH(tx))
-	to, err := stages.GetStageProgress(tx, stages.HashState)
+	to, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.HashState)
 	if err != nil {
 		return err
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, to)
+	hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), to)
 	if err != nil {
 		return err
 	}
-	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
+	syncHeadHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, "", expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, "", expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
