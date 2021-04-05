@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -146,7 +147,7 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 		return
 	}
 
-	for inreq, err := receiveUploadClient.Recv(); ; inreq, err = receiveUploadClient.Recv() {
+	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Error("Receive upload loop terminated", "error", err)
@@ -155,7 +156,7 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 			return
 		}
 
-		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
+		if err = controlServer.handleInboundMessage(ctx, req); err != nil {
 			log.Error("Handling incoming message", "error", err)
 		}
 	}
@@ -171,7 +172,7 @@ func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, co
 		return
 	}
 
-	for inreq, err := receiveClient.Recv(); ; inreq, err = receiveClient.Recv() {
+	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Error("Receive loop terminated", "error", err)
@@ -180,7 +181,7 @@ func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, co
 			return
 		}
 
-		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
+		if err = controlServer.handleInboundMessage(ctx, req); err != nil {
 			log.Error("Handling incoming message", "error", err)
 		}
 	}
@@ -488,7 +489,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage) err
 	return nil
 }
 
-func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func getAncestor(db ethdb.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}
@@ -533,7 +534,7 @@ func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, m
 	return hash, number
 }
 
-func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
+func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -791,6 +792,68 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 		return nil
 	}
 	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+}
+
+//nolint
+func BroadcastBlock(ctx context.Context, cs *ControlServerImpl, db ethdb.Getter, block *types.Block) error {
+	var td *big.Int
+	parentTd, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1)
+	if err != nil {
+		return fmt.Errorf("broadcastBlock: %w\n", err)
+	}
+	td = new(big.Int).Add(block.Difficulty(), parentTd)
+	err = cs.broadcastBlock(ctx, block, td, true) // First propagate block to peers
+	if err != nil {
+		return fmt.Errorf("broadcastBlock: %w\n", err)
+	}
+	err = cs.broadcastBlock(ctx, block, td, false) //  Only then announce to the rest
+	if err != nil {
+		return fmt.Errorf("broadcastBlock: %w\n", err)
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) broadcastBlock(ctx context.Context, block *types.Block, td *big.Int, propagate bool) error {
+	var req proto_sentry.SendMessageToRandomPeersRequest
+	// If propagation is requested, send to a subset of the peer
+	if propagate {
+		data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+			Block: block,
+			TD:    td,
+		})
+		if err != nil {
+			return err
+		}
+		req = proto_sentry.SendMessageToRandomPeersRequest{
+			MaxPeers: 1024,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_NewBlock,
+				Data: data,
+			},
+		}
+	} else {
+		data, err := rlp.EncodeToBytes(&eth.NewBlockHashesPacket{
+			{
+				Hash:   block.Hash(),
+				Number: block.NumberU64(),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		req = proto_sentry.SendMessageToRandomPeersRequest{
+			MaxPeers: 1024,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_NewBlockHashes,
+				Data: data,
+			},
+		}
+	}
+	_, err := cs.sentryClient.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {

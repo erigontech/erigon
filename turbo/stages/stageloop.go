@@ -43,10 +43,10 @@ func StageLoop(
 	)
 	initialCycle := true
 	stopped := false
-	for !stopped {
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
+	for !stopped {
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 

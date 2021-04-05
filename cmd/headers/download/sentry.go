@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -567,12 +568,81 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
 
-func (ss *SentryServerImpl) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
-	return nil, nil
+func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+	var msgcode uint64
+	switch req.Data.Id {
+	case proto_sentry.MessageId_NewBlock:
+		msgcode = eth.NewBlockMsg
+	case proto_sentry.MessageId_NewBlockHashes:
+		msgcode = eth.NewBlockHashesMsg
+	default:
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
+	}
+
+	amount := uint64(0)
+	ss.peerRwMap.Range(func(key, value interface{}) bool {
+		amount++
+		return true
+	})
+	if req.MaxPeers > amount {
+		amount = req.MaxPeers
+	}
+
+	// Send the block to a subset of our peers
+	sendToAmount := int(math.Sqrt(float64(amount)))
+	i := 0
+	var innerErr error
+	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
+	ss.peerRwMap.Range(func(key, value interface{}) bool {
+		peerID := key.(string)
+		rw, _ := value.(p2p.MsgReadWriter)
+		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
+			ss.peerHeightMap.Delete(peerID)
+			ss.peerTimeMap.Delete(peerID)
+			ss.peerRwMap.Delete(peerID)
+			innerErr = err
+			return false
+		}
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
+		i++
+		return sendToAmount <= i
+	})
+	if innerErr != nil {
+		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
+	}
+	return reply, nil
 }
 
-func (ss *SentryServerImpl) SendMessageToAll(context.Context, *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
-	return nil, nil
+func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+	var msgcode uint64
+	switch req.Id {
+	case proto_sentry.MessageId_NewBlock:
+		msgcode = eth.NewBlockMsg
+	case proto_sentry.MessageId_NewBlockHashes:
+		msgcode = eth.NewBlockHashesMsg
+	default:
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)
+	}
+
+	var innerErr error
+	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
+	ss.peerRwMap.Range(func(key, value interface{}) bool {
+		peerID := key.(string)
+		rw, _ := value.(p2p.MsgReadWriter)
+		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
+			ss.peerHeightMap.Delete(peerID)
+			ss.peerTimeMap.Delete(peerID)
+			ss.peerRwMap.Delete(peerID)
+			innerErr = err
+			return false
+		}
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
+		return true
+	})
+	if innerErr != nil {
+		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
+	}
+	return reply, nil
 }
 
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
