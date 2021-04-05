@@ -132,6 +132,7 @@ func TestVerifyHeadersClique128(t *testing.T) {
 }
 
 func TestVerifyHeadersClique1024(t *testing.T) {
+	t.Skip("too slow")
 	const toVerify = 1025
 
 	testVerifyHeadersClique(t, toVerify)
