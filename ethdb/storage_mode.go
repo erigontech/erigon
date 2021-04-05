@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -53,32 +52,32 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 	return mode, nil
 }
 
-func GetStorageModeFromDB(db Database) (StorageMode, error) {
+func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 	var (
 		sm  StorageMode
 		v   []byte
 		err error
 	)
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
+	if err != nil {
 		return StorageMode{}, err
 	}
 	sm.History = len(v) == 1 && v[0] == 1
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
+	if err != nil {
 		return StorageMode{}, err
 	}
 	sm.Receipts = len(v) == 1 && v[0] == 1
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
+	if err != nil {
 		return StorageMode{}, err
 	}
 	sm.TxIndex = len(v) == 1 && v[0] == 1
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeCallTraces)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeCallTraces)
+	if err != nil {
 		return StorageMode{}, err
 	}
 	sm.CallTraces = len(v) == 1 && v[0] == 1
@@ -114,11 +113,11 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 }
 
 func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
-	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
+	if err != nil {
 		return err
 	}
-	if errors.Is(err, ErrKeyNotFound) {
+	if len(mode) == 0 {
 		val := []byte{2}
 		if currentValue {
 			val = []byte{1}
