@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/bits"
 	"os"
@@ -292,7 +291,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		}
 		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 		value, err := p.db.GetOne(dbutils.PlainStateBucket, k)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return err
 		}
 
