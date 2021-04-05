@@ -155,7 +155,7 @@ func (m *mutation) hasMem(table string, key []byte) bool {
 	return m.puts.Has(&m.searchItem)
 }
 
-func (m *mutation) HasOne(table string, key []byte) (bool, error) {
+func (m *mutation) Has(table string, key []byte) (bool, error) {
 	if m.hasMem(table, key) {
 		return true, nil
 	}
@@ -163,10 +163,6 @@ func (m *mutation) HasOne(table string, key []byte) (bool, error) {
 		return m.db.Has(table, key)
 	}
 	return false, nil
-}
-
-func (m *mutation) Has(table string, key []byte) (bool, error) {
-	return m.HasOne(table, key)
 }
 
 func (m *mutation) Put(table string, key []byte, value []byte) error {
