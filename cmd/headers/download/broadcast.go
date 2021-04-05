@@ -26,14 +26,11 @@ func (cs *ControlServerImpl) propagateNewBlockHashes(ctx context.Context, hash c
 		log.Error("propagateNewBlockHashes", "error", err)
 		return
 	}
-	req := proto_sentry.SendMessageToRandomPeersRequest{
-		MaxPeers: 1024,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_NewBlockHashes,
-			Data: data,
-		},
+	req := &proto_sentry.OutboundMessageData{
+		Id:   proto_sentry.MessageId_NewBlockHashes,
+		Data: data,
 	}
-	_, err = cs.sentryClient.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{})
+	_, err = cs.sentryClient.SendMessageToAll(ctx, req, &grpc.EmptyCallOption{})
 	if err != nil {
 		log.Error("propagateNewBlockHashes", "error", err)
 	}
