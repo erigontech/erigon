@@ -301,7 +301,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 		1024*1024, /* tipLimit */
 		engine,
 	)
-	if err = hd.RecoverFromDb(db.(ethdb.HasRwKV).RwKV()); err != nil {
+	if err = hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
 	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chain)
