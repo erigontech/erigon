@@ -36,7 +36,7 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db databaseReader, hash common.Hash) *uint64 {
+func ReadTxLookupEntry(db ethdb.DatabaseReader, hash common.Hash) *uint64 {
 	data, _ := db.Get(dbutils.TxLookupPrefix, hash.Bytes())
 	if len(data) == 0 {
 		return nil
@@ -119,7 +119,7 @@ func ReadReceipt(db ethdb.Getter, hash common.Hash) (*types.Receipt, common.Hash
 
 // ReadBloomBits retrieves the compressed bloom bit vector belonging to the given
 // section and bit index from the.
-func ReadBloomBits(db databaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
+func ReadBloomBits(db ethdb.DatabaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
 	return db.Get(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head))
 }
 

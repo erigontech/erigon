@@ -33,12 +33,16 @@ const (
 	RO TxFlags = 0x02
 )
 
-// Getter wraps the database read operations.
-type Getter interface {
-	Has
+type DatabaseReader interface {
+	KVGetter
 
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
+}
+
+// Getter wraps the database read operations.
+type Getter interface {
+	DatabaseReader
 
 	// Walk iterates over entries with keys greater or equal to startkey.
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
@@ -158,6 +162,16 @@ type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
+}
+
+func getOneWrapper(dat []byte, err error) ([]byte, error) {
+	if err != nil {
+		return nil, err
+	}
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, nil
 }
 
 var errNotSupported = errors.New("not supported")

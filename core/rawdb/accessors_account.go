@@ -20,10 +20,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // ReadAccount reading account object from multiple buckets of db
-func ReadAccount(db databaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+func ReadAccount(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.HashedAccountsBucket, addrHashBytes)
 	if err != nil {
@@ -47,7 +48,7 @@ func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
 	return db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil)
 }
 
-func PlainReadAccount(db databaseReader, address common.Address, acc *accounts.Account) (bool, error) {
+func PlainReadAccount(db ethdb.DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
 	enc, err := db.Get(dbutils.PlainStateBucket, address[:])
 	if err != nil {
 		return false, err

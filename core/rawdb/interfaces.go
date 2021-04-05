@@ -16,12 +16,6 @@
 
 package rawdb
 
-// databaseReader wraps the Has and Get method of a backing data store.
-type databaseReader interface {
-	Has(bucket string, key []byte) (bool, error)
-	Get(bucket string, key []byte) ([]byte, error)
-}
-
 // DatabaseWriter wraps the Put method of a backing data store.
 type DatabaseWriter interface {
 	Put(bucket string, key []byte, value []byte) error

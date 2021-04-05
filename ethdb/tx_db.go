@@ -21,20 +21,19 @@ func NewRoTxDb(tx Tx) *roTxDb {
 	return &roTxDb{tx: tx, top: true}
 }
 
-func (m *roTxDb) Get(bucket string, key []byte) ([]byte, error) {
+func (m *roTxDb) GetOne(bucket string, key []byte) ([]byte, error) {
 	c, err := m.tx.Cursor(bucket)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 	_, v, err := c.SeekExact(key)
-	if err != nil {
-		return nil, err
-	}
-	if v == nil {
-		return nil, ErrKeyNotFound
-	}
-	return v, nil
+	return v, err
+}
+
+func (m *roTxDb) Get(bucket string, key []byte) ([]byte, error) {
+	dat, err := m.GetOne(bucket, key)
+	return getOneWrapper(dat, err)
 }
 
 func (m *roTxDb) Has(bucket string, key []byte) (bool, error) {
@@ -214,19 +213,18 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 	return c.Last()
 }
 
-func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
+func (m *TxDb) GetOne(bucket string, key []byte) ([]byte, error) {
 	c, err := m.cursor(bucket)
 	if err != nil {
 		return nil, err
 	}
 	_, v, err := c.SeekExact(key)
-	if err != nil {
-		return nil, err
-	}
-	if v == nil {
-		return nil, ErrKeyNotFound
-	}
-	return v, nil
+	return v, err
+}
+
+func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
+	dat, err := m.GetOne(bucket, key)
+	return getOneWrapper(dat, err)
 }
 
 func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
