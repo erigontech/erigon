@@ -225,5 +225,3 @@ type HasStats interface {
 	BucketSize(name string) (uint64, error)
 	DiskSize(context.Context) (uint64, error) // db size
 }
-
-var ErrDBClosed = errors.New("db closed")

@@ -1,6 +1,5 @@
 package ethdb
 
-import "C"
 import (
 	"bytes"
 	"context"
@@ -11,13 +10,11 @@ import (
 	"path"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/prometheus/tsdb/fileutil"
@@ -174,7 +171,6 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 		env:           env,
 		log:           logger,
 		wg:            &sync.WaitGroup{},
-		closing:       new(uint32),
 		buckets:       dbutils.BucketsCfg{},
 	}
 
@@ -280,7 +276,6 @@ type LmdbKV struct {
 	log           log.Logger
 	buckets       dbutils.BucketsCfg
 	wg            *sync.WaitGroup
-	closing       *uint32
 	exclusiveLock fileutil.Releaser
 }
 
@@ -292,9 +287,8 @@ func (db *LmdbKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if db.env != nil && atomic.CompareAndSwapUint32(db.closing, 0, 1) {
+	if db.env != nil {
 		db.wg.Wait()
-		defer atomic.StoreUint32(db.closing, 0)
 	}
 
 	if db.exclusiveLock != nil {

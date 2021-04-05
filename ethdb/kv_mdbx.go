@@ -12,7 +12,6 @@ import (
 	"path"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -151,6 +150,26 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
+	/*
+		if opts.flags&mdbx.Accede == 0 {
+			// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
+			// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
+			// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
+				if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+					return nil, err
+				}
+				if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+					return nil, err
+				}
+			}
+	*/
+
 	db := &MdbxKV{
 		opts:    opts,
 		env:     env,
@@ -253,13 +272,7 @@ type MdbxKV struct {
 	log     log.Logger
 	buckets dbutils.BucketsCfg
 	wg      *sync.WaitGroup
-	status  *uint32
 }
-
-const (
-	statusOK uint32 = iota
-	statusClosed
-)
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 	opts := db.opts
@@ -269,10 +282,6 @@ func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	if ok := atomic.CompareAndSwapUint32(db.status, statusOK, statusClosed); !ok {
-		return
-	}
-
 	if db.env != nil {
 		db.wg.Wait()
 	}
@@ -292,6 +301,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
+
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
@@ -348,13 +358,8 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-
 	defer func() {
 		if err == nil {
-			if atomic.LoadUint32(db.status) != statusOK {
-				err = ErrDBClosed
-				return
-			}
 			db.wg.Add(1)
 		}
 	}()
@@ -372,16 +377,12 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 }
 
 func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
-	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return nil, ErrDBClosed
+	if db.env == nil {
+		return nil, fmt.Errorf("db closed")
 	}
 	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
-			if atomic.LoadUint32(db.status) != statusOK {
-				err = ErrDBClosed
-				return
-			}
 			db.wg.Add(1)
 		}
 	}()
@@ -455,8 +456,8 @@ func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return ErrDBClosed
+	if db.env == nil {
+		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
@@ -472,8 +473,8 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
-	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
-		return ErrDBClosed
+	if db.env == nil {
+		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
 	defer db.wg.Done()
@@ -666,7 +667,7 @@ func (tx *MdbxTx) Commit() error {
 }
 
 func (tx *MdbxTx) Rollback() {
-	if tx.db.env == nil || atomic.LoadUint32(tx.db.status) != statusOK {
+	if tx.db.env == nil {
 		return
 	}
 	if tx.tx == nil {
