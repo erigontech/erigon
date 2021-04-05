@@ -93,7 +93,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 	}
 	cons := clique.New(config.Clique, params.CliqueSnapshot, db)
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(cons, config, exit, 1)
+	eng := process.NewConsensusProcess(clique.NewCliqueVerifier(cons), config, exit, 1)
 	defer common.SafeClose(exit)
 
 	tn := time.Now()

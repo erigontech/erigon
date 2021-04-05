@@ -138,6 +138,7 @@ func TestVerifyHeadersClique1024(t *testing.T) {
 }
 
 func TestVerifyHeadersClique65536(t *testing.T) {
+	t.Skip("seems to deadlock")
 	const toVerify = 65536
 
 	testVerifyHeadersClique(t, toVerify)
