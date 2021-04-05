@@ -72,38 +72,38 @@ func clearUnwindStack(db rawdb.DatabaseWriter, _ context.Context) error {
 	return nil
 }
 
-func resetState(db ethdb.Database, _ context.Context) error {
+func resetState(db ethdb.Database, ctx context.Context) error {
 	fmt.Printf("Before reset: \n")
 	if err := printStages(db); err != nil {
 		return err
 	}
-
+	kv := db.(ethdb.HasRwKV).RwKV()
 	// don't reset senders here
-	if err := resetExec(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
 		return err
 	}
-	if err := stagedsync.ResetHashState(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetHashState(tx) }); err != nil {
 		return err
 	}
-	if err := stagedsync.ResetIH(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetIH(tx) }); err != nil {
 		return err
 	}
-	if err := resetHistory(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetHistory(tx) }); err != nil {
 		return err
 	}
-	if err := resetLogIndex(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetLogIndex(tx) }); err != nil {
 		return err
 	}
-	if err := resetCallTraces(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetCallTraces(tx) }); err != nil {
 		return err
 	}
-	if err := resetTxLookup(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetTxLookup(tx) }); err != nil {
 		return err
 	}
-	if err := resetTxPool(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetTxPool(tx) }); err != nil {
 		return err
 	}
-	if err := resetFinish(db); err != nil {
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetFinish(tx) }); err != nil {
 		return err
 	}
 
@@ -126,135 +126,149 @@ func resetState(db ethdb.Database, _ context.Context) error {
 	return nil
 }
 
-func resetSenders(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.Senders,
-	); err != nil {
+func resetSenders(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Senders); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Senders, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.Senders, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
-func resetExec(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.HashedAccountsBucket,
-		dbutils.HashedStorageBucket,
-		dbutils.ContractCodeBucket,
-		dbutils.PlainStateBucket,
-		dbutils.PlainAccountChangeSetBucket,
-		dbutils.PlainStorageChangeSetBucket,
-		dbutils.PlainContractCodeBucket,
-		dbutils.BlockReceiptsPrefix,
-		dbutils.Log,
-		dbutils.IncarnationMapBucket,
-		dbutils.CodeBucket,
-	); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(db, stages.Execution, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(db, stages.Execution, 0); err != nil {
+	if err := stages.SaveStageUnwind(tx, stages.Senders, 0); err != nil {
 		return err
 	}
 	return nil
 }
 
-func resetHistory(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.AccountsHistoryBucket,
-		dbutils.StorageHistoryBucket,
-	); err != nil {
+func resetExec(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedAccountsBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedStorageBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.ContractCodeBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.AccountHistoryIndex, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainStateBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.StorageHistoryIndex, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainAccountChangeSetBucket); err != nil {
 		return err
 	}
-
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainStorageChangeSetBucket); err != nil {
+		return err
+	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainContractCodeBucket); err != nil {
+		return err
+	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.BlockReceiptsPrefix); err != nil {
+		return err
+	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Log); err != nil {
+		return err
+	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.IncarnationMapBucket); err != nil {
+		return err
+	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CodeBucket); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
-func resetLogIndex(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.LogAddressIndex,
-		dbutils.LogTopicIndex,
-	); err != nil {
+func resetHistory(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.AccountsHistoryBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.LogIndex, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.StorageHistoryBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.AccountHistoryIndex, 0); err != nil {
 		return err
 	}
-
-	return nil
-}
-
-func resetCallTraces(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.CallFromIndex,
-		dbutils.CallToIndex,
-	); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.CallTraces, 0); err != nil {
+	if err := stages.SaveStageUnwind(tx, stages.AccountHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0); err != nil {
+	if err := stages.SaveStageUnwind(tx, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func resetTxLookup(db rawdb.DatabaseWriter) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.TxLookupPrefix,
-	); err != nil {
+func resetLogIndex(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.LogAddressIndex); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.TxLookup, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.LogTopicIndex); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.TxLookup, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.LogIndex, 0); err != nil {
 		return err
 	}
-
-	return nil
-}
-
-func resetTxPool(db ethdb.Putter) error {
-	if err := stages.SaveStageProgress(db, stages.TxPool, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(db, stages.TxPool, 0); err != nil {
+	if err := stages.SaveStageUnwind(tx, stages.LogIndex, 0); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func resetFinish(db ethdb.Putter) error {
-	if err := stages.SaveStageProgress(db, stages.Finish, 0); err != nil {
+func resetCallTraces(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallFromIndex); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.Finish, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallToIndex); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.CallTraces, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.CallTraces, 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetTxLookup(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TxLookupPrefix); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.TxLookup, 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetTxPool(tx ethdb.RwTx) error {
+	if err := stages.SaveStageProgress(tx, stages.TxPool, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.TxPool, 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetFinish(tx ethdb.RwTx) error {
+	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.Finish, 0); err != nil {
 		return err
 	}
 

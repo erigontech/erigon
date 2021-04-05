@@ -1534,7 +1534,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 	}
 }
 
-func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult, execute bool) (uint64, error) {
+func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
 		return 0, nil
@@ -1552,30 +1552,27 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 	for i, result := range results {
 		blocks[i] = types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
 	}
+	tx, err2 := d.stateDB.Begin(context.Background(), ethdb.RW)
+	if err2 != nil {
+		return 0, err2
+	}
+	defer tx.Rollback()
+
 	var index int
 	var stopped bool
 	var err error
-	if execute {
-		index, err = d.blockchain.InsertChain(context.Background(), blocks)
+	stopped, err = core.InsertBodyChain(logPrefix, context.Background(), tx, blocks, true /* newCanonical */)
+	if stopped {
+		index = 0
 	} else {
-		tx, err2 := d.stateDB.Begin(context.Background(), ethdb.RW)
-		if err2 != nil {
-			return 0, err2
+		index = len(results)
+	}
+	if err == nil {
+		if err1 := tx.Commit(); err1 != nil {
+			return 0, err1
 		}
-		defer tx.Rollback()
-		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), tx, blocks, true /* newCanonical */)
-		if stopped {
-			index = 0
-		} else {
-			index = len(results)
-		}
-		if err == nil {
-			if err1 := tx.Commit(); err1 != nil {
-				return 0, err1
-			}
-		} else {
-			tx.Rollback()
-		}
+	} else {
+		tx.Rollback()
 	}
 	if err != nil {
 		if index < len(results) {

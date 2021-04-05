@@ -561,46 +561,39 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	return nil
 }
 
-func ResetHashState(db ethdb.Database) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.HashedAccountsBucket,
-		dbutils.HashedStorageBucket,
-		dbutils.ContractCodeBucket,
-	); err != nil {
+func ResetHashState(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedAccountsBucket); err != nil {
 		return err
 	}
-	batch := db.NewBatch()
-	if err := stages.SaveStageProgress(batch, stages.HashState, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedStorageBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(batch, stages.HashState, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.ContractCodeBucket); err != nil {
 		return err
 	}
-	if err := batch.Commit(); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(tx, stages.HashState, 0); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func ResetIH(db ethdb.Database) error {
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.TrieOfAccountsBucket,
-		dbutils.TrieOfStorageBucket,
-	); err != nil {
+func ResetIH(tx ethdb.RwTx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket); err != nil {
 		return err
 	}
-	batch := db.NewBatch()
-	if err := stages.SaveStageProgress(batch, stages.IntermediateHashes, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if err := batch.Commit(); err != nil {
+	if err := stages.SaveStageUnwind(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -610,7 +603,7 @@ func assertSubset(a, b uint16) {
 	}
 }
 
-func cacheWarmUpIfNeed(db ethdb.Database, cache *shards.StateCache) error {
+func cacheWarmUpIfNeed(db ethdb.Getter, cache *shards.StateCache) error {
 	if cache.HasAccountWithInPrefix([]byte{0}) {
 		return nil
 	}
