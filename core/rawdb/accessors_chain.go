@@ -62,25 +62,6 @@ func DeleteCanonicalHash(db DatabaseDeleter, number uint64) error {
 	return nil
 }
 
-// ReadAllHashes retrieves all the hashes assigned to blocks at a certain heights,
-// both canonical and reorged forks included.
-func ReadAllHashes(db databaseReader, number uint64) []common.Hash {
-	//prefix := headerKeyPrefix(number)
-
-	hashes := make([]common.Hash, 0, 1)
-	/*
-		it := db.NewIteratorWithPrefix(prefix)
-		defer it.Release()
-
-		for it.Next() {
-			if key := it.Key(); len(key) == len(prefix)+32 {
-				hashes = append(hashes, common.BytesToHash(key[len(key)-32:]))
-			}
-		}
-	*/
-	return hashes
-}
-
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db databaseReader, hash common.Hash) *uint64 {
 	data, err := db.Get(dbutils.HeaderNumberBucket, hash.Bytes())
