@@ -37,7 +37,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(ethdb.NewRoTxDb(tx))
+		stateReader = state.NewPlainStateReader(tx)
 	} else {
 		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(tx), blockNumber)
 	}

@@ -23,6 +23,12 @@ type Has interface {
 	Has(bucket string, key []byte) (bool, error)
 }
 
+type KVGetter interface {
+	Has
+
+	GetOne(bucket string, key []byte) (val []byte, err error)
+}
+
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
@@ -97,9 +103,7 @@ type RwKV interface {
 }
 
 type StatelessReadTx interface {
-	Has
-
-	GetOne(bucket string, key []byte) (val []byte, err error)
+	KVGetter
 
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.

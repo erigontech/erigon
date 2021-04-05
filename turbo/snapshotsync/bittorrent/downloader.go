@@ -62,8 +62,8 @@ func (cli *Client) Load(db ethdb.Database) error {
 		networkID, snapshotName := ParseInfoHashKey(k)
 		infoHash := metainfo.Hash{}
 		copy(infoHash[:], infoHashBytes)
-		infoBytes, err := db.Get(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		infoBytes, err := db.GetOne(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+		if err != nil {
 			return false, err
 		}
 
@@ -271,12 +271,12 @@ func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([
 	var err error
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, networkID)
-	infohash, err = db.Get(dbutils.SnapshotInfoBucket, MakeInfoHashKey(snapshotName, networkID))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	infohash, err = db.GetOne(dbutils.SnapshotInfoBucket, MakeInfoHashKey(snapshotName, networkID))
+	if err != nil {
 		return nil, nil, err
 	}
-	infobytes, err = db.Get(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	infobytes, err = db.GetOne(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+	if err != nil {
 		return nil, nil, err
 	}
 

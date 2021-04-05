@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -1709,16 +1708,14 @@ func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	i, err := db.Get(dbutils.IncarnationMapBucket, contractAddr[:])
+	i, err := db.GetOne(dbutils.IncarnationMapBucket, contractAddr[:])
 	if err != nil {
-		if errors.Is(err, ethdb.ErrKeyNotFound) {
-			fmt.Print("Not found\n")
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], 1)
-			if err = db.Put(dbutils.IncarnationMapBucket, contractAddr[:], b[:]); err != nil {
-				return err
-			}
-		} else {
+		return err
+	} else if i == nil {
+		fmt.Print("Not found\n")
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], 1)
+		if err = db.Put(dbutils.IncarnationMapBucket, contractAddr[:], b[:]); err != nil {
 			return err
 		}
 	} else {

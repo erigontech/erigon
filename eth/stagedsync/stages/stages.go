@@ -18,7 +18,6 @@ package stages
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -70,8 +69,8 @@ var AllStages = []SyncStage{
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, stage)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	v, err := db.GetOne(dbutils.SyncStageProgress, stage)
+	if err != nil {
 		return 0, err
 	}
 	return unmarshalData(v)
@@ -85,8 +84,8 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
-	v, err := db.Get(dbutils.SyncStageUnwind, stage)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	v, err := db.GetOne(dbutils.SyncStageUnwind, stage)
+	if err != nil {
 		return 0, err
 	}
 	return unmarshalData(v)

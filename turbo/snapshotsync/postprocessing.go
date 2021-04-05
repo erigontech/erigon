@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -97,7 +96,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	var number uint64
 
 	v, err := stages.GetStageProgress(db, HeaderNumber)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return err
 	}
 
@@ -134,7 +133,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	}
 
 	v, err = stages.GetStageProgress(db, HeaderCanonical)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return err
 	}
 	if v == 0 {

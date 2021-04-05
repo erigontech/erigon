@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -17,18 +16,18 @@ var _ StateReader = (*PlainStateReader)(nil)
 // Data in the plain state is stored using un-hashed account/storage items
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
-	db ethdb.Getter
+	db ethdb.KVGetter
 }
 
-func NewPlainStateReader(db ethdb.Getter) *PlainStateReader {
+func NewPlainStateReader(db ethdb.KVGetter) *PlainStateReader {
 	return &PlainStateReader{
 		db: db,
 	}
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.db.Get(dbutils.PlainStateBucket, address.Bytes())
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	enc, err := r.db.GetOne(dbutils.PlainStateBucket, address.Bytes())
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -43,8 +42,8 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := r.db.Get(dbutils.PlainStateBucket, compositeKey)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	enc, err := r.db.GetOne(dbutils.PlainStateBucket, compositeKey)
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -57,7 +56,7 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, incarnation u
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := r.db.Get(dbutils.CodeBucket, codeHash.Bytes())
+	code, err := r.db.GetOne(dbutils.CodeBucket, codeHash.Bytes())
 	if len(code) == 0 {
 		return nil, nil
 	}
@@ -70,11 +69,12 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, incarnati
 }
 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	if b, err := r.db.Get(dbutils.IncarnationMapBucket, address.Bytes()); err == nil {
-		return binary.BigEndian.Uint64(b), nil
-	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-		return 0, nil
-	} else {
+	b, err := r.db.GetOne(dbutils.IncarnationMapBucket, address.Bytes())
+	if err != nil {
 		return 0, err
 	}
+	if len(b) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(b), nil
 }

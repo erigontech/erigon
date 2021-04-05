@@ -173,9 +173,9 @@ func (db *ObjectDatabase) ReadSequence(bucket string) (res uint64, err error) {
 }
 
 // Get returns the value for a given key if it's present.
-func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
+func (db *ObjectDatabase) GetOne(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
-	if err := db.kv.View(context.Background(), func(tx Tx) error {
+	err := db.kv.View(context.Background(), func(tx Tx) error {
 		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
@@ -185,13 +185,13 @@ func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 			copy(dat, v)
 		}
 		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if dat == nil {
-		return nil, ErrKeyNotFound
-	}
-	return dat, nil
+	})
+	return dat, err
+}
+
+func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
+	dat, err := db.GetOne(bucket, key)
+	return getOneWrapper(dat, err)
 }
 
 func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
