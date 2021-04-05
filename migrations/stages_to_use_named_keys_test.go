@@ -3,7 +3,6 @@ package migrations
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -39,10 +38,11 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, i)
 
-	_, err = db.Get(dbutils.SyncStageProgress, []byte{byte(oldExecutionKey)})
-	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
+	v, err := db.GetOne(dbutils.SyncStageProgress, []byte{byte(oldExecutionKey)})
+	require.NoError(err)
+	require.Nil(v)
 
-	v, err := db.Get(dbutils.SyncStageProgress, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageProgress, stages.Execution)
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }
@@ -72,10 +72,11 @@ func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, i)
 
-	_, err = db.Get(dbutils.SyncStageUnwind, []byte{byte(oldExecutionKey)})
-	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
+	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte{byte(oldExecutionKey)})
+	require.NoError(err)
+	require.Nil(v)
 
-	v, err := db.Get(dbutils.SyncStageUnwind, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageUnwind, stages.Execution)
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }

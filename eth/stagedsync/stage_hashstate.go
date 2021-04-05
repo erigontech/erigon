@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 
@@ -280,7 +279,7 @@ func getExtractFunc(db ethdb.Tx, cache *shards.StateCache, changeSetBucket strin
 		_, k, _ := decode(dbKey, dbValue)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.GetOne(dbutils.PlainStateBucket, k)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return err
 		}
 		newK, err := transformPlainStateKey(k)
@@ -337,7 +336,7 @@ func getExtractCode(db ethdb.Tx, changeSetBucket string) etl.ExtractFunc {
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _ := decode(dbKey, dbValue)
 		value, err := db.GetOne(dbutils.PlainStateBucket, k)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return err
 		}
 		if len(value) == 0 {
@@ -353,7 +352,7 @@ func getExtractCode(db ethdb.Tx, changeSetBucket string) etl.ExtractFunc {
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 		var codeHash []byte
 		codeHash, err = db.GetOne(dbutils.PlainContractCodeBucket, plainKey)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
 		}
 		if codeHash == nil {
@@ -400,7 +399,7 @@ func getUnwindExtractAccounts(db ethdb.Tx, changeSetBucket string) etl.ExtractFu
 
 		if codeHash, err := db.GetOne(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
 			copy(acc.CodeHash[:], codeHash)
-		} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+		} else {
 			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
 		}
 
@@ -431,7 +430,7 @@ func getCodeUnwindExtractFunc(db ethdb.Tx, changeSetBucket string) etl.ExtractFu
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 		codeHash, err = db.GetOne(dbutils.PlainContractCodeBucket, plainKey)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
 		}
 		newK, err = transformContractCodeKey(plainKey)

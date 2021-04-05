@@ -27,8 +27,8 @@ func NewPlainStateReader(db ethdb.Getter) *PlainStateReader {
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.db.Get(dbutils.PlainStateBucket, address.Bytes())
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	enc, err := r.db.GetOne(dbutils.PlainStateBucket, address.Bytes())
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -43,8 +43,8 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := r.db.Get(dbutils.PlainStateBucket, compositeKey)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	enc, err := r.db.GetOne(dbutils.PlainStateBucket, compositeKey)
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {

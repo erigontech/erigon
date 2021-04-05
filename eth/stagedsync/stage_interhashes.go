@@ -198,7 +198,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 		}
 		if !storage {
 			newValue, err := p.db.GetOne(dbutils.PlainStateBucket, k)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			if err != nil {
 				return err
 			}
 			if len(v) > 0 {
