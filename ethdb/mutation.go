@@ -37,9 +37,9 @@ type MutationItem struct {
 	value []byte
 }
 
-func NewBatch(kv RwKV) StatelessRwTx {
+func NewBatch(tx RwTx) StatelessRwTx {
 	return &mutation{
-		db:   NewObjectDatabase(kv),
+		db:   &TxDb{tx: tx},
 		puts: btree.New(32),
 	}
 }
