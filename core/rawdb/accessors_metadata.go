@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -59,9 +58,9 @@ func WriteDatabaseVersion(db ethdb.Putter, version uint64) error {
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db ethdb.DatabaseReader, hash common.Hash) (*params.ChainConfig, error) {
-	data, err := db.Get(dbutils.ConfigPrefix, hash[:])
-	if err != nil && errors.Is(err, ethdb.ErrKeyNotFound) {
+func ReadChainConfig(db ethdb.KVGetter, hash common.Hash) (*params.ChainConfig, error) {
+	data, err := db.GetOne(dbutils.ConfigPrefix, hash[:])
+	if err != nil {
 		return nil, err
 	}
 	if len(data) == 0 {

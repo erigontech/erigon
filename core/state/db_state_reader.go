@@ -52,11 +52,11 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	if !ok {
 		var err error
 		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
-			enc, err = dbr.db.Get(dbutils.HashedAccountsBucket, addrHash[:])
+			enc, err = dbr.db.GetOne(dbutils.HashedAccountsBucket, addrHash[:])
 		} else {
 			return nil, err1
 		}
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return nil, err
 		}
 	}
