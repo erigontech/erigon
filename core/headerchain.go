@@ -558,7 +558,6 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 	var (
 		parentHash common.Hash
 		batch      = hc.chainDb.NewBatch()
-		origin     = true
 	)
 	for hdr := hc.CurrentHeader(); hdr != nil && hdr.Number.Uint64() > head; hdr = hc.CurrentHeader() {
 		num := hdr.Number.Uint64()
@@ -594,37 +593,19 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		hc.currentHeaderHash = parentHash
 		//headHeaderGauge.Update(parent.Number.Int64())
 
-		// If this is the first iteration, wipe any leftover data upwards too so
-		// we don't end up with dangling daps in the database
-		var nums []uint64
-		if origin {
-			for n := num + 1; len(rawdb.ReadAllHashes(hc.chainDb, n)) > 0; n++ {
-				nums = append([]uint64{n}, nums...) // suboptimal, but we don't really expect this path
-			}
-			origin = false
-		}
-		nums = append(nums, num)
-
 		// Remove the related data from the database on all sidechains
-		for _, num := range nums {
-			// Gather all the side fork hashes
-			hashes := rawdb.ReadAllHashes(hc.chainDb, num)
-			if len(hashes) == 0 {
-				// No hashes in the database whatsoever, probably frozen already
-				hashes = append(hashes, hdr.Hash())
-			}
-			for _, hash := range hashes {
-				if delFn != nil {
-					delFn(batch, hash, num)
-				}
-				rawdb.DeleteHeader(batch, hash, num)
-				if err := rawdb.DeleteTd(batch, hash, num); err != nil {
-					panic(err)
-				}
-			}
-			if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
-				panic(err)
-			}
+		// Gather all the side fork hashes
+		hash := hdr.Hash()
+		if delFn != nil {
+			delFn(batch, hash, num)
+		}
+		rawdb.DeleteHeader(batch, hash, num)
+		if err := rawdb.DeleteTd(batch, hash, num); err != nil {
+			panic(err)
+		}
+
+		if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
+			panic(err)
 		}
 	}
 	if err := batch.Commit(); err != nil {
