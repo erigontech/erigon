@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -72,8 +73,7 @@ func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	return block, nil
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig,
-	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
 
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
@@ -96,10 +96,9 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.Sta
 		stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
 	}
 
-	engine := chainContext.Engine()
-
 	// where the magic happens
-	receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter)
 	if err != nil {
 		return err
 	}
@@ -119,7 +118,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.Sta
 	return nil
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
 	prevStageProgress, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -169,8 +168,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		cache = params.Cache
 	}
 
-	chainContext.SetDB(tx)
-
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
@@ -197,7 +194,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, cache, batch, chainConfig, chainContext, vmConfig, params); err != nil {
+			if err = executeBlockWithGo(block, tx, cache, batch, chainConfig, engine, vmConfig, params); err != nil {
 				return err
 			}
 		}
@@ -219,7 +216,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
-					chainContext.SetDB(tx)
 				}
 			}
 		} else {
@@ -239,7 +235,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
-					chainContext.SetDB(tx)
 				}
 				//start = time.Now()
 				cache.TurnWritesToReads(writes)

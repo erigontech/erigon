@@ -502,9 +502,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		writeDB = d.stateDB
 	}
 
-	cc := &core.TinyChainContext{}
-	cc.SetDB(tx)
-	cc.SetEngine(d.blockchain.Engine())
 	var cache *shards.StateCache
 	if d.cacheSize > 0 {
 		cache = shards.NewStateCache(32, d.cacheSize)
@@ -513,7 +510,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	d.stagedSyncState, err = d.stagedSync.Prepare(
 		d,
 		d.chainConfig,
-		cc,
+		d.blockchain.Engine(),
 		d.blockchain.GetVMConfig(),
 		d.stateDB,
 		writeDB,
@@ -599,9 +596,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 	defer tx.Rollback()
 
-	cc.SetDB(tx)
-	cc.SetEngine(d.blockchain.Engine())
-
 	// Fill the block with all available pending transactions.
 	pending, err := txPool.Pending()
 	if err != nil {
@@ -614,7 +608,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	if d.miningState, err = d.mining.Prepare(
 		d,
 		d.chainConfig,
-		cc,
+		d.blockchain.Engine(),
 		d.blockchain.GetVMConfig(),
 		nil,
 		tx,

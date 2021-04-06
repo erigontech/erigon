@@ -51,7 +51,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, ibs *state.IntraBlockStat
 	var (
 		header       = block.Header()
 		gaspool      = new(GasPool).AddGas(block.GasLimit())
-		blockContext = NewEVMBlockContext(header, p.bc, nil)
+		blockContext = NewEVMBlockContext(header, p.bc.GetHeader, p.bc.Engine(), nil)
 		evm          = vm.NewEVM(blockContext, vm.TxContext{}, ibs, p.config, cfg)
 		signer       = types.MakeSigner(p.config, header.Number)
 	)

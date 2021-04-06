@@ -186,7 +186,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	cc, bc, _, st, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	engine, bc, _, st, _, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,
@@ -247,7 +247,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
 		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx,
-			bc.Config(), cc, bc.GetVMConfig(),
+			bc.Config(), engine, bc.GetVMConfig(),
 			ch,
 			stagedsync.ExecuteBlockStageParams{
 				ToBlock:       blockNumber, // limit execution to the specified block

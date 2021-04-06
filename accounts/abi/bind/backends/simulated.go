@@ -619,7 +619,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.chainContext, nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.chainContext.GetHeader, b.chainContext.Engine(), nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -649,7 +649,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.chainContext,
+		b.config, b.chainContext.GetHeader, b.chainContext.Engine(),
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -659,9 +659,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext, tx)
+			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
 		}
-		block.AddTxWithChain(b.chainContext, tx)
+		block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -780,7 +780,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext, tx)
+			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)

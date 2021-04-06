@@ -165,13 +165,13 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	sm, cc, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
+	sm, engine, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 			if err := stagedsync.SpawnExecuteBlocksStage(
 				s, tx,
-				chainConfig, cc, vmConfig,
+				chainConfig, engine, vmConfig,
 				quit,
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
@@ -268,7 +268,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			}
 		}
 
-		stateStages, err2 := st.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
+		stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
 		if err2 != nil {
 			panic(err2)
 		}
@@ -309,7 +309,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, cc, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
+			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
 			if err != nil {
 				panic(err)
 			}
@@ -318,7 +318,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					miningWorld.Block,
 					chainConfig,
-					cc.Engine(),
+					engine,
 					miningWorld.ExtraData,
 					miningWorld.GasFloor,
 					miningWorld.GasCeil,

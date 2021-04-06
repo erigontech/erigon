@@ -68,7 +68,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc.GetHeader, cc.Engine(), tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -226,7 +226,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if err != nil {
 		return nil, err
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc.GetHeader, cc.Engine(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

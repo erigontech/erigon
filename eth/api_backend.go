@@ -186,7 +186,7 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(b.ChainConfig(), b.eth.blockchain.GetHeader, b.eth.blockchain.Engine(), nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +232,7 @@ func (b *EthAPIBackend) GetEVM(ctx context.Context, msg core.Message, state *sta
 	vmError := func() error { return nil }
 
 	txContext := core.NewEVMTxContext(msg)
-	context := core.NewEVMBlockContext(header, b.eth.BlockChain(), nil)
+	context := core.NewEVMBlockContext(header, b.eth.BlockChain().GetHeader, b.eth.BlockChain().Engine(), nil)
 	return vm.NewEVM(context, txContext, state, b.eth.blockchain.Config(), *b.eth.blockchain.GetVMConfig()), vmError, nil
 }
 
