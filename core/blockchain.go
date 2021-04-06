@@ -86,10 +86,9 @@ var (
 )
 
 const (
-	receiptsCacheLimit  = 32
-	maxFutureBlocks     = 256
-	maxTimeFutureBlocks = 30
-	TriesInMemory       = 128
+	receiptsCacheLimit = 32
+	maxFutureBlocks    = 256
+	TriesInMemory      = 128
 
 	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
 	//
@@ -168,7 +167,6 @@ type BlockChain struct {
 
 	db            ethdb.Database // Low level persistent database to store final content in
 	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration  // Accumulates canonical block processing for trie dumping
 	txLookupLimit uint64
 
 	hc            *HeaderChain
@@ -184,7 +182,6 @@ type BlockChain struct {
 	Chainmu sync.RWMutex // blockchain insertion lock
 
 	currentBlock     atomic.Value // Current head of the block chain
-	committedBlock   atomic.Value // Committed head of the block chain
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
 	trieDbState   *state.TrieDbState
@@ -1282,18 +1279,6 @@ Error: %v
 Callers: %v
 ##############################
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err, debug.Callers(20)))
-}
-
-func (bc *BlockChain) rollbackBadBlock(block *types.Block, receipts types.Receipts, err error, reuseTrieDbState bool) {
-	if reuseTrieDbState {
-		bc.setTrieDbState(bc.trieDbState.WithNewBuffer())
-	} else {
-		bc.setTrieDbState(nil)
-	}
-	bc.ReportBlock(block, receipts, err)
-	if bc.committedBlock.Load() != nil {
-		bc.currentBlock.Store(bc.committedBlock.Load())
-	}
 }
 
 func (bc *BlockChain) HeaderChain() *HeaderChain {
