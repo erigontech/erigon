@@ -30,7 +30,10 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
-	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc.GetHeader, cc.Engine(), tx, hash, 0)
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, number)
+	}
+	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, cc.Engine(), tx, hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +45,6 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
 		header := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, number)
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, number)
-		}
 		receipt, err := core.ApplyTransaction(chainConfig, getHeader, cc.Engine(), nil, gp, ibs, dbstate, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
