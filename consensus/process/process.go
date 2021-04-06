@@ -1,9 +1,9 @@
 package process
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 	"time"
 
@@ -30,7 +30,6 @@ type validateHeaderRequest struct {
 const ttl = time.Minute
 
 var (
-	errEmptyHeader    = errors.New("an empty header")
 	errNothingToAsk   = errors.New("nothing to ask")
 	errRequestTimeout = errors.New("request timeout")
 )
@@ -44,12 +43,15 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 	for i := 0; i < workers; i++ {
 		go func() {
+
+			verifyRequests := list.New()                            // We accumulate verifyRequests here, but process them one by one
+			var currentVerifyRequest *consensus.VerifyHeaderRequest // verifyRequest being processed
+			var currentVerifyIdx int                                // Index of the currently verify header within currentVerifyRequest
 		eventLoop:
 			for {
 				select {
 				case req := <-c.API.VerifyHeaderRequests:
 					if len(req.Headers) == 0 {
-						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: req.ID, Hash: common.Hash{}, Err: errEmptyHeader}
 						continue
 					}
 
@@ -59,26 +61,30 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 					}
 
 					// copy slices and sort. had a data race with downloader
-					reqHeaders := make([]ReqHeader, len(req.Headers))
-					for i := range req.Headers {
-						reqHeaders[i] = ReqHeader{req.Headers[i], req.Seal[i]}
+					reqHeaders := ReqHeaders{headers: req.Headers, indices: make([]int, len(req.Headers))}
+					sort.Sort(&reqHeaders)
+
+					headers := make([]*types.Header, len(req.Headers))
+					seals := make([]bool, len(req.Headers))
+					for i, j := range reqHeaders.indices {
+						headers[i] = req.Headers[j]
+						seals[i] = req.Seal[j]
+					}
+					req.Headers = headers
+					req.Seal = seals
+					if currentVerifyRequest == nil {
+						currentVerifyRequest = &req
+						currentVerifyIdx = 0
+					} else {
+						verifyRequests.PushBack(&req)
+						//TODO add to the deadline tracking priority queue
 					}
 
-					SortHeadersAsc(reqHeaders)
-
-					req.Headers = make([]*types.Header, len(reqHeaders))
-					req.Seal = make([]bool, len(reqHeaders))
-					for i := range reqHeaders {
-						req.Headers[i] = reqHeaders[i].header
-						req.Seal[i] = reqHeaders[i].seal
-					}
-
-					ancestorsReqs := make([]consensus.HeadersRequest, 0, len(req.Headers))
+					ancestorsReqs := make([]consensus.HeadersRequest, 0, len(headers))
 
 					tn := time.Now()
-					for i, header := range req.Headers {
+					for i, header := range headers {
 						if header == nil {
-							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{ID: req.ID, Hash: common.Hash{}, Err: errEmptyHeader}
 							continue eventLoop
 						}
 
@@ -88,7 +94,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 							continue
 						}
 
-						knownParentsSlice, parentsToValidate, ancestorsReq := c.requestParentHeaders(req.ID, header, req.Headers, req.Seal[i])
+						knownParentsSlice, parentsToValidate, ancestorsReq := c.requestParentHeaders(req.ID, header, headers, seals[i])
 						if ancestorsReq == nil {
 							continue
 						}
@@ -96,16 +102,16 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 						ancestorsReqs = append(ancestorsReqs, *ancestorsReq)
 
 						// todo send first out of given range request immediately
-						err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParentsSlice)
+						err := c.verifyByRequest(req.ID, header, seals[i], parentsToValidate, knownParentsSlice)
 						if errors.Is(err, errNotAllParents) {
 							log.Debug(fmt.Sprint("verifyByRequest errNotAllParents", req.ID, header.Number.Uint64(), len(knownParentsSlice), parentsToValidate))
-							c.addVerifyHeaderRequest(req.ID, header, req.Seal[i], req.Deadline, knownParentsSlice, parentsToValidate)
+							c.addVerifyHeaderRequest(req.ID, header, seals[i], req.Deadline, knownParentsSlice, parentsToValidate)
 						}
 					}
 
-					ancestorsReq, err := sumHeadersRequestsInRange(req.ID, req.Headers[0].Number.Uint64(), ancestorsReqs...)
+					ancestorsReq, err := sumHeadersRequestsInRange(req.ID, headers[0].Number.Uint64(), ancestorsReqs...)
 					if err != nil {
-						log.Error("can't request header ancestors", "reqID", req.ID, "number", req.Headers[0].Number.Uint64(), "err", err)
+						log.Error("can't request header ancestors", "reqID", req.ID, "number", headers[0].Number.Uint64(), "err", err)
 						continue
 					}
 
@@ -170,48 +176,21 @@ type ReqHeader struct {
 	seal   bool
 }
 
-// Counting in-place sort
-func SortHeadersAsc(hs []ReqHeader) {
-	if len(hs) == 0 {
-		return
-	}
+type ReqHeaders struct {
+	headers []*types.Header
+	indices []int
+}
 
-	minIdx := 0
-	min := hs[minIdx].header.Number
-	sorted := true
-	var res int
+func (rh ReqHeaders) Len() int {
+	return len(rh.headers)
+}
 
-	for i := 1; i < len(hs); i++ {
-		res = hs[i].header.Number.Cmp(min)
-		if res < 0 {
-			min = hs[i].header.Number
-			minIdx = i
-		}
-		if res != 0 {
-			sorted = false
-		}
-	}
+func (rh ReqHeaders) Less(i, j int) bool {
+	return rh.headers[rh.indices[i]].Number.Cmp(rh.headers[rh.indices[j]].Number) < 0
+}
 
-	if sorted {
-		return
-	}
-
-	startIDx := 0
-	if minIdx == 0 {
-		startIDx = 1
-	}
-
-	var newIdx int
-	diffWithMin := big.NewInt(0)
-	bigI := big.NewInt(0)
-
-	for i := startIDx; i < len(hs); i++ {
-		bigI.SetInt64(int64(i))
-		for diffWithMin.Sub(hs[i].header.Number, min).Cmp(bigI) != 0 {
-			newIdx = int(diffWithMin.Int64())
-			hs[newIdx], hs[i] = hs[i], hs[newIdx]
-		}
-	}
+func (rh *ReqHeaders) Swap(i, j int) {
+	rh.indices[i], rh.indices[j] = rh.indices[j], rh.indices[i]
 }
 
 func (c *Consensus) cleanup() {
