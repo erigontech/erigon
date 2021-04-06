@@ -56,10 +56,10 @@ func TestHeaderVerification(t *testing.T) {
 
 			if valid {
 				engine := ethash.NewFaker()
-				_, results = engine.VerifyHeaders(stagedsync.ChainReader{params.TestChainConfig, db}, []*types.Header{headers[i]}, []bool{true})
+				_, results = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			} else {
 				engine := ethash.NewFakeFailer(headers[i].Number.Uint64())
-				_, results = engine.VerifyHeaders(stagedsync.ChainReader{params.TestChainConfig, db}, []*types.Header{headers[i]}, []bool{true})
+				_, results = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			}
 			// Wait for the verification result
 			select {
@@ -115,9 +115,9 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 		var results <-chan error
 
 		if valid {
-			_, results = ethash.NewFaker().VerifyHeaders(stagedsync.ChainReader{params.TestChainConfig, testdb}, headers, seals)
+			_, results = ethash.NewFaker().VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: testdb}, headers, seals)
 		} else {
-			_, results = ethash.NewFakeFailer(uint64(len(headers)-1)).VerifyHeaders(stagedsync.ChainReader{params.TestChainConfig, testdb}, headers, seals)
+			_, results = ethash.NewFakeFailer(uint64(len(headers)-1)).VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: testdb}, headers, seals)
 		}
 		// Wait for all the verification results
 		checks := make(map[int]error)
@@ -179,7 +179,7 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 		seals[i] = true
 	}
 
-	cancel, results := ethash.NewFakeDelayer(time.Millisecond).VerifyHeaders(stagedsync.ChainReader{params.TestChainConfig, testdb}, headers, seals)
+	cancel, results := ethash.NewFakeDelayer(time.Millisecond).VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: testdb}, headers, seals)
 	cancel()
 
 	// Deplete the results channel

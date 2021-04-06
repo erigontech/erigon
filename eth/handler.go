@@ -27,10 +27,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -75,14 +77,18 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database   ethdb.Database            // Database for direct sync insertions
-	Chain      *core.BlockChain          // Blockchain to serve data from
-	TxPool     txPool                    // Transaction pool to propagate from
-	Network    uint64                    // Network identifier to adfvertise
-	BloomCache uint64                    // Megabytes to alloc for fast sync bloom
-	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
-	Whitelist  map[uint64]common.Hash    // Hard coded whitelist for sync challenged
-	Mining     *params.MiningConfig
+	Database    ethdb.Database   // Database for direct sync insertions
+	Chain       *core.BlockChain // Blockchain to serve data from
+	chainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	genesis     *types.Block
+	engine      consensus.Engine
+	TxPool      txPool                    // Transaction pool to propagate from
+	Network     uint64                    // Network identifier to adfvertise
+	BloomCache  uint64                    // Megabytes to alloc for fast sync bloom
+	Checkpoint  *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
+	Whitelist   map[uint64]common.Hash    // Hard coded whitelist for sync challenged
+	Mining      *params.MiningConfig
 }
 
 type handler struct {
@@ -91,10 +97,14 @@ type handler struct {
 
 	acceptTxs uint32 // Flag whether we're considered synchronised (enables transaction processing)
 
-	database ethdb.Database
-	txpool   txPool
-	chain    *core.BlockChain
-	maxPeers int
+	database    ethdb.Database
+	txpool      txPool
+	chain       *core.BlockChain
+	chainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	genesis     *types.Block
+	engine      consensus.Engine
+	maxPeers    int
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -125,14 +135,18 @@ type handler struct {
 // newHandler returns a handler for all Ethereum chain management protocol.
 func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	h := &handler{
-		networkID: config.Network,
-		database:  config.Database,
-		txpool:    config.TxPool,
-		chain:     config.Chain,
-		peers:     newPeerSet(),
-		whitelist: config.Whitelist,
-		txsyncCh:  make(chan *txsync),
-		quitSync:  make(chan struct{}),
+		networkID:   config.Network,
+		database:    config.Database,
+		txpool:      config.TxPool,
+		chain:       config.Chain,
+		chainConfig: config.chainConfig,
+		vmConfig:    config.vmConfig,
+		genesis:     config.genesis,
+		engine:      config.engine,
+		peers:       newPeerSet(),
+		whitelist:   config.Whitelist,
+		txsyncCh:    make(chan *txsync),
+		quitSync:    make(chan struct{}),
 	}
 	if headHeight, err := stages.GetStageProgress(config.Database, stages.Finish); err == nil {
 		h.currentHeight = headHeight
@@ -142,7 +156,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	heighter := func() uint64 {
 		return atomic.LoadUint64(&h.currentHeight)
 	}
-	h.forkFilter = forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), heighter)
+	h.forkFilter = forkid.NewFilter(config.chainConfig, config.genesis.Hash(), heighter)
 	// Construct the downloader (long sync) and its backing state bloom if fast
 	// sync is requested. The downloader is responsible for deallocating the state
 	// bloom when it's done.
@@ -150,13 +164,13 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(config.Database, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm)
+	h.downloader = downloader.New(config.Database, config.chainConfig, config.Mining, config.engine, config.vmConfig, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
 	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
-		return h.chain.Engine().VerifyHeader(h.chain, header, true)
+		return h.engine.VerifyHeader(stagedsync.ChainReader{Cfg: h.chainConfig, Db: h.database}, header, true)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		if err == nil {
@@ -164,7 +178,9 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return 0, err
 	}
-	h.blockFetcher = fetcher.NewBlockFetcher(nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+
+	GetBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
+	h.blockFetcher = fetcher.NewBlockFetcher(nil, GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)
@@ -219,7 +235,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 
 	// Execute the Ethereum handshake
 	var (
-		genesis = h.chain.Genesis()
+		genesis = h.genesis
 		number  = atomic.LoadUint64(&h.currentHeight)
 	)
 	hash, err := rawdb.ReadCanonicalHash(h.database, number)
@@ -230,7 +246,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	if err1 != nil {
 		return fmt.Errorf("reading td for %d %x: %v", number, hash, err1)
 	}
-	forkID := forkid.NewID(h.chain.Config(), genesis.Hash(), number)
+	forkID := forkid.NewID(h.chainConfig, genesis.Hash(), number)
 	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
@@ -351,9 +367,12 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 	if propagate {
 		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 		var td *big.Int
-		if parent := h.chain.GetBlock(block.ParentHash(), block.NumberU64()-1); parent != nil {
-			td = new(big.Int).Add(block.Difficulty(), h.chain.GetTd(block.ParentHash(), block.NumberU64()-1))
+
+		if rawdb.HasBody(h.database, block.ParentHash(), block.NumberU64()-1) {
+			parentTd, _ := rawdb.ReadTd(h.database, block.ParentHash(), block.NumberU64()-1)
+			td = new(big.Int).Add(block.Difficulty(), parentTd)
 		} else {
+			// If the parent's unknown, abort insertion
 			log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 			return
 		}
@@ -366,7 +385,7 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 		return
 	}
 	// Otherwise if the block is indeed in out own chain, announce it
-	if h.chain.HasBlock(hash, block.NumberU64()) {
+	if rawdb.HasBody(h.database, hash, block.NumberU64()) {
 		for _, peer := range peers {
 			peer.AsyncSendNewBlockHash(block)
 		}

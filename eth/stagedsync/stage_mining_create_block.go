@@ -62,7 +62,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{chainConfig, tx}
+	chain := ChainReader{Cfg: chainConfig, Db: tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
