@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	sentryAddr    string // Address of the sentry <host>:<port>
-	coreAddr      string // Address of the core <host>:<port>
-	chaindata     string // Path to chaindata
-	database      string // Type of database (lmdb or mdbx)
-	mapSizeStr    string // Map size for LMDB
+	sentryAddr    string   // Address of the sentry <host>:<port>
+	sentryAddrs   []string // Address of the sentry <host>:<port>
+	coreAddr      string   // Address of the core <host>:<port>
+	chaindata     string   // Path to chaindata
+	database      string   // Type of database (lmdb or mdbx)
+	mapSizeStr    string   // Map size for LMDB
 	freelistReuse int
 )
 

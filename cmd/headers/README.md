@@ -14,10 +14,10 @@ There are two modes in which the program can be run - with external p2p sentry, 
 ```
 
 The command above specifies `--datadir` option - directory where the database files will be written. These two options will need to be specified regardless of the mode the program is run.
-This specific command above assumes and external p2p sentry running on the same computer listening to the port `9091`. In order to use a p2p sentry on a different computer, or a different port (or both), the option `--sentryAddr` can be used. For example:
+This specific command above assumes and external p2p sentry running on the same computer listening to the port `9091`. In order to use a p2p sentry on a different computer, or a different port (or both), the option `--sentry.addr` can be used. For example:
 
 ```
-./buid/bin/headers download  --chaindata <path_to_database> --sentryAddr localhost:9999
+./buid/bin/headers download  --chaindata <path_to_database> --sentry.addr localhost:9999
 ```
 
 The command above will expect the p2p sentry running on the same computer, but on the port `9999`
@@ -39,5 +39,5 @@ In order to run the internal sentry, use the following command:
 ./buid/bin/headers sentry
 ```
 
-By default, sentry is listening on the `localhost:9091`. In order to change that (to listen on a different network interface, different port, or both), the option `--sentryAddr` can be used. As with the internal p2p sentry, options `--nat`, `--port`, `--staticpeers`, `--netrestrict`, `--discovery` are also available.
+By default, sentry is listening on the `localhost:9091`. In order to change that (to listen on a different network interface, different port, or both), the option `--sentry.addr` can be used. As with the internal p2p sentry, options `--nat`, `--port`, `--staticpeers`, `--netrestrict`, `--discovery` are also available.
 

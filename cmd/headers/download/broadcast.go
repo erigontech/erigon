@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Methods of sentry called by Core
+
 func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, hash common.Hash, number uint64) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
@@ -30,9 +32,11 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, hash c
 		Id:   proto_sentry.MessageId_NewBlockHashes,
 		Data: data,
 	}
-	_, err = cs.sentryClient.SendMessageToAll(ctx, req, &grpc.EmptyCallOption{})
-	if err != nil {
-		log.Error("propagateNewBlockHashes", "error", err)
+	for _, sentry := range cs.sentries {
+		_, err = sentry.SendMessageToAll(ctx, req, &grpc.EmptyCallOption{})
+		if err != nil {
+			log.Error("propagateNewBlockHashes", "error", err)
+		}
 	}
 }
 
@@ -53,7 +57,9 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 			Data: data,
 		},
 	}
-	if _, err = cs.sentryClient.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{}); err != nil {
-		log.Error("broadcastNewBlock", "error", err)
+	for _, sentry := range cs.sentries {
+		if _, err = sentry.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{}); err != nil {
+			log.Error("broadcastNewBlock", "error", err)
+		}
 	}
 }
