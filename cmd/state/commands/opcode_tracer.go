@@ -672,7 +672,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	}
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, bcb.GetHeader, bcb.Engine(), nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}

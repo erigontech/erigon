@@ -299,7 +299,7 @@ func TestBlockhash(t *testing.T) {
 	input := common.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
 	ret, _, err := Execute(data, input, &Config{
-		GetHashFn:   core.GetHashFn(header, chain),
+		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
 	}, header.Number.Uint64())
 	if err != nil {

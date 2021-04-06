@@ -4,8 +4,10 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -18,11 +20,10 @@ import (
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
-	engine := cc.Engine()
 	ibs := state.New(state.NewPlainStateReader(tx))
 	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
@@ -37,12 +38,14 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		return nil
 	}
 
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, cc, localTxs, coinbase, ibs, stateWriter, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, coinbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -54,7 +57,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, cc, remoteTxs, coinbase, ibs, stateWriter, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, coinbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -107,7 +110,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, stateWriter state.StateWriter, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -116,9 +119,9 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err
@@ -185,7 +188,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 		// Start executing the transaction
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
-		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, cc, ibs, current)
+		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 
 		switch err {
 		case core.ErrGasLimitReached:

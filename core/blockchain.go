@@ -1488,7 +1488,7 @@ func (bc *BlockChain) doneJob() {
 func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
-	chainContext ChainContext,
+	getHeader func(hash common.Hash, number uint64) *types.Header,
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
@@ -1516,7 +1516,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {

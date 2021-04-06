@@ -14,9 +14,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -32,7 +34,7 @@ type CallTracesStageParams struct {
 	Cache     *shards.StateCache
 }
 
-func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
+func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -60,7 +62,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit, params); err != nil {
+	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, chainConfig, engine, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit, params); err != nil {
 		return err
 	}
 
@@ -76,7 +78,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
+func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, engine consensus.Engine, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -87,7 +89,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
-	engine := chainContext.Engine()
 
 	var cache = params.Cache
 
@@ -156,7 +157,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		stateWriter = state.NewCachedWriter(state.NewNoopWriter(), cache)
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
-		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 		for addr := range tracer.froms {
@@ -240,7 +242,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}, params CallTracesStageParams) error {
+func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, quitCh <-chan struct{}, params CallTracesStageParams) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -256,7 +258,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, chainContext, quitCh, params); err != nil {
+	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, engine, quitCh, params); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -273,10 +275,9 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}, params CallTracesStageParams) error {
+func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, engine consensus.Engine, quitCh <-chan struct{}, params CallTracesStageParams) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
-	engine := chainContext.Engine()
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
@@ -302,8 +303,8 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 
 		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)
 		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)
-
-		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
+		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}
 		if cache.WriteSize() >= int(params.BatchSize) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -29,11 +30,11 @@ type ChainEventNotifier interface {
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	d            DownloaderGlue
-	ChainConfig  *params.ChainConfig
-	chainContext *core.TinyChainContext
-	vmConfig     *vm.Config
-	DB           ethdb.Database
+	d           DownloaderGlue
+	ChainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	Engine      consensus.Engine
+	DB          ethdb.Database
 	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
@@ -208,7 +209,7 @@ func DefaultStages() StageBuilders {
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.ChainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.Engine, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -323,14 +324,14 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
@@ -419,7 +420,7 @@ func MiningStages() StageBuilders {
 						return SpawnMiningCreateBlockStage(s, world.TX,
 							world.mining.Block,
 							world.ChainConfig,
-							world.chainContext.Engine(),
+							world.Engine,
 							world.mining.ExtraData,
 							world.mining.GasFloor,
 							world.mining.GasCeil,
@@ -443,7 +444,7 @@ func MiningStages() StageBuilders {
 							world.mining.Block,
 							world.ChainConfig,
 							world.vmConfig,
-							world.chainContext,
+							world.Engine,
 							world.mining.Block.LocalTxs,
 							world.mining.Block.RemoteTxs,
 							world.mining.Etherbase,
@@ -493,7 +494,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.mining.resultCh, world.mining.miningCancel, world.QuitCh)
+						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.Engine, world.ChainConfig, world.mining.resultCh, world.mining.miningCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

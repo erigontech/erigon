@@ -302,7 +302,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else {
 			// In this case, we're processing a transaction hash
 			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txOrBlockHash)
-			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx, blockHash, txIndex)
+			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -373,7 +373,7 @@ func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, 
 	traceType := "callTracer" // nolint: goconst
 
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx, blockHash, txIndex)
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

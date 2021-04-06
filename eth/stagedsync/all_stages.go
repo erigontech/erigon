@@ -88,7 +88,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.ChainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.Engine, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -203,14 +203,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
@@ -286,15 +286,12 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		return err
 	}
 	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
-	cc := &core.TinyChainContext{}
-	cc.SetDB(nil)
-	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,
-		cc,
+		engine,
 		vmConfig,
 		db,
 		db,
@@ -393,7 +390,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,
-		cc,
+		engine,
 		vmConfig,
 		tx,
 		tx,
