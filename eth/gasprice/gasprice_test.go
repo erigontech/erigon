@@ -37,25 +37,26 @@ import (
 )
 
 type testBackend struct {
-	chain *core.BlockChain
+	db  ethdb.Database
+	cfg *params.ChainConfig
 }
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentHeader(b.chain.ChainDb()), nil
+		return rawdb.ReadCurrentHeader(b.db), nil
 	}
-	return rawdb.ReadHeaderByNumber(b.chain.ChainDb(), uint64(number)), nil
+	return rawdb.ReadHeaderByNumber(b.db, uint64(number)), nil
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	if number == rpc.LatestBlockNumber {
-		return b.chain.CurrentBlock(), nil
+		return rawdb.ReadCurrentBlock(b.db), nil
 	}
-	return b.chain.GetBlockByNumber(uint64(number)), nil
+	return rawdb.ReadBlockByNumber(b.db, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *params.ChainConfig {
-	return b.chain.Config()
+	return b.cfg
 }
 
 func newTestBackend(t *testing.T) *testBackend {
@@ -88,22 +89,19 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	chain, err := core.NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to create local chain, %v", err)
-	}
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{chain: chain}
+	return &testBackend{db: db, cfg: params.TestChainConfig}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
-	return b.chain.CurrentHeader()
+	return rawdb.ReadCurrentHeader(b.db)
 }
 
 func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	return b.chain.GetBlockByNumber(number)
+	r, _ := rawdb.ReadBlockByNumber(b.db, number)
+	return r
 }
 
 func TestSuggestPrice(t *testing.T) {
