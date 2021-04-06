@@ -25,7 +25,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -38,12 +37,9 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
@@ -1360,48 +1356,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		Fatalf("Developer chains are ephemeral")
 	}
 	return genesis
-}
-
-// MakeChain creates a chain manager from set command line flags.
-func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *params.ChainConfig, chain *core.BlockChain, chainDb *ethdb.ObjectDatabase) {
-	var err error
-	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */, false /* overwrite */)
-	if err != nil {
-		Fatalf("%v", err)
-	}
-	var engine consensus.Engine
-	if config.Clique != nil {
-		engine = clique.New(config.Clique, chainDb)
-	} else {
-		engine = ethash.NewFaker()
-		if !ctx.GlobalBool(FakePoWFlag.Name) {
-			datasetDir, _ := stack.ResolvePath(ethconfig.Defaults.Ethash.DatasetDir)
-			engine = ethash.New(ethash.Config{
-				CachesInMem:    ethconfig.Defaults.Ethash.CachesInMem,
-				CachesLockMmap: ethconfig.Defaults.Ethash.CachesLockMmap,
-				DatasetDir:     datasetDir,
-				DatasetsInMem:  ethconfig.Defaults.Ethash.DatasetsInMem,
-			}, nil, false)
-		}
-	}
-	cache := &core.CacheConfig{
-		Pruning: false, // no pruning for auxiliary commands
-	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {
-		cache.TrieCleanLimit = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheTrieFlag.Name) / 100
-	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheGCFlag.Name) {
-		cache.TrieDirtyLimit = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
-	}
-	vmcfg := vm.Config{EnablePreimageRecording: ctx.GlobalBool(VMEnableDebugFlag.Name)}
-
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg, nil, txCacher)
-	if err != nil {
-		Fatalf("Can't create BlockChain: %v", err)
-	}
-	return config, chain, chainDb
 }
 
 // MakeConsolePreloads retrieves the absolute paths for the console JavaScript

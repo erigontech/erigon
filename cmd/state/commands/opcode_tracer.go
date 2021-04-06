@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
-	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -400,14 +400,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	}
 	defer historyTx.Rollback()
 	chainConfig := genesis.Config
-	engine := ethash.NewFaker()
 	vmConfig := vm.Config{Tracer: ot, Debug: true}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, txCacher)
-	if err != nil {
-		return err
-	}
-	defer bc.Stop()
 
 	noOpWriter := state.NewNoopWriter()
 
@@ -529,13 +522,14 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
 	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
+		block, _ := rawdb.ReadBlockByNumber(chainDb, blockNum)
 		if block == nil {
 			break
 		}
 		bnStr := strconv.Itoa(int(blockNum))
 
 		if fsum == nil {
+			var err error
 			fsum, err = os.Create("./summary-" + bnStr)
 			check(err)
 			ot.fsumWriter = bufio.NewWriter(fsum)
@@ -545,7 +539,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, bc, block, vmConfig)
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -660,7 +655,7 @@ func check(e error) {
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -672,7 +667,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	}
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, err := core.ApplyTransaction(chainConfig, bcb.GetHeader, bcb.Engine(), nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}
