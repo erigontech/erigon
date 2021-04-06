@@ -127,6 +127,7 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
+		controlServer,
 		controlServer.requestWakeUpBodies,
 		timeout,
 	); err != nil {
@@ -146,7 +147,7 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 		return
 	}
 
-	for inreq, err := receiveUploadClient.Recv(); ; inreq, err = receiveUploadClient.Recv() {
+	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Error("Receive upload loop terminated", "error", err)
@@ -155,7 +156,7 @@ func recvUploadMessage(ctx context.Context, sentryClient proto_sentry.SentryClie
 			return
 		}
 
-		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
+		if err = controlServer.handleInboundMessage(ctx, req); err != nil {
 			log.Error("Handling incoming message", "error", err)
 		}
 	}
@@ -171,7 +172,7 @@ func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, co
 		return
 	}
 
-	for inreq, err := receiveClient.Recv(); ; inreq, err = receiveClient.Recv() {
+	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Error("Receive loop terminated", "error", err)
@@ -180,7 +181,7 @@ func recvMessage(ctx context.Context, sentryClient proto_sentry.SentryClient, co
 			return
 		}
 
-		if err = controlServer.handleInboundMessage(ctx, inreq); err != nil {
+		if err = controlServer.handleInboundMessage(ctx, req); err != nil {
 			log.Error("Handling incoming message", "error", err)
 		}
 	}
@@ -232,6 +233,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
+		controlServer,
 		controlServer.requestWakeUpBodies,
 		timeout,
 	); err != nil {
@@ -488,7 +490,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage) err
 	return nil
 }
 
-func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func getAncestor(db ethdb.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}
@@ -533,7 +535,7 @@ func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, m
 	return hash, number
 }
 
-func queryHeaders(db ethdb.Database, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
+func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)

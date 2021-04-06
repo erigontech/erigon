@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
@@ -33,20 +34,21 @@ func StageLoop(
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
+	blockPropagator adapter.BlockPropagator,
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
 	sync := stagedsync.New(
-		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
+		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
 	initialCycle := true
 	stopped := false
-	for !stopped {
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
+	for !stopped {
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 
@@ -68,7 +70,10 @@ func StageLoop(
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+			tx, err = tx.Begin(context.Background(), ethdb.RW)
+			if err != nil {
+				return err
+			}
 			defer tx.Rollback()
 			writeDB = tx
 		} else {
@@ -83,59 +88,17 @@ func StageLoop(
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
 
-		// begin tx at stage right after head/body download Or at first unwind stage
-		// it's temporary solution
-		st.BeforeStageRun(stages.Senders, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-
-			var errTx error
-			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-			return errTx
-		})
-		st.OnBeforeUnwind(func(id stages.SyncStage) error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-			if st.IsAfter(id, stages.TxPool) {
-				return nil
-			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-				return nil
-			}
-			var errTx error
-			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-			return errTx
-		})
-		st.BeforeStageUnwind(stages.Bodies, func() error {
-			if !canRunCycleInOneTransaction {
-				return nil
-			}
-			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-				return nil
-			}
-			log.Info("Commit cycle")
-			errCommit := tx.Commit()
-			return errCommit
-		})
-
 		err = st.Run(db, writeDB)
 		if err != nil {
 			return err
 		}
 		if canRunCycleInOneTransaction {
-			if hasTx, ok := tx.(ethdb.HasTx); !ok || hasTx.Tx() != nil {
-				commitStart := time.Now()
-				errTx := tx.Commit()
-				if errTx == nil {
-					log.Info("Commit cycle", "in", time.Since(commitStart))
-				} else {
-					return errTx
-				}
+			commitStart := time.Now()
+			errTx := tx.Commit()
+			if errTx != nil {
+				return errTx
 			}
+			log.Info("Commit cycle", "in", time.Since(commitStart))
 		}
 		initialCycle = false
 		select {
@@ -154,6 +117,7 @@ func ReplacementStages(ctx context.Context,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
+	blockPropagator adapter.BlockPropagator,
 	wakeUpChan chan struct{},
 	timeout int,
 ) stagedsync.StageBuilders {
@@ -165,7 +129,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan, world.BatchSize)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, blockPropagator, world.InitialCycle, wakeUpChan, world.BatchSize)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)
@@ -195,7 +159,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout, world.BatchSize)
+						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout, world.BatchSize)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.DB)
