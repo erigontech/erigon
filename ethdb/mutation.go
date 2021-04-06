@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -374,64 +373,4 @@ func (m *mutation) MemCopy() Database {
 
 func (m *mutation) SetRwKV(kv RwKV) {
 	m.db.(HasRwKV).SetRwKV(kv)
-}
-
-func NewRWDecorator(db Database) *RWCounterDecorator {
-	return &RWCounterDecorator{
-		db,
-		DBCounterStats{},
-	}
-}
-
-type RWCounterDecorator struct {
-	Database
-	DBCounterStats
-}
-
-type DBCounterStats struct {
-	Put           uint64
-	Get           uint64
-	GetS          uint64
-	GetAsOf       uint64
-	Has           uint64
-	Walk          uint64
-	WalkAsOf      uint64
-	MultiWalkAsOf uint64
-	Delete        uint64
-	MultiPut      uint64
-}
-
-func (d *RWCounterDecorator) Put(bucket string, key, value []byte) error {
-	atomic.AddUint64(&d.DBCounterStats.Put, 1)
-	return d.Database.Put(bucket, key, value)
-}
-
-func (d *RWCounterDecorator) Get(bucket string, key []byte) ([]byte, error) {
-	atomic.AddUint64(&d.DBCounterStats.Get, 1)
-	return d.Database.Get(bucket, key)
-}
-
-func (d *RWCounterDecorator) Has(bucket string, key []byte) (bool, error) {
-	atomic.AddUint64(&d.DBCounterStats.Has, 1)
-	return d.Database.Has(bucket, key)
-}
-func (d *RWCounterDecorator) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
-	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
-	return d.Database.Walk(bucket, startkey, fixedbits, walker)
-}
-
-func (d *RWCounterDecorator) Delete(bucket string, k, v []byte) error {
-	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
-	return d.Database.Delete(bucket, k, v)
-}
-func (d *RWCounterDecorator) MultiPut(tuples ...[]byte) (uint64, error) {
-	atomic.AddUint64(&d.DBCounterStats.MultiPut, 1)
-	return d.Database.MultiPut(tuples...)
-}
-func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
-	mm := &mutation{
-		db:   d,
-		puts: btree.New(32),
-	}
-	return mm
 }
