@@ -14,10 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package core_test
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
@@ -25,9 +24,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"golang.org/x/crypto/sha3"
@@ -42,11 +43,11 @@ func TestStateProcessorErrors(t *testing.T) {
 		signer     = types.HomesteadSigner{}
 		testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		db         = ethdb.NewMemDatabase()
-		gspec      = &Genesis{
+		gspec      = &core.Genesis{
 			Config: params.TestChainConfig,
 		}
 		genesis       = gspec.MustCommit(db)
-		blockchain, _ = NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil)
+		blockchain, _ = core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, nil)
 	)
 	defer blockchain.Stop()
 	var makeTx = func(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *types.Transaction {
@@ -105,7 +106,7 @@ func TestStateProcessorErrors(t *testing.T) {
 		// multiplication len(data) +gas_per_byte overflows uint64. Not testable at the moment
 	} {
 		block := GenerateBadBlock(genesis, ethash.NewFaker(), tt.txs)
-		_, err := blockchain.InsertChain(context.TODO(), types.Blocks{block})
+		_, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), types.Blocks{block}, true /* checkRoot */)
 		if err == nil {
 			t.Fatal("block imported without errors")
 		}
@@ -123,9 +124,9 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(&fakeChainReader{params.TestChainConfig}, parent.Time()+10,
+		Difficulty: engine.CalcDifficulty(&core.FakeChainReader{Cfg: params.TestChainConfig}, parent.Time()+10,
 			parent.Time(), parent.Difficulty(), parent.Number(), parent.Hash(), parent.UncleHash()),
-		GasLimit:  CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
+		GasLimit:  core.CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:    new(big.Int).Add(parent.Number(), common.Big1),
 		Time:      parent.Time() + 10,
 		UncleHash: types.EmptyUncleHash,

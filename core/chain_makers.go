@@ -173,7 +173,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 	if b.header.Time <= b.parent.Header().Time {
 		panic("block time out of range")
 	}
-	chainreader := &fakeChainReader{config: b.config}
+	chainreader := &FakeChainReader{Cfg: b.config}
 	parent := b.parent.Header()
 	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
 }
@@ -211,7 +211,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
-	chainreader := &fakeChainReader{config: config}
+	chainreader := &FakeChainReader{Cfg: config}
 	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
 	if errBegin != nil {
 		return nil, nil, errBegin
@@ -364,17 +364,17 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	}
 }
 
-type fakeChainReader struct {
-	config *params.ChainConfig
+type FakeChainReader struct {
+	Cfg *params.ChainConfig
 }
 
 // Config returns the chain configuration.
-func (cr *fakeChainReader) Config() *params.ChainConfig {
-	return cr.config
+func (cr *FakeChainReader) Config() *params.ChainConfig {
+	return cr.Cfg
 }
 
-func (cr *fakeChainReader) CurrentHeader() *types.Header                            { return nil }
-func (cr *fakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
-func (cr *fakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (cr *fakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
-func (cr *fakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
+func (cr *FakeChainReader) CurrentHeader() *types.Header                            { return nil }
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }

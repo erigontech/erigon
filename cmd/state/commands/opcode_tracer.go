@@ -674,7 +674,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
 		if err != nil {
-			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
+			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}

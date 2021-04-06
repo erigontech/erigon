@@ -206,9 +206,6 @@ type BlockChain interface {
 	// FastSyncCommitHead directly commits the head block to a certain entity.
 	FastSyncCommitHead(common.Hash) error
 
-	// InsertChain inserts a batch of blocks into the local chain.
-	InsertChain(context.Context, types.Blocks) (int, error)
-
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
 

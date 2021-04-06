@@ -165,11 +165,6 @@ func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, db ethd
 	return false, nil
 }
 
-// InsertChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
-	panic("")
-}
-
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) InsertHeaderChain(headers []*types.Header, checkFreq int) (i int, err error) {
 	panic("")
