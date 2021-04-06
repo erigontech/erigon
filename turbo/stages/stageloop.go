@@ -8,13 +8,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
@@ -34,13 +34,12 @@ func StageLoop(
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
-	propagateNewBlockHashes func(ctx context.Context, hash common.Hash, number uint64),
-	broadcastNewBlock func(ctx context.Context, b *types.Block, td *uint256.Int),
+	blockPropagator adapter.BlockPropagator,
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
 	sync := stagedsync.New(
-		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
+		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -118,6 +117,7 @@ func ReplacementStages(ctx context.Context,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
+	blockPropagator adapter.BlockPropagator,
 	wakeUpChan chan struct{},
 	timeout int,
 ) stagedsync.StageBuilders {
@@ -129,7 +129,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan, world.BatchSize)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, blockPropagator, world.InitialCycle, wakeUpChan, world.BatchSize)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)
@@ -159,7 +159,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout, world.BatchSize)
+						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout, world.BatchSize)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.DB)

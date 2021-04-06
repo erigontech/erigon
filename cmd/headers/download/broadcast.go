@@ -2,8 +2,8 @@ package download
 
 import (
 	"context"
+	"math/big"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc"
 )
 
-func (cs *ControlServerImpl) propagateNewBlockHashes(ctx context.Context, hash common.Hash, number uint64) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
+func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, hash common.Hash, number uint64) {
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
 	data, err := rlp.EncodeToBytes(&eth.NewBlockHashesPacket{
 		{
 			Hash:   hash,
@@ -36,12 +36,12 @@ func (cs *ControlServerImpl) propagateNewBlockHashes(ctx context.Context, hash c
 	}
 }
 
-func (cs *ControlServerImpl) broadcastNewBlock(ctx context.Context, block *types.Block, td *uint256.Int) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
+func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: block,
-		TD:    td.ToBig(),
+		TD:    td,
 	})
 	if err != nil {
 		log.Error("broadcastNewBlock", "error", err)
