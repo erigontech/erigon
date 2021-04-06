@@ -452,6 +452,7 @@ type StreamMsg struct {
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
+	ctx             context.Context
 	natSetting      string
 	port            int
 	staticPeers     []string
@@ -644,14 +645,14 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
+func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 	init := ss.statusData == nil
 	if init {
 		var err error
 		genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-		ss.p2pServer, err = p2pServer(ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
+		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
 		if err != nil {
 			return &empty.Empty{}, err
 		}

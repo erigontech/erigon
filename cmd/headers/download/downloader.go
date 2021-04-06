@@ -203,6 +203,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	ctx := rootContext()
 
 	sentryServer := &SentryServerImpl{
+		ctx:             ctx,
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
 	}
