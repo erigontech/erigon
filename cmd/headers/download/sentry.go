@@ -426,7 +426,7 @@ func p2pServer(ctx context.Context,
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
+func Sentry(natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string) error {
 	ctx := rootContext()
 
 	sentryServer, err := grpcSentryServer(ctx, sentryAddr)

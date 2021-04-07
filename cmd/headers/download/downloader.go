@@ -63,7 +63,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 }
 
 // Download creates and starts standalone downloader
-func Download(sentryAddrs []string, coreAddr string, db ethdb.Database, timeout, window int, chain string) error {
+func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string) error {
 	ctx := rootContext()
 
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
@@ -722,42 +722,4 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
-}
-
-func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
-	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-	reqData := &eth.GetBlockHeadersPacket{
-		Amount:  req.Length,
-		Reverse: req.Reverse,
-		Skip:    req.Skip,
-		Origin:  eth.HashOrNumber{Hash: req.Hash},
-	}
-	if req.Hash == (common.Hash{}) {
-		reqData.Origin.Number = req.Number
-	}
-	bytes, err := rlp.EncodeToBytes(reqData)
-	if err != nil {
-		log.Error("Could not encode header request", "err", err)
-		return nil
-	}
-	minBlock := req.Number
-	if !req.Reverse {
-		minBlock = req.Number + req.Length*req.Skip
-	}
-	outreq := proto_sentry.SendMessageByMinBlockRequest{
-		MinBlock: minBlock,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_GetBlockHeaders,
-			Data: bytes,
-		},
-	}
-	sentPeers, err1 := cs.sentries[0].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err1 != nil {
-		log.Error("Could not send header request", "err", err1)
-		return nil
-	}
-	if sentPeers == nil || len(sentPeers.Peers) == 0 {
-		return nil
-	}
-	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 }

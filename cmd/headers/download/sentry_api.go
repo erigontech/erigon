@@ -2,14 +2,17 @@ package download
 
 import (
 	"context"
+	"math/rand"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 )
 
@@ -54,15 +57,72 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 			Data: bytes,
 		},
 	}
-	sentPeers, err1 := cs.sentries[0].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err1 != nil {
-		log.Error("Could not send block bodies request", "err", err1)
+
+	// if sentry not found peers to send such message, try next one. stop if found.
+	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			log.Error("Could not send block bodies request", "err", err1)
+			return nil
+		}
+		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			continue
+		}
+		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
+	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+	reqData := &eth.GetBlockHeadersPacket{
+		Amount:  req.Length,
+		Reverse: req.Reverse,
+		Skip:    req.Skip,
+		Origin:  eth.HashOrNumber{Hash: req.Hash},
+	}
+	if req.Hash == (common.Hash{}) {
+		reqData.Origin.Number = req.Number
+	}
+	bytes, err := rlp.EncodeToBytes(reqData)
+	if err != nil {
+		log.Error("Could not encode header request", "err", err)
 		return nil
 	}
-	if sentPeers == nil || len(sentPeers.Peers) == 0 {
-		return nil
+	minBlock := req.Number
+	if !req.Reverse {
+		minBlock = req.Number + req.Length*req.Skip
 	}
-	return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+	outreq := proto_sentry.SendMessageByMinBlockRequest{
+		MinBlock: minBlock,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_GetBlockHeaders,
+			Data: bytes,
+		},
+	}
+
+	// if sentry not found peers to send such message, try next one. stop if found.
+	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			log.Error("Could not send header request", "err", err1)
+			return nil
+		}
+		if sentPeers == nil || len(sentPeers.Peers) == 0 {
+			continue
+		}
+		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
+	i := rand.Intn(len(cs.sentries) - 1)
+	to := i
+	return i, true, func() (int, bool) {
+		i = (i + 1) % len(cs.sentries)
+		return i, i != to
+	}
 }
 
 func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {

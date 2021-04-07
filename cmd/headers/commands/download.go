@@ -13,7 +13,7 @@ var (
 )
 
 func init() {
-	downloadCmd.Flags().StringSliceVar(&sentryAddrs, "sentry.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
+	downloadCmd.Flags().StringSliceVar(&sentryAddrs, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	downloadCmd.Flags().BoolVar(&combined, "combined", false, "run downloader and sentry in the same process")
 	downloadCmd.Flags().IntVar(&timeout, "timeout", 30, "timeout for devp2p delivery requests, in seconds")
 	downloadCmd.Flags().IntVar(&window, "window", 65536, "size of sliding window for downloading block bodies, block")
@@ -41,6 +41,6 @@ var downloadCmd = &cobra.Command{
 			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain)
 		}
 
-		return download.Download(sentryAddrs, coreAddr, db, timeout, window, chain)
+		return download.Download(sentryAddrs, db, timeout, window, chain)
 	},
 }
