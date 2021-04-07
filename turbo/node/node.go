@@ -125,26 +125,29 @@ func makeConfigNode(config *node.Config) *node.Node {
 // This function should be called before launching devp2p stack.
 func prepare(ctx *cli.Context) {
 	// If we're running a known preset, log it for convenience.
-	switch {
-	case ctx.GlobalIsSet(utils.RopstenFlag.Name):
+	chain := ctx.GlobalString(utils.ChainFlag.Name)
+	switch chain {
+	case params.RopstenChainName:
 		log.Info("Starting Turbo-Geth on Ropsten testnet...")
 
-	case ctx.GlobalIsSet(utils.RinkebyFlag.Name):
+	case params.RinkebyChainName:
 		log.Info("Starting Turbo-Geth on Rinkeby testnet...")
 
-	case ctx.GlobalIsSet(utils.GoerliFlag.Name):
+	case params.GoerliChainName:
 		log.Info("Starting Turbo-Geth on Görli testnet...")
 
-	case ctx.GlobalIsSet(utils.DeveloperFlag.Name):
+	case params.DevChainName:
 		log.Info("Starting Turbo-Geth in ephemeral dev mode...")
 
-	case !ctx.GlobalIsSet(utils.NetworkIdFlag.Name):
-		log.Info("Starting Turbo-Geth on Ethereum mainnet...")
+	default:
+		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
+			log.Info("Starting Turbo-Geth on Ethereum mainnet...")
+		}
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if !ctx.GlobalIsSet(utils.CacheFlag.Name) && !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
 		// Make sure we're not on any supported preconfigured testnet either
-		if !ctx.GlobalIsSet(utils.RopstenFlag.Name) && !ctx.GlobalIsSet(utils.RinkebyFlag.Name) && !ctx.GlobalIsSet(utils.GoerliFlag.Name) && !ctx.GlobalIsSet(utils.DeveloperFlag.Name) {
+		if chain != params.RopstenChainName && chain != params.RinkebyChainName && chain != params.GoerliChainName && chain != params.DevChainName {
 			// Nope, we're really on mainnet. Bump that cache up!
 			log.Info("Bumping default cache on mainnet", "provided", ctx.GlobalInt(utils.CacheFlag.Name), "updated", 4096)
 			ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(4096)) //nolint:errcheck
