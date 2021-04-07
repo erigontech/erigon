@@ -113,6 +113,9 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:   dbNoFork,
 			Chain:      chainNoFork,
+			genesis:    chainNoFork.Genesis(),
+			vmConfig:   chainNoFork.GetVMConfig(),
+			engine:     chainNoFork.Engine(),
 			TxPool:     newTestTxPool(),
 			Network:    1,
 			BloomCache: 1,
@@ -120,6 +123,9 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		ethProFork, _ = newHandler(&handlerConfig{
 			Database:   dbProFork,
 			Chain:      chainProFork,
+			genesis:    chainNoFork.Genesis(),
+			vmConfig:   chainNoFork.GetVMConfig(),
+			engine:     chainNoFork.Engine(),
 			TxPool:     newTestTxPool(),
 			Network:    1,
 			BloomCache: 1,
