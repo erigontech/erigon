@@ -31,46 +31,46 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 
 // Implements consensus.ChainReader
 type ChainReader struct {
-	config *params.ChainConfig
-	db     ethdb.Getter
+	Cfg *params.ChainConfig
+	Db  ethdb.Getter
 }
 
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *params.ChainConfig {
-	return cr.config
+	return cr.Cfg
 }
 
 // CurrentHeader retrieves the current header from the local chain.
 func (cr ChainReader) CurrentHeader() *types.Header {
-	hash := rawdb.ReadHeadHeaderHash(cr.db)
-	number := rawdb.ReadHeaderNumber(cr.db, hash)
-	return rawdb.ReadHeader(cr.db, hash, *number)
+	hash := rawdb.ReadHeadHeaderHash(cr.Db)
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	return rawdb.ReadHeader(cr.Db, hash, *number)
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
 func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(cr.db, hash, number)
+	return rawdb.ReadHeader(cr.Db, hash, number)
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number.
 func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	hash, err := rawdb.ReadCanonicalHash(cr.db, number)
+	hash, err := rawdb.ReadCanonicalHash(cr.Db, number)
 	if err != nil {
 		log.Error("ReadCanonicalHash failed", "err", err)
 		return nil
 	}
-	return rawdb.ReadHeader(cr.db, hash, number)
+	return rawdb.ReadHeader(cr.Db, hash, number)
 }
 
 // GetHeaderByHash retrieves a block header from the database by its hash.
 func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	number := rawdb.ReadHeaderNumber(cr.db, hash)
-	return rawdb.ReadHeader(cr.db, hash, *number)
+	number := rawdb.ReadHeaderNumber(cr.Db, hash)
+	return rawdb.ReadHeader(cr.Db, hash, *number)
 }
 
 // GetBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.db, hash, number)
+	return rawdb.ReadBlock(cr.Db, hash, number)
 }
 
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {

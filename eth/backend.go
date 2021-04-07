@@ -429,6 +429,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:   chainDb,
 		Chain:      eth.blockchain,
+		genesis:    eth.blockchain.Genesis(),
+		vmConfig:   eth.blockchain.GetVMConfig(),
+		engine:     eth.blockchain.Engine(),
 		TxPool:     eth.txPool,
 		Network:    config.NetworkID,
 		Checkpoint: checkpoint,

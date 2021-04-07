@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -424,18 +423,6 @@ func initialState1() error {
 		return err
 	}
 	engine = ethash.NewFaker()
-
-	if err != nil {
-		return err
-	}
-
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		return err
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	if err = hexPalette(); err != nil {
 		return err

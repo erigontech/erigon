@@ -154,6 +154,9 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	handler, _ := newHandler(&handlerConfig{
 		Database:   db,
 		Chain:      chain,
+		genesis:    chain.Genesis(),
+		vmConfig:   chain.GetVMConfig(),
+		engine:     chain.Engine(),
 		TxPool:     txpool,
 		Network:    1,
 		BloomCache: 1,

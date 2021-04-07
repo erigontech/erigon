@@ -6,18 +6,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/http"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
@@ -29,16 +24,7 @@ func FixState(chaindata string, url string) {
 		panic(err1)
 	}
 	defer tx.Rollback()
-
-	engine := ethash.NewFullFaker()
-	chainConfig := params.MainnetChainConfig
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, errOpen := core.NewBlockChain(tx, nil, chainConfig, engine, vm.Config{}, nil, txCacher)
-	if errOpen != nil {
-		panic(errOpen)
-	}
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
+	currentBlock := rawdb.ReadCurrentBlock(tx)
 	blockNum := currentBlock.NumberU64()
 	blockHash := currentBlock.Hash()
 	fmt.Printf("Block number: %d\n", blockNum)

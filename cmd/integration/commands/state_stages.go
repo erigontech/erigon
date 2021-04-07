@@ -427,8 +427,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)
-	defer bc.Stop()
+	_, _, _, st, _, cache, progress := newSync(ch, db, tx, nil)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)
@@ -492,8 +491,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, _, st, _, cache, progress := newSync(ch, db, tx, nil)
-	defer bc.Stop()
+	engine, chainConfig, vmConfig, st, _, cache, progress := newSync(ch, db, tx, nil)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)
@@ -514,7 +512,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		if err = stagedsync.SpawnExecuteBlocksStage(
 			stageState, tx,
-			bc.Config(), cc, bc.GetVMConfig(),
+			chainConfig, engine, vmConfig,
 			ch,
 			stagedsync.ExecuteBlockStageParams{
 				ToBlock:       to, // limit execution to the specified block

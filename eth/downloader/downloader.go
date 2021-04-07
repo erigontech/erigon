@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,9 +114,10 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
+	engine       consensus.Engine
+	vmConfig     *vm.Config
 	chainConfig  *params.ChainConfig
 	miningConfig *params.MiningConfig
-	blockchain   BlockChain
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -171,64 +171,8 @@ type Downloader struct {
 	mining          *stagedsync.StagedSync
 }
 
-// BlockChain encapsulates functions required to sync a (full or fast) blockchain.
-type BlockChain interface {
-	// HasHeader verifies a header's presence in the local chain.
-	HasHeader(common.Hash, uint64) bool
-
-	// GetHeaderByHash retrieves a header from the local chain.
-	GetHeaderByHash(common.Hash) *types.Header
-
-	// CurrentHeader retrieves the head header from the local chain.
-	CurrentHeader() *types.Header
-
-	// GetTd returns the total difficulty of a local block.
-	GetTd(common.Hash, uint64) *big.Int
-
-	// InsertHeaderChain inserts a batch of headers into the local chain.
-	InsertHeaderChain([]*types.Header, int) (int, error)
-
-	// SetHead rewinds the local chain to a new head.
-	SetHead(uint64) error
-
-	// HasBlock verifies a block's presence in the local chain.
-	HasBlock(common.Hash, uint64) bool
-
-	// GetBlockByHash retrieves a block from the local chain.
-	GetBlockByHash(common.Hash) *types.Block
-
-	// CurrentBlock retrieves the head block from the local chain.
-	CurrentBlock() *types.Block
-
-	// CurrentFastBlock retrieves the head fast block from the local chain.
-	CurrentFastBlock() *types.Block
-
-	// FastSyncCommitHead directly commits the head block to a certain entity.
-	FastSyncCommitHead(common.Hash) error
-
-	// InsertReceiptChain inserts a batch of receipts into the local chain.
-	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
-
-	NotifyHeightKnownBlock(h uint64)
-
-	// GetBlockByNumber is necessary for staged sync
-	GetBlockByNumber(number uint64) *types.Block
-
-	// Engine is necessary for staged sync
-	Engine() consensus.Engine
-
-	// GetHeader is necessary for staged sync
-	GetHeader(common.Hash, uint64) *types.Header
-
-	// GetVMConfig is necessary for staged sync
-	GetVMConfig() *vm.Config
-
-	// Stop the import that is going on
-	Stop()
-}
-
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, chain BlockChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	dl := &Downloader{
 		stateDB:       stateDB,
 		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
@@ -237,7 +181,8 @@ func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *
 		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
 		miningConfig:  miningConfig,
-		blockchain:    chain,
+		engine:        engine,
+		vmConfig:      vmConfig,
 		dropPeer:      dropPeer,
 		headerCh:      make(chan dataPack, 1),
 		bodyCh:        make(chan dataPack, 1),
@@ -510,8 +455,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	d.stagedSyncState, err = d.stagedSync.Prepare(
 		d,
 		d.chainConfig,
-		d.blockchain.Engine(),
-		d.blockchain.GetVMConfig(),
+		d.engine,
+		d.vmConfig,
 		d.stateDB,
 		writeDB,
 		p.id,
@@ -608,8 +553,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	if d.miningState, err = d.mining.Prepare(
 		d,
 		d.chainConfig,
-		d.blockchain.Engine(),
-		d.blockchain.GetVMConfig(),
+		d.engine,
+		d.vmConfig,
 		nil,
 		tx,
 		p.id,
@@ -690,7 +635,6 @@ func (d *Downloader) Cancel() {
 // Terminate interrupts the downloader, canceling all pending operations.
 // The downloader cannot be reused after calling Terminate.
 func (d *Downloader) Terminate() {
-	d.blockchain.Stop()
 	// Close the termination channel (make sure double close is allowed)
 	d.quitLock.Lock()
 	common.SafeClose(d.quitCh)
@@ -842,7 +786,7 @@ func (d *Downloader) findAncestorSpanSearch(p *peerConnection, remoteHeight, loc
 				h := headers[i].Hash()
 				n := headers[i].Number.Uint64()
 
-				if d.blockchain.HasHeader(h, n) {
+				if rawdb.HasHeader(d.stateDB, h, n) {
 					number, hash = n, h
 					break
 				}
@@ -912,7 +856,7 @@ func (d *Downloader) findAncestorBinarySearch(p *peerConnection, remoteHeight ui
 				h := headers[0].Hash()
 				n := headers[0].Number.Uint64()
 
-				if !d.blockchain.HasHeader(h, n) {
+				if !rawdb.HasHeader(d.stateDB, h, n) {
 					end = check
 					break
 				}
@@ -1477,7 +1421,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				var err error
 				var newCanonical bool
 
-				if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency); err != nil {
+				if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.engine, frequency); err != nil {
 					log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 					return fmt.Errorf("%w: %v", errInvalidChain, err)
 				}
@@ -1691,7 +1635,6 @@ func (d *Downloader) requestTTL() time.Duration {
 func (d *Downloader) SetSyncStatsChainHeight(h uint64) {
 	d.syncStatsLock.Lock()
 	d.syncStatsChainHeight = h
-	d.blockchain.NotifyHeightKnownBlock(h)
 	d.syncStatsLock.Unlock()
 }
 
@@ -1699,7 +1642,6 @@ func (d *Downloader) setGreaterSyncStatsChainHeight(h, old uint64) {
 	d.syncStatsLock.Lock()
 	if d.syncStatsChainHeight < old {
 		d.syncStatsChainHeight = h
-		d.blockchain.NotifyHeightKnownBlock(h)
 	}
 	d.syncStatsLock.Unlock()
 }

@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -59,10 +60,6 @@ func ExampleGenerateChain() {
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	genesis := gspec.MustCommit(db)
-
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -106,7 +103,7 @@ func ExampleGenerateChain() {
 	}
 
 	st := state.New(state.NewDbStateReader(db))
-	fmt.Printf("last block: #%d\n", blockchain.CurrentBlock().Number())
+	fmt.Printf("last block: #%d\n", rawdb.ReadCurrentBlock(db).Number())
 	fmt.Println("balance of addr1:", st.GetBalance(addr1))
 	fmt.Println("balance of addr2:", st.GetBalance(addr2))
 	fmt.Println("balance of addr3:", st.GetBalance(addr3))

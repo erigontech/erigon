@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -155,7 +156,7 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 		unknownNumbers = make([]uint64, 0, len(numbers))
 	)
 	for i := 0; i < len(hashes); i++ {
-		if !h.chain.HasBlock(hashes[i], numbers[i]) {
+		if !rawdb.HasBody(h.database, hashes[i], numbers[i]) {
 			unknownHashes = append(unknownHashes, hashes[i])
 			unknownNumbers = append(unknownNumbers, numbers[i])
 		}

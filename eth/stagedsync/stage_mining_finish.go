@@ -46,7 +46,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 		"difficulty", block.Difficulty(),
 	)
 
-	chain := ChainReader{chainConfig, tx}
+	chain := ChainReader{Cfg: chainConfig, Db: tx}
 	if err := engine.Seal(chain, block, results, sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
