@@ -102,6 +102,7 @@ func (sb *SnapshotMigrator) CreateHeadersSnapshot(chainDB ethdb.Database, toBloc
 }
 
 func (sb *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database) error {
+	fmt.Println("ReplaceHeadersSnapshot")
 	if  sb.Replacing {
 		return nil
 	}
@@ -119,6 +120,7 @@ func (sb *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database) error
 	if _, ok := chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
+	fmt.Println("sb.Replacing = true")
 	sb.Replacing = true
 	snapshotKV,err:=OpenHeadersSnapshot(sb.MigrateToSnapshotPath)
 	if err!=nil {
@@ -126,15 +128,20 @@ func (sb *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database) error
 	}
 
 	go func() {
+		fmt.Println("Update snapshots")
 		defer func() {
+			fmt.Println("sb.Replacing = false")
 			sb.Replacing = false
 		}()
 		done := make(chan struct{})
 		chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
+		fmt.Println("-Update snapshots")
 		select {
-		case <-time.After(time.Minute * 30):
+		case <-time.After(time.Minute):
+			panic("timeout")
 			log.Error("timout on closing headers snapshot database" )
 		case <-done:
+			fmt.Println("<-done")
 			if len(sb.CurrentSnapshotPath) >0 {
 				sb.toRemove[sb.CurrentSnapshotPath] = struct{}{}
 			}
