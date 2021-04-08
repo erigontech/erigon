@@ -248,7 +248,7 @@ var (
 		},
 	}
 
-	// MainnetChainConfig is the chain parameters to run a node on the main network.
+	// MainnetChainConfig is the chain parameters to run a PoW dev net to test turbo-geth mining
 	TurboMineChainConfig = &ChainConfig{
 		ChainID:             new(big.Int).SetBytes([]byte("turbo-mine")),
 		HomesteadBlock:      big.NewInt(0),
