@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/anacrolix/torrent/bencode"
 	"path/filepath"
 	"time"
 
@@ -289,6 +290,35 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 	}
 
 	return mp, nil
+}
+
+func (cli *Client) SeedSnapshot(db ethdb.Database, networkID uint64, path string) (metainfo.Hash, error) {
+	info,err:=BuildInfoBytesForSnapshot(path, LmdbFilename)
+	if err!=nil {
+		return [20]byte{}, err
+	}
+
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		return [20]byte{}, err
+	}
+
+
+	t, err := cli.AddTorrentSpec("headers", metainfo.HashBytes(infoBytes), infoBytes)
+	if err!=nil {
+		return [20]byte{}, err
+	}
+	return t.InfoHash(), nil
+}
+func (cli *Client) StopSeeding(hash metainfo.Hash) error {
+	t,ok := cli.Cli.Torrent(hash)
+	if !ok {
+		return nil
+	}
+	ch:=t.Closed()
+	t.Drop()
+	<-ch
+	return nil
 }
 
 func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {

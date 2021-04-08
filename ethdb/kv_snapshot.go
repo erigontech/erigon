@@ -100,14 +100,24 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
+
 func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV KV, done chan struct{}) {
 	sd:=snapshotData{
 		buckets: buckets,
 		snapshot: snapshotKV,
 	}
+
 	toClose:=[]KV{}
+	var (
+		snData snapshotData
+		ok bool
+	)
+	
 	for _,bucket:=range buckets {
-		toClose = append(toClose, s.snapshots[bucket].snapshot)
+		snData,ok = s.snapshots[bucket]
+		if ok {
+			toClose = append(toClose, snData.snapshot)
+		}
 		s.snapshots[bucket] = sd
 	}
 	go func() {
@@ -129,7 +139,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV KV, done chan 
 func (s *SnapshotKV) WriteDB() KV {
 	return s.db
 }
-func (s *SnapshotKV) SnapshotDB(bucket string) KV {
+func (s *SnapshotKV) SnapshotKV(bucket string) KV {
 	return s.snapshots[bucket].snapshot
 }
 
