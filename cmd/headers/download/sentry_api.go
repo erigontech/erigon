@@ -117,7 +117,10 @@ func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerd
 }
 
 func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
-	i := rand.Intn(len(cs.sentries) - 1)
+	var i int
+	if len(cs.sentries) > 1 {
+		i = rand.Intn(len(cs.sentries) - 1)
+	}
 	to := i
 	return i, true, func() (int, bool) {
 		i = (i + 1) % len(cs.sentries)
