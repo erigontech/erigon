@@ -56,11 +56,13 @@ var stagesToUseNamedKeys = Migration{
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
 			return err
 		}
-
+		if err := OnLoadCommit(db, nil, true); err != nil {
+			return err
+		}
 		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {
 			return err
 		}
@@ -101,8 +103,11 @@ var unwindStagesToUseNamedKeys = Migration{
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 

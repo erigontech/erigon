@@ -60,16 +60,10 @@ func TestHeadersGenerateIndex(t *testing.T) {
 
 	snKV = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).MustOpen()
 	snDb := ethdb.NewObjectDatabase(snKV)
-	tx, err := snDb.Begin(context.Background(), ethdb.RW)
+	err = GenerateHeaderIndexes(context.Background(), snDb)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	err = GenerateHeaderIndexes(context.Background(), tx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = tx.Commit()
 	snDB := ethdb.NewObjectDatabase(snKV)
 	td := big.NewInt(0)
 	for i, header := range headers {
