@@ -182,7 +182,7 @@ func ReadHeader(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
-func ReadCurrentHeader(db ethdb.Getter) *types.Header {
+func ReadCurrentHeader(db ethdb.KVGetter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
@@ -433,7 +433,7 @@ func ReadTd(db ethdb.KVGetter, hash common.Hash, number uint64) (*big.Int, error
 	return td, nil
 }
 
-func ReadTdByHash(db ethdb.Getter, hash common.Hash) (*big.Int, error) {
+func ReadTdByHash(db ethdb.KVGetter, hash common.Hash) (*big.Int, error) {
 	headNumber := ReadHeaderNumber(db, hash)
 	if headNumber == nil {
 		return nil, nil
@@ -932,7 +932,7 @@ func ReadBlocksByHash(db ethdb.Getter, hash common.Hash, n int) (blocks []*types
 	return
 }
 
-func ReadHeaderByNumber(db ethdb.DatabaseReader, number uint64) *types.Header {
+func ReadHeaderByNumber(db ethdb.KVGetter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		log.Error("ReadCanonicalHash failed", "err", err)
@@ -945,7 +945,7 @@ func ReadHeaderByNumber(db ethdb.DatabaseReader, number uint64) *types.Header {
 	return ReadHeader(db, hash, number)
 }
 
-func ReadHeaderByHash(db ethdb.DatabaseReader, hash common.Hash) (*types.Header, error) {
+func ReadHeaderByHash(db ethdb.KVGetter, hash common.Hash) (*types.Header, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
