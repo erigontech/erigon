@@ -173,13 +173,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			}
 
 			for _, num := range blockNumbers {
-				block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), num)
+				block, senders, err := rawdb.ReadBlockByNumberWithSenders(ethdb.NewRoTxDb(tx), num)
 				if err != nil {
 					return nil, err
-				}
-				senders, errSenders := rawdb.ReadSenders(tx, block.Hash(), num)
-				if errSenders != nil {
-					return nil, errSenders
 				}
 				for i, txn := range block.Transactions() {
 					if uint64(len(filteredHashes)) == maxTracesCount {

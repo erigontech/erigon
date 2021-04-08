@@ -527,6 +527,9 @@ func ReadReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receip
 		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
 		return nil
 	}
+	if senders == nil {
+		return nil
+	}
 	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
@@ -691,14 +694,14 @@ func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, error) {
+func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	block.Body().SendersToTxs(senders)
-	return block, nil
+	return block, senders, nil
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
@@ -892,13 +895,13 @@ func ReadBlockByNumber(db ethdb.Getter, number uint64) (*types.Block, error) {
 	return ReadBlock(db, hash, number), nil
 }
 
-func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, error) {
+func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, []common.Address, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		return nil, nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == (common.Hash{}) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	return ReadBlockWithSenders(db, hash, number)
