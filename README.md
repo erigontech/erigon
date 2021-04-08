@@ -63,10 +63,10 @@ If you would like to give turbo-geth a try, but do not have spare 2Tb on your dr
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
 > cd turbo-geth
 > make tg
-> ./build/bin/tg --datadir goerli --goerli
+> ./build/bin/tg --datadir goerli --chain goerli
 ```
 
-Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory.
+Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
 
 ### Mining
 
