@@ -169,7 +169,7 @@ func HasHeader(db ethdb.Has, hash common.Hash, number uint64) bool {
 }
 
 // ReadHeader retrieves the block header corresponding to the hash.
-func ReadHeader(db ethdb.DatabaseReader, hash common.Hash, number uint64) *types.Header {
+func ReadHeader(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Header {
 	data := ReadHeaderRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -344,7 +344,7 @@ func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadBodyWithoutTransactions(db ethdb.DatabaseReader, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBodyWithoutTransactions(db ethdb.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0

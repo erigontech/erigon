@@ -34,7 +34,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
 
-	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), hash, number)
+	td, err := rawdb.ReadTd(tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
