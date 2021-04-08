@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY af62dd2de4c2ad0b5aa76f686bdc58f16f335d55a323b5b0aaa48592afd02424_v0_9_3_62_gc77494e2
+#define MDBX_BUILD_SOURCERY 1f677208b309786e6466599eb57c084e6db9200cfd4b1133b8eea47029ae7fcf_v0_9_3_89_g80fad7a0
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -2620,7 +2620,7 @@ struct MDBX_env {
   uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
   unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
   atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dp_reserve;  /* list of malloc'd blocks for re-use */
+  MDBX_page *me_dp_reserve;  /* list of malloc'ed blocks for re-use */
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
   /* Number of freelist items that can fit in a single overflow page */
@@ -2891,15 +2891,18 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
 
 /* Key size which fits in a DKBUF (debug key buffer). */
 #define DKBUF_MAX 511
-
-#if MDBX_DEBUG
 #define DKBUF char _kbuf[DKBUF_MAX * 4 + 2]
 #define DKEY(x) mdbx_dump_val(x, _kbuf, DKBUF_MAX * 2 + 1)
 #define DVAL(x) mdbx_dump_val(x, _kbuf + DKBUF_MAX * 2 + 1, DKBUF_MAX * 2 + 1)
+
+#if MDBX_DEBUG
+#define DKBUF_DEBUG DKBUF
+#define DKEY_DEBUG(x) DKEY(x)
+#define DVAL_DEBUG(x) DVAL(x)
 #else
-#define DKBUF ((void)(0))
-#define DKEY(x) ("-")
-#define DVAL(x) ("-")
+#define DKBUF_DEBUG ((void)(0))
+#define DKEY_DEBUG(x) ("-")
+#define DVAL_DEBUG(x) ("-")
 #endif
 
 /* An invalid page number.
@@ -3046,6 +3049,23 @@ floor_powerof2(size_t value, size_t granularity) {
 MDBX_NOTHROW_CONST_FUNCTION static __always_inline __maybe_unused size_t
 ceil_powerof2(size_t value, size_t granularity) {
   return floor_powerof2(value + granularity - 1, granularity);
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused unsigned log2n(size_t value) {
+  assert(value > 0 && value < INT32_MAX && is_powerof2(value));
+  assert((value & -(int32_t)value) == value);
+#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
+  return __builtin_ctzl(value);
+#elif defined(_MSC_VER)
+  unsigned long index;
+  _BitScanForward(&index, (unsigned long)value);
+  return index;
+#else
+  static const uint8_t debruijn_ctz32[32] = {
+      0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
+      31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
+  return debruijn_ctz32[(uint32_t)(value * 0x077CB531u) >> 27];
+#endif
 }
 
 /* Only a subset of the mdbx_env flags can be changed
