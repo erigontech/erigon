@@ -242,12 +242,6 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 			return fmt.Errorf("%s: error while reading next element from disk: %v", logPrefix, err)
 		}
 	}
-	// Final commit
-	if args.OnLoadCommit != nil {
-		if err := args.OnLoadCommit(db, []byte{}, true); err != nil {
-			return err
-		}
-	}
 
 	runtime.ReadMemStats(&m)
 	log.Debug(

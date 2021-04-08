@@ -38,8 +38,11 @@ var dupSortHashState = Migration{
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 
@@ -74,8 +77,11 @@ var dupSortPlainState = Migration{
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 
@@ -233,17 +239,13 @@ var splitHashStateBucket = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorS.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorS.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = collectorA.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorA.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 
