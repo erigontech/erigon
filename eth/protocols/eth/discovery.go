@@ -43,14 +43,21 @@ func (e enrEntry) ENRKey() string {
 // head events and updates the requested node record whenever a fork is passed.
 func StartENRUpdater(chainConfig *params.ChainConfig, genesisHash common.Hash, events *remotedbserver.Events, ln *enode.LocalNode) {
 	events.AddHeaderSubscription(func(h *types.Header) error {
-		ln.Set(currentENREntry(chainConfig, genesisHash, h.Number.Uint64()))
+		ln.Set(CurrentENREntry(chainConfig, genesisHash, h.Number.Uint64()))
 		return nil
 	})
 }
 
-// currentENREntry constructs an `eth` ENR entry based on the current state of the chain.
-func currentENREntry(chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) *enrEntry {
+// CurrentENREntry constructs an `eth` ENR entry based on the current state of the chain.
+func CurrentENREntry(chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) *enrEntry {
 	return &enrEntry{
 		ForkID: forkid.NewID(chainConfig, genesisHash, headHeight),
+	}
+}
+
+// CurrentENREntryFromForks constructs an `eth` ENR entry based on the current state of the chain.
+func CurrentENREntryFromForks(forks []uint64, genesisHash common.Hash, headHeight uint64) *enrEntry {
+	return &enrEntry{
+		ForkID: forkid.NewIDFromForks(forks, genesisHash, headHeight),
 	}
 }

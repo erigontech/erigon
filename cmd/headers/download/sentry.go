@@ -646,12 +646,13 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 }
 
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
+	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 	init := ss.statusData == nil
 	if init {
 		var err error
-		genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
 		if err != nil {
 			return &empty.Empty{}, err
@@ -661,6 +662,8 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
 		}
 	}
+	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return &empty.Empty{}, nil
 }
