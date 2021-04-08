@@ -1,6 +1,8 @@
 # Turbo-Geth
 
-Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
+
+https://github.com/ledgerwatch/turbo-geth/actions/workflows/ci.yml/badge.svg
 
 <!--ts-->
 - [System Requirements](#system-requirements)
