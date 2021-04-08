@@ -365,9 +365,6 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 	if err != nil {
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
-	if data == nil {
-		return nil, nil
-	}
 	senders := make([]common.Address, len(data)/common.AddressLength)
 	for i := 0; i < len(senders); i++ {
 		copy(senders[i][:], data[i*common.AddressLength:])
@@ -702,9 +699,6 @@ func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*ty
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
 		return nil, nil, err
-	}
-	if senders == nil {
-		return nil, nil, nil
 	}
 	block.Body().SendersToTxs(senders)
 	return block, senders, nil
