@@ -36,10 +36,10 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-var PlainStateBucket = "PLAIN-CST2"
-var PlainStateBucketOld1 = "PLAIN-CST"
+const PlainStateBucket = "PLAIN-CST2"
+const PlainStateBucketOld1 = "PLAIN-CST"
 
-var (
+const (
 	//PlainContractCodeBucket -
 	//key - address+incarnation
 	//value - code hash
@@ -128,12 +128,12 @@ Invariants:
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
-var TrieOfAccountsBucket = "trie_account"
-var TrieOfStorageBucket = "trie_storage"
-var IntermediateTrieHashBucketOld1 = "iTh"
-var IntermediateTrieHashBucketOld2 = "iTh2"
+const TrieOfAccountsBucket = "trie_account"
+const TrieOfStorageBucket = "trie_storage"
+const IntermediateTrieHashBucketOld1 = "iTh"
+const IntermediateTrieHashBucketOld2 = "iTh2"
 
-var (
+const (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket        = "DBINFO"
 	SnapshotInfoBucket        = "SNINFO"
@@ -235,12 +235,6 @@ var (
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
 )
-
-// Metrics
-//var (
-//PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-//PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
-//)
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
