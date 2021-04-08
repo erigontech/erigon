@@ -410,13 +410,10 @@ func (p *Peer) RequestOneHeader(hash common.Hash) error {
 		Skip:    uint64(0),
 		Reverse: false,
 	}
-	if p.Version() >= ETH66 {
-		return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersPacket66{
-			RequestId:             rand.Uint64(), //nolint:gosec
-			GetBlockHeadersPacket: &query,
-		})
-	}
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &query)
+	return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersPacket66{
+		RequestId:             rand.Uint64(), //nolint:gosec
+		GetBlockHeadersPacket: &query,
+	})
 }
 
 // RequestHeadersByHash fetches a batch of blocks' headers corresponding to the

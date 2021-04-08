@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -338,11 +339,14 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
-			Amount:  1,
-			Reverse: false,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: announce.Hash},
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
+			RequestId: rand.Uint64(),
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Amount:  1,
+				Reverse: false,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: announce.Hash},
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("encode header request: %v", err)
@@ -529,7 +533,7 @@ func getAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, m
 	return hash, number
 }
 
-func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
+func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket66) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -614,7 +618,7 @@ func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket) ([]*types.H
 }
 
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.GetBlockHeadersPacket
+	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
