@@ -1853,6 +1853,8 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 	return l.receiver.Root(), nil
 }
 
+// CalcRoot is a combination of `ResolveStateTrie` and `UpdateStateTrie`
+// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func CalcRoot(logPrefix string, db ethdb.Database) (common.Hash, error) {
 	loader := NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
