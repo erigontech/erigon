@@ -137,7 +137,7 @@ func makeP2PServer(
 					peer,
 					rw,
 					eth.ProtocolVersions[0], // version == eth66
-					eth.ProtocolVersions[1], // minVersion == eth65
+					eth.ProtocolVersions[0], // minVersion == eth66
 					ss,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
