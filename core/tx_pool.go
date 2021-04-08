@@ -283,6 +283,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 	for _, addr := range pool.config.Locals {
 		pool.locals.add(addr)
 	}
+	pool.priced = newTxPricedList(pool.all)
 
 	return pool
 }
