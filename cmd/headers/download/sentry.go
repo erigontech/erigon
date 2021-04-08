@@ -375,6 +375,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 	}
 	grpcServer = grpc.NewServer(opts...)
 	sentryServer := &SentryServerImpl{
+		ctx:             ctx,
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
 	}
@@ -545,7 +546,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	rwRaw, ok := ss.peerRwMap.Load(peerID)
 	if !ok {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", inreq.PeerId)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	var msgcode uint64
