@@ -25,6 +25,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
+const (
+	MainnetChainName = "mainnet"
+	RopstenChainName = "ropsten"
+	RinkebyChainName = "rinkeby"
+	GoerliChainName  = "goerli"
+	YoloV3ChainName  = "yolov3"
+	DevChainName     = "dev"
+)
+
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
@@ -237,6 +246,24 @@ var (
 			Period: 15,
 			Epoch:  30000,
 		},
+	}
+
+	// MainnetChainConfig is the chain parameters to run a PoW dev net to test turbo-geth mining
+	TurboMineChainConfig = &ChainConfig{
+		ChainID:             new(big.Int).SetBytes([]byte("turbo-mine")),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      true,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		Ethash:              new(EthashConfig),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
