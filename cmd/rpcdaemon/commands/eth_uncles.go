@@ -34,7 +34,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	hash := block.Hash()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(ethdb.NewRoTxDb(tx), hash, number)
+	td, err := rawdb.ReadTd(tx, hash, number)
 	if err != nil {
 		return nil, err
 	}

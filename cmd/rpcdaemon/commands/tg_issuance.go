@@ -41,12 +41,7 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 	}
 	defer tx.Rollback()
 
-	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
-	if err != nil {
-		return Issuance{}, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return Issuance{}, err
 	}

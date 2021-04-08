@@ -59,12 +59,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
-	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -92,7 +87,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
+			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
@@ -126,7 +121,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 	if hash != (common.Hash{}) {
-		header := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, blockNumber)
+		header := rawdb.ReadHeader(tx, hash, blockNumber)
 		if header != nil {
 			res.Root = header.Root.String()
 		}
@@ -143,7 +138,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
+	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
@@ -217,12 +212,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 
 	bc := adapter.NewBlockGetter(tx)
 	cc := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
-	if err != nil {
-		return nil, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}

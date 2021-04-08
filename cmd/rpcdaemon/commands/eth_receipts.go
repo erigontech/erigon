@@ -31,7 +31,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, number)
+		return rawdb.ReadHeader(tx, hash, number)
 	}
 	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, cc.Engine(), tx, hash, 0)
 	if err != nil {
@@ -44,7 +44,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
-		header := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, number)
+		header := rawdb.ReadHeader(tx, hash, number)
 		receipt, err := core.ApplyTransaction(chainConfig, getHeader, cc.Engine(), nil, gp, ibs, dbstate, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
@@ -67,7 +67,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(ethdb.NewRoTxDb(tx), *crit.BlockHash)
+		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
 		if number == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
@@ -135,7 +135,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), err
 	}
 	for _, blockNToMatch := range blockNumbers.ToArray() {
-		blockHash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), uint64(blockNToMatch))
+		blockHash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
 		if err != nil {
 			return returnLogs(logs), err
 		}

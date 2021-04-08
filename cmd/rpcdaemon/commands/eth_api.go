@@ -114,7 +114,7 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisBlock.Hash())
+	cc, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
