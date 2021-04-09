@@ -83,6 +83,9 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
+
+	hash   atomic.Value
+	author common.Address
 }
 
 // field type overrides for gencodec
@@ -98,8 +101,26 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() common.Hash {
+func (h *Header) NewHash() common.Hash {
 	return rlpHash(h)
+}
+
+func (h *Header) Hash() common.Hash {
+	if hash := h.hash.Load(); hash != nil && hash != (common.Hash{}) {
+		return hash.(common.Hash)
+	}
+	v := rlpHash(h)
+	h.hash.Store(v)
+
+	return v
+}
+
+func (h *Header) Author() common.Address {
+	return h.author
+}
+
+func (h *Header) SetAuthor(addr common.Address) {
+	h.author = addr
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -283,6 +304,8 @@ func CopyHeader(h *Header) *Header {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
+	cpy.hash.Store(h.Hash())
+
 	return &cpy
 }
 
@@ -416,13 +439,22 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 	return block
 }
 
-// Hash returns the keccak256 hash of b's header.
+// NewHash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
+func (b *Block) NewHash() common.Hash {
+	if hash := b.hash.Load(); hash != nil {
+		return hash.(common.Hash)
+	}
+	v := b.header.NewHash()
+	b.hash.Store(v)
+	return v
+}
+
 func (b *Block) Hash() common.Hash {
 	if hash := b.hash.Load(); hash != nil {
 		return hash.(common.Hash)
 	}
-	v := b.header.Hash()
+	v := b.header.NewHash()
 	b.hash.Store(v)
 	return v
 }

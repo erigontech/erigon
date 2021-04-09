@@ -1,10 +1,11 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 )
 
 var (
@@ -108,7 +109,7 @@ func withDatadir2(cmd *cobra.Command) {
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 }
 
 func withBatchSize(cmd *cobra.Command) {

@@ -84,6 +84,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 
 	hc.genesisHeader = hc.GetHeaderByNumber(0)
 	if hc.genesisHeader == nil {
+		fmt.Println("%%%-1.0")
 		return nil, ErrNoGenesis
 	}
 
@@ -534,6 +535,7 @@ func (hc *HeaderChain) CurrentHeader() *types.Header {
 
 // SetCurrentHeader sets the current head header of the canonical chain.
 func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
+	fmt.Println("^^^.1.0", head.Number.Uint64())
 	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
 	hc.currentHeader.Store(head)
 	hc.currentHeaderHash = head.Hash()

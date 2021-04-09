@@ -17,6 +17,7 @@
 package clique
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -43,9 +44,10 @@ func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
 		db     = ethdb.NewMemDatabase()
+		cliqueDB     = ethdb.NewMemDatabase()
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
-		engine = New(params.AllCliqueProtocolChanges.Clique, db)
+		engine = New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
 		signer = new(types.HomesteadSigner)
 	)
 	genspec := &core.Genesis{
@@ -57,10 +59,13 @@ func TestReimportMirroredState(t *testing.T) {
 	copy(genspec.ExtraData[extraVanity:], addr[:])
 	genesis := genspec.MustCommit(db)
 
+	defer cliqueDB.Close()
+
 	// Generate a batch of blocks, each properly signed
 	txCacher := core.NewTxSenderCacher(1)
-	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
+	chain, err := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
+fmt.Println("^^^^", chain == nil, err)
 
 	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be

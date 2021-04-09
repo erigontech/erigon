@@ -18,12 +18,13 @@ package ethash
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"math/big"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/goccy/go-json"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"

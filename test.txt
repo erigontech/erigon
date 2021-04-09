@@ -1,0 +1,8 @@
+Building mdbx
+make[1]: Entering directory '/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/ethdb/mdbx/dist'
+make[1]: Leaving directory '/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/ethdb/mdbx/dist'
+make[1]: Entering directory '/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/ethdb/mdbx/dist'
+make[1]: Leaving directory '/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/ethdb/mdbx/dist'
+make[1]: Entering directory '/mnt/sdb/go/src/github.com/ledgerwatch/sync/turbo-geth/ethdb/mdbx/dist'
+make[1]: *** [GNUmakefile:101: mdbx-static.o] Interrupt
+make: *** [Makefile:90: mdbx] Interrupt

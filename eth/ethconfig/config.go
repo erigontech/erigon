@@ -26,10 +26,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/consensus/db"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
@@ -169,6 +171,8 @@ type Config struct {
 	// Ethash options
 	Ethash ethash.Config
 
+	Clique params.SnapshotConfig
+
 	// Transaction pool options
 	TxPool core.TxPoolConfig
 
@@ -202,33 +206,42 @@ type Config struct {
 	OverrideBerlin *big.Int               `toml:",omitempty"`
 }
 
-// CreateConsensusEngine creates a consensus engine for the given chain configuration.
-func CreateConsensusEngine(chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
-	// If proof-of-authority is requested, set it up
-	if chainConfig.Clique != nil {
-		return clique.New(chainConfig.Clique, db)
+func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {
+	var eng consensus.Engine
+
+	switch consensusCfg := config.(type) {
+	case *ethash.Config:
+		switch consensusCfg.PowMode {
+		case ethash.ModeFake:
+			log.Warn("Ethash used in fake mode")
+			eng = ethash.NewFaker()
+		case ethash.ModeTest:
+			log.Warn("Ethash used in test mode")
+			eng = ethash.NewTester(nil, noverify)
+		case ethash.ModeShared:
+			log.Warn("Ethash used in shared mode")
+			eng = ethash.NewShared()
+		default:
+			engine := ethash.New(ethash.Config{
+				CachesInMem:      consensusCfg.CachesInMem,
+				CachesLockMmap:   consensusCfg.CachesLockMmap,
+				DatasetDir:       consensusCfg.DatasetDir,
+				DatasetsInMem:    consensusCfg.DatasetsInMem,
+				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
+				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
+			}, notify, noverify)
+			engine.SetThreads(-1) // Disable CPU mining
+			eng = engine
+		}
+	case *params.SnapshotConfig:
+		if chainConfig.Clique != nil {
+			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, consensusCfg.MDBX))
+		}
 	}
-	// Otherwise assume proof-of-work
-	switch config.PowMode {
-	case ethash.ModeFake:
-		log.Warn("Ethash used in fake mode")
-		return ethash.NewFaker()
-	case ethash.ModeTest:
-		log.Warn("Ethash used in test mode")
-		return ethash.NewTester(nil, noverify)
-	case ethash.ModeShared:
-		log.Warn("Ethash used in shared mode")
-		return ethash.NewShared()
-	default:
-		engine := ethash.New(ethash.Config{
-			CachesInMem:      config.CachesInMem,
-			CachesLockMmap:   config.CachesLockMmap,
-			DatasetDir:       config.DatasetDir,
-			DatasetsInMem:    config.DatasetsInMem,
-			DatasetsOnDisk:   config.DatasetsOnDisk,
-			DatasetsLockMmap: config.DatasetsLockMmap,
-		}, notify, noverify)
-		engine.SetThreads(-1) // Disable CPU mining
-		return engine
+
+	if eng == nil {
+		panic("unknown config" + spew.Sdump(config))
 	}
+
+	return eng
 }
