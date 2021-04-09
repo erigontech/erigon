@@ -371,18 +371,18 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
 	_, err := rlpStream.List() // Now stream is at the requestID field
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
 	}
 	_, err = rlpStream.List() // Now stream is at the headers list
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
 	}
 	var headersRaw [][]byte
 	var headerRaw []byte
 	for headerRaw, err = rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
 		if err != nil {
 			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode BlockHeaders: %w", err)
+				return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
 			}
 			break
 		}
@@ -393,7 +393,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
-		return fmt.Errorf("decode NewBlockHashes: %v", err)
+		return fmt.Errorf("decode BlockHeadersPacket66: %v", err)
 	}
 	headers := request.BlockHeadersPacket
 	var heighestBlock uint64
@@ -483,7 +483,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var request eth.BlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodies: %v", err)
+		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
 	delivered, undelivered := cs.bd.DeliverBodies(request.BlockBodiesPacket)
 	total := delivered + undelivered
