@@ -485,7 +485,8 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
-	delivered, undelivered := cs.bd.DeliverBodies(request.BlockBodiesPacket)
+	txs, uncles := request.BlockBodiesPacket.Unpack()
+	delivered, undelivered := cs.bd.DeliverBodies(txs, uncles)
 	total := delivered + undelivered
 	if total > 0 {
 		// Approximate numbers
