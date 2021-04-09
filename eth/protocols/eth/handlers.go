@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -34,10 +35,16 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v", err, msg)
 	}
-	response, err := AnswerGetBlockHeadersQuery(backend.Chain().ChainDb(), query.GetBlockHeadersPacket)
+	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+	response, err := AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
+	if err != nil {
+		return err
+	}
+	tx.Rollback()
 	return peer.ReplyBlockHeaders(query.RequestId, response)
 }
 
@@ -138,7 +145,13 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	response := AnswerGetBlockBodiesQuery(backend.Chain().ChainDb(), query.GetBlockBodiesPacket)
+	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	response := AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket)
+	tx.Rollback()
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
 
@@ -187,10 +200,16 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	response, err := AnswerGetReceiptsQuery(backend.Chain().ChainDb(), query.GetReceiptsPacket)
+	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+	response, err := AnswerGetReceiptsQuery(tx, query.GetReceiptsPacket)
+	if err != nil {
+		return err
+	}
+	tx.Rollback()
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
 
