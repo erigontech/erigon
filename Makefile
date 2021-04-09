@@ -119,7 +119,6 @@ lintci-deps:
 clean:
 	env GO111MODULE=on go clean -cache
 	rm -fr build/*
-	rm -f semantics/z3/build/libz3.a
 	cd ethdb/mdbx/dist/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
