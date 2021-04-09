@@ -1,5 +1,6 @@
 fn config() -> prost_build::Config {
     let mut config = prost_build::Config::new();
+    config.protoc_arg("--experimental_allow_proto3_optional");
     config.bytes(&["."]);
     config
 }
@@ -13,12 +14,15 @@ fn make_protos(protos: &[&str]) {
 fn main() {
     let mut protos = vec!["types/types.proto"];
 
+    if cfg!(feature = "consensus") {
+        protos.push("consensus_engine/consensus.proto");
+    }
+
     if cfg!(feature = "sentry") {
         protos.push("p2psentry/sentry.proto");
     }
 
     if cfg!(feature = "remotekv") {
-        protos.push("remote/db.proto");
         protos.push("remote/ethbackend.proto");
         protos.push("remote/kv.proto");
     }

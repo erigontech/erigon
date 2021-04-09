@@ -113,6 +113,11 @@ pub mod types {
     U!(H512, ethereum_types::H512, ethereum_types::U512);
 }
 
+#[cfg(feature = "consensus")]
+pub mod consensus {
+    tonic::include_proto!("consensus");
+}
+
 #[cfg(feature = "sentry")]
 pub mod sentry {
     tonic::include_proto!("sentry");
