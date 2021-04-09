@@ -1,9 +1,6 @@
 package bodydownload
 
 import (
-	//"context"
-	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
 	"context"
 	"fmt"
 	"math/big"
