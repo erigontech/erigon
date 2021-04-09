@@ -309,6 +309,9 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
+	if g.Config != nil && g.Config.IsAleut(common.Big0) {
+		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+	}
 
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }

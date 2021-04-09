@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,135 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
+	BaseFee     *big.Int       `json:"baseFee"`
+	eip1559     bool           // to avoid relying on BaseFee != nil for that
+}
+
+func (h *Header) EncodeRLP(w io.Writer) error {
+	// Precompute the size of the encoding
+	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
+		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+	encodingSize++
+	var diffLen int
+	if h.Difficulty.BitLen() >= 8 {
+		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	}
+	encodingSize += diffLen
+	encodingSize++
+	var numberLen int
+	if h.Number.BitLen() >= 8 {
+		numberLen = (h.Number.BitLen() + 7) / 8
+	}
+	encodingSize += numberLen
+	encodingSize++
+	var gasLimitLen int
+	if h.GasLimit >= 128 {
+		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
+	}
+	encodingSize += gasLimitLen
+	encodingSize++
+	var gasUsedLen int
+	if h.GasUsed >= 128 {
+		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
+	}
+	encodingSize += gasUsedLen
+	encodingSize++
+	var timeLen int
+	if h.Time >= 128 {
+		timeLen = (bits.Len64(h.Time) + 7) / 8
+	}
+	encodingSize += timeLen
+	encodingSize += 1 + len(h.Extra)
+	if len(h.Extra) >= 56 {
+		encodingSize += bits.Len(uint(len(h.Extra))+7) / 8
+	}
+	if h.eip1559 {
+		encodingSize++
+		if h.BaseFee.BitLen() >= 8 {
+			encodingSize += (h.BaseFee.BitLen() + 7) / 8
+		}
+	}
+	// Emit len(ser.len) + 247
+	var b [33]byte
+	beSize := bits.Len(uint(encodingSize)) + 7/8
+	b[0] = byte(beSize)
+	binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
+	if _, err := w.Write(b[:1+beSize]); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.ParentHash.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.UncleHash.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Coinbase.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Root.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.TxHash.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.ReceiptHash.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 183 + 2
+	b[1] = 0
+	b[2] = 1
+	if _, err := w.Write(b[:3]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
+		return err
+	}
+	if diffLen > 0 && h.Difficulty.BitLen() < 8 {
+		b[0] = byte(h.Difficulty.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(diffLen)
+		h.Difficulty.FillBytes(b[1:])
+		if _, err := w.Write(b[:1+diffLen]); err != nil {
+			return err
+		}
+	}
+	if numberLen > 0 && h.Number.BitLen() < 8 {
+		b[0] = byte(h.Number.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(numberLen)
+		h.Number.FillBytes(b[1:])
+		if _, err := w.Write(b[:1+numberLen]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // field type overrides for gencodec

@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -51,6 +52,8 @@ type StateTransition struct {
 	msg        Message
 	gas        uint64
 	gasPrice   *uint256.Int
+	feeCap     *uint256.Int
+	tip        *uint256.Int
 	initialGas uint64
 	value      *uint256.Int
 	data       []byte
@@ -64,6 +67,8 @@ type Message interface {
 	To() *common.Address
 
 	GasPrice() *uint256.Int
+	FeeCap() *uint256.Int
+	Tip() *uint256.Int
 	Gas() uint64
 	Value() *uint256.Int
 
@@ -156,6 +161,8 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		evm:      evm,
 		msg:      msg,
 		gasPrice: msg.GasPrice(),
+		feeCap:   msg.FeeCap(),
+		tip:      msg.Tip(),
 		value:    msg.Value(),
 		data:     msg.Data(),
 		state:    evm.IntraBlockState,
@@ -185,7 +192,12 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), st.gasPrice.ToBig())
+	price := st.gasPrice
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+		// price = min(tip, feeCap - baseFee) + baseFee
+		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
+	}
+	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), price.ToBig())
 	gasCost, overflow := uint256.FromBig(mgval)
 	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
 		if !gasBailout {
@@ -215,6 +227,14 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
 				st.msg.From().Hex(), msgNonce, stNonce)
 		}
+	}
+	// Make sure the transaction feeCap is greater than the block's baseFee.
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+		if st.feeCap.Cmp(st.evm.Context.BaseFee) < 0 {
+			return fmt.Errorf("%w: address %v, feeCap: %d baseFee: %d", ErrFeeCapTooLow,
+				st.msg.From().Hex(), st.feeCap.Uint64(), st.evm.Context.BaseFee.Uint64())
+		}
+
 	}
 	return st.buyGas(gasBailout)
 }

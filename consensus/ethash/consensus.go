@@ -281,9 +281,17 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	if header.GasLimit > cap {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
 	}
-	// Verify that the gasUsed is <= gasLimit
-	if header.GasUsed > header.GasLimit {
-		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
+	// Verify the block's gas usage and (if applicable) verify the base fee.
+	if chain.Config().IsAleut(header.Number) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number)); err != nil {
+			return err
+		}
+	} else {
+		// Verify that the gasUsed is <= gasLimit
+		if header.GasUsed > header.GasLimit {
+			return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
+		}
+
 	}
 
 	// Verify that the gas limit remains within allowed bounds
@@ -600,7 +608,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, heade
 func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	hasher := sha3.NewLegacyKeccak256()
 
-	rlp.Encode(hasher, []interface{}{
+	enc := []interface{}{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,

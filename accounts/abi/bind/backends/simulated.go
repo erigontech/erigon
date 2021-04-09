@@ -803,6 +803,8 @@ func (m callMsg) Nonce() uint64                { return 0 }
 func (m callMsg) CheckNonce() bool             { return false }
 func (m callMsg) To() *common.Address          { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *big.Int             { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *big.Int                { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
