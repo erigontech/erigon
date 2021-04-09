@@ -8,25 +8,14 @@ package sentry;
 option go_package = "./sentry;sentry";
 
 enum MessageId {
-  // eth64 announcement messages (no id)
-  NewBlockHashes = 0;
-  NewBlock = 1;
-  Transactions = 2;
-
-  // eth65 announcement messages (no id)
-  NewPooledTransactionHashes = 3;
-
-  // eth66 messages with request-id
-  GetBlockHeaders = 4;
-  GetBlockBodies = 5;
-  GetNodeData = 6;
-  GetReceipts = 7;
-  GetPooledTransactions = 8;
-  BlockHeaders = 9;
-  BlockBodies = 10;
-  NodeData = 11;
-  Receipts = 12;
-  PooledTransactions = 13;
+  GetBlockHeaders = 0;
+  GetBlockBodies = 1;
+  GetNodeData = 2;
+  NewBlockHashes = 3;
+  BlockHeaders = 4;
+  BlockBodies = 5;
+  NewBlock = 6;
+  NodeData = 7;
 }
 
 message OutboundMessageData {
@@ -49,9 +38,9 @@ message SendMessageToRandomPeersRequest {
   uint64 max_peers = 2;
 }
 
-message SentPeers {repeated types.H512 peers = 1;}
+message SentPeers { repeated types.H512 peers = 1; }
 
-enum PenaltyKind {Kick = 0;}
+enum PenaltyKind { Kick = 0; }
 
 message PenalizePeerRequest {
   types.H512 peer_id = 1;
