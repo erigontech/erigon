@@ -171,15 +171,18 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		return nil, common.Hash{}, storedErr
 	}
 	if overwrite || (stored == common.Hash{}) {
+		custom := true
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
 			genesis = DefaultGenesisBlock()
-		} else {
-			log.Info("Writing custom genesis block")
+			custom = false
 		}
 		block, _, err1 := genesis.Commit(db, history)
 		if err1 != nil {
 			return genesis.Config, common.Hash{}, err1
+		}
+		if custom {
+			log.Info("Writing custom genesis block", "hash", block.Hash().String())
 		}
 		return genesis.Config, block.Hash(), nil
 	}
@@ -251,6 +254,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.GoerliChainConfig
 	case ghash == params.YoloV3GenesisHash:
 		return params.YoloV3ChainConfig
+	case ghash == params.TurboMineGenesisHash:
+		return params.TurboMineChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -486,10 +491,10 @@ func DefaultYoloV3GenesisBlock() *Genesis {
 
 func DefaultTurboMineGenesisBlock() *Genesis {
 	return &Genesis{
-		Config:     params.RopstenChainConfig,
+		Config:     params.TurboMineChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
-		GasLimit:   100000000,
+		GasLimit:   1000000000,
 		Difficulty: big.NewInt(1048576),
 		Alloc:      readPrealloc("allocs/turbomine.json"),
 	}
