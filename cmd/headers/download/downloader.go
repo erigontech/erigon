@@ -371,17 +371,17 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the requestID field
 		if !errors.Is(err, rlp.ErrExpectedList) {
-			return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
+			return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 		}
 	}
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the headers list
-		return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
+		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	var headersRaw [][]byte
 	for headerRaw, err := rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
 		if err != nil {
 			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
+				return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 			}
 			break
 		}
@@ -392,7 +392,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockHeadersPacket66: %v", err)
+		return fmt.Errorf("decode 4 BlockHeadersPacket66: %v", err)
 	}
 	headers := request.BlockHeadersPacket
 	var heighestBlock uint64
@@ -435,20 +435,20 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 1 NewBlockMsg: %w", err)
 	}
 	_, err = rlpStream.List() // Now stream is at the beginning of the header
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 2 NewBlockMsg: %w", err)
 	}
 	var headerRaw []byte
 	if headerRaw, err = rlpStream.Raw(); err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
 	var request eth.NewBlockPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %v", err)
+		return fmt.Errorf("decode 4 NewBlockMsg: %v", err)
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
