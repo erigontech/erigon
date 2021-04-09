@@ -32,6 +32,7 @@ const (
 	GoerliChainName  = "goerli"
 	YoloV3ChainName  = "yolov3"
 	DevChainName     = "dev"
+	TurboMineName    = "turbomine"
 )
 
 // Genesis hashes to enforce below configs on.
