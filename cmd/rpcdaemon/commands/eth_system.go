@@ -24,7 +24,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	execution, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
+	execution, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return 0, err
 	}
@@ -38,12 +38,12 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Headers)
+	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Finish)
+	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return false, err
 	}

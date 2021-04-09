@@ -300,7 +300,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 			break
 		}
 
-		nextBlock, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
+		nextBlock, _, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}

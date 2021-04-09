@@ -132,7 +132,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 
 	if req.ToBlock == nil {
-		headNumber := rawdb.ReadHeaderNumber(ethdb.NewRoTxDb(tx), rawdb.ReadHeadHeaderHash(ethdb.NewRoTxDb(tx)))
+		headNumber := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
 		toBlock = *headNumber
 	} else {
 		toBlock = uint64(*req.ToBlock)
@@ -173,13 +173,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			}
 
 			for _, num := range blockNumbers {
-				block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), num)
+				block, senders, err := rawdb.ReadBlockByNumberWithSenders(ethdb.NewRoTxDb(tx), num)
 				if err != nil {
 					return nil, err
-				}
-				senders, errSenders := rawdb.ReadSenders(ethdb.NewRoTxDb(tx), block.Hash(), num)
-				if errSenders != nil {
-					return nil, errSenders
 				}
 				for i, txn := range block.Transactions() {
 					if uint64(len(filteredHashes)) == maxTracesCount {
@@ -252,12 +248,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 
 	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
-	if err != nil {
-		return nil, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -361,12 +352,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(tx)
-	genesis, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
-	if err != nil {
-		return nil, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(ethdb.NewRoTxDb(tx), genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}

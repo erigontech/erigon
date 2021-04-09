@@ -66,8 +66,6 @@ type TransformArgs struct {
 	BufferType      int
 	BufferSize      int
 	Quit            <-chan struct{}
-	OnLoadCommit    LoadCommitHandler
-	loadBatchSize   int // used in testing
 
 	LogDetailsExtract AdditionalLogArguments
 	LogDetailsLoad    AdditionalLogArguments

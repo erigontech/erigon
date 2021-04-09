@@ -183,7 +183,6 @@ type BlockChain struct {
 	currentBlock     atomic.Value // Current head of the block chain
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
-	trieDbState   *state.TrieDbState
 	receiptsCache *lru.Cache // Cache for the most recent receipts per block
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
@@ -281,38 +280,6 @@ func (bc *BlockChain) EnableTxLookupIndex(et bool) {
 
 func (bc *BlockChain) EnablePreimages(ep bool) {
 	bc.enablePreimages = ep
-}
-
-func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
-	if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
-		currentBlockNr := bc.CurrentBlock().NumberU64()
-		trieDbState, err := bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
-		if err != nil {
-			return nil, err
-		}
-		bc.setTrieDbState(trieDbState)
-		log.Info("Creation complete.")
-	}
-	return bc.trieDbState, nil
-}
-
-func (bc *BlockChain) setTrieDbState(trieDbState *state.TrieDbState) {
-	log.Warn("trieDbState has been changed", "isNil", trieDbState == nil, "callers", debug.Callers(20))
-	bc.trieDbState = trieDbState
-}
-
-func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
-	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
-		log.Info("Creating IntraBlockState from latest state", "block", blockNr, "isNIl", bc.trieDbState == nil, "callers", debug.Callers(20))
-		tds := state.NewTrieDbState(root, bc.db, blockNr)
-		tds.SetNoHistory(bc.NoHistory())
-		tds.SetResolveReads(bc.resolveReads)
-		tds.EnablePreimages(bc.enablePreimages)
-
-		log.Info("Creation complete.")
-		return tds, nil
-	}
-	return bc.trieDbState, nil
 }
 
 // GetVMConfig returns the block chain VM config.

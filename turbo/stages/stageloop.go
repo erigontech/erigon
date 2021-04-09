@@ -69,7 +69,7 @@ func StageLoop(
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx, err = tx.Begin(context.Background(), ethdb.RW)
+			tx, err = db.Begin(context.Background(), ethdb.RW)
 			if err != nil {
 				return err
 			}

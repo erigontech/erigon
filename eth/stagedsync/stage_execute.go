@@ -62,15 +62,8 @@ func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlock(tx, blockHash, blockNum)
-
-	senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNum)
-	if errSenders != nil {
-		return nil, errSenders
-	}
-	block.Body().SendersToTxs(senders)
-
-	return block, nil
+	b, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
+	return b, err
 }
 
 func executeBlockWithGo(block *types.Block, tx ethdb.Database, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, params ExecuteBlockStageParams) error {

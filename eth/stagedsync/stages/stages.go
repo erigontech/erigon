@@ -68,7 +68,7 @@ var AllStages = []SyncStage{
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
+func GetStageProgress(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
 	v, err := db.GetOne(dbutils.SyncStageProgress, stage)
 	if err != nil {
 		return 0, err
@@ -83,7 +83,7 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
-func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
+func GetStageUnwind(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
 	v, err := db.GetOne(dbutils.SyncStageUnwind, stage)
 	if err != nil {
 		return 0, err

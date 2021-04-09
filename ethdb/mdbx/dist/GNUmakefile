@@ -26,6 +26,7 @@ mandir  ?= $(prefix)/man
 # lib/bin suffix for multiarch/biarch, e.g. '.x86_64'
 suffix  ?=
 
+INSTALL ?= install
 CC      ?= gcc
 CFLAGS_EXTRA ?=
 LD      ?= ld
@@ -60,7 +61,7 @@ LIBRARIES  := libmdbx.a libmdbx.$(SO_SUFFIX)
 TOOLS      := mdbx_stat mdbx_copy mdbx_dump mdbx_load mdbx_chk mdbx_drop
 MANPAGES   := mdbx_stat.1 mdbx_copy.1 mdbx_dump.1 mdbx_load.1 mdbx_chk.1 mdbx_drop.1
 
-.PHONY: mdbx all install clean
+.PHONY: mdbx all install install-strip install-no-strip clean
 
 all: $(LIBRARIES) $(TOOLS)
 
@@ -72,7 +73,7 @@ strip: all
 	strip libmdbx.$(SO_SUFFIX) $(TOOLS)
 
 clean:
-	@rm -rf $(TOOLS) mdbx_test @* *.[ao] *.[ls]o *.$(SO_SUFFIX) *.dSYM *~ tmp.db/* \
+	rm -rf $(TOOLS) mdbx_test @* *.[ao] *.[ls]o *.$(SO_SUFFIX) *.dSYM *~ tmp.db/* \
 		*.gcov *.log *.err src/*.o test/*.o mdbx_example dist \
 		config.h src/config.h src/version.c *.tar*
 
@@ -88,7 +89,7 @@ libmdbx.$(SO_SUFFIX): mdbx-dylib.o mdbx++-dylib.o
 MAN_SRCDIR := man1/
 
 config.h: mdbx.c $(lastword $(MAKEFILE_LIST))
-	@(echo '#define MDBX_BUILD_TIMESTAMP "$(shell date +%Y-%m-%dT%H:%M:%S%z)"' \
+	(echo '#define MDBX_BUILD_TIMESTAMP "$(shell date +%Y-%m-%dT%H:%M:%S%z)"' \
 	&& echo '#define MDBX_BUILD_FLAGS "$(CXXSTD) $(CFLAGS) $(LDFLAGS) $(LIBS)"' \
 	&& echo '#define MDBX_BUILD_COMPILER "$(shell (LC_ALL=C $(CC) --version || echo 'Please use GCC or CLANG compatible compiler') | head -1)"' \
 	&& echo '#define MDBX_BUILD_TARGET "$(shell set -o pipefail; (LC_ALL=C $(CC) -v 2>&1 | grep -i '^Target:' | cut -d ' ' -f 2- || (LC_ALL=C $(CC) --version | grep -qi e2k && echo E2K) || echo 'Please use GCC or CLANG compatible compiler') | head -1)"' \
@@ -98,7 +99,7 @@ mdbx-dylib.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST))
 	$(CC) $(CFLAGS) $(MDBX_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -DLIBMDBX_EXPORTS=1 -c mdbx.c -o $@
 
 mdbx-static.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST))
-	@$(CC) $(CFLAGS) $(MDBX_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -ULIBMDBX_EXPORTS -c mdbx.c -o $@
+	$(CC) $(CFLAGS) $(MDBX_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -ULIBMDBX_EXPORTS -c mdbx.c -o $@
 
 mdbx++-dylib.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST))
 	$(CXX) $(CXXFLAGS) $(MDBX_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -DLIBMDBX_EXPORTS=1 -c mdbx.c++ -o $@
@@ -109,12 +110,19 @@ mdbx++-static.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST))
 mdbx_%:	mdbx_%.c libmdbx.a
 	$(CC) $(CFLAGS) $(MDBX_OPTIONS) '-DMDBX_CONFIG_H="config.h"' $^ $(EXE_LDFLAGS) $(LIBS) -o $@
 
+
 install: $(LIBRARIES) $(TOOLS) $(HEADERS)
-	install -D -p -s -t $(DESTDIR)$(prefix)/bin$(suffix) $(TOOLS) && \
-	install -D -p -s -t $(DESTDIR)$(prefix)/lib$(suffix) $(filter-out libmdbx.a,$(LIBRARIES)) && \
-	install -D -p -t $(DESTDIR)$(prefix)/lib$(suffix) libmdbx.a && \
-	install -D -p -m 444 -t $(DESTDIR)$(prefix)/include $(HEADERS) && \
-	install -D -p -m 444 -t $(DESTDIR)$(mandir)/man1 $(addprefix $(MAN_SRCDIR), $(MANPAGES))
+	$(INSTALL) -D -p $(EXE_INSTALL_FLAGS) -t $(DESTDIR)$(prefix)/bin$(suffix) $(TOOLS) && \
+	$(INSTALL) -D -p $(EXE_INSTALL_FLAGS) -t $(DESTDIR)$(prefix)/lib$(suffix) $(filter-out libmdbx.a,$(LIBRARIES)) && \
+	$(INSTALL) -D -p -t $(DESTDIR)$(prefix)/lib$(suffix) libmdbx.a && \
+	$(INSTALL) -D -p -m 444 -t $(DESTDIR)$(prefix)/include $(HEADERS) && \
+	$(INSTALL) -D -p -m 444 -t $(DESTDIR)$(mandir)/man1 $(addprefix $(MAN_SRCDIR), $(MANPAGES))
+
+install-strip: EXE_INSTALL_FLAGS = -s
+install-strip: install
+
+install-no-strip: EXE_INSTALL_FLAGS =
+install-no-strip: install
 
 uninstall:
 	rm -f $(addprefix $(DESTDIR)$(prefix)/bin$(suffix)/,$(TOOLS)) \

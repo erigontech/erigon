@@ -169,7 +169,7 @@ func HasHeader(db ethdb.Has, hash common.Hash, number uint64) bool {
 }
 
 // ReadHeader retrieves the block header corresponding to the hash.
-func ReadHeader(db ethdb.DatabaseReader, hash common.Hash, number uint64) *types.Header {
+func ReadHeader(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Header {
 	data := ReadHeaderRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -182,7 +182,7 @@ func ReadHeader(db ethdb.DatabaseReader, hash common.Hash, number uint64) *types
 	return header
 }
 
-func ReadCurrentHeader(db ethdb.Getter) *types.Header {
+func ReadCurrentHeader(db ethdb.KVGetter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
@@ -344,7 +344,7 @@ func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadBodyWithoutTransactions(db ethdb.DatabaseReader, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBodyWithoutTransactions(db ethdb.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0
@@ -433,7 +433,7 @@ func ReadTd(db ethdb.KVGetter, hash common.Hash, number uint64) (*big.Int, error
 	return td, nil
 }
 
-func ReadTdByHash(db ethdb.Getter, hash common.Hash) (*big.Int, error) {
+func ReadTdByHash(db ethdb.KVGetter, hash common.Hash) (*big.Int, error) {
 	headNumber := ReadHeaderNumber(db, hash)
 	if headNumber == nil {
 		return nil, nil
@@ -525,6 +525,9 @@ func ReadReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receip
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
 		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
+		return nil
+	}
+	if senders == nil {
 		return nil
 	}
 	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
@@ -691,14 +694,14 @@ func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, error) {
+func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	block.Body().SendersToTxs(senders)
-	return block, nil
+	return block, senders, nil
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
@@ -892,13 +895,13 @@ func ReadBlockByNumber(db ethdb.Getter, number uint64) (*types.Block, error) {
 	return ReadBlock(db, hash, number), nil
 }
 
-func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, error) {
+func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, []common.Address, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		return nil, nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == (common.Hash{}) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	return ReadBlockWithSenders(db, hash, number)
@@ -929,7 +932,7 @@ func ReadBlocksByHash(db ethdb.Getter, hash common.Hash, n int) (blocks []*types
 	return
 }
 
-func ReadHeaderByNumber(db ethdb.DatabaseReader, number uint64) *types.Header {
+func ReadHeaderByNumber(db ethdb.KVGetter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		log.Error("ReadCanonicalHash failed", "err", err)
@@ -942,7 +945,7 @@ func ReadHeaderByNumber(db ethdb.DatabaseReader, number uint64) *types.Header {
 	return ReadHeader(db, hash, number)
 }
 
-func ReadHeaderByHash(db ethdb.DatabaseReader, hash common.Hash) (*types.Header, error) {
+func ReadHeaderByHash(db ethdb.KVGetter, hash common.Hash) (*types.Header, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil

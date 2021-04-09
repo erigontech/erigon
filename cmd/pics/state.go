@@ -81,7 +81,6 @@ var bucketLabels = map[string]string{
 	dbutils.HeaderNumberBucket:          "Header Numbers",
 	dbutils.TxLookupPrefix:              "Transaction Index",
 	dbutils.CodeBucket:                  "Code Of Contracts",
-	dbutils.Senders:                     "Senders",
 	dbutils.SyncStageProgress:           "Sync Progress",
 	dbutils.PlainStateBucket:            "Plain State",
 	dbutils.HashedAccountsBucket:        "Hashed Accounts",

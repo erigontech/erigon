@@ -36,9 +36,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
+)
+
+var (
+	// gitCommit is injected through the build flags (see Makefile)
+	gitCommit string
+	gitBranch string
 )
 
 func nodeKey() *ecdsa.PrivateKey {
@@ -84,7 +91,9 @@ func makeP2PServer(
 	}
 	p2pConfig.NAT = natif
 	p2pConfig.PrivateKey = serverKey
-	p2pConfig.Name = "header downloader"
+
+	nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+	p2pConfig.Name = nodeConfig.NodeName()
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
@@ -375,6 +384,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 	}
 	grpcServer = grpc.NewServer(opts...)
 	sentryServer := &SentryServerImpl{
+		ctx:             ctx,
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
 	}
@@ -545,7 +555,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	rwRaw, ok := ss.peerRwMap.Load(peerID)
 	if !ok {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", inreq.PeerId)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	var msgcode uint64
@@ -646,12 +656,13 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 }
 
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
+	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 	init := ss.statusData == nil
 	if init {
 		var err error
-		genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
 		if err != nil {
 			return &empty.Empty{}, err
@@ -661,6 +672,8 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
 		}
 	}
+	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return &empty.Empty{}, nil
 }

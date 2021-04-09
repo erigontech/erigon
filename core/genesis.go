@@ -19,13 +19,13 @@ package core
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -39,12 +39,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
+
+//go:embed allocs
+var allocs embed.FS
 
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -430,7 +432,7 @@ func DefaultGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
 		Difficulty: big.NewInt(17179869184),
-		Alloc:      decodePrealloc(mainnetAllocData),
+		Alloc:      readPrealloc("allocs/mainnet.json"),
 	}
 }
 
@@ -442,7 +444,7 @@ func DefaultRopstenGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
 		GasLimit:   16777216,
 		Difficulty: big.NewInt(1048576),
-		Alloc:      decodePrealloc(ropstenAllocData),
+		Alloc:      readPrealloc("allocs/ropsten.json"),
 	}
 }
 
@@ -454,7 +456,7 @@ func DefaultRinkebyGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x52657370656374206d7920617574686f7269746168207e452e436172746d616e42eb768f2244c8811c63729a21a3569731535f067ffc57839b00206d1ad20c69a1981b489f772031b279182d99e65703f0076e4812653aab85fca0f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   4700000,
 		Difficulty: big.NewInt(1),
-		Alloc:      decodePrealloc(rinkebyAllocData),
+		Alloc:      readPrealloc("allocs/rinkeby.json"),
 	}
 }
 
@@ -466,7 +468,7 @@ func DefaultGoerliGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x22466c6578692069732061207468696e6722202d204166726900000000000000e0a2bd4258d2768837baa26a28fe71dc079f84c70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   10485760,
 		Difficulty: big.NewInt(1),
-		Alloc:      decodePrealloc(goerliAllocData),
+		Alloc:      readPrealloc("allocs/goerli.json"),
 	}
 }
 
@@ -478,7 +480,18 @@ func DefaultYoloV3GenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001041afbcb359d5a8dc58c15b2ff51354ff8a217d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x47b760,
 		Difficulty: big.NewInt(1),
-		Alloc:      decodePrealloc(yoloV3AllocData),
+		Alloc:      readPrealloc("allocs/yolov3.json"),
+	}
+}
+
+func DefaultTurboMineGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.RopstenChainConfig,
+		Nonce:      66,
+		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
+		GasLimit:   100000000,
+		Difficulty: big.NewInt(1048576),
+		Alloc:      readPrealloc("allocs/turbomine.json"),
 	}
 }
 
@@ -509,14 +522,17 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	}
 }
 
-func decodePrealloc(data string) GenesisAlloc {
-	var p []struct{ Addr, Balance *big.Int }
-	if err := rlp.NewStream(strings.NewReader(data), 0).Decode(&p); err != nil {
-		panic(err)
+func readPrealloc(filename string) GenesisAlloc {
+	f, err := allocs.Open(filename)
+	if err != nil {
+		panic(fmt.Sprintf("Could not open genesis preallocation for %s: %v", filename, err))
 	}
-	ga := make(GenesisAlloc, len(p))
-	for _, account := range p {
-		ga[common.BigToAddress(account.Addr)] = GenesisAccount{Balance: account.Balance}
+	defer f.Close()
+	decoder := json.NewDecoder(f)
+	ga := make(GenesisAlloc)
+	err = decoder.Decode(&ga)
+	if err != nil {
+		panic(fmt.Sprintf("Could not parse genesis preallocation for %s: %v", filename, err))
 	}
 	return ga
 }

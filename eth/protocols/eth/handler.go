@@ -115,7 +115,7 @@ func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator, chai
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
 			},
-			Attributes:     []enr.Entry{currentENREntry(chainConfig, genesisHash, headHeight)},
+			Attributes:     []enr.Entry{CurrentENREntry(chainConfig, genesisHash, headHeight)},
 			DialCandidates: dnsdisc,
 		}
 	}

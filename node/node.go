@@ -98,7 +98,6 @@ func New(conf *Config) (*Node, error) {
 		server:        &p2p.Server{Config: conf.P2P},
 		databases:     make([]ethdb.Closer, 0),
 	}
-
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
 
@@ -113,7 +112,7 @@ func New(conf *Config) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.server.Config.Name = node.config.NodeName()
+	node.server.Config.Name = node.Config().NodeName()
 	node.server.Config.Logger = node.log
 	if node.server.Config.StaticNodes == nil {
 		node.server.Config.StaticNodes, err = node.config.StaticNodes()

@@ -484,7 +484,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	return nil
 }
 
-func getAncestor(db ethdb.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func getAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}

@@ -140,15 +140,13 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		if err2 != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
-		block := rawdb.ReadBlock(tx, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
 		if block == nil {
 			break
 		}
-		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNum)
-		if errSenders != nil {
-			return errSenders
-		}
-		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
@@ -291,15 +289,13 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		if err != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
 		}
-		block := rawdb.ReadBlock(db, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
 		if block == nil {
 			break
 		}
-		senders, errSenders := rawdb.ReadSenders(db, blockHash, blockNum)
-		if errSenders != nil {
-			return errSenders
-		}
-		block.Body().SendersToTxs(senders)
 
 		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)
 		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)

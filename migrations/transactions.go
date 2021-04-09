@@ -143,16 +143,12 @@ var transactionsTable = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorT.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorT.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the eth_tx table: %w", err)
 		}
-		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the bodies table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }

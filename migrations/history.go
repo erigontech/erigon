@@ -121,12 +121,10 @@ var historyAccBitmap = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.AccountsHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.AccountsHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the bodies table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 
@@ -238,11 +236,9 @@ var historyStorageBitmap = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.StorageHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorB.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.StorageHistoryBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the bodies table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
