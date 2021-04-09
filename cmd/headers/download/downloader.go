@@ -369,11 +369,8 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
-	_, err := rlpStream.List() // Now stream is at the requestID field
-	if err != nil {
-		return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
-	}
-	_, err = rlpStream.List() // Now stream is at the headers list
+	_, _ = rlpStream.List()    // Now stream is at the requestID field
+	_, err := rlpStream.List() // Now stream is at the headers list
 	if err != nil {
 		return fmt.Errorf("decode BlockHeadersPacket66: %w", err)
 	}
