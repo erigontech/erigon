@@ -317,6 +317,7 @@ func (c *Clique) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
 	}
 
+	fmt.Println("XXX-storeGenesisSnapshot")
 	snap := newSnapshot(c.config, c.snapStorage, h.Number.Uint64(), h.Hash(), h.Time, signers)
 	if err := c.applyAndStoreSnapshot(snap, false); err != nil {
 		return nil, err
@@ -373,12 +374,16 @@ func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, has
 	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
 	ancestors := make([]*types.Header, 0, ancestorsNum)
 
-	for n := num - 1; n > num-ancestorsNum; n-- {
-		ans := chain.GetHeader(parentHash, n)
+	fmt.Println("DDD-2", ancestorsNum, num-ancestorsNum)
+	var i uint64
+	for n := int(num - 1); n >= int(num)-int(ancestorsNum); n-- {
+		i++
+		ans := chain.GetHeader(parentHash, uint64(n))
 		ancestors = append(ancestors, ans)
-
+		fmt.Println("DDD-2.1", i, n, ans == nil)
 		parentHash = ans.ParentHash
 	}
+	fmt.Println("DDD-3", ancestorsNum, i, len(ancestors))
 
 	snap, err := c.snapshotFromAncestors(&ancestors)
 	if err != nil {

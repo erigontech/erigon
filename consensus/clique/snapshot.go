@@ -89,9 +89,13 @@ func newSnapshot(config *params.CliqueConfig, snapStorage *storage, number uint6
 		Tally:       make(map[common.Address]Tally),
 		snapStorage: snapStorage,
 	}
+	s := "signers: "
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
+
+		s += " " + signer.Hex()
 	}
+	fmt.Println("DDD-X1", number, hash.Hex(), s)
 	return snap
 }
 
@@ -381,6 +385,7 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 }
 
 func (s *Snapshot) Copy() *Snapshot {
+	fmt.Println("XXX-COPY", s.Number, s.Hash.Hex())
 	snap := newSnapshot(s.config, s.snapStorage, s.Number, s.Hash, s.Time, s.signers())
 
 	snap.Recents = make(map[uint64]common.Address, len(s.Recents))

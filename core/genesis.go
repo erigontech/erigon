@@ -373,9 +373,12 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
+	fmt.Println("&&&&&&-1")
 	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+		fmt.Println("&&&&&&-1.1")
 		return nil, nil, err
 	}
+	fmt.Println("&&&&&&-2")
 	rawdb.WriteHeadBlockHash(tx, block.Hash())
 	rawdb.WriteHeadFastBlockHash(tx, block.Hash())
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {

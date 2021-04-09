@@ -65,7 +65,7 @@ func TestReimportMirroredState(t *testing.T) {
 	txCacher := core.NewTxSenderCacher(1)
 	chain, err := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
-fmt.Println("^^^^", chain == nil, err)
+fmt.Println("^^^^", chain == nil, err, genesis.Hash())
 
 	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
