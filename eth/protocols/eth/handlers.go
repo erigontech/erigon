@@ -17,11 +17,12 @@
 package eth
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -31,13 +32,16 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	// Decode the complex header query
 	var query GetBlockHeadersPacket66
 	if err := msg.Decode(&query); err != nil {
-		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		return fmt.Errorf("%w: message %v", err, msg)
 	}
-	response := answerGetBlockHeadersQuery(backend, query.GetBlockHeadersPacket, peer)
+	response, err := AnswerGetBlockHeadersQuery(backend.Chain().ChainDb(), query.GetBlockHeadersPacket)
+	if err != nil {
+		return err
+	}
 	return peer.ReplyBlockHeaders(query.RequestId, response)
 }
 
-func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, peer *Peer) []*types.Header {
+func AnswerGetBlockHeadersQuery(db ethdb.KVGetter, query *GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -47,6 +51,7 @@ func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, p
 		bytes   common.StorageSize
 		headers []*types.Header
 		unknown bool
+		err     error
 		lookups int
 	)
 	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
@@ -57,15 +62,18 @@ func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, p
 		if hashMode {
 			if first {
 				first = false
-				origin = backend.Chain().GetHeaderByHash(query.Origin.Hash)
+				origin, err = rawdb.ReadHeaderByHash(db, query.Origin.Hash)
+				if err != nil {
+					return nil, err
+				}
 				if origin != nil {
 					query.Origin.Number = origin.Number.Uint64()
 				}
 			} else {
-				origin = backend.Chain().GetHeader(query.Origin.Hash, query.Origin.Number)
+				origin = rawdb.ReadHeader(db, query.Origin.Hash, query.Origin.Number)
 			}
 		} else {
-			origin = backend.Chain().GetHeaderByNumber(query.Origin.Number)
+			origin = rawdb.ReadHeaderByNumber(db, query.Origin.Number)
 		}
 		if origin == nil {
 			break
@@ -81,7 +89,7 @@ func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, p
 			if ancestor == 0 {
 				unknown = true
 			} else {
-				query.Origin.Hash, query.Origin.Number = backend.Chain().GetAncestor(query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
+				query.Origin.Hash, query.Origin.Number = rawdb.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
 				unknown = (query.Origin.Hash == common.Hash{})
 			}
 		case hashMode && !query.Reverse:
@@ -91,13 +99,14 @@ func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, p
 				next    = current + query.Skip + 1
 			)
 			if next <= current {
-				infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
-				peer.Log().Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
+				//infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
+				//log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
+				log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
 				unknown = true
 			} else {
-				if header := backend.Chain().GetHeaderByNumber(next); header != nil {
+				if header := rawdb.ReadHeaderByNumber(db, next); header != nil {
 					nextHash := header.Hash()
-					expOldHash, _ := backend.Chain().GetAncestor(nextHash, next, query.Skip+1, &maxNonCanonical)
+					expOldHash, _ := rawdb.ReadAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
 					if expOldHash == query.Origin.Hash {
 						query.Origin.Hash, query.Origin.Number = nextHash, next
 					} else {
@@ -120,7 +129,7 @@ func answerGetBlockHeadersQuery(backend Backend, query *GetBlockHeadersPacket, p
 			query.Origin.Number += query.Skip + 1
 		}
 	}
-	return headers
+	return headers, nil
 }
 
 func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
@@ -129,11 +138,11 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	response := answerGetBlockBodiesQuery(backend, query.GetBlockBodiesPacket, peer)
+	response := AnswerGetBlockBodiesQuery(backend.Chain().ChainDb(), query.GetBlockBodiesPacket)
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
 
-func answerGetBlockBodiesQuery(backend Backend, query GetBlockBodiesPacket, peer *Peer) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db ethdb.Getter, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var (
 		bytes  int
@@ -144,10 +153,16 @@ func answerGetBlockBodiesQuery(backend Backend, query GetBlockBodiesPacket, peer
 			lookups >= 2*maxBodiesServe {
 			break
 		}
-		if data := backend.Chain().GetBodyRLP(hash); len(data) != 0 {
-			bodies = append(bodies, data)
-			bytes += len(data)
+		number := rawdb.ReadHeaderNumber(db, hash)
+		if number == nil {
+			continue
 		}
+		data := rawdb.ReadBodyRLP(db, hash, *number)
+		if len(data) == 0 {
+			continue
+		}
+		bodies = append(bodies, data)
+		bytes += len(data)
 	}
 	return bodies
 }
@@ -172,11 +187,14 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	response := answerGetReceiptsQuery(backend, query.GetReceiptsPacket, peer)
+	response, err := AnswerGetReceiptsQuery(backend.Chain().ChainDb(), query.GetReceiptsPacket)
+	if err != nil {
+		return err
+	}
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
 
-func answerGetReceiptsQuery(backend Backend, query GetReceiptsPacket, peer *Peer) []rlp.RawValue { //nolint:unparam
+func AnswerGetReceiptsQuery(db ethdb.Getter, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -188,21 +206,25 @@ func answerGetReceiptsQuery(backend Backend, query GetReceiptsPacket, peer *Peer
 			break
 		}
 		// Retrieve the requested block's receipts
-		results := backend.Chain().GetReceiptsByHash(hash)
+		results := rawdb.ReadReceiptsByHash(db, hash)
 		if results == nil {
-			if header := backend.Chain().GetHeaderByHash(hash); header == nil || header.ReceiptHash != types.EmptyRootHash {
+			header, err := rawdb.ReadHeaderByHash(db, hash)
+			if err != nil {
+				return nil, err
+			}
+			if header == nil || header.ReceiptHash != types.EmptyRootHash {
 				continue
 			}
 		}
 		// If known, encode and queue for response packet
 		if encoded, err := rlp.EncodeToBytes(results); err != nil {
-			log.Error("Failed to encode receipt", "err", err)
+			return nil, fmt.Errorf("failed to encode receipt: %w", err)
 		} else {
 			receipts = append(receipts, encoded)
 			bytes += len(encoded)
 		}
 	}
-	return receipts
+	return receipts, nil
 }
 
 func handleNewBlockhashes(backend Backend, msg Decoder, peer *Peer) error {
@@ -304,11 +326,11 @@ func handleGetPooledTransactions66(backend Backend, msg Decoder, peer *Peer) err
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	hashes, txs := answerGetPooledTransactions(backend, query.GetPooledTransactionsPacket, peer)
+	hashes, txs := AnswerGetPooledTransactions(backend.TxPool(), query.GetPooledTransactionsPacket)
 	return peer.ReplyPooledTransactionsRLP(query.RequestId, hashes, txs)
 }
 
-func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsPacket, peer *Peer) ([]common.Hash, []rlp.RawValue) { //nolint:unparam
+func AnswerGetPooledTransactions(txPool TxPool, query GetPooledTransactionsPacket) ([]common.Hash, []rlp.RawValue) { //nolint:unparam
 	// Gather transactions until the fetch or network limits is reached
 	var (
 		bytes  int
@@ -320,7 +342,7 @@ func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsPac
 			break
 		}
 		// Retrieve the requested transaction, skipping if unknown to us
-		tx := backend.TxPool().Get(hash)
+		tx := txPool.Get(hash)
 		if tx == nil {
 			continue
 		}

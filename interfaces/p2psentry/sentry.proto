@@ -21,12 +21,12 @@ enum MessageId {
   GetBlockBodies = 5;
   GetNodeData = 6;
   GetReceipts = 7;
-  GetPooledTransactionsMsg = 8;
+  GetPooledTransactions = 8;
   BlockHeaders = 9;
   BlockBodies = 10;
   NodeData = 11;
   Receipts = 12;
-  PooledTransactionsMsg = 13;
+  PooledTransactions = 13;
 }
 
 message OutboundMessageData {

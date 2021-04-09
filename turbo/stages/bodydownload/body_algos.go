@@ -168,7 +168,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	}
 }
 
-// DeliverBody takes the block body received from a peer and adds it to the various data structures
+// DeliverBodies takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()

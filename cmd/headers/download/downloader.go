@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -39,13 +36,8 @@ import (
 
 // Methods of Core called by sentry
 
-const (
-	softResponseLimit = 2 * 1024 * 1024 // Target maximum size of returned blocks, headers or node data.
-	estHeaderRlpSize  = 500             // Approximate size of an RLP encoded block header
-)
-
 func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
-	// CREATING GRPC CLIENT CONNECTION
+	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -77,7 +69,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		sentries[i] = sentry
 	}
 
-	controlServer, err1 := NewControlServer(db, sentries, window, chain)
+	controlServer, err1 := NewControlServer(db, sentries, window, chain, nil)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
@@ -210,7 +202,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	}
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
-	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain)
+	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain, nil)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -271,9 +263,10 @@ type ControlServerImpl struct {
 	protocolVersion      uint32
 	networkId            uint64
 	db                   ethdb.Database
+	txPool               eth.TxPool
 }
 
-func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string, txPool eth.TxPool) (*ControlServerImpl, error) {
 	ethashConfig := &ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
@@ -319,7 +312,15 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
-	cs := &ControlServerImpl{hd: hd, bd: bd, sentries: sentries, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
+	cs := &ControlServerImpl{
+		hd:                   hd,
+		bd:                   bd,
+		sentries:             sentries,
+		requestWakeUpHeaders: make(chan struct{}, 1),
+		requestWakeUpBodies:  make(chan struct{}, 1),
+		db:                   db,
+		txPool:               txPool,
+	}
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = genesisHash
@@ -488,133 +489,8 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	return nil
 }
 
-func getAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
-	if ancestor > number {
-		return common.Hash{}, 0
-	}
-	if ancestor == 1 {
-		// in this case it is cheaper to just read the header
-		if header := rawdb.ReadHeader(db, hash, number); header != nil {
-			return header.ParentHash, number - 1
-		}
-		return common.Hash{}, 0
-	}
-	for ancestor != 0 {
-		h, err := rawdb.ReadCanonicalHash(db, number)
-		if err != nil {
-			panic(err)
-		}
-		if h == hash {
-			ancestorHash, err := rawdb.ReadCanonicalHash(db, number-ancestor)
-			if err != nil {
-				panic(err)
-			}
-			h, err := rawdb.ReadCanonicalHash(db, number)
-			if err != nil {
-				panic(err)
-			}
-			if h == hash {
-				number -= ancestor
-				return ancestorHash, number
-			}
-		}
-		if *maxNonCanonical == 0 {
-			return common.Hash{}, 0
-		}
-		*maxNonCanonical--
-		ancestor--
-		header := rawdb.ReadHeader(db, hash, number)
-		if header == nil {
-			return common.Hash{}, 0
-		}
-		hash = header.ParentHash
-		number--
-	}
-	return hash, number
-}
-
-func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket66) ([]*types.Header, error) {
-	hashMode := query.Origin.Hash != (common.Hash{})
-	first := true
-	maxNonCanonical := uint64(100)
-	// Gather headers until the fetch or network limits is reached
-	var (
-		bytes   common.StorageSize
-		headers []*types.Header
-		unknown bool
-	)
-	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit && len(headers) < downloader.MaxHeaderFetch {
-		// Retrieve the next header satisfying the query
-		var origin *types.Header
-		var err error
-		if hashMode {
-			if first {
-				first = false
-				if origin, err = rawdb.ReadHeaderByHash(db, query.Origin.Hash); err != nil {
-					return nil, err
-				}
-				if origin != nil {
-					query.Origin.Number = origin.Number.Uint64()
-				}
-			} else {
-				origin = rawdb.ReadHeader(db, query.Origin.Hash, query.Origin.Number)
-			}
-		} else {
-			origin = rawdb.ReadHeaderByNumber(db, query.Origin.Number)
-		}
-		if origin == nil {
-			break
-		}
-		headers = append(headers, origin)
-		bytes += estHeaderRlpSize
-
-		// Advance to the next header of the query
-		switch {
-		case hashMode && query.Reverse:
-			// Hash based traversal towards the genesis block
-			ancestor := query.Skip + 1
-			if ancestor == 0 {
-				unknown = true
-			} else {
-				query.Origin.Hash, query.Origin.Number = getAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
-				unknown = (query.Origin.Hash == common.Hash{})
-			}
-		case hashMode && !query.Reverse:
-			// Hash based traversal towards the leaf block
-			var (
-				current = origin.Number.Uint64()
-				next    = current + query.Skip + 1
-			)
-			if next <= current {
-				log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
-				unknown = true
-			} else {
-				if header := rawdb.ReadHeaderByNumber(db, next); header != nil {
-					nextHash := header.Hash()
-					expOldHash, _ := getAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
-					if expOldHash == query.Origin.Hash {
-						query.Origin.Hash, query.Origin.Number = nextHash, next
-					} else {
-						unknown = true
-					}
-				} else {
-					unknown = true
-				}
-			}
-		case query.Reverse:
-			// Number based traversal towards the genesis block
-			if query.Origin.Number >= query.Skip+1 {
-				query.Origin.Number -= query.Skip + 1
-			} else {
-				unknown = true
-			}
-
-		case !query.Reverse:
-			// Number based traversal towards the leaf block
-			query.Origin.Number += query.Skip + 1
-		}
-	}
-	return headers, nil
+func (cs *ControlServerImpl) receipts(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	return nil
 }
 
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -622,11 +498,15 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	headers, err1 := queryHeaders(cs.db, &query)
-	if err1 != nil {
-		return fmt.Errorf("querying BlockHeaders: %w", err1)
+
+	headers, err := eth.AnswerGetBlockHeadersQuery(cs.db, query.GetBlockHeadersPacket)
+	if err != nil {
+		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
-	b, err := rlp.EncodeToBytes(headers)
+	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          query.RequestId,
+		BlockHeadersPacket: headers,
+	})
 	if err != nil {
 		return fmt.Errorf("encode header response: %v", err)
 	}
@@ -646,41 +526,15 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 }
 
 func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	// Decode the retrieval message
-	msgStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
-	if _, err := msgStream.List(); err != nil {
-		return fmt.Errorf("getting list from RLP stream for GetBlockBodiesMsg: %v", err)
+	var query eth.GetBlockBodiesPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	// Gather blocks until the fetch or network limits is reached
-	var hash common.Hash
-	var bytes int
-	var bodies []rlp.RawValue
-	var hashesStr strings.Builder
-	for bytes < softResponseLimit && len(bodies) < downloader.MaxBlockFetch {
-		// Retrieve the hash of the next block
-		if err := msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
-			break
-		} else if err != nil {
-			return fmt.Errorf("decode hash for GetBlockBodiesMsg: %v", err)
-		}
-		if hashesStr.Len() > 0 {
-			hashesStr.WriteString(",")
-		}
-		hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-		// Retrieve the requested block body, stopping if enough was found
-		number := rawdb.ReadHeaderNumber(cs.db, hash)
-		if number == nil {
-			continue
-		}
-		hashesStr.WriteString(fmt.Sprintf("(%d)", *number))
-		data := rawdb.ReadBodyRLP(cs.db, hash, *number)
-		if len(data) == 0 {
-			continue
-		}
-		bodies = append(bodies, data)
-		bytes += len(data)
-	}
-	b, err := rlp.EncodeToBytes(bodies)
+	response := eth.AnswerGetBlockBodiesQuery(cs.db, query.GetBlockBodiesPacket)
+	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
+		RequestId:            query.RequestId,
+		BlockBodiesRLPPacket: response,
+	})
 	if err != nil {
 		return fmt.Errorf("encode header response: %v", err)
 	}
@@ -688,6 +542,65 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
 			Id:   proto_sentry.MessageId_BlockBodies,
+			Data: b,
+		},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send bodies response: %v", err)
+	}
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
+	return nil
+}
+
+func (cs *ControlServerImpl) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if cs.txPool == nil {
+		return nil
+	}
+	var query eth.GetPooledTransactionsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	_, txs := eth.AnswerGetPooledTransactions(cs.txPool, query.GetPooledTransactionsPacket)
+	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
+		RequestId:                   query.RequestId,
+		PooledTransactionsRLPPacket: txs,
+	})
+	if err != nil {
+		return fmt.Errorf("encode header response: %v", err)
+	}
+	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_PooledTransactions, Data: b},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send pooled transactions response: %v", err)
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	var query eth.GetReceiptsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	receipts, err := eth.AnswerGetReceiptsQuery(cs.db, query.GetReceiptsPacket)
+	if err != nil {
+		return err
+	}
+	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         query.RequestId,
+		ReceiptsRLPPacket: receipts,
+	})
+	if err != nil {
+		return fmt.Errorf("encode header response: %v", err)
+	}
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_Receipts,
 			Data: b,
 		},
 	}
@@ -723,6 +636,12 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 		return cs.getBlockHeaders(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GetBlockBodies:
 		return cs.getBlockBodies(ctx, inreq, sentry)
+	case proto_sentry.MessageId_Receipts:
+		return cs.receipts(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GetReceipts:
+		return cs.getReceipts(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GetPooledTransactions:
+		return cs.getPooledTransactions(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
