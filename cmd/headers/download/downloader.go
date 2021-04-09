@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -368,10 +367,15 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
-	_, err := rlpStream.List()
+	_, err := rlpStream.List() // Now stream is at the requestID field
 	if err != nil {
-		return fmt.Errorf("decode BlockHeaders: %w", err)
+		return fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	_, err = rlpStream.List() // Now stream is at the headers list
+	if err != nil {
+		return fmt.Errorf("decode NewBlockMsg: %w", err)
 	}
 	var headersRaw [][]byte
 	var headerRaw []byte
@@ -385,19 +389,20 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 		headersRaw = append(headersRaw, headerRaw)
 	}
-	headers := make([]*types.Header, len(headersRaw))
+
+	// Parse the entire request from scratch
+	var request eth.BlockHeadersPacket66
+	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+		return fmt.Errorf("decode NewBlockHashes: %v", err)
+	}
+	headers := request.BlockHeadersPacket
 	var heighestBlock uint64
-	var i int
-	for i, headerRaw = range headersRaw {
-		var h types.Header
-		if err = rlp.DecodeBytes(headerRaw, &h); err != nil {
-			return fmt.Errorf("decode BlockHeaders: %w", err)
-		}
-		headers[i] = &h
+	for _, h := range headers {
 		if h.Number.Uint64() > heighestBlock {
 			heighestBlock = h.Number.Uint64()
 		}
 	}
+
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
@@ -476,11 +481,11 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 }
 
 func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var request []*types.Body
+	var request eth.BlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodies: %v", err)
 	}
-	delivered, undelivered := cs.bd.DeliverBodies(request)
+	delivered, undelivered := cs.bd.DeliverBodies(request.BlockBodiesPacket)
 	total := delivered + undelivered
 	if total > 0 {
 		// Approximate numbers

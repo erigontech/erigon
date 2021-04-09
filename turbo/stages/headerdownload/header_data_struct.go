@@ -113,8 +113,8 @@ func (aq *AnchorQueue) Pop() interface{} {
 	return x
 }
 
+// ChainSegment must be contiguous and must not include bad headers
 // First item in ChainSegment is the anchor
-// ChainSegment must be contigous and must not include bad headers
 type ChainSegment struct {
 	HeadersRaw [][]byte
 	Headers    []*types.Header
