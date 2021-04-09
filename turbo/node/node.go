@@ -75,7 +75,11 @@ func New(
 ) *TurboGethNode {
 	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
-	nodeConfig := makeNodeConfig(ctx, optionalParams)
+
+	nodeConfig := NewNodeConfig(optionalParams)
+	utils.SetNodeConfig(ctx, nodeConfig)
+	turbocli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
+
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
 
@@ -95,7 +99,7 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	return ethConfig
 }
 
-func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
+func NewNodeConfig(p Params) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := p.GitCommit; commit != "" {
@@ -105,10 +109,6 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
-
-	utils.SetNodeConfig(ctx, &nodeConfig)
-	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
-
 	return &nodeConfig
 }
 

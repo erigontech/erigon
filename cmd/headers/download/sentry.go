@@ -36,9 +36,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
+)
+
+var (
+	// gitCommit is injected through the build flags (see Makefile)
+	gitCommit string
+	gitBranch string
 )
 
 func nodeKey() *ecdsa.PrivateKey {
@@ -84,7 +91,9 @@ func makeP2PServer(
 	}
 	p2pConfig.NAT = natif
 	p2pConfig.PrivateKey = serverKey
-	p2pConfig.Name = "header downloader"
+
+	nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+	p2pConfig.Name = nodeConfig.NodeName()
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
