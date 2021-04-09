@@ -1204,6 +1204,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Override any default configs for hard coded networks.
 	chain := ctx.GlobalString(ChainFlag.Name)
 	switch chain {
+	case "":
+		if cfg.NetworkID == 1 {
+			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
+		}
 	case params.MainnetChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1
@@ -1268,9 +1272,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
 	default:
-		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
-		}
+		Fatalf("Chain name is not recognized: %s", chain)
 	}
 }
 

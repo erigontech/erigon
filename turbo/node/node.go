@@ -139,10 +139,12 @@ func prepare(ctx *cli.Context) {
 	case params.DevChainName:
 		log.Info("Starting Turbo-Geth in ephemeral dev mode...")
 
-	default:
+	case "", params.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Turbo-Geth on Ethereum mainnet...")
 		}
+	default:
+		log.Info("Starting Turbo-Geth on", "devnet", chain)
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if !ctx.GlobalIsSet(utils.CacheFlag.Name) && !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
