@@ -113,7 +113,8 @@ func New(conf *Config) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.server.Config.Name = node.config.NodeName()
+	node.server.Config.Name = node.Config().NodeName()
+	fmt.Printf("server name: %s\n", node.server.Config.Name)
 	node.server.Config.Logger = node.log
 	if node.server.Config.StaticNodes == nil {
 		node.server.Config.StaticNodes, err = node.config.StaticNodes()
