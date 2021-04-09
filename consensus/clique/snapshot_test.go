@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"errors"
-	"fmt"
 	"runtime"
 	"sort"
 	"testing"
@@ -501,18 +500,14 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := blocks[len(blocks)-1]
 
-			if len(blocks) > 1 {
-				head = blocks[len(blocks)-2]
-			}
-			fmt.Println("ddd-1", head.Number(), head.Hash().Hex(), head.ParentHash())
-			snap, _, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), head.ParentHash())
+			snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), head.ParentHash())
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)
 				engine.Close()
 				return
 			}
-			fmt.Println("ddd-X-2", head.Number(), head.Hash().Hex(), head.ParentHash(), snap.Number, snap.Hash.Hex())
+
 			// Verify the final list of signers against the expected ones
 			signers = make([]common.Address, len(tt.results))
 			for j, signer := range tt.results {

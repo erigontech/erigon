@@ -246,12 +246,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
-		fmt.Println("%%%-1")
 		return nil, err
 	}
 	bc.genesisBlock = bc.GetBlockByNumber(0)
 	if bc.genesisBlock == nil {
-		fmt.Println("%%%-0")
 		return nil, ErrNoGenesis
 	}
 
@@ -260,7 +258,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.currentFastBlock.Store(nilBlock)
 
 	if err := bc.loadLastState(); err != nil {
-		fmt.Println("%%%-2")
 		log.Error("loadLoadState", "err", err)
 	}
 	return bc, nil

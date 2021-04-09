@@ -1747,7 +1747,7 @@ func snapSizes(chaindata string) error {
 	defer dbtx.Rollback()
 	tx := dbtx.(ethdb.HasTx).Tx()
 
-	c, _ := tx.Cursor(dbutils.CliqueBucket)
+	c, _ := tx.Cursor(dbutils.CliqueSeparateBucket)
 	defer c.Close()
 
 	sizes := make(map[int]int)

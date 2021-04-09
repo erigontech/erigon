@@ -189,6 +189,7 @@ const (
 	SyncStageUnwind     = "SSU2"
 	SyncStageUnwindOld1 = "SSU"
 
+	CliqueSeparateBucket     = "clique-"
 	CliqueBucket             = "clique-"
 	CliqueSnapshotBucket     = "snap"
 	CliqueLastSnapshotBucket = "lastSnap"
@@ -259,6 +260,7 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	CliqueBucket,
+	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
 	SyncStageProgress,
@@ -302,6 +304,7 @@ var DeprecatedBuckets = []string{
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
 	HeaderPrefixOld,
+	CliqueBucket,
 }
 
 type CustomComparator string

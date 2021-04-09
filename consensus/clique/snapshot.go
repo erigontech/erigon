@@ -89,13 +89,11 @@ func newSnapshot(config *params.CliqueConfig, snapStorage *storage, number uint6
 		Tally:       make(map[common.Address]Tally),
 		snapStorage: snapStorage,
 	}
-	s := "signers: "
+
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
-
-		s += " " + signer.Hex()
 	}
-	fmt.Println("DDD-X1", number, hash.Hex(), s)
+
 	return snap
 }
 
@@ -128,11 +126,11 @@ func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, e
 }
 
 func getSnapshotData(db ethdb.Database, num uint64, hash common.Hash) ([]byte, error) {
-	return db.Get(dbutils.CliqueBucket, SnapshotFullKey(num, hash))
+	return db.Get(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
 }
 
 func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, error) {
-	return db.Has(dbutils.CliqueBucket, SnapshotFullKey(num, hash))
+	return db.Has(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
 }
 
 func hasSnapshot(db ethdb.Database, num uint64) (bool, error) {
@@ -229,8 +227,6 @@ func (s *Snapshot) apply(r *lru.ARCCache, headers ...*types.Header) error {
 		for _, par := range headers {
 			parStr += fmt.Sprintf("%d ", par.Number.Uint64())
 		}
-		fmt.Printf("invalid voting chain - 2, from %d, to %d, snap+1 %d, %s\n",
-			headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1, parStr)
 
 		return fmt.Errorf("%w: highest parent %d, snap %d - %s",
 			errInvalidVotingChain, headers[0].Number.Uint64(), s.Number, parStr)
@@ -385,7 +381,6 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 }
 
 func (s *Snapshot) Copy() *Snapshot {
-	fmt.Println("XXX-COPY", s.Number, s.Hash.Hex())
 	snap := newSnapshot(s.config, s.snapStorage, s.Number, s.Hash, s.Time, s.signers())
 
 	snap.Recents = make(map[uint64]common.Address, len(s.Recents))
@@ -524,7 +519,7 @@ func (st *storage) save(s *Snapshot, force bool) error {
 
 		defer tx.Rollback()
 
-		if err = tx.Put(dbutils.CliqueBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
+		if err = tx.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
 			log.Error("can't store a snapshot", "block", s.Number, "hash", s.Hash, "err", err)
 			return err
 		}
@@ -595,7 +590,7 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 			continue
 		}
 
-		if err = batch.Put(dbutils.CliqueBucket, SnapshotFullKey(snap.number, snap.hash), blobs[i]); err != nil {
+		if err = batch.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(snap.number, snap.hash), blobs[i]); err != nil {
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 

@@ -46,7 +46,7 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	snap, _, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	snap, _, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 		return nil, errUnknownBlock
 	}
 
-	snap, _, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	snap, _, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (api *API) Status() (*status, error) {
 		diff      = uint64(0)
 		optimals  = 0
 	)
-	snap, _, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return nil, err
 	}

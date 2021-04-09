@@ -84,7 +84,6 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 
 	hc.genesisHeader = hc.GetHeaderByNumber(0)
 	if hc.genesisHeader == nil {
-		fmt.Println("%%%-1.0")
 		return nil, ErrNoGenesis
 	}
 
@@ -507,8 +506,6 @@ func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
 // GetHeaderByNumber retrieves a block header from the database by number,
 // caching it (associated with its hash) if found.
 func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	fmt.Println("^^^2", hc==nil, hc.chainDb == nil, number)
-
 	hash, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
 	if err != nil {
 		panic(err)
@@ -517,10 +514,6 @@ func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
 	if hash == (common.Hash{}) {
 		return nil
 	}
-	fmt.Println("^^^3", hc==nil, hc.chainDb == nil, number, hash.Hex())
-	h := hc.CurrentHeader()
-	fmt.Println("^^^3.1", hc==nil, hc.chainDb == nil, number, h.Number, h.Hash())
-
 	return hc.GetHeader(hash, number)
 }
 
@@ -535,9 +528,7 @@ func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
 // CurrentHeader retrieves the current head header of the canonical chain.
 func (hc *HeaderChain) CurrentHeader() *types.Header {
 	headHash := rawdb.ReadHeadHeaderHash(hc.chainDb)
-	fmt.Println("^^^4", headHash.Hex())
 	headNumber := rawdb.ReadHeaderNumber(hc.chainDb, headHash)
-	fmt.Println("^^^5", headNumber)
 	return rawdb.ReadHeader(hc.chainDb, headHash, *headNumber)
 }
 

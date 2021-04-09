@@ -212,7 +212,6 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-//fixme: не надо ли разные базы принимать. на запись клика и на чтение стейта?
 func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.Database) *Clique {
 	config := cfg.Clique
 
@@ -272,7 +271,7 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	snap, _, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return err
 	}
@@ -295,9 +294,6 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 
 		for i, header := range headers {
 			err := c.verifyHeader(chain, header, headers[:i])
-			if err != nil {
-				fmt.Println("====", header.Number.Uint64(), i, len(headers), len(headers[:i]), err)
-			}
 
 			select {
 			case <-abort:
@@ -388,7 +384,7 @@ func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	snap, _, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
 	if err != nil {
 		return err
 	}
@@ -404,7 +400,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	number := header.Number.Uint64()
 	// Assemble the voting snapshot to check which votes make sense
-	snap, _, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
 	if err != nil {
 		return err
 	}
@@ -451,7 +447,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
-		fmt.Println("+++-1", header.Number, header.ParentHash, number-1)
 		return consensus.ErrUnknownAncestor
 	}
 	header.Time = parent.Time + c.config.Period
@@ -512,7 +507,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
-	snap, _, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
 	if err != nil {
 		return err
 	}
@@ -568,7 +563,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _, parentNumber *big.Int, parentHash, _ common.Hash) *big.Int {
-	snap, _, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, common.Hash{})
+	snap, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, common.Hash{})
 	if err != nil {
 		return nil
 	}
@@ -647,18 +642,6 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	if err != nil {
 		panic("can't encode: " + err.Error())
 	}
-}
-
-func (c *Clique) Verify(_ consensus.ChainHeaderReader, _ *types.Header, _ []*types.Header, _ bool, _ bool) error {
-	panic("should not be used")
-}
-
-func (c *Clique) AncestorsNeededForVerification(_ *types.Header) int {
-	panic("should not be used")
-}
-
-func (c *Clique) PrepareHeaders(_ []*types.Header) {
-	panic("not implemented")
 }
 
 func (c *Clique) checkSnapshot(num uint64, hash *common.Hash) bool {
@@ -749,7 +732,7 @@ func (c *Clique) lookupSnapshot(num uint64) bool {
 		return false
 	}
 
-	cur, err := tx.Cursor(dbutils.CliqueBucket)
+	cur, err := tx.Cursor(dbutils.CliqueSeparateBucket)
 	if err != nil {
 		log.Error("Lookup snapshot - opening cursor", "error", err)
 		return false
@@ -779,7 +762,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	} else {
 		return nil, err
 	}
-	cur, err1 := tx.Cursor(dbutils.CliqueBucket)
+	cur, err1 := tx.Cursor(dbutils.CliqueSeparateBucket)
 	if err1 != nil {
 		return nil, err1
 	}

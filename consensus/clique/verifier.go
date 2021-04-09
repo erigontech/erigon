@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -109,33 +108,22 @@ func (c *Clique) verifyCascadingFieldsByAncestors(chain consensus.ChainHeaderRea
 		return nil
 	}
 
-	fmt.Println("***verifyCascadingFieldsByAncestors", header.Number.Uint64(), len(parents))
-
 	// Retrieve the snapshot needed to verify this header and cache it
 	var parent *types.Header
 	if len(parents) > 0 {
 		parent = parents[len(parents)-1]
 	} else {
-		fmt.Println("0000000000000000000000000",header.ParentHash, number-1)
 		parent = chain.GetHeader(header.ParentHash, number-1)
-
-		if header.ParentHash != parent.Hash() {
-			fmt.Println("0000000000000000000000000-1",header.ParentHash, number-1)
-		}
-
 		parents = []*types.Header{parent}
 	}
 
 	snap, err := c.snapshotFromAncestors(&parents)
 	if err != nil {
-		fmt.Println("***-3snapshotFromAncestors-end")
 		return err
 	}
 
 	// Ensure that the block's timestamp isn't too close to its parent
 	if parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
-		fmt.Println("0000000000000000000000000-2",header.ParentHash, number-1)
-		fmt.Println("+++-4", number, parent.Hash(), header.ParentHash)
 		return fmt.Errorf("verifyCascadingFields num=%d err=%w %v", header.Number.Uint64(), consensus.ErrUnknownAncestor, len(parents))
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -175,7 +163,6 @@ func (c *Clique) verifyCascadingFieldsBySnapshot(chain consensus.ChainHeaderRead
 
 	// Ensure that the block's timestamp isn't too close to its parent
 	if snap.Number != number-1 || snap.Hash != header.ParentHash {
-		fmt.Println("+++-5", number)
 		return fmt.Errorf("verifyCascadingFields num=%d err=%w", header.Number.Uint64(), consensus.ErrUnknownAncestor)
 	}
 	if snap.Time+c.config.Period > header.Time {
@@ -206,11 +193,11 @@ func (c *Clique) verifyCascadingFieldsBySnapshot(chain consensus.ChainHeaderRead
 	return err
 }
 
-func (c *Clique) snapshot(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, []*types.Header, error) {
+func (c *Clique) snapshot(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
 	if parentHash == (common.Hash{}) {
 		parent := chain.GetHeader(hash, num)
 		if parent == nil {
-			return nil, nil, fmt.Errorf("header not found: %d(%q)", num, hash.Hex())
+			return nil, fmt.Errorf("header not found: %d(%q)", num, hash.Hex())
 		}
 		parentHash = parent.Hash()
 	}
@@ -272,11 +259,10 @@ func (c *Clique) snapshotFromAncestors(parentsRef *[]*types.Header) (*Snapshot, 
 			if i < 0 {
 				i = 0
 			}
-			fmt.Println("+++-2", i, parents[i].Number.Uint64())
+
 			return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
 		}
 
-		fmt.Println("+++-3", debug.Callers(10))
 		return nil, fmt.Errorf("a nil snap for %d ancestors: %w", len(parents), consensus.ErrUnknownAncestor)
 	}
 
@@ -311,13 +297,26 @@ func (c *Clique) snapshotFromAncestors(parentsRef *[]*types.Header) (*Snapshot, 
 	return snap, nil
 }
 
+func (c *Clique) snapshotByHeader(num uint64, hash common.Hash) *Snapshot {
+	if s, ok := c.recentsGet(hash); ok {
+		return s
+	}
+
+	if isSnapshot(num, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
+		if s, err := loadAndFillSnapshot(c.db, num, hash, c.config, c.snapStorage); err == nil {
+			return s
+		}
+	}
+
+	return nil
+}
+
 func (c *Clique) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
 	signers := make([]common.Address, (len(h.Extra)-extraVanity-extraSeal)/common.AddressLength)
 	for i := 0; i < len(signers); i++ {
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
 	}
 
-	fmt.Println("XXX-storeGenesisSnapshot")
 	snap := newSnapshot(c.config, c.snapStorage, h.Number.Uint64(), h.Hash(), h.Time, signers)
 	if err := c.applyAndStoreSnapshot(snap, false); err != nil {
 		return nil, err
@@ -370,27 +369,28 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
-func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, []*types.Header, error) {
+func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
 	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
+	if ancestorsNum == 0 {
+		return c.snapshotByHeader(num, hash), nil
+	}
+
 	ancestors := make([]*types.Header, 0, ancestorsNum)
 
-	fmt.Println("DDD-2", ancestorsNum, num-ancestorsNum)
 	var i uint64
 	for n := int(num - 1); n >= int(num)-int(ancestorsNum); n-- {
 		i++
 		ans := chain.GetHeader(parentHash, uint64(n))
 		ancestors = append(ancestors, ans)
-		fmt.Println("DDD-2.1", i, n, ans == nil)
 		parentHash = ans.ParentHash
 	}
-	fmt.Println("DDD-3", ancestorsNum, i, len(ancestors))
 
 	snap, err := c.snapshotFromAncestors(&ancestors)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return snap, ancestors, nil
+	return snap, nil
 }
 
 func (c *Clique) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash) int {
@@ -432,7 +432,7 @@ func (c *Clique) findPrevCheckpoint(num uint64, hash common.Hash, parentHash com
 
 	ancestors := int(num) - n
 
-	if ancestors <= 0 {
+	if ancestors < 0 {
 		ancestors = 1 // we need at least 1 parent for verification
 	}
 

@@ -47,12 +47,9 @@ func ReadCanonicalHash(db ethdb.KVGetter, number uint64) (common.Hash, error) {
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db ethdb.Putter, hash common.Hash, number uint64) error {
-	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!-1", number, hash)
 	if err := db.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number), hash.Bytes()); err != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!-2", number, hash, err)
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
-	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!-3", number, hash)
 	return nil
 }
 
@@ -68,15 +65,12 @@ func DeleteCanonicalHash(db ethdb.Deleter, number uint64) error {
 func ReadHeaderNumber(db ethdb.KVGetter, hash common.Hash) *uint64 {
 	data, err := db.GetOne(dbutils.HeaderNumberBucket, hash.Bytes())
 	if err != nil {
-		fmt.Println("aaa-1")
 		log.Error("ReadHeaderNumber failed", "err", err)
 	}
 	if len(data) == 0 {
-		fmt.Println("aaa-2")
 		return nil
 	}
 	if len(data) != 8 {
-		fmt.Println("aaa-3")
 		log.Error("ReadHeaderNumber got wrong data len", "len", len(data))
 		return nil
 	}
@@ -86,12 +80,10 @@ func ReadHeaderNumber(db ethdb.KVGetter, hash common.Hash) *uint64 {
 
 // WriteHeaderNumber stores the hash->number mapping.
 func WriteHeaderNumber(db ethdb.Putter, hash common.Hash, number uint64) {
-	fmt.Println("IIII-3.WriteHeaderNumber", number, hash.Hex())
 	enc := dbutils.EncodeBlockNumber(number)
 	if err := db.Put(dbutils.HeaderNumberBucket, hash[:], enc); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
-	fmt.Println("IIII-4.WriteHeaderNumber", number, hash.Hex())
 }
 
 // DeleteHeaderNumber removes hash->number mapping.
@@ -226,7 +218,6 @@ func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
 func WriteHeader(ctx context.Context, db ethdb.Putter, header *types.Header) {
-	fmt.Println("IIII-1.WriteHeader", header.Number, header.Hash().Hex())
 	var (
 		hash    = header.Hash()
 		number  = header.Number.Uint64()
@@ -246,7 +237,6 @@ func WriteHeader(ctx context.Context, db ethdb.Putter, header *types.Header) {
 	if err := db.Put(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash), data); err != nil {
 		log.Crit("Failed to store header", "err", err)
 	}
-	fmt.Println("IIII-2.WriteHeader", header.Number, header.Hash().Hex())
 }
 
 // DeleteHeader removes all block header data associated with a hash.
