@@ -31,7 +31,7 @@ import (
 // ensure they process the early transactions fast.
 type txSenderCacherRequest struct {
 	signer types.Signer
-	txs    []*types.Transaction
+	txs    []types.Transaction
 	inc    int
 }
 

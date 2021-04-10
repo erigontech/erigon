@@ -122,14 +122,13 @@ func (s Transactions) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	tx := s[i]
-	if tx.Type() == LegacyTxType {
-		if err := rlp.Encode(w, tx); err != nil {
+	if tx.Type() != LegacyTxType {
+		if err := w.WriteByte(tx.Type()); err != nil {
 			panic(err)
 		}
-	} else {
-		if err := tx.encodeTyped(w); err != nil {
-			panic(err)
-		}
+	}
+	if err := rlp.Encode(w, tx); err != nil {
+		panic(err)
 	}
 }
 

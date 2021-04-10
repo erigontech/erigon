@@ -264,8 +264,10 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if _, err := w.Write(h.Extra); err != nil {
-		return err
+	if len(h.Extra) > 0 {
+		if _, err := w.Write(h.Extra); err != nil {
+			return err
+		}
 	}
 	b[0] = 128 + 32
 	if _, err := w.Write(b[:1]); err != nil {

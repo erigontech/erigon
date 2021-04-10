@@ -49,7 +49,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	}
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
-		baseFee = new(uint256.Int).Set(header.BaseFee)
+		baseFee, _ = uint256.FromBig(header.BaseFee)
 	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,

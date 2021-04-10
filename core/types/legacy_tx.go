@@ -17,7 +17,9 @@
 package types
 
 import (
+	"encoding/binary"
 	"io"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -118,7 +120,136 @@ func (tx LegacyTx) copy() *LegacyTx {
 	return cpy
 }
 
-func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
+func (tx LegacyTx) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	encodingSize++
+	var gasPriceLen int
+	if tx.GasPrice.BitLen() >= 8 {
+		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
+	}
+	encodingSize += gasPriceLen
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		nonceLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		gasPriceLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		gasPriceLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		gasPriceLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		gasPriceLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	// Emit len(ser.len) + 247
+	var b [33]byte
+	beSize := bits.Len(uint(encodingSize)) + 7/8
+	b[0] = byte(beSize)
+	binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
+	if _, err := w.Write(b[:1+beSize]); err != nil {
+		return err
+	}
+	if nonceLen > 0 && tx.Nonce < 128 {
+		b[0] = byte(tx.Nonce)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(nonceLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		if _, err := w.Write(b[:1+nonceLen]); err != nil {
+			return err
+		}
+	}
+	if err := tx.GasPrice.EncodeRLP(w); err != nil {
+		return err
+	}
+	if gasLen > 0 && tx.Gas < 128 {
+		b[0] = byte(tx.Gas)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(gasLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Gas)
+		if _, err := w.Write(b[:1+gasLen]); err != nil {
+			return err
+		}
+	}
+	if tx.To == nil {
+		b[0] = 128
+	} else {
+		b[0] = 128 + 20
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if tx.To != nil {
+		if _, err := w.Write(tx.To.Bytes()); err != nil {
+			return err
+		}
+	}
+	if err := tx.Value.EncodeRLP(w); err != nil {
+		return err
+	}
+	if len(tx.Data) >= 56 {
+		beSize = bits.Len(uint(len(tx.Data))+7) / 8
+		b[0] = 183 + byte(beSize)
+		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(len(tx.Data))
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	if len(tx.Data) > 0 {
+		if _, err := w.Write(tx.Data); err != nil {
+			return err
+		}
+	}
+	if err := tx.V.EncodeRLP(w); err != nil {
+		return err
+	}
+	if err := tx.R.EncodeRLP(w); err != nil {
+		return err
+	}
+	if err := tx.S.EncodeRLP(w); err != nil {
+		return err
+	}
 	return nil
 }
 
