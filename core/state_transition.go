@@ -23,8 +23,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ledgerwatch/turbo-geth/common"
+	cmath "github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/params"
