@@ -121,7 +121,7 @@ func (tx *LegacyTx) Protected() bool {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer) (Message, error) {
+func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -134,8 +134,21 @@ func (tx *LegacyTx) AsMessage(s Signer) (Message, error) {
 	}
 
 	var err error
-	msg.from, err = Sender(s, tx)
+	msg.from, err = Sender(s, &tx)
 	return msg, err
+}
+
+// Hash computes the hash (but not for signatures!)
+func (tx LegacyTx) Hash() common.Hash {
+	return rlpHash([]interface{}{
+		tx.Nonce,
+		tx.GasPrice,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+		tx.V, tx.R, tx.S,
+	})
 }
 
 // accessors for innerTx.

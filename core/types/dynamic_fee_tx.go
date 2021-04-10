@@ -85,11 +85,12 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
+func (tx DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
-		gasPrice:   *tx.Tip,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,
@@ -98,8 +99,24 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
 	}
 
 	var err error
-	msg.from, err = Sender(s, tx)
+	msg.from, err = Sender(s, &tx)
 	return msg, err
+}
+
+// Hash computes the hash (but not for signatures!)
+func (tx DynamicFeeTransaction) Hash() common.Hash {
+	return rlpHash([]interface{}{
+		tx.ChainID,
+		tx.Nonce,
+		tx.Tip,
+		tx.FeeCap,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+		tx.AccessList,
+		tx.V, tx.R, tx.S,
+	})
 }
 
 // accessors for innerTx.

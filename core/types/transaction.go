@@ -563,12 +563,14 @@ type Message struct {
 	amount     uint256.Int
 	gasLimit   uint64
 	gasPrice   uint256.Int
+	feeCap     uint256.Int
+	tip        uint256.Int
 	data       []byte
 	accessList AccessList
 	checkNonce bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
 	return Message{
 		from:       from,
 		to:         to,
@@ -576,6 +578,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		amount:     *amount,
 		gasLimit:   gasLimit,
 		gasPrice:   *gasPrice,
+		feeCap:     *feeCap,
+		tip:        *tip,
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
@@ -585,6 +589,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 func (m Message) From() common.Address   { return m.from }
 func (m Message) To() *common.Address    { return m.to }
 func (m Message) GasPrice() *uint256.Int { return &m.gasPrice }
+func (m Message) FeeCap() *uint256.Int   { return &m.feeCap }
+func (m Message) Tip() *uint256.Int      { return &m.tip }
 func (m Message) Value() *uint256.Int    { return &m.amount }
 func (m Message) Gas() uint64            { return m.gasLimit }
 func (m Message) Nonce() uint64          { return m.nonce }

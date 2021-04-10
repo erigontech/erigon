@@ -92,7 +92,7 @@ func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error
 }
 
 // SignNewTx creates a transaction and signs it.
-func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txdata TxData) (Transaction, error) {
+func SignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) (Transaction, error) {
 	tx := NewTx(txdata)
 	h := s.Hash(tx)
 	sig, err := crypto.Sign(h[:], prv)
@@ -178,25 +178,33 @@ func (s eip2930Signer) Sender(tx Transaction) (common.Address, error) {
 }
 
 func (s eip2930Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (common.Address, error) {
-	var V, R, S *uint256.Int
+	var V uint256.Int
+	var R, S *uint256.Int
 	switch t := tx.(type) {
 	case *LegacyTx:
 		if !t.Protected() {
 			return HomesteadSigner{}.Sender(t)
 		}
-		V = new(uint256.Int).Sub(t.V, s.chainIDMul)
-		V.Sub(V, u256.Num8)
+		V.Sub(t.V, s.chainIDMul)
+		V.Sub(&V, u256.Num8)
+		R, S = t.R, t.S
 	case *AccessListTx:
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
 		// 27 to become equivalent to unprotected Homestead signatures.
-		V = new(uint256.Int).Add(t.V, u256.Num27)
+		V.Add(t.V, u256.Num27)
+		R, S = t.R, t.S
+	case *DynamicFeeTransaction:
+		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(t.V, u256.Num27)
+		R, S = t.R, t.S
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
 	if tx.ChainId().Cmp(s.chainID) != 0 {
 		return common.Address{}, ErrInvalidChainId
 	}
-	return recoverPlain(context, s.Hash(tx), R, S, V, true)
+	return recoverPlain(context, s.Hash(tx), R, S, &V, true)
 }
 
 func (s eip2930Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
@@ -208,6 +216,14 @@ func (s eip2930Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uin
 			V.Add(V, s.chainIDMul)
 		}
 	case *AccessListTx:
+		// Check that chain ID of tx matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the tx.
+		if txdata.ChainID.Sign() != 0 && txdata.ChainID.Cmp(s.chainID) != 0 {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, _ = decodeSignature(sig)
+		V = uint256.NewInt().SetUint64(uint64(sig[64]))
+	case *DynamicFeeTransaction:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
 		if txdata.ChainID.Sign() != 0 && txdata.ChainID.Cmp(s.chainID) != 0 {
