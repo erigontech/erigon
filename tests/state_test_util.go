@@ -359,7 +359,7 @@ func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
 
-	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, data, accessList, true)
+	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, nil, nil, data, accessList, true)
 	return msg, nil
 }
 

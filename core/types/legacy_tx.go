@@ -126,6 +126,8 @@ func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
 		gasPrice:   *tx.GasPrice,
+		tip:        *tx.GasPrice,
+		feeCap:     *tx.GasPrice,
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,

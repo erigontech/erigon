@@ -35,15 +35,22 @@ var ErrInvalidChainId = errors.New("invalid chain id for signer")
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 	var signer Signer
+	signer.unprotected = true
 	switch {
+	case config.IsAleut(blockNumber):
+		// All transaction types are still supported
+		signer.protected = true
+		signer.accesslist = true
+		signer.dynamicfee = true
 	case config.IsBerlin(blockNumber):
-		signer = NewEIP2930Signer(config.ChainID)
+		signer.protected = true
+		signer.accesslist = true
 	case config.IsEIP155(blockNumber):
-		signer = NewEIP155Signer(config.ChainID)
+		signer.protected = true
 	case config.IsHomestead(blockNumber):
-		signer = HomesteadSigner{}
 	default:
-		signer = FrontierSigner{}
+		// Only allow malleable transactions in Frontier
+		signer.maleable = true
 	}
 	return signer
 }
@@ -55,16 +62,20 @@ func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 //
 // Use this in transaction-handling code where the current block number is unknown. If you
 // have the current block number available, use MakeSigner instead.
-func LatestSigner(config *params.ChainConfig) Signer {
+func LatestSigner(config *params.ChainConfig) *Signer {
+	var signer Signer
+	signer.unprotected = true
 	if config.ChainID != nil {
 		if config.BerlinBlock != nil || config.YoloV3Block != nil {
-			return NewEIP2930Signer(config.ChainID)
+			signer.protected = true
+			signer.accesslist = true
+			signer.dynamicfee = true
 		}
 		if config.EIP155Block != nil {
-			return NewEIP155Signer(config.ChainID)
+			signer.protected = true
 		}
 	}
-	return HomesteadSigner{}
+	return &signer
 }
 
 // LatestSignerForChainID returns the 'most permissive' Signer available. Specifically,
@@ -137,23 +148,167 @@ func Sender(signer Signer, tx Transaction) (common.Address, error) {
 //
 // Note that this interface is not a stable API and may change at any time to accommodate
 // new protocol rules.
-type Signer interface {
-	// Sender returns the sender address of the transaction.
-	Sender(tx Transaction) (common.Address, error)
-	// SenderWithContext returns the sender address of the transaction.
-	SenderWithContext(context *secp256k1.Context, tx Transaction) (common.Address, error)
+type Signer struct {
+	chainID, chainIDMul uint256.Int
+	maleable            bool // Whether this signer should allow legacy transactions with malleability
+	unprotected         bool // Whether this signer should allow legacy transactions without chainId protection
+	protected           bool // Whether this signer should allow transactions with replay protection via chainId
+	accesslist          bool // Whether this signer should allow transactions with access list, superseeds protected
+	dynamicfee          bool // Whether this signer should allow transactions with basefee and tip (instead of gasprice), superseeds accesslist
+}
 
-	// SignatureValues returns the raw R, S, V values corresponding to the
-	// given signature.
-	SignatureValues(tx Transaction, sig []byte) (r, s, v *uint256.Int, err error)
-	ChainID() *uint256.Int
+func (sg Signer) String() string {
+	return fmt.Sprintf("Signer[chainId=%d,unprotected=%t,protected=%t,accesslist=%t,basefee=%d")
+}
 
-	// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
-	// private key. This hash does not uniquely identify the transaction.
-	Hash(tx Transaction) common.Hash
+// Sender returns the sender address of the transaction.
+func (sg Signer) Sender(tx Transaction) (common.Address, error) {
+	return sg.SenderWithContext(secp256k1.DefaultContext, tx)
+}
 
-	// Equal returns true if the given signer is the same as the receiver.
-	Equal(Signer) bool
+// SenderWithContext returns the sender address of the transaction.
+func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (common.Address, error) {
+	var V uint256.Int
+	var R, S *uint256.Int
+	var hash common.Hash
+	switch t := tx.(type) {
+	case *LegacyTx:
+		if !t.Protected() {
+			if !sg.unprotected {
+				return common.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
+			}
+			V.Set(t.V)
+			hash = rlpHash([]interface{}{
+				t.Nonce,
+				t.GasPrice,
+				t.Gas,
+				t.To,
+				t.Value,
+				t.Data,
+			})
+		} else {
+			if !sg.protected {
+				return common.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
+			}
+			if !deriveChainId(t.V).Eq(&sg.chainID) {
+				return common.Address{}, ErrInvalidChainId
+			}
+			V.Sub(t.V, &sg.chainIDMul)
+			V.Sub(&V, u256.Num8)
+			hash = rlpHash([]interface{}{
+				t.Nonce,
+				t.GasPrice,
+				t.Gas,
+				t.To,
+				t.Value,
+				t.Data,
+				sg.chainID.ToBig(), uint(0), uint(0),
+			})
+		}
+		R, S = t.R, t.S
+	case *AccessListTx:
+		if !sg.accesslist {
+			return common.Address{}, fmt.Errorf("accesslist tx is not supported by signer %s", sg)
+		}
+		if !t.ChainID.Eq(&sg.chainID) {
+			return common.Address{}, ErrInvalidChainId
+		}
+		// ACL txs are defined to use 0 and 1 as their recovery id, add
+		// 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(t.V, u256.Num27)
+		R, S = t.R, t.S
+		hash = prefixedRlpHash(
+			AccessListTxType,
+			[]interface{}{
+				t.ChainID.ToBig(),
+				t.Nonce,
+				t.GasPrice,
+				t.Gas,
+				t.To,
+				t.Value,
+				t.Data,
+				t.AccessList,
+			})
+	case *DynamicFeeTransaction:
+		if !sg.dynamicfee {
+			return common.Address{}, fmt.Errorf("dynamicfee tx is not supported by signer %s", sg)
+		}
+		if !t.ChainID.Eq(&sg.chainID) {
+			return common.Address{}, ErrInvalidChainId
+		}
+		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(t.V, u256.Num27)
+		R, S = t.R, t.S
+		hash = prefixedRlpHash(
+			DynamicFeeTxType,
+			[]interface{}{
+				t.ChainID,
+				t.Nonce,
+				t.Tip,
+				t.FeeCap,
+				t.Gas,
+				t.To,
+				t.Value,
+				t.Data,
+				t.AccessList,
+			})
+	default:
+		return common.Address{}, ErrTxTypeNotSupported
+	}
+	return recoverPlain(context, hash, R, S, &V, !sg.maleable)
+}
+
+// SignatureValues returns the raw R, S, V values corresponding to the
+// given signature.
+func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
+	switch t := tx.(type) {
+	case *LegacyTx:
+		R, S, V = decodeSignature(sig)
+		if sg.chainID.IsZero() {
+			V.Add(V, u256.Num27)
+		} else {
+			V.Add(V, u256.Num35)
+			V.Add(V, &sg.chainIDMul)
+		}
+	case *AccessListTx:
+		// Check that chain ID of tx matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the tx.
+		if !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, V = decodeSignature(sig)
+	case *DynamicFeeTransaction:
+		// Check that chain ID of tx matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the tx.
+		if !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, V = decodeSignature(sig)
+	default:
+		return nil, nil, nil, ErrTxTypeNotSupported
+	}
+	return R, S, V, nil
+}
+
+func (sg Signer) ChainID() *uint256.Int {
+	return &sg.chainID
+}
+
+// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
+// private key. This hash does not uniquely identify the transaction.
+func (sg Signer) Hash(tx Transaction) common.Hash {
+	return common.Hash{}
+}
+
+// Equal returns true if the given signer is the same as the receiver.
+func (sg Signer) Equal(other Signer) bool {
+	return sg.chainID.Eq(&other.chainID) &&
+		sg.maleable == sg.maleable &&
+		sg.unprotected == sg.unprotected &&
+		sg.protected == sg.protected &&
+		sg.accesslist == sg.accesslist &&
+		sg.dynamicfee == sg.dynamicfee
 }
 
 type eip2930Signer struct{ EIP155Signer }
@@ -422,7 +577,7 @@ func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
 	}
 	r = new(uint256.Int).SetBytes(sig[:32])
 	s = new(uint256.Int).SetBytes(sig[32:64])
-	v = new(uint256.Int).SetBytes([]byte{sig[64] + 27})
+	v = new(uint256.Int).SetBytes(sig[64:65])
 	return r, s, v
 }
 
