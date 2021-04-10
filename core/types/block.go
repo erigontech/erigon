@@ -299,7 +299,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 }
 
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
-	encodingSize, err := s.List()
+	_, err := s.List()
 	if err != nil {
 		return err
 	}
@@ -468,7 +468,7 @@ func (h *Header) EmptyReceipts() bool {
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
-	Transactions []*Transaction
+	Transactions []Transaction
 	Uncles       []*Header
 }
 
@@ -514,7 +514,7 @@ type StorageBlock Block
 // "external" block encoding. used for eth protocol, etc.
 type extblock struct {
 	Header *Header
-	Txs    []*Transaction
+	Txs    []Transaction
 	Uncles []*Header
 }
 
@@ -522,7 +522,7 @@ type extblock struct {
 // "storage" block encoding. used for database.
 type storageblock struct {
 	Header *Header
-	Txs    []*Transaction
+	Txs    []Transaction
 	Uncles []*Header
 	TD     *big.Int
 }
@@ -533,7 +533,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, tx := range b.Transactions {
-		tx.from.Store(senders[i])
+		tx.From().Store(senders[i])
 	}
 }
 
@@ -541,7 +541,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, tx := range b.Transactions {
-		if sc := tx.from.Load(); sc != nil {
+		if sc := tx.From().Load(); sc != nil {
 			senders[i] = sc.(common.Address)
 		}
 	}
@@ -555,7 +555,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 // The values of TxHash, UncleHash, ReceiptHash and Bloom in header
 // are ignored and set to values derived from the given txs, uncles
 // and receipts.
-func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*Receipt) *Block {
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt) *Block {
 	b := &Block{header: CopyHeader(header), td: new(big.Int)}
 
 	// TODO: panic if len(txs) != len(receipts)
@@ -651,7 +651,7 @@ func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
-func (b *Block) Transaction(hash common.Hash) *Transaction {
+func (b *Block) Transaction(hash common.Hash) Transaction {
 	for _, transaction := range b.transactions {
 		if transaction.Hash() == hash {
 			return transaction
@@ -738,10 +738,10 @@ func (b *Block) WithSeal(header *Header) *Block {
 }
 
 // WithBody returns a new block with the given transaction and uncle contents.
-func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
+func (b *Block) WithBody(transactions []Transaction, uncles []*Header) *Block {
 	block := &Block{
 		header:       CopyHeader(b.header),
-		transactions: make([]*Transaction, len(transactions)),
+		transactions: make([]Transaction, len(transactions)),
 		uncles:       make([]*Header, len(uncles)),
 	}
 	copy(block.transactions, transactions)

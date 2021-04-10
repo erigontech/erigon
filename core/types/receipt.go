@@ -375,11 +375,11 @@ func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions
 		r[i].TransactionIndex = uint(i)
 
 		// The contract address can be derived from the transaction itself
-		if txs[i].To() == nil {
+		if txs[i].GetTo() == nil {
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].Nonce())
+			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {

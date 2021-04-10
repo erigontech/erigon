@@ -38,10 +38,18 @@ func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
 
+func (ct CommonTx) GetTo() *common.Address {
+	return ct.To
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
 	GasPrice *uint256.Int // wei per gas
+}
+
+func (tx LegacyTx) GetPrice() *uint256.Int {
+	return new(uint256.Int).Set(tx.GasPrice)
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -74,9 +82,12 @@ func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gas
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *LegacyTx) copy() *LegacyTx {
+func (tx LegacyTx) copy() *LegacyTx {
 	cpy := &LegacyTx{
 		CommonTx: CommonTx{
+			TransactionMisc: TransactionMisc{
+				time: tx.time,
+			},
 			Nonce: tx.Nonce,
 			To:    tx.To, // TODO: copy pointed-to address
 			Data:  common.CopyBytes(tx.Data),
@@ -140,6 +151,16 @@ func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
+func (tx LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := tx.copy()
+	var err error
+	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	return cpy, nil
+}
+
 // Hash computes the hash (but not for signatures!)
 func (tx LegacyTx) Hash() common.Hash {
 	return rlpHash([]interface{}{
@@ -153,21 +174,4 @@ func (tx LegacyTx) Hash() common.Hash {
 	})
 }
 
-// accessors for innerTx.
-
-func (tx *LegacyTx) Type() byte             { return LegacyTxType }
-func (tx *LegacyTx) chainID() *uint256.Int  { return deriveChainId(tx.V) }
-func (tx *LegacyTx) accessList() AccessList { return nil }
-func (tx *LegacyTx) data() []byte           { return tx.Data }
-func (tx *LegacyTx) gas() uint64            { return tx.Gas }
-func (tx *LegacyTx) gasPrice() *uint256.Int { return tx.GasPrice }
-func (tx *LegacyTx) value() *uint256.Int    { return tx.Value }
-func (tx *LegacyTx) to() *common.Address    { return tx.To }
-
-func (tx *LegacyTx) rawSignatureValues() (v, r, s *uint256.Int) {
-	return tx.V, tx.R, tx.S
-}
-
-func (tx *LegacyTx) setSignatureValues(chainID, v, r, s *uint256.Int) {
-	tx.V, tx.R, tx.S = v, r, s
-}
+func (tx LegacyTx) Type() byte { return LegacyTxType }

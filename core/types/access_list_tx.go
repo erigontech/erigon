@@ -52,10 +52,13 @@ type AccessListTx struct {
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *AccessListTx) copy() *AccessListTx {
+func (tx AccessListTx) copy() *AccessListTx {
 	cpy := &AccessListTx{
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
+				TransactionMisc: TransactionMisc{
+					time: tx.time,
+				},
 				Nonce: tx.Nonce,
 				To:    tx.To, // TODO: copy pointed-to address
 				Data:  common.CopyBytes(tx.Data),
@@ -93,7 +96,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
-func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
+func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
@@ -121,6 +124,17 @@ func (tx AccessListTx) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
+func (tx AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := tx.copy()
+	var err error
+	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy.ChainID = signer.ChainID()
+	return cpy, nil
+}
+
 // Hash computes the hash (but not for signatures!)
 func (tx AccessListTx) Hash() common.Hash {
 	return rlpHash([]interface{}{
@@ -136,22 +150,4 @@ func (tx AccessListTx) Hash() common.Hash {
 	})
 }
 
-// accessors for innerTx.
-
-func (tx *AccessListTx) Type() byte             { return AccessListTxType }
-func (tx *AccessListTx) chainID() *uint256.Int  { return tx.ChainID }
-func (tx *AccessListTx) accessList() AccessList { return tx.AccessList }
-func (tx *AccessListTx) data() []byte           { return tx.Data }
-func (tx *AccessListTx) gas() uint64            { return tx.Gas }
-func (tx *AccessListTx) gasPrice() *uint256.Int { return tx.GasPrice }
-func (tx *AccessListTx) value() *uint256.Int    { return tx.Value }
-func (tx *AccessListTx) nonce() uint64          { return tx.Nonce }
-func (tx *AccessListTx) to() *common.Address    { return tx.To }
-
-func (tx *AccessListTx) rawSignatureValues() (v, r, s *uint256.Int) {
-	return tx.V, tx.R, tx.S
-}
-
-func (tx *AccessListTx) setSignatureValues(chainID, v, r, s *uint256.Int) {
-	tx.ChainID, tx.V, tx.R, tx.S = chainID, v, r, s
-}
+func (tx AccessListTx) Type() byte { return AccessListTxType }

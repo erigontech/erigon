@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"errors"
-	"io"
 	"sync/atomic"
 	"time"
 
@@ -49,9 +48,13 @@ const (
 type Transaction interface {
 	Type() byte
 	GetNonce() uint64
+	GetPrice() *uint256.Int
 	Time() time.Time
 	From() *atomic.Value
+	GetTo() *common.Address
 	AsMessage(s Signer) (Message, error)
+	WithSignature(signer Signer, sig []byte) (Transaction, error)
+	Hash() common.Hash
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -71,140 +74,6 @@ func (tm TransactionMisc) Time() time.Time {
 
 func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
-}
-
-// NewTx creates a new transaction.
-func NewTx(inner TxData) *Transaction {
-	tx := new(Transaction)
-	tx.setDecoded(inner.copy(), 0)
-	return tx
-}
-
-// TxData is the underlying data of a transaction.
-//
-// This is implemented by LegacyTx and AccessListTx.
-type TxData interface {
-	txType() byte // returns the type ID
-	copy() TxData // creates a deep copy and initializes all fields
-
-	chainID() *uint256.Int
-	accessList() AccessList
-	data() []byte
-	gas() uint64
-	gasPrice() *uint256.Int
-	value() *uint256.Int
-	nonce() uint64
-	to() *common.Address
-
-	rawSignatureValues() (v, r, s *uint256.Int)
-	setSignatureValues(chainID, v, r, s *uint256.Int)
-}
-
-// EncodeRLP implements rlp.Encoder
-func (tx *Transaction) EncodeRLP(w io.Writer) error {
-	if tx.Type() == LegacyTxType {
-		return rlp.Encode(w, tx.inner)
-	}
-	// It's an EIP-2718 typed TX envelope.
-	buf := new(bytes.Buffer)
-	if err := tx.encodeTyped(buf); err != nil {
-		return err
-	}
-	return rlp.Encode(w, buf.Bytes())
-}
-
-// encodeTyped writes the canonical encoding of a typed transaction to w.
-func (tx *Transaction) encodeTyped(w *bytes.Buffer) error {
-	w.WriteByte(tx.Type())
-	return rlp.Encode(w, tx.inner)
-}
-
-// MarshalBinary returns the canonical encoding of the transaction.
-// For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
-// transactions, it returns the type and payload.
-func (tx *Transaction) MarshalBinary() ([]byte, error) {
-	if tx.Type() == LegacyTxType {
-		return rlp.EncodeToBytes(tx.inner)
-	}
-	var buf bytes.Buffer
-	err := tx.encodeTyped(&buf)
-	return buf.Bytes(), err
-}
-
-// DecodeRLP implements rlp.Decoder
-func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
-	kind, size, err := s.Kind()
-	switch {
-	case err != nil:
-		return err
-	case kind == rlp.List:
-		// It's a legacy transaction.
-		var inner LegacyTx
-		err = s.Decode(&inner)
-		if err == nil {
-			tx.setDecoded(&inner, int(rlp.ListSize(size)))
-		}
-		return err
-	case kind == rlp.String:
-		// It's an EIP-2718 typed TX envelope.
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
-			return err
-		}
-		inner, err := tx.decodeTyped(b)
-		if err == nil {
-			tx.setDecoded(inner, len(b))
-		}
-		return err
-	default:
-		return rlp.ErrExpectedList
-	}
-}
-
-// UnmarshalBinary decodes the canonical encoding of transactions.
-// It supports legacy RLP transactions and EIP2718 typed transactions.
-func (tx *Transaction) UnmarshalBinary(b []byte) error {
-	if len(b) > 0 && b[0] > 0x7f {
-		// It's a legacy transaction.
-		var data LegacyTx
-		err := rlp.DecodeBytes(b, &data)
-		if err != nil {
-			return err
-		}
-		tx.setDecoded(&data, len(b))
-		return nil
-	}
-	// It's an EIP2718 typed transaction envelope.
-	inner, err := tx.decodeTyped(b)
-	if err != nil {
-		return err
-	}
-	tx.setDecoded(inner, len(b))
-	return nil
-}
-
-// decodeTyped decodes a typed transaction from the canonical format.
-func (tx *Transaction) decodeTyped(b []byte) (TxData, error) {
-	if len(b) == 0 {
-		return nil, errEmptyTypedTx
-	}
-	switch b[0] {
-	case AccessListTxType:
-		var inner AccessListTx
-		err := rlp.DecodeBytes(b[1:], &inner)
-		return &inner, err
-	default:
-		return nil, ErrTxTypeNotSupported
-	}
-}
-
-// setDecoded sets the inner transaction and size after decoding.
-func (tx *Transaction) setDecoded(inner TxData, size int) {
-	tx.inner = inner
-	tx.time = time.Now()
-	if size > 0 {
-		tx.size.Store(common.StorageSize(size))
-	}
 }
 
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
@@ -240,110 +109,6 @@ func isProtectedV(V *uint256.Int) bool {
 	}
 	// anything not 27 or 28 is considered protected
 	return true
-}
-
-// ChainId returns the EIP155 chain ID of the transaction. The return value will always be
-// non-nil. For legacy transactions which are not replay-protected, the return value is
-// zero.
-func (tx *Transaction) ChainId() *uint256.Int {
-	return tx.inner.chainID()
-}
-
-// Data returns the input data of the transaction.
-func (tx *Transaction) Data() []byte { return tx.inner.data() }
-
-// AccessList returns the access list of the transaction.
-func (tx *Transaction) AccessList() AccessList { return tx.inner.accessList() }
-
-// Gas returns the gas limit of the transaction.
-func (tx *Transaction) Gas() uint64 { return tx.inner.gas() }
-
-// GasPrice returns the gas price of the transaction.
-func (tx *Transaction) GasPrice() *uint256.Int { return new(uint256.Int).Set(tx.inner.gasPrice()) }
-
-// Value returns the ether amount of the transaction.
-func (tx *Transaction) Value() *uint256.Int { return new(uint256.Int).Set(tx.inner.value()) }
-
-// Nonce returns the sender account nonce of the transaction.
-func (tx *Transaction) Nonce() uint64 { return tx.inner.nonce() }
-
-// To returns the recipient address of the transaction.
-// For contract-creation transactions, To returns nil.
-func (tx *Transaction) To() *common.Address {
-	// Copy the pointed-to address.
-	ito := tx.inner.to()
-	if ito == nil {
-		return nil
-	}
-	cpy := *ito
-	return &cpy
-}
-
-// Cost returns gas * gasPrice + value.
-func (tx *Transaction) Cost() *uint256.Int {
-	total := new(uint256.Int).Mul(tx.GasPrice(), new(uint256.Int).SetUint64(tx.Gas()))
-	total.Add(total, tx.Value())
-	return total
-}
-
-// RawSignatureValues returns the V, R, S signature values of the transaction.
-// The return values should not be modified by the caller.
-func (tx *Transaction) RawSignatureValues() (v, r, s *uint256.Int) {
-	return tx.inner.rawSignatureValues()
-}
-
-// GasPriceCmp compares the gas prices of two transactions.
-func (tx *Transaction) GasPriceCmp(other *Transaction) int {
-	return tx.inner.gasPrice().Cmp(other.GasPrice())
-}
-
-func (tx *Transaction) CheckNonce() bool { return true }
-
-// GasPriceIntCmp compares the gas price of the transaction against the given price.
-func (tx *Transaction) GasPriceIntCmp(other *uint256.Int) int {
-	return tx.inner.gasPrice().Cmp(other)
-}
-
-// Hash returns the transaction hash.
-func (tx *Transaction) Hash() common.Hash {
-	if hash := tx.hash.Load(); hash != nil {
-		return hash.(common.Hash)
-	}
-
-	var h common.Hash
-	if tx.Type() == LegacyTxType {
-		h = rlpHash(tx.inner)
-	} else {
-		h = prefixedRlpHash(tx.Type(), tx.inner)
-	}
-	tx.hash.Store(h)
-	return h
-}
-
-// Size returns the true RLP encoded storage size of the transaction, either by
-// encoding and returning it, or returning a previously cached value.
-func (tx *Transaction) Size() common.StorageSize {
-	if size := tx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := writeCounter(0)
-	if err := rlp.Encode(&c, &tx.inner); err != nil {
-		panic(err)
-	}
-	tx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
-}
-
-// WithSignature returns a new transaction with the given signature.
-// This signature needs to be in the [R || S || V] format where V is 0 or 1.
-func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, error) {
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
-		return nil, err
-	}
-	cpy := tx.inner.copy()
-	cpy.setSignatureValues(signer.ChainID(), v, r, s)
-	return &Transaction{inner: cpy, time: tx.time}, nil
 }
 
 // Transactions implements DerivableList for transactions.
@@ -395,7 +160,7 @@ func TxDifference(a, b Transactions) Transactions {
 type TxByNonce Transactions
 
 func (s TxByNonce) Len() int           { return len(s) }
-func (s TxByNonce) Less(i, j int) bool { return s[i].Nonce() < s[j].Nonce() }
+func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // TxByPriceAndTime implements both the sort and the heap interface, making it useful
@@ -406,7 +171,7 @@ func (s TxByPriceAndTime) Len() int { return len(s) }
 func (s TxByPriceAndTime) Less(i, j int) bool {
 	// If the prices are equal, use the time the transaction was first seen for
 	// deterministic sorting
-	cmp := s[i].GasPrice().Cmp(s[j].GasPrice())
+	cmp := s[i].GetPrice().Cmp(s[j].GetPrice())
 	if cmp == 0 {
 		return s[i].Time().Before(s[j].Time())
 	}

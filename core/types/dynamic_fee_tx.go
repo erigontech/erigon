@@ -32,10 +32,17 @@ type DynamicFeeTransaction struct {
 	AccessList AccessList
 }
 
+func (tx DynamicFeeTransaction) GetPrice() *uint256.Int {
+	return new(uint256.Int).Set(tx.Tip)
+}
+
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
+func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	cpy := &DynamicFeeTransaction{
 		CommonTx: CommonTx{
+			TransactionMisc: TransactionMisc{
+				time: tx.time,
+			},
 			Nonce: tx.Nonce,
 			To:    tx.To, // TODO: copy pointed-to address
 			Data:  common.CopyBytes(tx.Data),
@@ -76,7 +83,18 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
+func (tx DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := tx.copy()
+	var err error
+	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy.ChainID = signer.ChainID()
+	return cpy, nil
+}
+
+func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
@@ -121,23 +139,4 @@ func (tx DynamicFeeTransaction) Hash() common.Hash {
 }
 
 // accessors for innerTx.
-func (tx *DynamicFeeTransaction) Type() byte             { return DynamicFeeTxType }
-func (tx *DynamicFeeTransaction) chainID() *uint256.Int  { return tx.ChainID }
-func (tx *DynamicFeeTransaction) protected() bool        { return true }
-func (tx *DynamicFeeTransaction) accessList() AccessList { return tx.AccessList }
-func (tx *DynamicFeeTransaction) data() []byte           { return tx.Data }
-func (tx *DynamicFeeTransaction) gas() uint64            { return tx.Gas }
-func (tx *DynamicFeeTransaction) feeCap() *uint256.Int   { return tx.FeeCap }
-func (tx *DynamicFeeTransaction) tip() *uint256.Int      { return tx.Tip }
-func (tx *DynamicFeeTransaction) gasPrice() *uint256.Int { return tx.Tip }
-func (tx *DynamicFeeTransaction) value() *uint256.Int    { return tx.Value }
-func (tx *DynamicFeeTransaction) nonce() uint64          { return tx.Nonce }
-func (tx *DynamicFeeTransaction) to() *common.Address    { return tx.To }
-
-func (tx *DynamicFeeTransaction) rawSignatureValues() (v, r, s *uint256.Int) {
-	return tx.V, tx.R, tx.S
-}
-
-func (tx *DynamicFeeTransaction) setSignatureValues(chainID, v, r, s *uint256.Int) {
-	tx.ChainID, tx.V, tx.R, tx.S = chainID, v, r, s
-}
+func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
