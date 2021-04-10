@@ -19,6 +19,7 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -126,11 +127,13 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if len(h.Extra) >= 56 {
 		encodingSize += bits.Len(uint(len(h.Extra))+7) / 8
 	}
+	var baseFeeLen int
 	if h.eip1559 {
 		encodingSize++
 		if h.BaseFee.BitLen() >= 8 {
-			encodingSize += (h.BaseFee.BitLen() + 7) / 8
+			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
 		}
+		encodingSize += baseFeeLen
 	}
 	// Emit len(ser.len) + 247
 	var b [33]byte
@@ -212,6 +215,197 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
+	if gasLimitLen > 0 && h.GasLimit < 128 {
+		b[0] = byte(h.GasLimit)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(gasLimitLen)
+		binary.BigEndian.PutUint64(b[1:], h.GasLimit)
+		if _, err := w.Write(b[:1+gasLimitLen]); err != nil {
+			return err
+		}
+	}
+	if gasUsedLen > 0 && h.GasUsed < 128 {
+		b[0] = byte(h.GasUsed)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(gasUsedLen)
+		binary.BigEndian.PutUint64(b[1:], h.GasUsed)
+		if _, err := w.Write(b[:1+gasUsedLen]); err != nil {
+			return err
+		}
+	}
+	if timeLen > 0 && h.Time < 128 {
+		b[0] = byte(h.Time)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(timeLen)
+		binary.BigEndian.PutUint64(b[1:], h.Time)
+		if _, err := w.Write(b[:1+timeLen]); err != nil {
+			return err
+		}
+	}
+	if len(h.Extra) >= 56 {
+		beSize = bits.Len(uint(len(h.Extra))+7) / 8
+		b[0] = 183 + byte(beSize)
+		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(len(h.Extra))
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	if _, err := w.Write(h.Extra); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.MixDigest.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 8
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Nonce[:]); err != nil {
+		return err
+	}
+	if h.eip1559 {
+		if baseFeeLen > 0 && h.BaseFee.BitLen() < 8 {
+			b[0] = byte(h.BaseFee.Uint64())
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+		} else {
+			b[0] = 128 + byte(baseFeeLen)
+			h.BaseFee.FillBytes(b[1:])
+			if _, err := w.Write(b[:1+baseFeeLen]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	encodingSize, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for ParentHash: %d", len(b))
+	}
+	copy(h.ParentHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for UncleHash: %d", len(b))
+	}
+	copy(h.UncleHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Coinbase: %d", len(b))
+	}
+	copy(h.Coinbase[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for Root: %d", len(b))
+	}
+	copy(h.Root[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for TxHash: %d", len(b))
+	}
+	copy(h.TxHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for ReceiptHash: %d", len(b))
+	}
+	copy(h.ReceiptHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 256 {
+		return fmt.Errorf("wrong size for Bloom: %d", len(b))
+	}
+	copy(h.Bloom[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
+	}
+	h.Difficulty = new(big.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Number: %d", len(b))
+	}
+	h.Number = new(big.Int).SetBytes(b)
+	if h.GasLimit, err = s.Uint(); err != nil {
+		return err
+	}
+	if h.GasUsed, err = s.Uint(); err != nil {
+		return err
+	}
+	if h.Time, err = s.Uint(); err != nil {
+		return err
+	}
+	if h.Extra, err = s.Bytes(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for MixDigest: %d", len(b))
+	}
+	copy(h.MixDigest[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 8 {
+		return fmt.Errorf("wrong size for Nonce: %d", len(b))
+	}
+	copy(h.Nonce[:], b)
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.BaseFee = nil
+			h.eip1559 = false
+			return nil
+		}
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
+	}
+	h.eip1559 = true
+	h.BaseFee = new(big.Int).SetBytes(b)
 	return nil
 }
 
@@ -223,6 +417,7 @@ type headerMarshaling struct {
 	GasUsed    hexutil.Uint64
 	Time       hexutil.Uint64
 	Extra      hexutil.Bytes
+	BaseFee    *hexutil.Big
 	Hash       common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
@@ -409,6 +604,10 @@ func CopyHeader(h *Header) *Header {
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
+	if h.BaseFee != nil {
+		cpy.BaseFee = new(big.Int)
+		cpy.BaseFee.Set(h.BaseFee)
+	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
@@ -478,6 +677,12 @@ func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
+func (b *Block) BaseFee() *big.Int {
+	if b.header.BaseFee == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.BaseFee)
+}
 
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 

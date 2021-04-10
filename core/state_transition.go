@@ -315,7 +315,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if refunds {
 		st.refundGas()
 	}
-	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.gasPrice))
+	price := st.gasPrice
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+		// price = min(tip, feeCap - baseFee) + baseFee
+		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
+	}
+	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), price))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
@@ -333,7 +338,12 @@ func (st *StateTransition) refundGas() {
 	st.gas += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
+	price := st.gasPrice
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+		// price = min(tip, feeCap - baseFee) + baseFee
+		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
+	}
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), price)
 	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is

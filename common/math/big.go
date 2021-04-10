@@ -154,7 +154,7 @@ func BigMin(x, y *big.Int) *big.Int {
 }
 
 // Min256 returns the smaller of x or y.
-func Min256(x, y *uint256.Int) *big.Int {
+func Min256(x, y *uint256.Int) *uint256.Int {
 	if x.Cmp(y) > 0 {
 		return y
 	}

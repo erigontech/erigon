@@ -42,17 +42,35 @@ var (
 const (
 	LegacyTxType = iota
 	AccessListTxType
+	DynamicFeeTxType
 )
 
 // Transaction is an Ethereum transaction.
-type Transaction struct {
-	inner TxData    // Consensus contents of a transaction
-	time  time.Time // Time first seen locally (spam avoidance)
+type Transaction interface {
+	Type() byte
+	GetNonce() uint64
+	Time() time.Time
+	From() *atomic.Value
+	AsMessage(s Signer) (Message, error)
+}
+
+// TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
+// implementations of different transaction types
+type TransactionMisc struct {
+	time time.Time // Time first seen locally (spam avoidance)
 
 	// caches
 	hash atomic.Value
 	size atomic.Value
 	from atomic.Value
+}
+
+func (tm TransactionMisc) Time() time.Time {
+	return tm.time
+}
+
+func (tm TransactionMisc) From() *atomic.Value {
+	return &tm.from
 }
 
 // NewTx creates a new transaction.
@@ -224,21 +242,6 @@ func isProtectedV(V *uint256.Int) bool {
 	return true
 }
 
-// Protected says whether the transaction is replay-protected.
-func (tx *Transaction) Protected() bool {
-	switch tx := tx.inner.(type) {
-	case *LegacyTx:
-		return tx.V != nil && isProtectedV(tx.V)
-	default:
-		return true
-	}
-}
-
-// Type returns the transaction type.
-func (tx *Transaction) Type() uint8 {
-	return tx.inner.txType()
-}
-
 // ChainId returns the EIP155 chain ID of the transaction. The return value will always be
 // non-nil. For legacy transactions which are not replay-protected, the return value is
 // zero.
@@ -344,7 +347,7 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 }
 
 // Transactions implements DerivableList for transactions.
-type Transactions []*Transaction
+type Transactions []Transaction
 
 // Len returns the length of s.
 func (s Transactions) Len() int { return len(s) }
@@ -355,7 +358,7 @@ func (s Transactions) Len() int { return len(s) }
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	tx := s[i]
 	if tx.Type() == LegacyTxType {
-		if err := rlp.Encode(w, tx.inner); err != nil {
+		if err := rlp.Encode(w, tx); err != nil {
 			panic(err)
 		}
 	} else {
@@ -405,14 +408,14 @@ func (s TxByPriceAndTime) Less(i, j int) bool {
 	// deterministic sorting
 	cmp := s[i].GasPrice().Cmp(s[j].GasPrice())
 	if cmp == 0 {
-		return s[i].time.Before(s[j].time)
+		return s[i].Time().Before(s[j].Time())
 	}
 	return cmp > 0
 }
 func (s TxByPriceAndTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s *TxByPriceAndTime) Push(x interface{}) {
-	*s = append(*s, x.(*Transaction))
+	*s = append(*s, x.(Transaction))
 }
 
 func (s *TxByPriceAndTime) Pop() interface{} {
@@ -479,7 +482,7 @@ func (t *TransactionsByPriceAndNonce) Empty() bool {
 }
 
 // Peek returns the next transaction by price.
-func (t *TransactionsByPriceAndNonce) Peek() *Transaction {
+func (t *TransactionsByPriceAndNonce) Peek() Transaction {
 	if len(t.heads) == 0 {
 		return nil
 	}
@@ -531,7 +534,7 @@ func (t *TransactionsFixedOrder) Empty() bool {
 }
 
 // Peek returns the next transaction by price.
-func (t *TransactionsFixedOrder) Peek() *Transaction {
+func (t *TransactionsFixedOrder) Peek() Transaction {
 	if len(t.Transactions) == 0 {
 		return nil
 	}
@@ -577,24 +580,6 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		accessList: accessList,
 		checkNonce: checkNonce,
 	}
-}
-
-// AsMessage returns the transaction as a core.Message.
-func (tx *Transaction) AsMessage(s Signer) (Message, error) {
-	msg := Message{
-		nonce:      tx.Nonce(),
-		gasLimit:   tx.Gas(),
-		gasPrice:   *tx.GasPrice(),
-		to:         tx.To(),
-		amount:     *tx.Value(),
-		data:       tx.Data(),
-		accessList: tx.AccessList(),
-		checkNonce: true,
-	}
-
-	var err error
-	msg.from, err = Sender(s, tx)
-	return msg, err
 }
 
 func (m Message) From() common.Address   { return m.from }

@@ -17,8 +17,11 @@
 package types
 
 import (
+	"io"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // go:generate gencodec -type AccessTuple -out gen_access_tuple.go
@@ -43,32 +46,30 @@ func (al AccessList) StorageKeys() int {
 
 // AccessListTx is the data of EIP-2930 access list transactions.
 type AccessListTx struct {
-	ChainID    *uint256.Int    // destination chain ID
-	Nonce      uint64          // nonce of sender account
-	GasPrice   *uint256.Int    // wei per gas
-	Gas        uint64          // gas limit
-	To         *common.Address `rlp:"nil"` // nil means contract creation
-	Value      *uint256.Int    // wei amount
-	Data       []byte          // contract invocation input data
-	AccessList AccessList      // EIP-2930 access list
-	V, R, S    *uint256.Int    // signature values
+	LegacyTx
+	ChainID    *uint256.Int
+	AccessList AccessList // EIP-2930 access list
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *AccessListTx) copy() TxData {
+func (tx *AccessListTx) copy() *AccessListTx {
 	cpy := &AccessListTx{
-		Nonce: tx.Nonce,
-		To:    tx.To, // TODO: copy pointed-to address
-		Data:  common.CopyBytes(tx.Data),
-		Gas:   tx.Gas,
-		// These are copied below.
-		AccessList: make(AccessList, len(tx.AccessList)),
-		Value:      new(uint256.Int),
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: tx.Nonce,
+				To:    tx.To, // TODO: copy pointed-to address
+				Data:  common.CopyBytes(tx.Data),
+				Gas:   tx.Gas,
+				// These are copied below.
+				Value: new(uint256.Int),
+				V:     new(uint256.Int),
+				R:     new(uint256.Int),
+				S:     new(uint256.Int),
+			},
+			GasPrice: new(uint256.Int),
+		},
 		ChainID:    new(uint256.Int),
-		GasPrice:   new(uint256.Int),
-		V:          new(uint256.Int),
-		R:          new(uint256.Int),
-		S:          new(uint256.Int),
+		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
@@ -92,9 +93,35 @@ func (tx *AccessListTx) copy() TxData {
 	return cpy
 }
 
+func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
+	return nil
+}
+
+func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
+	return nil
+}
+
+// AsMessage returns the transaction as a core.Message.
+func (tx *AccessListTx) AsMessage(s Signer) (Message, error) {
+	msg := Message{
+		nonce:      tx.Nonce,
+		gasLimit:   tx.Gas,
+		gasPrice:   *tx.GasPrice,
+		to:         tx.To,
+		amount:     *tx.Value,
+		data:       tx.Data,
+		accessList: tx.AccessList,
+		checkNonce: true,
+	}
+
+	var err error
+	msg.from, err = Sender(s, tx)
+	return msg, err
+}
+
 // accessors for innerTx.
 
-func (tx *AccessListTx) txType() byte           { return AccessListTxType }
+func (tx *AccessListTx) Type() byte             { return AccessListTxType }
 func (tx *AccessListTx) chainID() *uint256.Int  { return tx.ChainID }
 func (tx *AccessListTx) accessList() AccessList { return tx.AccessList }
 func (tx *AccessListTx) data() []byte           { return tx.Data }
