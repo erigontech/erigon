@@ -222,7 +222,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	receipt := receipts[txIndex]
 
-	var signer types.Signer = types.FrontierSigner{}
+	var signer types.Signer = types.HomesteadSigner{}
 	if txn.Protected() {
 		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
 	}
