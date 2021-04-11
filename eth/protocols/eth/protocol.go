@@ -231,15 +231,15 @@ type BlockBodiesRLPPacket66 struct {
 
 // BlockBody represents the data content of a single block.
 type BlockBody struct {
-	Transactions []*types.Transaction // Transactions contained within a block
-	Uncles       []*types.Header      // Uncles contained within a block
+	Transactions []types.Transaction // Transactions contained within a block
+	Uncles       []*types.Header     // Uncles contained within a block
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesPacket) Unpack() ([][]*types.Transaction, [][]*types.Header) {
+func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
 	var (
-		txset    = make([][]*types.Transaction, len(*p))
+		txset    = make([][]types.Transaction, len(*p))
 		uncleset = make([][]*types.Header, len(*p))
 	)
 	for i, body := range *p {

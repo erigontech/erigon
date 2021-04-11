@@ -40,7 +40,7 @@ const (
 
 type txsync struct {
 	p   *eth.Peer
-	txs []*types.Transaction
+	txs []types.Transaction
 }
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
