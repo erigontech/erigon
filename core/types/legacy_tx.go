@@ -266,18 +266,8 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize += sLen
 	// prefix
 	var b [33]byte
-	if encodingSize >= 56 {
-		beSize := bits.Len(uint(encodingSize)) + 7/8
-		b[0] = byte(beSize) + 247
-		binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(encodingSize) + 192
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
 	}
 	if nonceLen > 0 && tx.Nonce < 128 {
 		b[0] = byte(tx.Nonce)
@@ -412,7 +402,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S = new(uint256.Int).SetBytes(b)
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.

@@ -17,7 +17,10 @@
 package types
 
 import (
+	"encoding/binary"
+	"fmt"
 	"io"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -108,7 +111,88 @@ func (tx DynamicFeeTransaction) Protected() bool {
 }
 
 func (tx DynamicFeeTransaction) encodingSize() int {
-	return 0
+	encodingSize := 0
+	// size of ChainID
+	encodingSize++
+	var chainIdLen int
+	if tx.ChainID.BitLen() >= 8 {
+		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
+	}
+	encodingSize += chainIdLen
+	// size of Nonce
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	// size of Tip
+	encodingSize++
+	var tipLen int
+	if tx.Tip.BitLen() >= 8 {
+		tipLen = (tx.Tip.BitLen() + 7) / 8
+	}
+	encodingSize += tipLen
+	// size of FeeCap
+	encodingSize++
+	var feeCapLen int
+	if tx.FeeCap.BitLen() >= 8 {
+		feeCapLen = (tx.FeeCap.BitLen() + 7) / 8
+	}
+	encodingSize += feeCapLen
+	// size of Gas
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	// size of To
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	// size of Value
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		valueLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	// size of Data
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	// size of AccessList
+	encodingSize++
+	accessListLen := accessListSize(tx.AccessList)
+	if accessListLen >= 56 {
+		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
+	}
+	encodingSize += accessListLen
+	// size of V
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		vLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	// size of R
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		rLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	// size of S
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		sLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	return encodingSize
 }
 
 func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -123,11 +207,272 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 }
 
 func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of ChainID
+	encodingSize++
+	var chainIdLen int
+	if tx.ChainID.BitLen() >= 8 {
+		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
+	}
+	encodingSize += chainIdLen
+	// size of Nonce
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	// size of Tip
+	encodingSize++
+	var tipLen int
+	if tx.Tip.BitLen() >= 8 {
+		tipLen = (tx.Tip.BitLen() + 7) / 8
+	}
+	encodingSize += tipLen
+	// size of FeeCap
+	encodingSize++
+	var feeCapLen int
+	if tx.FeeCap.BitLen() >= 8 {
+		feeCapLen = (tx.FeeCap.BitLen() + 7) / 8
+	}
+	encodingSize += feeCapLen
+	// size of Gas
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	// size of To
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	// size of Value
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		valueLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	// size of Data
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	// size of AccessList
+	encodingSize++
+	var accessListLen int = accessListSize(tx.AccessList)
+	if accessListLen >= 56 {
+		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
+	}
+	encodingSize += accessListLen
+	// size of V
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		vLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	// size of R
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		rLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	// size of S
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		sLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	var b [33]byte
+	// prefix
+	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode ChainID
+	if err := tx.ChainID.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Nonce
+	if nonceLen > 0 && tx.Nonce < 128 {
+		b[0] = byte(tx.Nonce)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(nonceLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		if _, err := w.Write(b[:1+nonceLen]); err != nil {
+			return err
+		}
+	}
+	// encode Tip
+	if err := tx.Tip.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode FeeCap
+	if err := tx.FeeCap.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Gas
+	if gasLen > 0 && tx.Gas < 128 {
+		b[0] = byte(tx.Gas)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(gasLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Gas)
+		if _, err := w.Write(b[:1+gasLen]); err != nil {
+			return err
+		}
+	}
+	// encode To
+	if tx.To == nil {
+		b[0] = 128
+	} else {
+		b[0] = 128 + 20
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if tx.To != nil {
+		if _, err := w.Write(tx.To.Bytes()); err != nil {
+			return err
+		}
+	}
+	// encode Value
+	if err := tx.Value.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Data
+	if len(tx.Data) >= 56 {
+		beSize := bits.Len(uint(len(tx.Data))+7) / 8
+		b[0] = 183 + byte(beSize)
+		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(len(tx.Data))
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	if len(tx.Data) > 0 {
+		if _, err := w.Write(tx.Data); err != nil {
+			return err
+		}
+	}
+	// prefix
+	if err := encodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
+		return err
+	}
+	// encode AccessList
+	if err := encodeAccessList(tx.AccessList, w, b[:]); err != nil {
+		return err
+	}
+	// encode V
+	if err := tx.V.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode R
+	if err := tx.R.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode S
+	if err := tx.S.EncodeRLP(w); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
-	return nil
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for ChainID: %d", len(b))
+	}
+	tx.ChainID = new(uint256.Int).SetBytes(b)
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Tip: %d", len(b))
+	}
+	tx.Tip = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for FeeCap: %d", len(b))
+	}
+	tx.FeeCap = new(uint256.Int).SetBytes(b)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 0 && len(b) != 20 {
+		return fmt.Errorf("wrong size for To: %d", len(b))
+	}
+	if len(b) > 0 {
+		tx.To = &common.Address{}
+		copy((*tx.To)[:], b)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Value: %d", len(b))
+	}
+	tx.Value = new(uint256.Int).SetBytes(b)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	// decode AccessList
+	tx.AccessList = AccessList{}
+	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+		return err
+	}
+	// decode V
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for V: %d", len(b))
+	}
+	tx.V = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for R: %d", len(b))
+	}
+	tx.R = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for S: %d", len(b))
+	}
+	tx.S = new(uint256.Int).SetBytes(b)
+	return s.ListEnd()
+
 }
 
 // AsMessage returns the transaction as a core.Message.

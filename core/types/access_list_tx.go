@@ -18,6 +18,8 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"math/bits"
 
@@ -116,7 +118,145 @@ func (tx AccessListTx) Protected() bool {
 }
 
 func (tx AccessListTx) encodingSize() int {
-	return 0
+	encodingSize := 0
+	// size of ChainID
+	encodingSize++
+	var chainIdLen int
+	if tx.ChainID.BitLen() >= 8 {
+		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
+	}
+	encodingSize += chainIdLen
+	// size of Nonce
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	// size of GasPrice
+	encodingSize++
+	var gasPriceLen int
+	if tx.GasPrice.BitLen() >= 8 {
+		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
+	}
+	encodingSize += gasPriceLen
+	// size of Gas
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	// size of To
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	// size of Value
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		valueLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	// size of Data
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	// size of AccessList
+	encodingSize++
+	accessListLen := accessListSize(tx.AccessList)
+	if accessListLen >= 56 {
+		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
+	}
+	encodingSize += accessListLen
+	// size of V
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		vLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	// size of R
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		rLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	// size of S
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		sLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	return encodingSize
+}
+
+func accessListSize(al AccessList) int {
+	var accessListLen int
+	for _, tuple := range al {
+		accessListLen += 21 + 1 // For the address and prefix for storage keys
+		// Each storage key takes 33 bytes
+		storageLen := 33 * len(tuple.StorageKeys)
+		if storageLen >= 56 {
+			accessListLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+		}
+	}
+	return accessListLen
+}
+
+func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
+	for _, tuple := range al {
+		tupleLen := 21 + 1
+		// Each storage key takes 33 bytes
+		storageLen := 33 * len(tuple.StorageKeys)
+		if storageLen >= 56 {
+			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+		}
+		if err := encodeStructSizePrefix(tupleLen, w, b); err != nil {
+			return err
+		}
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
+			return err
+		}
+		if err := encodeStructSizePrefix(storageLen, w, b); err != nil {
+			return err
+		}
+		b[0] = 128 + 32
+		for _, storageKey := range tuple.StorageKeys {
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+			if _, err := w.Write(storageKey.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func encodeStructSizePrefix(size int, w io.Writer, b []byte) error {
+	if size >= 56 {
+		beSize := bits.Len(uint(size)) + 7/8
+		b[0] = byte(beSize) + 247
+		binary.BigEndian.PutUint64(b[1:], uint64(size))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = byte(size) + 192
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tx AccessListTx) EncodeRLP(w io.Writer) error {
@@ -168,15 +308,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	}
 	// size of AccessList
 	encodingSize++
-	var accessListLen int
-	for _, tuple := range tx.AccessList {
-		accessListLen += 21 + 1 // For the address and prefix for storage keys
-		// Each storage key takes 33 bytes
-		storageLen := 33 * len(tuple.StorageKeys)
-		if storageLen >= 56 {
-			accessListLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
-		}
-	}
+	var accessListLen int = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
 		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
 	}
@@ -202,20 +334,10 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
-	// prefix
 	var b [33]byte
-	if encodingSize >= 56 {
-		beSize := bits.Len(uint(encodingSize)) + 7/8
-		b[0] = byte(beSize) + 247
-		binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(encodingSize) + 192
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	// prefix
+	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
 	}
 	// encode ChainID
 	if err := tx.ChainID.EncodeRLP(w); err != nil {
@@ -288,70 +410,13 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	// encode AccessList
 	// prefix
-	if accessListLen >= 56 {
-		beSize := bits.Len(uint(accessListLen)) + 7/8
-		b[0] = byte(beSize) + 247
-		binary.BigEndian.PutUint64(b[1:], uint64(accessListLen))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(accessListLen) + 192
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	if err := encodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
+		return err
 	}
-	for _, tuple := range tx.AccessList {
-		tupleLen := 21 + 1
-		// Each storage key takes 33 bytes
-		storageLen := 33 * len(tuple.StorageKeys)
-		if storageLen >= 56 {
-			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
-		}
-		if tupleLen >= 56 {
-			beSize := bits.Len(uint(tupleLen)) + 7/8
-			b[0] = byte(beSize) + 247
-			binary.BigEndian.PutUint64(b[1:], uint64(tupleLen))
-			if _, err := w.Write(b[:1+beSize]); err != nil {
-				return err
-			}
-		} else {
-			b[0] = byte(tupleLen) + 192
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-		}
-		b[0] = 128 + 20
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
-			return err
-		}
-		if storageLen >= 56 {
-			beSize := bits.Len(uint(storageLen)) + 7/8
-			b[0] = byte(beSize) + 247
-			binary.BigEndian.PutUint64(b[1:], uint64(storageLen))
-			if _, err := w.Write(b[:1+beSize]); err != nil {
-				return err
-			}
-		} else {
-			b[0] = byte(storageLen) + 192
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-		}
-		b[0] = 128 + 32
-		for _, storageKey := range tuple.StorageKeys {
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-			if _, err := w.Write(storageKey.Bytes()); err != nil {
-				return err
-			}
-		}
+	// encode AccessList
+	if err := encodeAccessList(tx.AccessList, w, b[:]); err != nil {
+		return err
 	}
 	// encode V
 	if err := tx.V.EncodeRLP(w); err != nil {
@@ -366,11 +431,127 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	return nil
+}
 
+func decodeAccessList(al *AccessList, s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	for _, err = s.List(); err == nil; _, err = s.List() {
+		// decode tuple
+		*al = append(*al, AccessTuple{})
+		tuple := &(*al)[len(*al)-1]
+		if b, err = s.Bytes(); err != nil {
+			return err
+		}
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for AccessTuple address: %d", len(b))
+		}
+		copy(tuple.Address[:], b)
+		if _, err = s.List(); err != nil {
+			return err
+		}
+		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
+			if len(b) != 32 {
+				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
+			}
+			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
+		}
+		if !errors.Is(err, rlp.EOL) {
+			return err
+		}
+		// end of StorageKeys list
+		if err = s.ListEnd(); err != nil {
+			return err
+		}
+		// end of tuple
+		if err = s.ListEnd(); err != nil {
+			return err
+		}
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	return s.ListEnd()
 }
 
 func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
-	return nil
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for ChainID: %d", len(b))
+	}
+	tx.ChainID = new(uint256.Int).SetBytes(b)
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
+	}
+	tx.GasPrice = new(uint256.Int).SetBytes(b)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 0 && len(b) != 20 {
+		return fmt.Errorf("wrong size for To: %d", len(b))
+	}
+	if len(b) > 0 {
+		tx.To = &common.Address{}
+		copy((*tx.To)[:], b)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Value: %d", len(b))
+	}
+	tx.Value = new(uint256.Int).SetBytes(b)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	// decode AccessList
+	tx.AccessList = AccessList{}
+	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+		return err
+	}
+	// decode V
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for V: %d", len(b))
+	}
+	tx.V = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for R: %d", len(b))
+	}
+	tx.R = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for S: %d", len(b))
+	}
+	tx.S = new(uint256.Int).SetBytes(b)
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
