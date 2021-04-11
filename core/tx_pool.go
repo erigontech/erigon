@@ -561,11 +561,11 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
 	// transactions but may occur if you create a transaction using the RPC.
-	if tx.Value().Sign() < 0 {
+	if tx.GetValue().Sign() < 0 {
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas.
-	if pool.currentMaxGas < tx.Gas() {
+	if pool.currentMaxGas < tx.GetGas() {
 		return ErrGasLimit
 	}
 	// Make sure the transaction is signed properly.
@@ -574,7 +574,7 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 		return ErrInvalidSender
 	}
 	// Drop non-local transactions under our own minimal accepted gas price
-	if !local && pool.gasPrice.Cmp(tx.GetPrice()) > 0 {
+	if !local && pool.gasPrice.Gt(tx.GetPrice()) {
 		return ErrUnderpriced
 	}
 	// Ensure the transaction adheres to nonce ordering
@@ -591,7 +591,7 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 	if err != nil {
 		return err
 	}
-	if tx.Gas() < intrGas {
+	if tx.GetGas() < intrGas {
 		return ErrIntrinsicGas
 	}
 	return nil
@@ -669,7 +669,7 @@ func (pool *TxPool) add(tx types.Transaction, local bool) (replaced bool, err er
 		pool.priced.Put(tx, isLocal)
 		pool.journalTx(from, tx)
 		pool.queueTxEvent(tx)
-		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
+		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.GetTo())
 
 		// Successful promotion, bump the heartbeat
 		pool.beats[from] = time.Now()
@@ -691,7 +691,7 @@ func (pool *TxPool) add(tx types.Transaction, local bool) (replaced bool, err er
 	}
 	pool.journalTx(from, tx)
 
-	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
+	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.GetTo())
 	return replaced, nil
 }
 
@@ -776,7 +776,7 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx types.Tr
 		pendingGauge.Inc(1)
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
-	pool.pendingNonces.set(addr, tx.Nonce()+1)
+	pool.pendingNonces.set(addr, tx.GetNonce()+1)
 
 	// Successful promotion, bump the heartbeat
 	pool.beats[addr] = time.Now()
@@ -833,7 +833,7 @@ func (pool *TxPool) addTxs(txs []types.Transaction, local, sync bool) []error {
 	// Filter out known ones without obtaining the pool lock or recovering signatures
 	var (
 		errs = make([]error, len(txs))
-		news = make([]*types.Transaction, 0, len(txs))
+		news = make([]types.Transaction, 0, len(txs))
 	)
 	for i, tx := range txs {
 		// If the transaction is known, pre-set the error slot
@@ -845,7 +845,7 @@ func (pool *TxPool) addTxs(txs []types.Transaction, local, sync bool) []error {
 		// Exclude transactions with invalid signatures as soon as
 		// possible and cache senders in transactions before
 		// obtaining lock
-		_, err := types.Sender(pool.signer, tx)
+		_, err := types.Sender(*pool.signer, tx)
 		if err != nil {
 			errs[i] = ErrInvalidSender
 			invalidTxMeter.Mark(1)
@@ -904,11 +904,11 @@ func (pool *TxPool) Status(hashes []common.Hash) []TxStatus {
 		if tx == nil {
 			continue
 		}
-		from, _ := types.Sender(pool.signer, tx) // already validated
+		from, _ := types.Sender(*pool.signer, tx) // already validated
 		pool.mu.RLock()
-		if txList := pool.pending[from]; txList != nil && txList.txs.items[tx.Nonce()] != nil {
+		if txList := pool.pending[from]; txList != nil && txList.txs.items[tx.GetNonce()] != nil {
 			status[i] = TxStatusPending
-		} else if txList := pool.queue[from]; txList != nil && txList.txs.items[tx.Nonce()] != nil {
+		} else if txList := pool.queue[from]; txList != nil && txList.txs.items[tx.GetNonce()] != nil {
 			status[i] = TxStatusQueued
 		}
 		// implicit else: the tx may have been included into a block between
@@ -919,7 +919,7 @@ func (pool *TxPool) Status(hashes []common.Hash) []TxStatus {
 }
 
 // Get returns a transaction if it is contained in the pool and nil otherwise.
-func (pool *TxPool) Get(hash common.Hash) *types.Transaction {
+func (pool *TxPool) Get(hash common.Hash) types.Transaction {
 	return pool.all.Get(hash)
 }
 
@@ -943,7 +943,7 @@ func (pool *TxPool) removeTxLocked(hash common.Hash, outofbound bool) {
 	if tx == nil {
 		return
 	}
-	addr, _ := types.Sender(pool.signer, tx) // already validated during insertion
+	addr, _ := types.Sender(*pool.signer, tx) // already validated during insertion
 
 	// Remove it from the list of known transactions
 	pool.all.Remove(hash)
@@ -968,7 +968,7 @@ func (pool *TxPool) removeTxLocked(hash common.Hash, outofbound bool) {
 				}
 			}
 			// Update the account nonce if needed
-			pool.pendingNonces.setIfLower(addr, tx.Nonce())
+			pool.pendingNonces.setIfLower(addr, tx.GetNonce())
 			// Reduce the pending counter
 			pendingGauge.Dec(int64(1 + len(invalids)))
 			return
@@ -1010,7 +1010,7 @@ func (pool *TxPool) requestPromoteExecutables(set *accountSet) chan struct{} {
 }
 
 // queueTxEvent enqueues a transaction event to be sent in the next reorg run.
-func (pool *TxPool) queueTxEvent(tx *types.Transaction) {
+func (pool *TxPool) queueTxEvent(tx types.Transaction) {
 	select {
 	case pool.queueTxEventCh <- tx:
 	case <-pool.reorgShutdownCh:
@@ -1128,13 +1128,13 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 	// Update all accounts to the latest known pending nonce
 	for addr, list := range pool.pending {
 		highestPending := list.LastElement()
-		pool.pendingNonces.set(addr, highestPending.Nonce()+1)
+		pool.pendingNonces.set(addr, highestPending.GetNonce()+1)
 	}
 	pool.mu.Unlock()
 
 	// Notify subsystems for newly added transactions
 	for _, tx := range promoted {
-		addr, _ := types.Sender(pool.signer, tx)
+		addr, _ := types.Sender(*pool.signer, tx)
 		if _, ok := events[addr]; !ok {
 			events[addr] = newTxSortedMap()
 		}
@@ -1152,9 +1152,9 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 // promoteExecutables moves transactions that have become processable from the
 // future queue to the set of pending transactions. During this process, all
 // invalidated transactions (low nonce, low balance) are deleted.
-func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Transaction {
+func (pool *TxPool) promoteExecutables(accounts []common.Address) []types.Transaction {
 	// Track the promoted transactions to broadcast them at once
-	var promoted []*types.Transaction
+	var promoted []types.Transaction
 
 	// Iterate over all accounts and promote any executable transactions
 	for _, addr := range accounts {
@@ -1260,7 +1260,7 @@ func (pool *TxPool) truncatePending() {
 						pool.all.Remove(hash)
 
 						// Update the account nonce to the dropped transaction
-						pool.pendingNonces.setIfLower(offenders[i], tx.Nonce())
+						pool.pendingNonces.setIfLower(offenders[i], tx.GetNonce())
 						log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 					}
 					pool.priced.Removed(len(caps))
@@ -1287,7 +1287,7 @@ func (pool *TxPool) truncatePending() {
 					pool.all.Remove(hash)
 
 					// Update the account nonce to the dropped transaction
-					pool.pendingNonces.setIfLower(addr, tx.Nonce())
+					pool.pendingNonces.setIfLower(addr, tx.GetNonce())
 					log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 				}
 				pool.priced.Removed(len(caps))

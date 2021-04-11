@@ -44,6 +44,14 @@ func (ct CommonTx) GetTo() *common.Address {
 	return ct.To
 }
 
+func (ct CommonTx) GetGas() uint64 {
+	return ct.Gas
+}
+
+func (ct CommonTx) GetValue() *uint256.Int {
+	return ct.Value
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -51,7 +59,14 @@ type LegacyTx struct {
 }
 
 func (tx LegacyTx) GetPrice() *uint256.Int {
-	return new(uint256.Int).Set(tx.GasPrice)
+	return tx.GasPrice
+}
+
+func (tx LegacyTx) Cost() *uint256.Int {
+	total := new(uint256.Int).SetUint64(tx.Gas)
+	total.Mul(total, tx.GasPrice)
+	total.Add(total, tx.Value)
+	return total
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -118,6 +133,70 @@ func (tx LegacyTx) copy() *LegacyTx {
 		cpy.S.Set(tx.S)
 	}
 	return cpy
+}
+
+func (tx *LegacyTx) Size() common.StorageSize {
+	if size := tx.size.Load(); size != nil {
+		return size.(common.StorageSize)
+	}
+	c := tx.encodingSize()
+	tx.size.Store(common.StorageSize(c))
+	return common.StorageSize(c)
+}
+
+func (tx LegacyTx) encodingSize() int {
+	encodingSize := 0
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	encodingSize++
+	var gasPriceLen int
+	if tx.GasPrice.BitLen() >= 8 {
+		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
+	}
+	encodingSize += gasPriceLen
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		nonceLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		gasPriceLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		gasPriceLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		gasPriceLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		gasPriceLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	return encodingSize
 }
 
 func (tx LegacyTx) EncodeRLP(w io.Writer) error {
@@ -282,7 +361,7 @@ func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
-func (tx LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	var err error
 	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)

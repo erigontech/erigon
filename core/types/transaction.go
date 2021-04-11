@@ -49,12 +49,17 @@ type Transaction interface {
 	Type() byte
 	GetNonce() uint64
 	GetPrice() *uint256.Int
+	Cost() *uint256.Int
+	GetGas() uint64
+	GetValue() *uint256.Int
 	Time() time.Time
 	From() *atomic.Value
 	GetTo() *common.Address
 	AsMessage(s Signer) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
+	encodingSize() int
+	Size() common.StorageSize
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete

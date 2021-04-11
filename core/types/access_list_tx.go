@@ -96,6 +96,19 @@ func (tx AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
+func (tx *AccessListTx) Size() common.StorageSize {
+	if size := tx.size.Load(); size != nil {
+		return size.(common.StorageSize)
+	}
+	c := tx.encodingSize()
+	tx.size.Store(common.StorageSize(c))
+	return common.StorageSize(c)
+}
+
+func (tx AccessListTx) encodingSize() int {
+	return 0
+}
+
 func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
@@ -124,7 +137,7 @@ func (tx AccessListTx) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
-func (tx AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	var err error
 	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)

@@ -17,7 +17,9 @@
 package core
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -73,7 +75,7 @@ func (journal *txJournal) load(add func([]types.Transaction) []error) error {
 	defer func() { journal.writer = nil }()
 
 	// Inject all transactions from the journal into the pool
-	stream := rlp.NewStream(input, 0)
+	stream := bufio.NewReader(input)
 	total, dropped := 0, 0
 
 	// Create a method to load a limited batch of transactions and bump the
@@ -93,11 +95,35 @@ func (journal *txJournal) load(add func([]types.Transaction) []error) error {
 	)
 	for {
 		// Parse the next transaction and terminate on error
-		tx := new(types.Transaction)
-		if err = stream.Decode(tx); err != nil {
+		var firstByte byte
+		var tx types.Transaction
+		if firstByte, err = stream.ReadByte(); err != nil {
 			if err != io.EOF {
 				failure = err
 			}
+			if batch.Len() > 0 {
+				loadBatch(batch)
+			}
+			break
+		}
+		switch firstByte {
+		case types.AccessListTxType:
+			tx = &types.AccessListTx{}
+		case types.DynamicFeeTxType:
+			tx = &types.DynamicFeeTransaction{}
+		default:
+			if firstByte < 192 {
+				// RLP list's first byte is >= 192
+				return fmt.Errorf("unknown tx type: %v", firstByte)
+			}
+			tx = &types.LegacyTx{}
+			// First byte is part of RLP representation, unread
+			if err = stream.UnreadByte(); err != nil {
+				return err
+			}
+		}
+		if err = rlp.Decode(stream, tx); err != nil {
+			failure = err
 			if batch.Len() > 0 {
 				loadBatch(batch)
 			}
@@ -117,7 +143,7 @@ func (journal *txJournal) load(add func([]types.Transaction) []error) error {
 }
 
 // insert adds the specified transaction to the local disk journal.
-func (journal *txJournal) insert(tx *types.Transaction) error {
+func (journal *txJournal) insert(tx types.Transaction) error {
 	if journal.writer == nil {
 		return errNoActiveJournal
 	}

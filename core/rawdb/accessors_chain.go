@@ -280,16 +280,18 @@ func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.
 		switch txData[0] {
 		case types.AccessListTxType:
 			txs[i] = &types.AccessListTx{}
+			reader.Reset(txData[1:]) // first byte is not part of representation
 		case types.DynamicFeeTxType:
 			txs[i] = &types.DynamicFeeTransaction{}
+			reader.Reset(txData[1:]) // first byte is not part of representation
 		default:
 			if txData[0] < 192 {
 				// RLP list's first byte is >= 192
 				return false, fmt.Errorf("unknown tx type: %v", txData[0])
 			}
 			txs[i] = &types.LegacyTx{}
+			reader.Reset(txData) // first byte is part of representation
 		}
-		reader.Reset(txData) // first byte is part of representation
 		if err := rlp.Decode(reader, txs[i]); err != nil {
 			return false, fmt.Errorf("broken tx rlp: %w", err)
 		}
@@ -312,6 +314,11 @@ func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint
 		txId++
 
 		buf.Reset()
+		if tx.Type() != types.LegacyTxType {
+			if err := buf.WriteByte(tx.Type()); err != nil {
+				return err
+			}
+		}
 		if err := rlp.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}

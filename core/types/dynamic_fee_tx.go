@@ -33,7 +33,14 @@ type DynamicFeeTransaction struct {
 }
 
 func (tx DynamicFeeTransaction) GetPrice() *uint256.Int {
-	return new(uint256.Int).Set(tx.Tip)
+	return tx.Tip
+}
+
+func (tx DynamicFeeTransaction) Cost() *uint256.Int {
+	total := new(uint256.Int).SetUint64(tx.Gas)
+	total.Mul(total, tx.Tip)
+	total.Add(total, tx.Value)
+	return total
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -83,7 +90,20 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *DynamicFeeTransaction) Size() common.StorageSize {
+	if size := tx.size.Load(); size != nil {
+		return size.(common.StorageSize)
+	}
+	c := tx.encodingSize()
+	tx.size.Store(common.StorageSize(c))
+	return common.StorageSize(c)
+}
+
+func (tx DynamicFeeTransaction) encodingSize() int {
+	return 0
+}
+
+func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	var err error
 	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
