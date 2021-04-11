@@ -468,7 +468,7 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) 
 		return nil, nil
 	}
 	var upper, lower uint64
-	upper = interpreter.evm.Context.BlockNumber.Uint64()
+	upper = interpreter.evm.Context.BlockNumber
 	if upper < 257 {
 		lower = 0
 	} else {
@@ -488,13 +488,13 @@ func opCoinbase(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 }
 
 func opTimestamp(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	v, _ := uint256.FromBig(interpreter.evm.Context.Time)
+	v := new(uint256.Int).SetUint64(interpreter.evm.Context.Time)
 	callContext.stack.Push(v)
 	return nil, nil
 }
 
 func opNumber(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	v, _ := uint256.FromBig(interpreter.evm.Context.BlockNumber)
+	v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
 	callContext.stack.Push(v)
 	return nil, nil
 }
@@ -858,7 +858,7 @@ func makeLog(size int) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// core/state doesn't know the current block number.
-			BlockNumber: interpreter.evm.Context.BlockNumber.Uint64(),
+			BlockNumber: interpreter.evm.Context.BlockNumber,
 		})
 
 		return nil, nil

@@ -24,7 +24,7 @@ import (
 type miningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []*types.Transaction
+	Txs      []types.Transaction
 	Receipts types.Receipts
 
 	LocalTxs  types.TransactionsStream
@@ -54,9 +54,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if parent == nil { // todo: how to return error and don't stop TG?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-	signer := types.NewEIP155Signer(chainConfig.ChainID)
 
 	blockNum := executionAt + 1
+	signer := types.MakeSigner(chainConfig, blockNum)
 
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -81,13 +81,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	}
 
 	type envT struct {
-		signer    types.Signer
+		signer    *types.Signer
 		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
 		family    mapset.Set // family set (used for checking uncle invalidity)
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.NewEIP155Signer(chainConfig.ChainID),
+		signer:    types.MakeSigner(chainConfig, blockNum),
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),

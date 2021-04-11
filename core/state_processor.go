@@ -172,13 +172,13 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
-		if !p.config.IsByzantium(header.Number) {
+		if !p.config.IsByzantium(header.Number.Uint64()) {
 			tds.StartNewBuffer()
 		}
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.config, header, ibs, block.Transactions(), block.Uncles())
-	ctx := p.config.WithEIPsFlags(context.Background(), header.Number)
+	ctx := p.config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	err = ibs.FinalizeTx(ctx, tds.TrieStateWriter())
 	if err != nil {
 		return
@@ -200,7 +200,7 @@ func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState,
 	if err != nil {
 		return err
 	}
-	if !p.config.IsByzantium(block.Header().Number) {
+	if !p.config.IsByzantium(block.NumberU64()) {
 		for i, receipt := range receipts {
 			receipt.PostState = roots[i].Bytes()
 		}
@@ -213,12 +213,12 @@ func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState,
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}
 
-	ctx := config.WithEIPsFlags(context.Background(), header.Number)
+	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Create a new context to be used in the EVM environment
 	context := NewEVMBlockContext(header, getHeader, engine, author)
 	txContext := NewEVMTxContext(msg)
@@ -275,7 +275,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}

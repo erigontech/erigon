@@ -53,7 +53,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, ibs *state.IntraBlockStat
 		gaspool      = new(GasPool).AddGas(block.GasLimit())
 		blockContext = NewEVMBlockContext(header, p.bc.GetHeader, p.bc.Engine(), nil)
 		evm          = vm.NewEVM(blockContext, vm.TxContext{}, ibs, p.config, cfg)
-		signer       = types.MakeSigner(p.config, header.Number)
+		signer       = types.MakeSigner(p.config, header.Number.Uint64())
 	)
 	for i, tx := range block.Transactions() {
 		// If block precaching was interrupted, abort
@@ -61,7 +61,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, ibs *state.IntraBlockStat
 			return
 		}
 		// Convert the transaction into an executable message and pre-cache its sender
-		msg, err := tx.AsMessage(signer)
+		msg, err := tx.AsMessage(*signer)
 		if err != nil {
 			return // Also invalid block, bail out
 		}

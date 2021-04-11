@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -30,10 +31,25 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	signedTx := new(types.Transaction)
 	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
+	var signedTx types.Transaction
+	var rlpData []byte
+	switch in.Signedtx[0] {
+	case types.AccessListTxType:
+		signedTx = &types.AccessListTx{}
+		rlpData = in.Signedtx[1:]
+	case types.DynamicFeeTxType:
+		signedTx = &types.DynamicFeeTransaction{}
+		rlpData = in.Signedtx[1:]
+	default:
+		if in.Signedtx[0] < 192 {
+			return out, fmt.Errorf("unknown transaction type: %v", in.Signedtx[0])
+		}
+		signedTx = &types.LegacyTx{}
+		rlpData = in.Signedtx
+	}
 
-	if err := rlp.DecodeBytes(in.Signedtx, signedTx); err != nil {
+	if err := rlp.DecodeBytes(rlpData, signedTx); err != nil {
 		return out, err
 	}
 

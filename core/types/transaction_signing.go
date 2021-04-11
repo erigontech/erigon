@@ -33,8 +33,11 @@ import (
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
 // MakeSigner returns a Signer based on the given chain config and block number.
-func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
+func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	var signer Signer
+	chainId, _ := uint256.FromBig(config.ChainID)
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
 	signer.unprotected = true
 	switch {
 	case config.IsAleut(blockNumber):
@@ -52,7 +55,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 		// Only allow malleable transactions in Frontier
 		signer.maleable = true
 	}
-	return signer
+	return &signer
 }
 
 // LatestSigner returns the 'most permissive' Signer available for the given chain

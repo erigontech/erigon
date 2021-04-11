@@ -1182,7 +1182,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	if chainConfig.IsByzantium(header.Number) && !vmConfig.NoReceipts {
+	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
@@ -1211,7 +1211,7 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs t
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	engine.Finalize(cc, header, ibs, txs, uncles)
 
-	ctx := cc.WithEIPsFlags(context.Background(), header.Number)
+	ctx := cc.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
 		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
 	}

@@ -309,7 +309,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && g.Config.IsAleut(common.Big0) {
+	if g.Config != nil && g.Config.IsAleut(0) {
 		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 	}
 

@@ -96,6 +96,10 @@ func (tx AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
+func (tx AccessListTx) GetAccessList() AccessList {
+	return tx.AccessList
+}
+
 func (tx *AccessListTx) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)

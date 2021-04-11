@@ -90,6 +90,10 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
+func (tx DynamicFeeTransaction) GetAccessList() AccessList {
+	return tx.AccessList
+}
+
 func (tx *DynamicFeeTransaction) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)

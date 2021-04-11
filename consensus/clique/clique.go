@@ -330,8 +330,8 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return errInvalidTimestamp
 	}
 	// Verify the header's EIP-1559 attributes.
-	if chain.Config().IsAleut(header.Number) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number)); err != nil {
+	if chain.Config().IsAleut(number) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
 			return err
 		}
 	}

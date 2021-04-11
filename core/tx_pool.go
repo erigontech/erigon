@@ -19,7 +19,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 	"sync"
 	"time"
@@ -401,7 +400,7 @@ func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.currentMaxGas = blockGasLimit
 
 	// Update all fork indicator by next pending block number.
-	next := big.NewInt(int64(blockNumber + 1))
+	next := blockNumber + 1
 	pool.istanbul = pool.chainconfig.IsIstanbul(next)
 	pool.eip2718 = pool.chainconfig.IsBerlin(next)
 }
@@ -587,7 +586,7 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 		return ErrInsufficientFunds
 	}
 	// Ensure the transaction has more gas than the basic tx fee.
-	intrGas, err := IntrinsicGas(tx.Data(), tx.AccessList(), tx.GetTo() == nil, true, pool.istanbul)
+	intrGas, err := IntrinsicGas(tx.GetData(), tx.GetAccessList(), tx.GetTo() == nil, true, pool.istanbul)
 	if err != nil {
 		return err
 	}

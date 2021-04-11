@@ -52,6 +52,10 @@ func (ct CommonTx) GetValue() *uint256.Int {
 	return ct.Value
 }
 
+func (ct CommonTx) GetData() []byte {
+	return ct.Data
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -67,6 +71,10 @@ func (tx LegacyTx) Cost() *uint256.Int {
 	total.Mul(total, tx.GasPrice)
 	total.Add(total, tx.Value)
 	return total
+}
+
+func (tx LegacyTx) GetAccessList() AccessList {
+	return AccessList{}
 }
 
 // NewTransaction creates an unsigned legacy transaction.

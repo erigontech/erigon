@@ -92,7 +92,7 @@ func (v *BlockValidator) ValidateReceipts(block *types.Block, receipts types.Rec
 	}
 
 	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
-	if v.config.IsByzantium(block.Header().Number) {
+	if v.config.IsByzantium(block.Header().Number.Uint64()) {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != header.ReceiptHash {
 			if errorBuf.Len() > 0 {
