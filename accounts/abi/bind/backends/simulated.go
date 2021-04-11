@@ -264,7 +264,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 // blockchain. The isPending return value indicates whether the transaction has been
 // mined yet. Note that the transaction may not be part of the canonical chain even if
 // it's not pending.
-func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (*types.Transaction, bool, error) {
+func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (types.Transaction, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -386,7 +386,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 }
 
 // TransactionInBlock returns the transaction for a specific block at a specific index.
-func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error) {
+func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (types.Transaction, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -630,20 +630,20 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 // SendTransaction updates the pending block to include the given transaction.
 // It panics if the transaction is invalid.
-func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
 	block := rawdb.ReadCurrentBlock(b.database)
-	signer := types.MakeSigner(b.config, block.Number())
-	sender, senderErr := types.Sender(signer, tx)
+	signer := types.MakeSigner(b.config, block.Number().Uint64())
+	sender, senderErr := types.Sender(*signer, tx)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
-	if tx.Nonce() != nonce {
-		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.Nonce(), nonce)
+	if tx.GetNonce() != nonce {
+		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
@@ -803,8 +803,8 @@ func (m callMsg) Nonce() uint64                { return 0 }
 func (m callMsg) CheckNonce() bool             { return false }
 func (m callMsg) To() *common.Address          { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *big.Int             { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *big.Int                { return m.CallMsg.Tip }
+func (m callMsg) FeeCap() *uint256.Int         { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int            { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }

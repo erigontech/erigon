@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -222,11 +223,19 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	receipt := receipts[txIndex]
 
-	var signer types.Signer = types.HomesteadSigner{}
-	if txn.Protected() {
-		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
+	var chainId *uint256.Int
+	switch t := txn.(type) {
+	case *types.LegacyTx:
+		if t.Protected() {
+			chainId = types.DeriveChainId(t.V)
+		}
+	case *types.AccessListTx:
+		chainId = t.ChainID
+	case *types.DynamicFeeTransaction:
+		chainId = t.ChainID
 	}
-	from, _ := types.Sender(signer, txn)
+	signer := types.LatestSignerForChainID(chainId.ToBig())
+	from, _ := types.Sender(*signer, txn)
 
 	// Fill in the derived information in the logs
 	if receipt.Logs != nil {
@@ -245,7 +254,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(txIndex),
 		"from":              from,
-		"to":                txn.To(),
+		"to":                txn.GetTo(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,

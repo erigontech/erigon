@@ -33,7 +33,7 @@ const TokenABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_minter
 var TokenBin = "0x608060405234801561001057600080fd5b506040516102cd3803806102cd8339818101604052602081101561003357600080fd5b5051600280546001600160a01b0319166001600160a01b0390921691909117905561026a806100636000396000f3fe608060405234801561001057600080fd5b50600436106100575760003560e01c8063075461721461005c57806318160ddd1461008057806340c10f191461009a57806370a08231146100da578063a9059cbb14610100575b600080fd5b61006461012c565b604080516001600160a01b039092168252519081900360200190f35b61008861013b565b60408051918252519081900360200190f35b6100c6600480360360408110156100b057600080fd5b506001600160a01b038135169060200135610141565b604080519115158252519081900360200190f35b610088600480360360208110156100f057600080fd5b50356001600160a01b03166101b1565b6100c66004803603604081101561011657600080fd5b506001600160a01b0381351690602001356101c3565b6002546001600160a01b031681565b60005481565b6002546000906001600160a01b0316331461015b57600080fd5b6001600160a01b03831660009081526001602052604090205482810181111561018357600080fd5b6001600160a01b03841660009081526001602081905260408220928501909255805484019055905092915050565b60016020526000908152604090205481565b33600090815260016020526040808220546001600160a01b038516835290822054838210156101f157600080fd5b80848201101561020057600080fd5b336000908152600160208190526040808320948790039094556001600160a01b03969096168152919091209201909155509056fea2646970667358221220db4c7b3ba8d073604af68ade92006926639bb4003f2a18929524d580777155fb64736f6c63430007020033"
 
 // DeployToken deploys a new Ethereum contract, binding an instance of Token to it.
-func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter common.Address) (common.Address, *types.Transaction, *Token, error) {
+func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter common.Address) (common.Address, types.Transaction, *Token, error) {
 	parsed, err := abi.JSON(strings.NewReader(TokenABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Token *TokenRaw) Call(opts *bind.CallOpts, result *[]interface{}, method 
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Token *TokenRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Token *TokenRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Token.Contract.TokenTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Token *TokenRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Token *TokenRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Token.Contract.TokenTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,12 +179,12 @@ func (_Token *TokenCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, m
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Token *TokenTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Token *TokenTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Token.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Token *TokenTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Token *TokenTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Token.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -284,41 +284,41 @@ func (_Token *TokenCallerSession) TotalSupply() (*big.Int, error) {
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactor) Mint(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenTransactor) Mint(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.contract.Transact(opts, "mint", _to, _value)
 }
 
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenSession) Mint(_to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenSession) Mint(_to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Mint(&_Token.TransactOpts, _to, _value)
 }
 
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactorSession) Mint(_to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenTransactorSession) Mint(_to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Mint(&_Token.TransactOpts, _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactor) Transfer(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenTransactor) Transfer(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.contract.Transact(opts, "transfer", _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenSession) Transfer(_to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenSession) Transfer(_to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Transfer(&_Token.TransactOpts, _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactorSession) Transfer(_to common.Address, _value *big.Int) (*types.Transaction, error) {
+func (_Token *TokenTransactorSession) Transfer(_to common.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Transfer(&_Token.TransactOpts, _to, _value)
 }

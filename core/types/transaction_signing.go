@@ -68,6 +68,9 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 func LatestSigner(config *params.ChainConfig) *Signer {
 	var signer Signer
 	signer.unprotected = true
+	chainId, _ := uint256.FromBig(config.ChainID)
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
 		if config.AleutBlock != nil {
 			signer.dynamicfee = true
@@ -95,6 +98,9 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 	if chainID == nil {
 		return &signer
 	}
+	chainId, _ := uint256.FromBig(chainID)
+	signer.chainID.Set(chainId)
+	signer.chainIDMul.Mul(chainId, u256.Num2)
 	signer.protected = true
 	signer.accesslist = true
 	return &signer

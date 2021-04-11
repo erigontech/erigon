@@ -186,10 +186,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 					}
 
 					var to *common.Address
-					if txn.To() == nil {
+					if txn.GetTo() == nil {
 						to = &common.Address{}
 					} else {
-						to = txn.To()
+						to = txn.GetTo()
 					}
 
 					if isFromAddress {
