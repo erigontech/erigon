@@ -1096,6 +1096,8 @@ type SendTxArgs struct {
 	To       *common.Address `json:"to"`
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
+	Tip      *hexutil.Big    `json:"tip"`
+	FeeCap   *hexutil.Big    `json:"feeCap"`
 	Value    *hexutil.Big    `json:"value"`
 	Nonce    *hexutil.Uint64 `json:"nonce"`
 	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
@@ -1184,39 +1186,63 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 		input = *args.Data
 	}
 
-	var data types.TxData
+	var tx types.Transaction
 	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
 	value, _ := uint256.FromBig((*big.Int)(args.Value))
 	if args.AccessList == nil {
-		data = &types.LegacyTx{
-			To:       args.To,
-			Nonce:    uint64(*args.Nonce),
-			Gas:      uint64(*args.Gas),
+		tx = &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				To:    args.To,
+				Nonce: uint64(*args.Nonce),
+				Gas:   uint64(*args.Gas),
+				Value: value,
+				Data:  input,
+			},
 			GasPrice: gasPrice,
-			Value:    value,
-			Data:     input,
 		}
 	} else {
 		chainId, _ := uint256.FromBig((*big.Int)(args.ChainID))
-		data = &types.AccessListTx{
-			To:         args.To,
-			ChainID:    chainId,
-			Nonce:      uint64(*args.Nonce),
-			Gas:        uint64(*args.Gas),
-			GasPrice:   gasPrice,
-			Value:      value,
-			Data:       input,
-			AccessList: *args.AccessList,
+		if args.FeeCap == nil {
+			tx = &types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						To:    args.To,
+						Nonce: uint64(*args.Nonce),
+						Gas:   uint64(*args.Gas),
+						Value: value,
+						Data:  input,
+					},
+					GasPrice: gasPrice,
+				},
+				ChainID:    chainId,
+				AccessList: *args.AccessList,
+			}
+		} else {
+			tip, _ := uint256.FromBig((*big.Int)(args.Tip))
+			feeCap, _ := uint256.FromBig((*big.Int)(args.FeeCap))
+			tx = &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					To:    args.To,
+					Nonce: uint64(*args.Nonce),
+					Gas:   uint64(*args.Gas),
+					Value: value,
+					Data:  input,
+				},
+				Tip:        tip,
+				FeeCap:     feeCap,
+				ChainID:    chainId,
+				AccessList: *args.AccessList,
+			}
 		}
 	}
-	return types.NewTx(data)
+	return tx
 }
 
 // SubmitTransaction is a helper function that submits tx to txPool and logs a message.
-func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (common.Hash, error) {
+func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (common.Hash, error) {
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(tx.GasPrice().ToBig(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
+	if err := checkTxFee(tx.GetPrice().ToBig(), tx.GetGas(), b.RPCTxFeeCap()); err != nil {
 		return common.Hash{}, err
 	}
 	if !b.UnprotectedAllowed() && !tx.Protected() {
@@ -1227,17 +1253,17 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		return common.Hash{}, err
 	}
 	// Print a log with full tx details for manual investigations and interventions
-	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number())
-	from, err := types.Sender(signer, tx)
+	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64())
+	from, err := types.Sender(*signer, tx)
 	if err != nil {
 		return common.Hash{}, err
 	}
 
-	if tx.To() == nil {
-		addr := crypto.CreateAddress(from, tx.Nonce())
-		log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
+	if tx.GetTo() == nil {
+		addr := crypto.CreateAddress(from, tx.GetNonce())
+		log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.GetNonce(), "contract", addr.Hex(), "value", tx.GetValue())
 	} else {
-		log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value())
+		log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.GetNonce(), "recipient", tx.GetTo(), "value", tx.GetValue())
 	}
 	return tx.Hash(), nil
 }
@@ -1251,27 +1277,48 @@ func (s *PublicTransactionPoolAPI) FillTransaction(ctx context.Context, args Sen
 	}
 	// Assemble the transaction and obtain rlp
 	tx := args.toTransaction()
-	data, err := tx.MarshalBinary()
-	if err != nil {
+	var blob bytes.Buffer
+	if tx.Type() != types.LegacyTxType {
+		if err := blob.WriteByte(tx.Type()); err != nil {
+			return nil, err
+		}
+	}
+	if err := rlp.Encode(&blob, tx); err != nil {
 		return nil, err
 	}
-	return &SignTransactionResult{data, tx}, nil
+	return &SignTransactionResult{blob.Bytes(), tx}, nil
 }
 
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
-	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(input); err != nil {
-		return common.Hash{}, err
+	var tx types.Transaction
+	var rlpData []byte
+	switch input[0] {
+	case types.AccessListTxType:
+		tx = &types.AccessListTx{}
+		rlpData = input[1:] // first byte is not part of representation
+	case types.DynamicFeeTxType:
+		tx = &types.DynamicFeeTransaction{}
+		rlpData = input[1:] // first byte is not part of representation
+	default:
+		if input[0] < 192 {
+			// RLP list's first byte is >= 192
+			return common.Hash{}, fmt.Errorf("unknown tx type: %v", input[0])
+		}
+		tx = &types.LegacyTx{}
+		rlpData = input // first byte is part of representation
+	}
+	if err := rlp.DecodeBytes(rlpData, tx); err != nil {
+		return common.Hash{}, fmt.Errorf("broken tx rlp: %w", err)
 	}
 	return SubmitTransaction(ctx, s.b, tx)
 }
 
 // SignTransactionResult represents a RLP encoded signed transaction.
 type SignTransactionResult struct {
-	Raw hexutil.Bytes      `json:"raw"`
-	Tx  *types.Transaction `json:"tx"`
+	Raw hexutil.Bytes     `json:"raw"`
+	Tx  types.Transaction `json:"tx"`
 }
 
 // PublicDebugAPI is the collection of Ethereum APIs exposed over the public
