@@ -76,7 +76,7 @@ func (p *Peer) broadcastTransactions() {
 			// Pile transaction until we reach our allowed network limit
 			var (
 				hashes []common.Hash
-				txs    []*types.Transaction
+				txs    []types.Transaction
 				size   common.StorageSize
 			)
 			for i := 0; i < len(queue) && size < maxTxPacketSize; i++ {

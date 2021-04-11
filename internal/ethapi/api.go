@@ -106,7 +106,7 @@ func (s *PublicTxPoolAPI) Content() map[string]map[string]map[string]*RPCTransac
 	for account, txs := range pending {
 		dump := make(map[string]*RPCTransaction)
 		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = newRPCPendingTransaction(tx)
+			dump[fmt.Sprintf("%d", tx.GetNonce())] = newRPCPendingTransaction(tx)
 		}
 		content["pending"][account.Hex()] = dump
 	}
@@ -114,7 +114,7 @@ func (s *PublicTxPoolAPI) Content() map[string]map[string]map[string]*RPCTransac
 	for account, txs := range queue {
 		dump := make(map[string]*RPCTransaction)
 		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = newRPCPendingTransaction(tx)
+			dump[fmt.Sprintf("%d", tx.GetNonce())] = newRPCPendingTransaction(tx)
 		}
 		content["queued"][account.Hex()] = dump
 	}
@@ -140,17 +140,17 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	pending, queue := s.b.TxPoolContent()
 
 	// Define a formatter to flatten a transaction into a string
-	var format = func(tx *types.Transaction) string {
-		if to := tx.To(); to != nil {
-			return fmt.Sprintf("%s: %v wei + %v gas × %v wei", tx.To().Hex(), tx.Value(), tx.Gas(), tx.GasPrice())
+	var format = func(tx types.Transaction) string {
+		if to := tx.GetTo(); to != nil {
+			return fmt.Sprintf("%s: %v wei + %v gas × %v wei", tx.GetTo().Hex(), tx.GetValue(), tx.GetGas(), tx.GetPrice())
 		}
-		return fmt.Sprintf("contract creation: %v wei + %v gas × %v wei", tx.Value(), tx.Gas(), tx.GasPrice())
+		return fmt.Sprintf("contract creation: %v wei + %v gas × %v wei", tx.GetValue(), tx.GetGas(), tx.GetPrice())
 	}
 	// Flatten the pending transactions
 	for account, txs := range pending {
 		dump := make(map[string]string)
 		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
+			dump[fmt.Sprintf("%d", tx.GetNonce())] = format(tx)
 		}
 		content["pending"][account.Hex()] = dump
 	}
@@ -158,7 +158,7 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	for account, txs := range queue {
 		dump := make(map[string]string)
 		for _, tx := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
+			dump[fmt.Sprintf("%d", tx.GetNonce())] = format(tx)
 		}
 		content["queued"][account.Hex()] = dump
 	}
@@ -335,6 +335,8 @@ type CallArgs struct {
 	To         *common.Address   `json:"to"`
 	Gas        *hexutil.Uint64   `json:"gas"`
 	GasPrice   *hexutil.Big      `json:"gasPrice"`
+	Tip        *hexutil.Big      `json:"tip"`
+	FeeCap     *hexutil.Big      `json:"feeCap"`
 	Value      *hexutil.Big      `json:"value"`
 	Data       *hexutil.Bytes    `json:"data"`
 	AccessList *types.AccessList `json:"accessList"`
@@ -364,6 +366,14 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 	if args.GasPrice != nil {
 		gasPrice.SetFromBig(args.GasPrice.ToInt())
 	}
+	var tip *uint256.Int
+	if args.Tip != nil {
+		tip.SetFromBig(args.Tip.ToInt())
+	}
+	var feeCap *uint256.Int
+	if args.FeeCap != nil {
+		feeCap.SetFromBig(args.FeeCap.ToInt())
+	}
 	value := new(uint256.Int)
 	if args.Value != nil {
 		value.SetFromBig(args.Value.ToInt())
@@ -377,7 +387,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, data, accessList, false)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, feeCap, tip, data, accessList, false)
 	return msg
 }
 
@@ -737,11 +747,11 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]i
 	fields["size"] = hexutil.Uint64(block.Size())
 
 	if inclTx {
-		formatTx := func(tx *types.Transaction) (interface{}, error) {
+		formatTx := func(tx types.Transaction) (interface{}, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx *types.Transaction) (interface{}, error) {
+			formatTx = func(tx types.Transaction) (interface{}, error) {
 				return newRPCTransactionFromBlockHash(block, tx.Hash()), nil
 			}
 		}
@@ -792,7 +802,9 @@ type RPCTransaction struct {
 	BlockNumber      *hexutil.Big      `json:"blockNumber"`
 	From             common.Address    `json:"from"`
 	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice"`
+	GasPrice         *hexutil.Big      `json:"gasPrice,omitempty"`
+	Tip              *hexutil.Big      `json:"tip,omitempty"`
+	FeeCap           *hexutil.Big      `json:"feeCap,omitempty"`
 	Hash             common.Hash       `json:"hash"`
 	Input            hexutil.Bytes     `json:"input"`
 	Nonce            hexutil.Uint64    `json:"nonce"`
@@ -809,49 +821,56 @@ type RPCTransaction struct {
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
 	// because the return value of ChainId is zero for those transactions.
-	var signer types.Signer
-	if tx.Protected() {
-		signer = types.LatestSignerForChainID(tx.ChainId().ToBig())
-	} else {
-		signer = types.HomesteadSigner{}
-	}
-
-	from, _ := types.Sender(signer, tx)
-	v, r, s := tx.RawSignatureValues()
+	var chainId *uint256.Int
 	result := &RPCTransaction{
-		Type:     hexutil.Uint64(tx.Type()),
-		From:     from,
-		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
-		Hash:     tx.Hash(),
-		Input:    hexutil.Bytes(tx.Data()),
-		Nonce:    hexutil.Uint64(tx.Nonce()),
-		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value().ToBig()),
-		V:        (*hexutil.Big)(v.ToBig()),
-		R:        (*hexutil.Big)(r.ToBig()),
-		S:        (*hexutil.Big)(s.ToBig()),
+		Type:  hexutil.Uint64(tx.Type()),
+		Gas:   hexutil.Uint64(tx.GetGas()),
+		Hash:  tx.Hash(),
+		Input: hexutil.Bytes(tx.GetData()),
+		Nonce: hexutil.Uint64(tx.GetNonce()),
+		To:    tx.GetTo(),
+		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
+	switch t := tx.(type) {
+	case *types.LegacyTx:
+		chainId = types.DeriveChainId(t.V)
+		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+	case *types.AccessListTx:
+		result.ChainID = (*hexutil.Big)(t.ChainID.ToBig())
+		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+	case *types.DynamicFeeTransaction:
+		result.ChainID = (*hexutil.Big)(t.ChainID.ToBig())
+		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
+		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+	}
+	signer := types.LatestSignerForChainID(chainId.ToBig())
+	result.From, _ = types.Sender(*signer, tx)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
-	if tx.Type() == types.AccessListTxType {
-		al := tx.AccessList()
-		result.Accesses = &al
-		result.ChainID = (*hexutil.Big)(tx.ChainId().ToBig())
-	}
 	return result
 }
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(tx *types.Transaction) *RPCTransaction {
+func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
 	return newRPCTransaction(tx, common.Hash{}, 0, 0)
 }
 
@@ -870,8 +889,16 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 	if index >= uint64(len(txs)) {
 		return nil
 	}
-	blob, _ := txs[index].MarshalBinary()
-	return blob
+	var blob bytes.Buffer
+	if txs[index].Type() != types.LegacyTxType {
+		if err := blob.WriteByte(txs[index].Type()); err != nil {
+			panic(err)
+		}
+	}
+	if err := rlp.Encode(&blob, txs[index]); err != nil {
+		panic(err)
+	}
+	return blob.Bytes()
 }
 
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
@@ -888,7 +915,7 @@ func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransa
 type PublicTransactionPoolAPI struct {
 	b         Backend
 	nonceLock *AddrLocker
-	signer    types.Signer
+	signer    *types.Signer
 }
 
 // NewPublicTransactionPoolAPI creates a new RPC service with methods specific for the transaction pool.
@@ -1001,7 +1028,16 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 		}
 	}
 	// Serialize to RLP and return
-	return tx.MarshalBinary()
+	var blob bytes.Buffer
+	if tx.Type() != types.LegacyTxType {
+		if err := blob.WriteByte(tx.Type()); err != nil {
+			return nil, err
+		}
+	}
+	if err := rlp.Encode(&blob, tx); err != nil {
+		return nil, err
+	}
+	return blob.Bytes(), nil
 }
 
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
@@ -1020,9 +1056,8 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	receipt := receipts[index]
 
 	// Derive the sender.
-	bigblock := new(big.Int).SetUint64(blockNumber)
-	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
-	from, _ := types.Sender(signer, tx)
+	signer := types.MakeSigner(s.b.ChainConfig(), blockNumber)
+	from, _ := types.Sender(*signer, tx)
 
 	fields := map[string]interface{}{
 		"blockHash":         blockHash,
@@ -1030,7 +1065,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(index),
 		"from":              from,
-		"to":                tx.To(),
+		"to":                tx.GetTo(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
@@ -1141,7 +1176,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 
 // toTransaction converts the arguments to a transaction.
 // This assumes that setDefaults has been called.
-func (args *SendTxArgs) toTransaction() *types.Transaction {
+func (args *SendTxArgs) toTransaction() types.Transaction {
 	var input []byte
 	if args.Input != nil {
 		input = *args.Input

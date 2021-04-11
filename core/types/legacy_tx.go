@@ -77,6 +77,10 @@ func (tx LegacyTx) GetAccessList() AccessList {
 	return AccessList{}
 }
 
+func (tx LegacyTx) Protected() bool {
+	return tx.V != nil && isProtectedV(tx.V)
+}
+
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
 func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
@@ -342,11 +346,6 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	return nil
-}
-
-// Protected says whether the transaction is replay-protected.
-func (tx *LegacyTx) Protected() bool {
-	return tx.V != nil && isProtectedV(tx.V)
 }
 
 // AsMessage returns the transaction as a core.Message.

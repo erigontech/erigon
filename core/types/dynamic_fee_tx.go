@@ -103,6 +103,10 @@ func (tx *DynamicFeeTransaction) Size() common.StorageSize {
 	return common.StorageSize(c)
 }
 
+func (tx DynamicFeeTransaction) Protected() bool {
+	return true
+}
+
 func (tx DynamicFeeTransaction) encodingSize() int {
 	return 0
 }

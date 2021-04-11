@@ -114,12 +114,12 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
-	signer := types.NewEIP155Signer(chainConfig.ChainID)
+	signer := types.MakeSigner(chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
 		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
@@ -176,11 +176,11 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		// during transaction acceptance is the transaction pool.
 		//
 		// We use the eip155 signer regardless of the env hf.
-		from, _ := types.Sender(signer, txn)
+		from, _ := types.Sender(*signer, txn)
 		// Check whether the txn is replay protected. If we're not in the EIP155 hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsEIP155(header.Number) {
-			log.Trace("Ignoring reply protected transaction", "hash", txn.Hash(), "eip155", chainConfig.EIP155Block)
+		if txn.Protected() && !chainConfig.IsEIP155(header.Number.Uint64()) {
+			log.Trace("Ignoring replay protected transaction", "hash", txn.Hash(), "eip155", chainConfig.EIP155Block)
 
 			txs.Pop()
 			continue
@@ -198,12 +198,12 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 		case core.ErrNonceTooLow:
 			// New head notification data race between the transaction pool and miner, shift
-			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", txn.Nonce())
+			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", txn.GetNonce())
 			txs.Shift()
 
 		case core.ErrNonceTooHigh:
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Trace("Skipping account with hight nonce", "sender", from, "nonce", txn.Nonce())
+			log.Trace("Skipping account with hight nonce", "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 
 		case nil:

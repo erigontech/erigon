@@ -109,6 +109,10 @@ func (tx *AccessListTx) Size() common.StorageSize {
 	return common.StorageSize(c)
 }
 
+func (tx AccessListTx) Protected() bool {
+	return true
+}
+
 func (tx AccessListTx) encodingSize() int {
 	return 0
 }

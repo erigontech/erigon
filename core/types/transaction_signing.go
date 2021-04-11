@@ -165,7 +165,7 @@ type Signer struct {
 }
 
 func (sg Signer) String() string {
-	return fmt.Sprintf("Signer[chainId=%d,unprotected=%t,protected=%t,accesslist=%t,basefee=%d")
+	return fmt.Sprintf("Signer[chainId=%d,malleable=%t,unprotected=%t,protected=%t,accesslist=%t,dynamicfee=%t", sg.chainID, sg.maleable, sg.unprotected, sg.protected, sg.accesslist, sg.dynamicfee)
 }
 
 // Sender returns the sender address of the transaction.
@@ -197,7 +197,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 			if !sg.protected {
 				return common.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
 			}
-			if !deriveChainId(t.V).Eq(&sg.chainID) {
+			if !DeriveChainId(t.V).Eq(&sg.chainID) {
 				return common.Address{}, ErrInvalidChainId
 			}
 			V.Sub(t.V, &sg.chainIDMul)
@@ -356,7 +356,7 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 }
 
 // deriveChainID derives the chain id from the given v parameter
-func deriveChainId(v *uint256.Int) *uint256.Int {
+func DeriveChainId(v *uint256.Int) *uint256.Int {
 	if v.IsUint64() {
 		v := v.Uint64()
 		if v == 27 || v == 28 {

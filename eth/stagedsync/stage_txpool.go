@@ -172,7 +172,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 		log.Error(fmt.Sprintf("[%s] TxPoolUpdate: walking over sender", logPrefix), "error", err)
 		return err
 	}
-	var txsToInject []*types.Transaction
+	var txsToInject []types.Transaction
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err

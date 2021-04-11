@@ -61,6 +61,7 @@ type Transaction interface {
 	Size() common.StorageSize
 	GetData() []byte
 	GetAccessList() AccessList
+	Protected() bool
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -89,7 +90,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 
 	var plainV byte
 	if isProtectedV(v) {
-		chainID := deriveChainId(v).Uint64()
+		chainID := DeriveChainId(v).Uint64()
 		plainV = byte(v.Uint64() - 35 - 2*chainID)
 	} else if maybeProtected {
 		// Only EIP-155 signatures can be optionally protected. Since
