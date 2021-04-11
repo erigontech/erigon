@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math/bits"
 
@@ -173,7 +174,7 @@ func (tx LegacyTx) encodingSize() int {
 	encodingSize++
 	var gasLen int
 	if tx.Gas >= 128 {
-		nonceLen = (bits.Len64(tx.Gas) + 7) / 8
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
 	encodingSize += gasLen
 	encodingSize++
@@ -183,7 +184,7 @@ func (tx LegacyTx) encodingSize() int {
 	encodingSize++
 	var valueLen int
 	if tx.Value.BitLen() >= 8 {
-		gasPriceLen = (tx.Value.BitLen() + 7) / 8
+		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
 	encodingSize += valueLen
 	encodingSize += 1 + len(tx.Data)
@@ -193,19 +194,19 @@ func (tx LegacyTx) encodingSize() int {
 	encodingSize++
 	var vLen int
 	if tx.V.BitLen() >= 8 {
-		gasPriceLen = (tx.V.BitLen() + 7) / 8
+		vLen = (tx.V.BitLen() + 7) / 8
 	}
 	encodingSize += vLen
 	encodingSize++
 	var rLen int
 	if tx.R.BitLen() >= 8 {
-		gasPriceLen = (tx.R.BitLen() + 7) / 8
+		rLen = (tx.R.BitLen() + 7) / 8
 	}
 	encodingSize += rLen
 	encodingSize++
 	var sLen int
 	if tx.S.BitLen() >= 8 {
-		gasPriceLen = (tx.S.BitLen() + 7) / 8
+		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
 	return encodingSize
@@ -228,7 +229,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize++
 	var gasLen int
 	if tx.Gas >= 128 {
-		nonceLen = (bits.Len64(tx.Gas) + 7) / 8
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
 	encodingSize += gasLen
 	encodingSize++
@@ -238,7 +239,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize++
 	var valueLen int
 	if tx.Value.BitLen() >= 8 {
-		gasPriceLen = (tx.Value.BitLen() + 7) / 8
+		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
 	encodingSize += valueLen
 	encodingSize += 1 + len(tx.Data)
@@ -248,28 +249,35 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize++
 	var vLen int
 	if tx.V.BitLen() >= 8 {
-		gasPriceLen = (tx.V.BitLen() + 7) / 8
+		vLen = (tx.V.BitLen() + 7) / 8
 	}
 	encodingSize += vLen
 	encodingSize++
 	var rLen int
 	if tx.R.BitLen() >= 8 {
-		gasPriceLen = (tx.R.BitLen() + 7) / 8
+		rLen = (tx.R.BitLen() + 7) / 8
 	}
 	encodingSize += rLen
 	encodingSize++
 	var sLen int
 	if tx.S.BitLen() >= 8 {
-		gasPriceLen = (tx.S.BitLen() + 7) / 8
+		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
-	// Emit len(ser.len) + 247
+	// prefix
 	var b [33]byte
-	beSize := bits.Len(uint(encodingSize)) + 7/8
-	b[0] = byte(beSize)
-	binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
-	if _, err := w.Write(b[:1+beSize]); err != nil {
-		return err
+	if encodingSize >= 56 {
+		beSize := bits.Len(uint(encodingSize)) + 7/8
+		b[0] = byte(beSize) + 247
+		binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = byte(encodingSize) + 192
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
 	}
 	if nonceLen > 0 && tx.Nonce < 128 {
 		b[0] = byte(tx.Nonce)
@@ -315,7 +323,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	if len(tx.Data) >= 56 {
-		beSize = bits.Len(uint(len(tx.Data))+7) / 8
+		beSize := bits.Len(uint(len(tx.Data))+7) / 8
 		b[0] = 183 + byte(beSize)
 		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
 		if _, err := w.Write(b[:1+beSize]); err != nil {
@@ -345,6 +353,65 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
+	}
+	tx.GasPrice = new(uint256.Int).SetBytes(b)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 0 && len(b) != 20 {
+		return fmt.Errorf("wrong size for To: %d", len(b))
+	}
+	if len(b) > 0 {
+		tx.To = &common.Address{}
+		copy((*tx.To)[:], b)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Value: %d", len(b))
+	}
+	tx.Value = new(uint256.Int).SetBytes(b)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for V: %d", len(b))
+	}
+	tx.V = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for R: %d", len(b))
+	}
+	tx.R = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for S: %d", len(b))
+	}
+	tx.S = new(uint256.Int).SetBytes(b)
 	return nil
 }
 

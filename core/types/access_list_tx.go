@@ -17,7 +17,9 @@
 package types
 
 import (
+	"encoding/binary"
 	"io"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -118,7 +120,253 @@ func (tx AccessListTx) encodingSize() int {
 }
 
 func (tx AccessListTx) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of ChainID
+	encodingSize++
+	var chainIdLen int
+	if tx.ChainID.BitLen() >= 8 {
+		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
+	}
+	encodingSize += chainIdLen
+	// size of Nonce
+	encodingSize++
+	var nonceLen int
+	if tx.Nonce >= 128 {
+		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
+	}
+	encodingSize += nonceLen
+	// size of GasPrice
+	encodingSize++
+	var gasPriceLen int
+	if tx.GasPrice.BitLen() >= 8 {
+		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
+	}
+	encodingSize += gasPriceLen
+	// size of Gas
+	encodingSize++
+	var gasLen int
+	if tx.Gas >= 128 {
+		gasLen = (bits.Len64(tx.Gas) + 7) / 8
+	}
+	encodingSize += gasLen
+	// size of To
+	encodingSize++
+	if tx.To != nil {
+		encodingSize += 20
+	}
+	// size of Value
+	encodingSize++
+	var valueLen int
+	if tx.Value.BitLen() >= 8 {
+		valueLen = (tx.Value.BitLen() + 7) / 8
+	}
+	encodingSize += valueLen
+	// size of Data
+	encodingSize += 1 + len(tx.Data)
+	if len(tx.Data) >= 56 {
+		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+	}
+	// size of AccessList
+	encodingSize++
+	var accessListLen int
+	for _, tuple := range tx.AccessList {
+		accessListLen += 21 + 1 // For the address and prefix for storage keys
+		// Each storage key takes 33 bytes
+		storageLen := 33 * len(tuple.StorageKeys)
+		if storageLen >= 56 {
+			accessListLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+		}
+	}
+	if accessListLen >= 56 {
+		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
+	}
+	encodingSize += accessListLen
+	// size of V
+	encodingSize++
+	var vLen int
+	if tx.V.BitLen() >= 8 {
+		vLen = (tx.V.BitLen() + 7) / 8
+	}
+	encodingSize += vLen
+	// size of R
+	encodingSize++
+	var rLen int
+	if tx.R.BitLen() >= 8 {
+		rLen = (tx.R.BitLen() + 7) / 8
+	}
+	encodingSize += rLen
+	// size of S
+	encodingSize++
+	var sLen int
+	if tx.S.BitLen() >= 8 {
+		sLen = (tx.S.BitLen() + 7) / 8
+	}
+	encodingSize += sLen
+	// prefix
+	var b [33]byte
+	if encodingSize >= 56 {
+		beSize := bits.Len(uint(encodingSize)) + 7/8
+		b[0] = byte(beSize) + 247
+		binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = byte(encodingSize) + 192
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	// encode ChainID
+	if err := tx.ChainID.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Nonce
+	if nonceLen > 0 && tx.Nonce < 128 {
+		b[0] = byte(tx.Nonce)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(nonceLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		if _, err := w.Write(b[:1+nonceLen]); err != nil {
+			return err
+		}
+	}
+	// encode GasPrice
+	if err := tx.GasPrice.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Gas
+	if gasLen > 0 && tx.Gas < 128 {
+		b[0] = byte(tx.Gas)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(gasLen)
+		binary.BigEndian.PutUint64(b[1:], tx.Gas)
+		if _, err := w.Write(b[:1+gasLen]); err != nil {
+			return err
+		}
+	}
+	// encode To
+	if tx.To == nil {
+		b[0] = 128
+	} else {
+		b[0] = 128 + 20
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if tx.To != nil {
+		if _, err := w.Write(tx.To.Bytes()); err != nil {
+			return err
+		}
+	}
+	// encode Value
+	if err := tx.Value.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Data
+	if len(tx.Data) >= 56 {
+		beSize := bits.Len(uint(len(tx.Data))+7) / 8
+		b[0] = 183 + byte(beSize)
+		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(len(tx.Data))
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	if len(tx.Data) > 0 {
+		if _, err := w.Write(tx.Data); err != nil {
+			return err
+		}
+	}
+	// encode AccessList
+	// prefix
+	if accessListLen >= 56 {
+		beSize := bits.Len(uint(accessListLen)) + 7/8
+		b[0] = byte(beSize) + 247
+		binary.BigEndian.PutUint64(b[1:], uint64(accessListLen))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = byte(accessListLen) + 192
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	for _, tuple := range tx.AccessList {
+		tupleLen := 21 + 1
+		// Each storage key takes 33 bytes
+		storageLen := 33 * len(tuple.StorageKeys)
+		if storageLen >= 56 {
+			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+		}
+		if tupleLen >= 56 {
+			beSize := bits.Len(uint(tupleLen)) + 7/8
+			b[0] = byte(beSize) + 247
+			binary.BigEndian.PutUint64(b[1:], uint64(tupleLen))
+			if _, err := w.Write(b[:1+beSize]); err != nil {
+				return err
+			}
+		} else {
+			b[0] = byte(tupleLen) + 192
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+		}
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
+			return err
+		}
+		if storageLen >= 56 {
+			beSize := bits.Len(uint(storageLen)) + 7/8
+			b[0] = byte(beSize) + 247
+			binary.BigEndian.PutUint64(b[1:], uint64(storageLen))
+			if _, err := w.Write(b[:1+beSize]); err != nil {
+				return err
+			}
+		} else {
+			b[0] = byte(storageLen) + 192
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+		}
+		b[0] = 128 + 32
+		for _, storageKey := range tuple.StorageKeys {
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+			if _, err := w.Write(storageKey.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	// encode V
+	if err := tx.V.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode R
+	if err := tx.R.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode S
+	if err := tx.S.EncodeRLP(w); err != nil {
+		return err
+	}
 	return nil
+
 }
 
 func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
