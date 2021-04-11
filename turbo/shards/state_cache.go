@@ -539,7 +539,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	}
 
 	if sc.limit != 0 && sc.readSize+item.GetSize() > int(sc.limit) {
-		for sc.readQueuesLen() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
+		for sc.readQueue[id].Len() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
 			// Read queue cannot grow anymore, need to evict one element
 			cacheItem := heap.Pop(&sc.readQueue[id]).(CacheItem)
 			sc.readSize -= cacheItem.GetSize()
@@ -669,7 +669,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		return
 	}
 	if sc.limit != 0 && sc.readSize+item.GetSize() > int(sc.limit) {
-		for sc.readQueuesLen() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
+		for sc.readQueue[id].Len() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
 			// There is no space available, need to evict one read element
 			cacheItem := heap.Pop(&sc.readQueue[id]).(CacheItem)
 			sc.readWrites[id].Delete(cacheItem)
