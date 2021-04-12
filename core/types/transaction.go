@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -81,6 +82,36 @@ func (tm TransactionMisc) Time() time.Time {
 
 func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
+}
+
+func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
+	firstByte, err := s.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	switch firstByte {
+	case AccessListTxType:
+		tx := &AccessListTx{}
+		if err = tx.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case DynamicFeeTxType:
+		tx := &DynamicFeeTransaction{}
+		if err = tx.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	default:
+		if firstByte < 192 {
+			return nil, fmt.Errorf("unknown tx type first byte: %d", firstByte)
+		}
+		tx := &LegacyTx{}
+		if err = tx.DecodeRLP(s, firstByte); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	}
 }
 
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {

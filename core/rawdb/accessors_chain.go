@@ -273,27 +273,16 @@ func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.
 	}
 	txIdKey := make([]byte, 8)
 	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 	if err := db.Walk(dbutils.EthTx, txIdKey, 0, func(k, txData []byte) (bool, error) {
-		switch txData[0] {
-		case types.AccessListTxType:
-			txs[i] = &types.AccessListTx{}
-			reader.Reset(txData[1:]) // first byte is not part of representation
-		case types.DynamicFeeTxType:
-			txs[i] = &types.DynamicFeeTransaction{}
-			reader.Reset(txData[1:]) // first byte is not part of representation
-		default:
-			if txData[0] < 192 {
-				// RLP list's first byte is >= 192
-				return false, fmt.Errorf("unknown tx type: %v", txData[0])
-			}
-			txs[i] = &types.LegacyTx{}
-			reader.Reset(txData) // first byte is part of representation
-		}
-		if err := rlp.Decode(reader, txs[i]); err != nil {
-			return false, fmt.Errorf("broken tx rlp: %w", err)
+		var decodeErr error
+		reader.Reset(txData)
+		stream.Reset(reader, 0)
+		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+			return false, decodeErr
 		}
 		i++
 		return i < amount, nil

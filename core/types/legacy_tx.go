@@ -349,11 +349,25 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
+// DecodeRLP decodes LegacyTx but with the first byte already removed (for detection of tx envelope type)
+func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, firstByte byte) error {
+	if firstByte < 192 {
+		return fmt.Errorf("first byte of legacy Tx encoding must be >= 192: %d", firstByte)
 	}
+	var encodingSize int
+	var err error
+	if firstByte < 248 {
+		encodingSize = int(firstByte - 192)
+	} else {
+		beSize := encodingSize - 247
+		var buf [8]byte
+		var encSize uint64
+		if encSize, err = s.ReadRawUint64(beSize, buf[:]); err != nil {
+			return err
+		}
+		encodingSize = int(encSize)
+	}
+	s.NewList(uint64(encodingSize))
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
