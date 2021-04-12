@@ -313,7 +313,44 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 }
 
 func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
-	return nil
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		bb.Transactions = append(bb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle types.Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Uncles = append(bb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns
