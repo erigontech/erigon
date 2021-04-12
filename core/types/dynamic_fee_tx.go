@@ -514,5 +514,21 @@ func (tx DynamicFeeTransaction) Hash() common.Hash {
 	})
 }
 
+func (tx DynamicFeeTransaction) SigningHash() common.Hash {
+	return prefixedRlpHash(
+		DynamicFeeTxType,
+		[]interface{}{
+			tx.ChainID,
+			tx.Nonce,
+			tx.Tip,
+			tx.FeeCap,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			tx.AccessList,
+		})
+}
+
 // accessors for innerTx.
 func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }

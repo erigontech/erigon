@@ -59,6 +59,7 @@ type Transaction interface {
 	AsMessage(s Signer) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
+	SigningHash() common.Hash
 	Size() common.StorageSize
 	GetData() []byte
 	GetAccessList() AccessList

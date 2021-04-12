@@ -454,4 +454,27 @@ func (tx LegacyTx) Hash() common.Hash {
 	})
 }
 
+func (tx LegacyTx) SigningHash() common.Hash {
+	if tx.Protected() {
+		chainID := DeriveChainId(tx.V)
+		return rlpHash([]interface{}{
+			tx.Nonce,
+			tx.GasPrice,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			chainID.ToBig(), uint(0), uint(0),
+		})
+	}
+	return rlpHash([]interface{}{
+		tx.Nonce,
+		tx.GasPrice,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+	})
+}
+
 func (tx LegacyTx) Type() byte { return LegacyTxType }

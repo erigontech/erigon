@@ -590,4 +590,19 @@ func (tx AccessListTx) Hash() common.Hash {
 	})
 }
 
+func (tx AccessListTx) SigningHash() common.Hash {
+	return prefixedRlpHash(
+		AccessListTxType,
+		[]interface{}{
+			tx.ChainID.ToBig(),
+			tx.Nonce,
+			tx.GasPrice,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			tx.AccessList,
+		})
+}
+
 func (tx AccessListTx) Type() byte { return AccessListTxType }

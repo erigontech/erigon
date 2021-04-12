@@ -108,7 +108,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 
 // SignTx signs the transaction using the given signer and private key.
 func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := s.Hash(tx)
+	h := tx.SigningHash()
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error
 
 // SignNewTx creates a transaction and signs it.
 func SignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) (Transaction, error) {
-	h := s.Hash(tx)
+	h := tx.SigningHash()
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -183,23 +183,17 @@ func (sg Signer) Sender(tx Transaction) (common.Address, error) {
 func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (common.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	var hash common.Hash
+	// recoverPlain below will subract 27 from V
 	switch t := tx.(type) {
 	case *LegacyTx:
 		if !t.Protected() {
+			fmt.Printf("SenderWithContext Legacy !t.Protected\n")
 			if !sg.unprotected {
 				return common.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
 			}
 			V.Set(t.V)
-			hash = rlpHash([]interface{}{
-				t.Nonce,
-				t.GasPrice,
-				t.Gas,
-				t.To,
-				t.Value,
-				t.Data,
-			})
 		} else {
+			fmt.Printf("SenderWithContext Legacy t.Protected\n")
 			if !sg.protected {
 				return common.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
 			}
@@ -208,15 +202,6 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 			}
 			V.Sub(t.V, &sg.chainIDMul)
 			V.Sub(&V, u256.Num8)
-			hash = rlpHash([]interface{}{
-				t.Nonce,
-				t.GasPrice,
-				t.Gas,
-				t.To,
-				t.Value,
-				t.Data,
-				sg.chainID.ToBig(), uint(0), uint(0),
-			})
 		}
 		R, S = t.R, t.S
 	case *AccessListTx:
@@ -230,18 +215,6 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(t.V, u256.Num27)
 		R, S = t.R, t.S
-		hash = prefixedRlpHash(
-			AccessListTxType,
-			[]interface{}{
-				t.ChainID.ToBig(),
-				t.Nonce,
-				t.GasPrice,
-				t.Gas,
-				t.To,
-				t.Value,
-				t.Data,
-				t.AccessList,
-			})
 	case *DynamicFeeTransaction:
 		if !sg.dynamicfee {
 			return common.Address{}, fmt.Errorf("dynamicfee tx is not supported by signer %s", sg)
@@ -253,23 +226,10 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(t.V, u256.Num27)
 		R, S = t.R, t.S
-		hash = prefixedRlpHash(
-			DynamicFeeTxType,
-			[]interface{}{
-				t.ChainID,
-				t.Nonce,
-				t.Tip,
-				t.FeeCap,
-				t.Gas,
-				t.To,
-				t.Value,
-				t.Data,
-				t.AccessList,
-			})
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	return recoverPlain(context, hash, R, S, &V, !sg.maleable)
+	return recoverPlain(context, tx.SigningHash(), R, S, &V, !sg.maleable)
 }
 
 // SignatureValues returns the raw R, S, V values corresponding to the
@@ -306,12 +266,6 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 
 func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
-}
-
-// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
-// private key. This hash does not uniquely identify the transaction.
-func (sg Signer) Hash(tx Transaction) common.Hash {
-	return common.Hash{}
 }
 
 // Equal returns true if the given signer is the same as the receiver.
