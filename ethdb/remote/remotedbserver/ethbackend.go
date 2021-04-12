@@ -1,10 +1,10 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -32,28 +32,11 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
 	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	var signedTx types.Transaction
-	var rlpData []byte
-	switch in.Signedtx[0] {
-	case types.AccessListTxType:
-		signedTx = &types.AccessListTx{}
-		rlpData = in.Signedtx[1:]
-	case types.DynamicFeeTxType:
-		signedTx = &types.DynamicFeeTransaction{}
-		rlpData = in.Signedtx[1:]
-	default:
-		if in.Signedtx[0] < 192 {
-			return out, fmt.Errorf("unknown transaction type: %v", in.Signedtx[0])
-		}
-		signedTx = &types.LegacyTx{}
-		rlpData = in.Signedtx
+	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
+	if err != nil {
+		return nil, err
 	}
-
-	if err := rlp.DecodeBytes(rlpData, signedTx); err != nil {
-		return out, err
-	}
-
-	if err := s.eth.TxPool().AddLocal(signedTx); err != nil {
+	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
 		return out, err
 	}
 

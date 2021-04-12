@@ -679,26 +679,6 @@ func (s *Stream) Raw() ([]byte, error) {
 	return buf, nil
 }
 
-func (s *Stream) ReadByte() (byte, error) {
-	if err := s.willRead(1); err != nil {
-		return 0, err
-	}
-	return s.r.ReadByte()
-}
-
-var emptyByte8 [8]byte
-
-func (s *Stream) ReadRawUint64(size int, buffer []byte) (uint64, error) {
-	if err := s.willRead(uint64(size)); err != nil {
-		return 0, err
-	}
-	copy(buffer, emptyByte8[:])
-	if _, err := s.r.Read(buffer[8-size:]); err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(buffer[:]), nil
-}
-
 // Uint reads an RLP string of up to 8 bytes and returns its contents
 // as an unsigned integer. If the input does not contain an RLP string, the
 // returned error will be ErrExpectedString.

@@ -152,10 +152,11 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 // from an RLP stream.
 func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 	kind, _, err := s.Kind()
-	switch {
-	case err != nil:
-		return err
-	case kind == rlp.List:
+	if err != nil {
+		return nil
+	}
+	switch kind {
+	case rlp.List:
 		// It's a legacy receipt.
 		var dec receiptRLP
 		if err := s.Decode(&dec); err != nil {
@@ -163,14 +164,14 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = LegacyTxType
 		return r.setFromRLP(dec)
-	case kind == rlp.String:
+	case rlp.Byte, rlp.String:
 		// It's an EIP-2718 typed tx receipt.
-		b, err := s.Bytes()
-		if err != nil {
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
 			return err
 		}
-		if len(b) == 0 {
-			return errEmptyTypedReceipt
+		if len(b) != 0 {
+			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
 		}
 		r.Type = b[0]
 		if r.Type == AccessListTxType || r.Type == DynamicFeeTxType {

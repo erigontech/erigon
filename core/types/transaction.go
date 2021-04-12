@@ -85,32 +85,43 @@ func (tm TransactionMisc) From() *atomic.Value {
 }
 
 func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
-	firstByte, err := s.ReadByte()
+	kind, size, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
-	switch firstByte {
-	case AccessListTxType:
-		tx := &AccessListTx{}
-		if err = tx.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return tx, nil
-	case DynamicFeeTxType:
-		tx := &DynamicFeeTransaction{}
-		if err = tx.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return tx, nil
-	default:
-		if firstByte < 192 {
-			return nil, fmt.Errorf("unknown tx type first byte: %d", firstByte)
-		}
+	switch kind {
+	case rlp.List:
 		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, firstByte); err != nil {
+		if err = tx.DecodeRLP(s, size); err != nil {
 			return nil, err
 		}
 		return tx, nil
+	case rlp.Byte, rlp.String:
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return nil, err
+		}
+		if len(b) != 1 {
+			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		}
+		switch b[0] {
+		case AccessListTxType:
+			tx := &AccessListTx{}
+			if err = tx.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			return tx, nil
+		case DynamicFeeTxType:
+			tx := &DynamicFeeTransaction{}
+			if err = tx.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			return tx, nil
+		default:
+			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+		}
+	default:
+		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
 	}
 }
 

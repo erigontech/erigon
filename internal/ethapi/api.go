@@ -1292,25 +1292,9 @@ func (s *PublicTransactionPoolAPI) FillTransaction(ctx context.Context, args Sen
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
-	var tx types.Transaction
-	var rlpData []byte
-	switch input[0] {
-	case types.AccessListTxType:
-		tx = &types.AccessListTx{}
-		rlpData = input[1:] // first byte is not part of representation
-	case types.DynamicFeeTxType:
-		tx = &types.DynamicFeeTransaction{}
-		rlpData = input[1:] // first byte is not part of representation
-	default:
-		if input[0] < 192 {
-			// RLP list's first byte is >= 192
-			return common.Hash{}, fmt.Errorf("unknown tx type: %v", input[0])
-		}
-		tx = &types.LegacyTx{}
-		rlpData = input // first byte is part of representation
-	}
-	if err := rlp.DecodeBytes(rlpData, tx); err != nil {
-		return common.Hash{}, fmt.Errorf("broken tx rlp: %w", err)
+	tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	if err != nil {
+		return common.Hash{}, err
 	}
 	return SubmitTransaction(ctx, s.b, tx)
 }

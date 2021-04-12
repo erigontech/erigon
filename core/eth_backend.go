@@ -1,9 +1,9 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -51,23 +51,11 @@ func NewEthBackend(eth EthBackend, ethashApi *ethash.API) *EthBackendImpl {
 }
 
 func (back *EthBackendImpl) AddLocal(_ context.Context, signedtx []byte) ([]byte, error) {
-	var tx types.Transaction
-	switch signedtx[0] {
-	case types.AccessListTxType:
-		tx = &types.AccessListTx{}
-	case types.DynamicFeeTxType:
-		tx = &types.DynamicFeeTransaction{}
-	default:
-		if signedtx[0] < 192 {
-			// RLP list's first byte is >= 192
-			return nil, fmt.Errorf("unknown tx type: %v", signedtx[0])
-		}
-		tx = &types.LegacyTx{}
+	s := rlp.NewStream(bytes.NewReader(signedtx), 0)
+	tx, err := types.DecodeTransaction(s)
+	if err != nil {
+		return nil, err
 	}
-	if err := rlp.DecodeBytes(signedtx, tx); err != nil {
-		return common.Hash{}.Bytes(), err
-	}
-
 	return tx.Hash().Bytes(), back.eth.TxPool().AddLocal(tx)
 }
 
