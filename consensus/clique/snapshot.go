@@ -442,6 +442,7 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 			case snap := <-st.ch:
 				snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 
+				fmt.Println("!!!!!", snaps == nil, snap == nil)
 				if len(snaps) >= batchSize || snap.number == 0 {
 					snaps, isSorted = st.saveAndReset(snaps, isSorted)
 					syncSmall.Reset(syncSmallBatch)
@@ -492,7 +493,7 @@ func (st *storage) save(s *Snapshot) error {
 	}
 	select {
 	case <-st.exit:
-	case st.ch <- &snapObj{s.Number, s.Hash, s}:
+	case st.ch <- &snapObj{s.Number, s.Hash, s.Copy()}:
 	}
 
 	return nil
