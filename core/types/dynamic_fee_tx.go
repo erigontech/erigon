@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/big"
 	"math/bits"
 
 	"github.com/holiman/uint256"
@@ -514,11 +515,11 @@ func (tx DynamicFeeTransaction) Hash() common.Hash {
 	})
 }
 
-func (tx DynamicFeeTransaction) SigningHash() common.Hash {
+func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		[]interface{}{
-			tx.ChainID,
+			chainID,
 			tx.Nonce,
 			tx.Tip,
 			tx.FeeCap,

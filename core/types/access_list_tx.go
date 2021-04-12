@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"math/bits"
 
 	"github.com/holiman/uint256"
@@ -590,11 +591,11 @@ func (tx AccessListTx) Hash() common.Hash {
 	})
 }
 
-func (tx AccessListTx) SigningHash() common.Hash {
+func (tx AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		[]interface{}{
-			tx.ChainID.ToBig(),
+			chainID,
 			tx.Nonce,
 			tx.GasPrice,
 			tx.Gas,

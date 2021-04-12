@@ -108,7 +108,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 
 // SignTx signs the transaction using the given signer and private key.
 func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := tx.SigningHash()
+	h := tx.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error
 
 // SignNewTx creates a transaction and signs it.
 func SignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) (Transaction, error) {
-	h := tx.SigningHash()
+	h := tx.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -187,13 +187,11 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	switch t := tx.(type) {
 	case *LegacyTx:
 		if !t.Protected() {
-			fmt.Printf("SenderWithContext Legacy !t.Protected\n")
 			if !sg.unprotected {
 				return common.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
 			}
 			V.Set(t.V)
 		} else {
-			fmt.Printf("SenderWithContext Legacy t.Protected\n")
 			if !sg.protected {
 				return common.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
 			}
@@ -229,7 +227,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	return recoverPlain(context, tx.SigningHash(), R, S, &V, !sg.maleable)
+	return recoverPlain(context, tx.SigningHash(sg.chainID.ToBig()), R, S, &V, !sg.maleable)
 }
 
 // SignatureValues returns the raw R, S, V values corresponding to the

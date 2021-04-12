@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/big"
 	"math/bits"
 
 	"github.com/holiman/uint256"
@@ -454,9 +455,8 @@ func (tx LegacyTx) Hash() common.Hash {
 	})
 }
 
-func (tx LegacyTx) SigningHash() common.Hash {
-	if tx.Protected() {
-		chainID := DeriveChainId(tx.V)
+func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
 			tx.GasPrice,
@@ -464,7 +464,7 @@ func (tx LegacyTx) SigningHash() common.Hash {
 			tx.To,
 			tx.Value,
 			tx.Data,
-			chainID.ToBig(), uint(0), uint(0),
+			chainID, uint(0), uint(0),
 		})
 	}
 	return rlpHash([]interface{}{
