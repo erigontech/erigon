@@ -12,26 +12,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-/*
-Создать снепшот
-Подменить снепшот в базе
-Остановить раздачи старого снепшота
-Удалить раздачу старого снепшота
-Удалить старый снепшот
-Удалить данные из основной бд
-
-
-Находится в стейдже Final
-Сохранение промежуточного прогресса
-Проход для каждого снепшота последовательный
- */
 
 
 
@@ -105,7 +94,7 @@ func (sb *SnapshotMigrator) CreateHeadersSnapshot(chainDB ethdb.Database, toBloc
 			fmt.Println("snapshot generated ", sb.MigrateToSnapshotPath)
 		}()
 		fmt.Println("Snapshot generation")
-		err=CreateHeadersSnapshot(chainDB, toBlock, snapshotPath)
+		err=CreateHeadersSnapshot(context.Background(), chainDB, toBlock, snapshotPath)
 		if err!=nil {
 			log.Error("Create headers snapshot failed", "err", err)
 			fmt.Print("Snapshot generation failed", err)
@@ -279,7 +268,7 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.KV, error) {
 	}).Path(dbPath).Open()
 
 }
-func CreateHeadersSnapshot(chainDB ethdb.Database, toBlock uint64, snapshotPath string)  error {
+func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.Database, toBlock uint64, snapshotPath string)  error {
 	snKV,err := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket:              dbutils.BucketsConfigs[dbutils.HeadersBucket],
@@ -294,7 +283,7 @@ func CreateHeadersSnapshot(chainDB ethdb.Database, toBlock uint64, snapshotPath 
 		return err
 	}
 	defer sntx.Rollback()
-	err = GenerateHeadersSnapshot(chainDB, sntx, toBlock)
+	err = GenerateHeadersSnapshot(ctx, chainDB, sntx, toBlock)
 	if err!=nil {
 		return err
 	}
@@ -308,12 +297,15 @@ func CreateHeadersSnapshot(chainDB ethdb.Database, toBlock uint64, snapshotPath 
 	return nil
 }
 
-func GenerateHeadersSnapshot(db ethdb.Database, sntx ethdb.RwTx, toBlock uint64) error {
+func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.RwTx, toBlock uint64) error {
 	headerCursor:=sntx.RwCursor(dbutils.HeadersBucket)
 	var hash common.Hash
 	var err error
 	var header []byte
 	for i := uint64(0); i <= toBlock; i++ {
+		if common.IsCanceled(ctx) {
+			return common.ErrStopped
+		}
 		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
 			return err
@@ -329,4 +321,278 @@ func GenerateHeadersSnapshot(db ethdb.Database, sntx ethdb.RwTx, toBlock uint64)
 		}
 	}
 	return nil
+}
+
+
+
+/*
+Создать снепшот
+Подменить снепшот в базе
+Остановить раздачи старого снепшота
+Удалить раздачу старого снепшота
+Удалить старый снепшот
+Удалить данные из основной бд
+
+
+Находится в стейдже Final
+Сохранение промежуточного прогресса
+Проход для каждого снепшота последовательный
+*/
+
+
+type SnapshotMigrator2 struct {
+	epochSize uint64
+	snapshotsDir string
+	HeadersCurrentSnapshot uint64
+	HeadersNewSnapshot uint64
+	HeadersCleanTo uint64
+
+	Stage uint64
+	BodiesCurrentSnapshot uint64
+	BodiesNewSnapshot uint64
+
+	mtx sync.RWMutex
+
+	cancel func()
+}
+func (sm *SnapshotMigrator2) Close() {
+	sm.cancel()
+}
+
+const (
+	StageStart  = 0
+	StageGenerate  = 1
+	StageReplace  = 2
+	StageStopSeeding  = 3
+	StageStartSeedingNew  = 4
+	StageRemoveOldSnapshot  = 5
+	StagePruneDB  = 6
+)
+func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlock uint64,  bittorrent *bittorrent.Client) error  {
+	switch atomic.LoadUint64(&sm.Stage) {
+	case StageStart:
+		sm.mtx.Lock()
+		atomic.StoreUint64(&sm.Stage, StageGenerate)
+		ctx, cancel:=context.WithCancel(context.Background())
+		sm.cancel = cancel
+		sm.mtx.Unlock()
+		go func() {
+			var err error
+			defer func() {
+				sm.mtx.Lock()
+				if err!=nil {
+					atomic.StoreUint64(&sm.Stage, StageStart)
+				}
+				sm.cancel = nil
+				sm.mtx.Unlock()
+			}()
+			snapshotPath:=snapshotName(sm.snapshotsDir, "headers", toBlock)
+			err=CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath)
+			if err!=nil {
+				fmt.Println("-----------------------Create Error!", err)
+				return
+			}
+			atomic.StoreUint64(&sm.Stage, StageReplace)
+			err = sm.ReplaceHeadersSnapshot(db, snapshotPath)
+			if err!=nil {
+				fmt.Println("-----------------------Replace Error!", err)
+				return
+			}
+
+			atomic.StoreUint64(&sm.Stage, StageStopSeeding)
+			//todo headers infohash
+			infohash,err:=db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+			if err!=nil {
+				fmt.Println("-------get infohash err", err)
+			}
+			if len(infohash)==20 {
+				var hash metainfo.Hash
+				copy(hash[:], infohash)
+				err = bittorrent.StopSeeding(hash)
+				if err!=nil {
+					fmt.Println("-----------------------stop seeding!", err)
+					return
+				}
+				atomic.StoreUint64(&sm.Stage, StageStartSeedingNew)
+			}
+
+			_, err = bittorrent.SeedSnapshot(db, 0, snapshotPath)
+			if err!=nil {
+				fmt.Println("-------seed snaopshot err", err)
+			}
+			atomic.StoreUint64(&sm.Stage, StageRemoveOldSnapshot)
+			sm.mtx.RLock()
+			if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot {
+				oldSnapshotPath:= snapshotName(sm.snapshotsDir,"headers", sm.HeadersCurrentSnapshot)
+				err = os.RemoveAll(oldSnapshotPath)
+				if err!=nil {
+					fmt.Println("snapshot hasn't removed")
+				}
+
+			}
+			sm.mtx.Lock()
+			atomic.StoreUint64(&sm.Stage, StageGenerate)
+			ctx, cancel:=context.WithCancel(context.Background())
+			sm.cancel = cancel
+			sm.mtx.Unlock()
+			go func() {
+				var err error
+				defer func() {
+					sm.mtx.Lock()
+					if err!=nil {
+						atomic.StoreUint64(&sm.Stage, StageStart)
+					}
+					sm.cancel = nil
+					sm.mtx.Unlock()
+				}()
+				snapshotPath:=snapshotName(sm.snapshotsDir, "headers", toBlock)
+				err=CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath)
+				if err!=nil {
+					fmt.Println("-----------------------Create Error!", err)
+					return
+				}
+				atomic.StoreUint64(&sm.Stage, StageReplace)
+				err = sm.ReplaceHeadersSnapshot(db, snapshotPath)
+				if err!=nil {
+					fmt.Println("-----------------------Replace Error!", err)
+					return
+				}
+
+				atomic.StoreUint64(&sm.Stage, StageStopSeeding)
+				//todo headers infohash
+				infohash,err:=db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+				if err!=nil {
+					fmt.Println("-------get infohash err", err)
+				}
+				if len(infohash)==20 {
+					var hash metainfo.Hash
+					copy(hash[:], infohash)
+					err = bittorrent.StopSeeding(hash)
+					if err!=nil {
+						fmt.Println("-----------------------stop seeding!", err)
+						return
+					}
+					atomic.StoreUint64(&sm.Stage, StageStartSeedingNew)
+				}
+
+				_, err = bittorrent.SeedSnapshot(db, 0, snapshotPath)
+				if err!=nil {
+					fmt.Println("-------seed snaopshot err", err)
+				}
+				atomic.StoreUint64(&sm.Stage, StageRemoveOldSnapshot)
+				sm.mtx.RLock()
+				if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot {
+					oldSnapshotPath:= snapshotName(sm.snapshotsDir,"headers", sm.HeadersCurrentSnapshot)
+					err = os.RemoveAll(oldSnapshotPath)
+					if err!=nil {
+						fmt.Println("snapshot hasn't removed")
+					}
+
+				}
+				atomic.StoreUint64(&sm.Stage, StagePruneDB)
+			}()
+
+		}()
+
+	case StagePruneDB:
+		err := sm.RemoveHeadersData(tx)
+		if err!=nil {
+			return err
+		}
+		sm.mtx.Lock()
+		atomic.StoreUint64(&sm.Stage, StageStart)
+		atomic.StoreUint64(&sm.HeadersCurrentSnapshot,sm.HeadersNewSnapshot)
+		sm.mtx.Unlock()
+	default:
+		return nil
+	}
+}
+
+
+
+func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snapshotPath string) error {
+	if snapshotPath == "" {
+		log.Error("snapshot path is empty")
+		return errors.New("snapshot path is empty")
+	}
+	if _, ok := chainDB.(ethdb.HasKV); !ok {
+		return errors.New("db don't implement hasKV interface")
+	}
+
+	if _, ok := chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+		return errors.New("db don't implement snapshotUpdater interface")
+	}
+	snapshotKV,err:=OpenHeadersSnapshot(snapshotPath)
+	if err!=nil {
+		return err
+	}
+
+	done := make(chan struct{})
+	chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
+	select {
+	case <-time.After(time.Minute):
+		panic("timeout")
+		log.Error("timout on closing headers snapshot database" )
+	case <-done:
+	}
+
+	return  nil
+}
+
+
+func (sb *SnapshotMigrator2) RemoveHeadersData(tx ethdb.Database) (err error) {
+	if sb.toClean.To == 0 {
+		return nil
+	}
+	if sb.CleanedTo >= sb.toClean.To {
+		return nil
+	}
+	from:=sb.toClean.From
+	if sb.CleanedTo> sb.toClean.From {
+		from=sb.CleanedTo
+	}
+
+	log.Info("Remove data", "from", from, "to", sb.toClean.To)
+	fmt.Println("Remove data", "from", from, "to", sb.toClean.To)
+	if _, ok := db.(ethdb.HasKV); !ok {
+		return errors.New("db don't implement hasKV interface")
+	}
+
+	if _, ok := db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+		return errors.New("db don't implement snapshotUpdater interface")
+	}
+	headerSnapshot:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	if headerSnapshot == nil {
+		return  nil
+	}
+	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot)
+	wdb:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).WriteDB()
+	if wdb == nil {
+		return nil
+	}
+	rmTX, err := wdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	rmCursor := rmTX.RwCursor(dbutils.HeadersBucket)
+	var lastCleaned uint64
+	defer func() {
+		if err == nil {
+			atomic.StoreUint64(&sb.CleanedTo, lastCleaned)
+			fmt.Println("removed to", lastCleaned)
+		}
+	}()
+	err = snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
+		innerErr := rmCursor.Delete(k, nil)
+		if innerErr != nil {
+			return false, innerErr
+		}
+		lastCleaned = binary.BigEndian.Uint64(k[:8])
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return rmTX.Commit(context.Background())
 }

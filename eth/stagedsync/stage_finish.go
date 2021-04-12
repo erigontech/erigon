@@ -24,5 +24,6 @@ func NotifyRpcDaemon(from, to uint64, notifier ChainEventNotifier, db ethdb.Data
 		}
 		notifier.OnNewHeader(header)
 	}
+
 	return nil
 }

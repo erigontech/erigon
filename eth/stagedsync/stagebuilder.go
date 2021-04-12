@@ -391,6 +391,11 @@ func DefaultStages() StageBuilders {
 							return err
 						}
 
+						sm:=&migrator.SnapshotMigrator2{}
+						err = sm.Migrate(world.DB, world.TX, executionAt, world.btClient)
+						if err!=nil {
+							return err
+						}
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

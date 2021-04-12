@@ -240,6 +240,7 @@ var (
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
 	BittorrentPeerID 		 = "peerID"
+	CurrentHeadersSnapshotHash 		 = []byte("CurrentHeadersSnapshotHash")
 )
 
 // Metrics
