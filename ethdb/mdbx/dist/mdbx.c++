@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY bbae0afeaea846f97858ef137703e39d21052f12bdc607d7c32cc3c092867812_v0_9_3_92_g49296cad
+#define MDBX_BUILD_SOURCERY 190ff851bc39425868c497bf7324a780f7755889e341f31bfbb4c9a813edd10b_v0_9_3_90_g0dd27a46
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
