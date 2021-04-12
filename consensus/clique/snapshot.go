@@ -18,7 +18,6 @@ package clique
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -158,8 +157,8 @@ func lastSnapshot(db ethdb.Database) (uint64, error) {
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(force bool) error {
-	return s.snapStorage.save(s, force)
+func (s *Snapshot) store() error {
+	return s.snapStorage.save(s)
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
@@ -443,7 +442,7 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 			case snap := <-st.ch:
 				snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 
-				if len(snaps) >= batchSize {
+				if len(snaps) >= batchSize || snap.number == 0 {
 					snaps, isSorted = st.saveAndReset(snaps, isSorted)
 					syncSmall.Reset(syncSmallBatch)
 				}
@@ -487,60 +486,13 @@ func (st *storage) appendSnap(snap *snapObj, snaps []*snapObj, isSorted bool) ([
 	return snaps, isSorted
 }
 
-func (st *storage) save(s *Snapshot, force bool) error {
-	if !force {
-		if atomic.LoadUint32(st.chStatus) == 1 {
-			return nil
-		}
-		select {
-		case <-st.exit:
-		case st.ch <- &snapObj{s.Number, s.Hash, s}:
-		}
-
+func (st *storage) save(s *Snapshot) error {
+	if atomic.LoadUint32(st.chStatus) == 1 {
 		return nil
 	}
-
-	// a forced case (genesis)
-	ok, err := hasSnapshotData(st.db, s.Number, s.Hash)
-
-	if !ok || err != nil {
-		blob, err := json.Marshal(s)
-		if err != nil {
-			return err
-		}
-
-		st.saveMu.Lock()
-		defer st.saveMu.Unlock()
-
-		tx, err := st.db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-
-		defer tx.Rollback()
-
-		if err = tx.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
-			log.Error("can't store a snapshot", "block", s.Number, "hash", s.Hash, "err", err)
-			return err
-		}
-
-		if err = tx.Put(dbutils.CliqueSnapshotBucket, SnapshotKey(s.Number), []byte{0}); err != nil {
-			log.Error("can't store a snapshot number", "block", s.Number, "hash", s.Hash, "err", err)
-			return err
-		}
-
-		lastSnap, err := lastSnapshot(tx)
-		if lastSnap < s.Number || errors.Is(err, ErrNotFound) {
-			if err = tx.Put(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey(), dbutils.EncodeBlockNumber(s.Number)); err != nil {
-				log.Error("can't store a snapshot number", "block", s.Number, "hash", s.Hash, "err", err)
-				return err
-			}
-		}
-
-		if err = tx.Commit(); err != nil {
-			log.Error("can't commit snapshot transaction", "block", s.Number, "hash", s.Hash, "err", err)
-			return err
-		}
+	select {
+	case <-st.exit:
+	case st.ch <- &snapObj{s.Number, s.Hash, s}:
 	}
 
 	return nil

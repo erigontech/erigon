@@ -363,7 +363,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, check bool, headers ...*t
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-		if err := snap.store(snap.Number == 0); err != nil {
+		if err := snap.store(); err != nil {
 			return err
 		}
 		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)

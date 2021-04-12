@@ -189,8 +189,8 @@ const (
 	SyncStageUnwind     = "SSU2"
 	SyncStageUnwindOld1 = "SSU"
 
-	CliqueSeparateBucket     = "clique-"
-	CliqueBucket             = "clique-snapshots-"
+	CliqueBucket             = "clique-"
+	CliqueSeparateBucket     = "clique-snapshots-"
 	CliqueSnapshotBucket     = "snap"
 	CliqueLastSnapshotBucket = "lastSnap"
 
@@ -259,7 +259,6 @@ var Buckets = []string{
 	BloomBitsIndexPrefix,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
-	CliqueBucket,
 	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
