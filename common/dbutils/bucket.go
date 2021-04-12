@@ -190,7 +190,7 @@ const (
 	SyncStageUnwindOld1 = "SSU"
 
 	CliqueSeparateBucket     = "clique-"
-	CliqueBucket             = "clique-"
+	CliqueBucket             = "clique-snapshots-"
 	CliqueSnapshotBucket     = "snap"
 	CliqueLastSnapshotBucket = "lastSnap"
 
