@@ -228,8 +228,8 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	b[0] = 183 + 2
-	b[1] = 0
-	b[2] = 1
+	b[1] = 1
+	b[2] = 0
 	if _, err := w.Write(b[:3]); err != nil {
 		return err
 	}
@@ -266,9 +266,9 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(gasLimitLen)
 		binary.BigEndian.PutUint64(b[1:], h.GasLimit)
-		if _, err := w.Write(b[:1+gasLimitLen]); err != nil {
+		b[8-gasLimitLen] = 128 + byte(gasLimitLen)
+		if _, err := w.Write(b[8-gasLimitLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -278,9 +278,9 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(gasUsedLen)
 		binary.BigEndian.PutUint64(b[1:], h.GasUsed)
-		if _, err := w.Write(b[:1+gasUsedLen]); err != nil {
+		b[8-gasUsedLen] = 128 + byte(gasUsedLen)
+		if _, err := w.Write(b[8-gasUsedLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -290,9 +290,9 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(timeLen)
 		binary.BigEndian.PutUint64(b[1:], h.Time)
-		if _, err := w.Write(b[:1+timeLen]); err != nil {
+		b[8-timeLen] = 128 + byte(timeLen)
+		if _, err := w.Write(b[8-timeLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -338,93 +338,93 @@ func (h Header) EncodeRLP(w io.Writer) error {
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return err
+		return fmt.Errorf("open header struct: %v", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read ParentHash: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for ParentHash: %d", len(b))
 	}
 	copy(h.ParentHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read UncleHash: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for UncleHash: %d", len(b))
 	}
 	copy(h.UncleHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Coinbase: %v", err)
 	}
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for Coinbase: %d", len(b))
 	}
 	copy(h.Coinbase[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Root: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for Root: %d", len(b))
 	}
 	copy(h.Root[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read TxHash: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for TxHash: %d", len(b))
 	}
 	copy(h.TxHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read ReceiptHash: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for ReceiptHash: %d", len(b))
 	}
 	copy(h.ReceiptHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Bloom: %v", err)
 	}
 	if len(b) != 256 {
 		return fmt.Errorf("wrong size for Bloom: %d", len(b))
 	}
 	copy(h.Bloom[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Difficulty: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
 	}
 	h.Difficulty = new(big.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Number: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Number: %d", len(b))
 	}
 	h.Number = new(big.Int).SetBytes(b)
 	if h.GasLimit, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read GasLimit: %v", err)
 	}
 	if h.GasUsed, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read GasUsed: %v", err)
 	}
 	if h.Time, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read Time: %v", err)
 	}
 	if h.Extra, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Extra: %v", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read MixDigest: %v", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for MixDigest: %d", len(b))
 	}
 	copy(h.MixDigest[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Nonce: %v", err)
 	}
 	if len(b) != 8 {
 		return fmt.Errorf("wrong size for Nonce: %d", len(b))
@@ -434,16 +434,22 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if errors.Is(err, rlp.EOL) {
 			h.BaseFee = nil
 			h.eip1559 = false
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no basefee): %v", err)
+			}
 			return nil
 		}
-		return err
+		return fmt.Errorf("read BaseFee: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
 	}
 	h.eip1559 = true
 	h.BaseFee = new(big.Int).SetBytes(b)
-	return s.ListEnd()
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close header struct: %v", err)
+	}
+	return nil
 }
 
 // field type overrides for gencodec

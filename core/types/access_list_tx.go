@@ -245,10 +245,10 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 
 func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 	if size >= 56 {
-		beSize := bits.Len(uint(size)) + 7/8
-		b[0] = byte(beSize) + 247
+		beSize := (bits.Len(uint(size)) + 7) / 8
 		binary.BigEndian.PutUint64(b[1:], uint64(size))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
+		b[8-beSize] = byte(beSize) + 247
+		if _, err := w.Write(b[8-beSize : 9]); err != nil {
 			return err
 		}
 	} else {
@@ -351,9 +351,9 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(nonceLen)
 		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		if _, err := w.Write(b[:1+nonceLen]); err != nil {
+		b[8-nonceLen] = 128 + byte(nonceLen)
+		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -368,9 +368,9 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(gasLen)
 		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		if _, err := w.Write(b[:1+gasLen]); err != nil {
+		b[8-gasLen] = 128 + byte(gasLen)
+		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
 			return err
 		}
 	}

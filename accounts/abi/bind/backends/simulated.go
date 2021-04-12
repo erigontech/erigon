@@ -150,7 +150,6 @@ func (b *SimulatedBackend) Close() error {
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
-	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
@@ -162,7 +161,6 @@ func (b *SimulatedBackend) Commit() {
 		allLogs = append(allLogs, r.Logs...)
 	}
 	b.logsFeed.Send(allLogs)
-	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -640,7 +638,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}
-	fmt.Printf("Sender = %x\n", sender)
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)

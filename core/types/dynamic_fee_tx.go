@@ -305,9 +305,9 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(nonceLen)
 		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		if _, err := w.Write(b[:1+nonceLen]); err != nil {
+		b[8-nonceLen] = 128 + byte(nonceLen)
+		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -326,9 +326,9 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	} else {
-		b[0] = 128 + byte(gasLen)
 		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		if _, err := w.Write(b[:1+gasLen]); err != nil {
+		b[8-gasLen] = 128 + byte(gasLen)
+		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
 			return err
 		}
 	}
@@ -353,19 +353,6 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	// encode Data
 	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
 		return err
-	}
-	if len(tx.Data) >= 56 {
-		beSize := bits.Len(uint(len(tx.Data))+7) / 8
-		b[0] = 183 + byte(beSize)
-		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(len(tx.Data))
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
 	}
 	if len(tx.Data) > 0 {
 		if _, err := w.Write(tx.Data); err != nil {
