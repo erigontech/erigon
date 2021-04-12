@@ -89,7 +89,55 @@ type Header struct {
 	eip1559     bool           // to avoid relying on BaseFee != nil for that
 }
 
-func (h *Header) EncodeRLP(w io.Writer) error {
+func (h Header) EncodingSize() int {
+	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
+		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+	encodingSize++
+	var diffLen int
+	if h.Difficulty.BitLen() >= 8 {
+		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	}
+	encodingSize += diffLen
+	encodingSize++
+	var numberLen int
+	if h.Number.BitLen() >= 8 {
+		numberLen = (h.Number.BitLen() + 7) / 8
+	}
+	encodingSize += numberLen
+	encodingSize++
+	var gasLimitLen int
+	if h.GasLimit >= 128 {
+		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
+	}
+	encodingSize += gasLimitLen
+	encodingSize++
+	var gasUsedLen int
+	if h.GasUsed >= 128 {
+		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
+	}
+	encodingSize += gasUsedLen
+	encodingSize++
+	var timeLen int
+	if h.Time >= 128 {
+		timeLen = (bits.Len64(h.Time) + 7) / 8
+	}
+	encodingSize += timeLen
+	encodingSize += 1 + len(h.Extra)
+	if len(h.Extra) >= 56 {
+		encodingSize += bits.Len(uint(len(h.Extra))+7) / 8
+	}
+	var baseFeeLen int
+	if h.eip1559 {
+		encodingSize++
+		if h.BaseFee.BitLen() >= 8 {
+			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
+		}
+		encodingSize += baseFeeLen
+	}
+	return encodingSize
+}
+
+func (h Header) EncodeRLP(w io.Writer) error {
 	// Precompute the size of the encoding
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
@@ -135,12 +183,9 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 		encodingSize += baseFeeLen
 	}
-	// Emit len(ser.len) + 247
 	var b [33]byte
-	beSize := bits.Len(uint(encodingSize)) + 7/8
-	b[0] = byte(beSize)
-	binary.BigEndian.PutUint64(b[1:], uint64(encodingSize))
-	if _, err := w.Write(b[:1+beSize]); err != nil {
+	// Prefix
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -251,18 +296,8 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if len(h.Extra) >= 56 {
-		beSize = bits.Len(uint(len(h.Extra))+7) / 8
-		b[0] = 183 + byte(beSize)
-		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(len(h.Extra))
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	if err := EncodeStringSizePrefix(len(h.Extra), w, b[:]); err != nil {
+		return err
 	}
 	if len(h.Extra) > 0 {
 		if _, err := w.Write(h.Extra); err != nil {
@@ -408,7 +443,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	}
 	h.eip1559 = true
 	h.BaseFee = new(big.Int).SetBytes(b)
-	return nil
+	return s.ListEnd()
 }
 
 // field type overrides for gencodec

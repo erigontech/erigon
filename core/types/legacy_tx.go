@@ -152,12 +152,12 @@ func (tx *LegacyTx) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)
 	}
-	c := tx.encodingSize()
+	c := tx.EncodingSize()
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
 
-func (tx LegacyTx) encodingSize() int {
+func (tx LegacyTx) EncodingSize() int {
 	encodingSize := 0
 	encodingSize++
 	var nonceLen int
@@ -210,6 +210,23 @@ func (tx LegacyTx) encodingSize() int {
 	}
 	encodingSize += sLen
 	return encodingSize
+}
+
+func EncodeStringSizePrefix(size int, w io.Writer, b []byte) error {
+	if size >= 56 {
+		beSize := bits.Len(uint(size)) + 7/8
+		b[0] = byte(beSize) + 183
+		binary.BigEndian.PutUint64(b[1:], uint64(size))
+		if _, err := w.Write(b[:1+beSize]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = byte(size) + 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tx LegacyTx) EncodeRLP(w io.Writer) error {
@@ -266,7 +283,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize += sLen
 	// prefix
 	var b [33]byte
-	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	if nonceLen > 0 && tx.Nonce < 128 {
@@ -312,18 +329,8 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	if err := tx.Value.EncodeRLP(w); err != nil {
 		return err
 	}
-	if len(tx.Data) >= 56 {
-		beSize := bits.Len(uint(len(tx.Data))+7) / 8
-		b[0] = 183 + byte(beSize)
-		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(len(tx.Data))
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
+		return err
 	}
 	if len(tx.Data) > 0 {
 		if _, err := w.Write(tx.Data); err != nil {

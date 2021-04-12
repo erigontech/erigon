@@ -108,7 +108,7 @@ func (tx *AccessListTx) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)
 	}
-	c := tx.encodingSize()
+	c := tx.EncodingSize()
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
@@ -117,7 +117,7 @@ func (tx AccessListTx) Protected() bool {
 	return true
 }
 
-func (tx AccessListTx) encodingSize() int {
+func (tx AccessListTx) EncodingSize() int {
 	encodingSize := 0
 	// size of ChainID
 	encodingSize++
@@ -216,7 +216,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		if storageLen >= 56 {
 			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
 		}
-		if err := encodeStructSizePrefix(tupleLen, w, b); err != nil {
+		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
 		b[0] = 128 + 20
@@ -226,7 +226,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
 			return err
 		}
-		if err := encodeStructSizePrefix(storageLen, w, b); err != nil {
+		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
 			return err
 		}
 		b[0] = 128 + 32
@@ -242,7 +242,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 	return nil
 }
 
-func encodeStructSizePrefix(size int, w io.Writer, b []byte) error {
+func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 	if size >= 56 {
 		beSize := bits.Len(uint(size)) + 7/8
 		b[0] = byte(beSize) + 247
@@ -336,7 +336,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	encodingSize += sLen
 	var b [33]byte
 	// prefix
-	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -392,18 +392,8 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Data
-	if len(tx.Data) >= 56 {
-		beSize := bits.Len(uint(len(tx.Data))+7) / 8
-		b[0] = 183 + byte(beSize)
-		binary.BigEndian.PutUint64(b[1:], uint64(beSize))
-		if _, err := w.Write(b[:1+beSize]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(len(tx.Data))
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
+	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
+		return err
 	}
 	if len(tx.Data) > 0 {
 		if _, err := w.Write(tx.Data); err != nil {
@@ -411,7 +401,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		}
 	}
 	// prefix
-	if err := encodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
 		return err
 	}
 	// encode AccessList

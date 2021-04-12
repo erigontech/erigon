@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -233,6 +234,86 @@ type BlockBodiesRLPPacket66 struct {
 type BlockBody struct {
 	Transactions []types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header     // Uncles contained within a block
+}
+
+func (bb BlockBody) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range bb.Transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range bb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.Transactions {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
+	return nil
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns

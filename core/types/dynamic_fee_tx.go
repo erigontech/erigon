@@ -101,7 +101,7 @@ func (tx *DynamicFeeTransaction) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)
 	}
-	c := tx.encodingSize()
+	c := tx.EncodingSize()
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
@@ -110,7 +110,7 @@ func (tx DynamicFeeTransaction) Protected() bool {
 	return true
 }
 
-func (tx DynamicFeeTransaction) encodingSize() int {
+func (tx DynamicFeeTransaction) EncodingSize() int {
 	encodingSize := 0
 	// size of ChainID
 	encodingSize++
@@ -290,7 +290,7 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	encodingSize += sLen
 	var b [33]byte
 	// prefix
-	if err := encodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -350,6 +350,9 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Data
+	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
+		return err
+	}
 	if len(tx.Data) >= 56 {
 		beSize := bits.Len(uint(len(tx.Data))+7) / 8
 		b[0] = 183 + byte(beSize)
@@ -369,7 +372,7 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 		}
 	}
 	// prefix
-	if err := encodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
 		return err
 	}
 	// encode AccessList
