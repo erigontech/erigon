@@ -635,12 +635,12 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	block := rawdb.ReadCurrentBlock(b.database)
-	signer := types.MakeSigner(b.config, block.Number().Uint64())
+	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
 	sender, senderErr := types.Sender(*signer, tx)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}
+	fmt.Printf("Sender = %x\n", sender)
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)

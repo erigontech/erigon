@@ -123,6 +123,70 @@ func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
 // TransactionsPacket is the network packet for broadcasting new transactions.
 type TransactionsPacket []types.Transaction
 
+func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range tp {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// encode Transactions
+	var b [33]byte
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range tp {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (tp *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		*tp = append(*tp, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	return s.ListEnd()
+}
+
 // GetBlockHeadersPacket represents a block header query.
 type GetBlockHeadersPacket struct {
 	Origin  HashOrNumber // Block from which to retrieve headers
