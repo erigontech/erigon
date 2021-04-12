@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
@@ -71,25 +72,39 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
-	tx, err := api.kv.BeginRo(ctx)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, tx)
+	defer dbtx.Rollback()
+	blockNum, err := getBlockNumber(blockNr, dbtx)
 	if err != nil {
 		return nil, err
 	}
 	bn := hexutil.Uint64(blockNum)
-	var req TraceFilterRequest
-	req.FromBlock = &bn
-	req.ToBlock = &bn
-	req.FromAddress = nil
-	req.ToAddress = nil
-	req.After = nil
-	req.Count = nil
 
-	traces, err := api.Filter(ctx, req)
+	// Extract transactions from block
+	hash, hashErr := rawdb.ReadCanonicalHash(dbtx, blockNum)
+	if hashErr != nil {
+		return nil, hashErr
+	}
+	block, senders, sendersErr := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(dbtx), hash, uint64(bn))
+	if sendersErr != nil {
+		return nil, sendersErr
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	txs := make([]TransactionWithSender, 0, len(senders))
+	for n, tx := range block.Transactions() {
+		txs = append(txs, TransactionWithSender{
+			tx:     *tx,
+			sender: senders[n],
+		})
+	}
+
+	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(bn))
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +328,52 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		}
 	}
 	return traces, nil
+}
+
+type TransactionWithSender struct {
+	tx     types.Transaction
+	sender common.Address
+}
+
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]ParityTrace, error) {
+	toExecute := []TraceCallParam{}
+
+	for _, tx := range txs {
+		gas := hexutil.Uint64(tx.tx.Gas())
+		gasPrice := hexutil.Big(*tx.tx.GasPrice().ToBig())
+		value := hexutil.Big(*tx.tx.Value().ToBig())
+		toExecute = append(toExecute, TraceCallParam{
+			From:     &tx.sender,
+			To:       tx.tx.To(),
+			Gas:      &gas,
+			GasPrice: &gasPrice,
+			Value:    &value,
+			Data:     tx.tx.Data(),
+		})
+	}
+
+	calls, callsErr := json.Marshal(toExecute)
+	if callsErr != nil {
+		return nil, callsErr
+	}
+	traces, cmErr := api.doCallMany(ctx, dbtx, calls, &rpc.BlockNumberOrHash{
+		BlockNumber:      &blockNo,
+		BlockHash:        &blockHash,
+		RequireCanonical: true,
+	})
+
+	if cmErr != nil {
+		return nil, cmErr
+	}
+
+	out := make([]ParityTrace, 0, len(traces))
+	for _, trace := range traces {
+		for _, pt := range trace.Trace {
+			out = append(out, *pt)
+		}
+	}
+
+	return out, nil
 }
 
 func retrieveHistory(tx ethdb.Getter, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
