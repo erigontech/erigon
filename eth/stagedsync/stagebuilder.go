@@ -3,8 +3,8 @@ package stagedsync
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
 	"strings"
 	"time"
 	"unsafe"
@@ -57,7 +57,7 @@ type StageParameters struct {
 	mining                *MiningStagesParameters
 	snapshotsDir		 string
 	btClient			 *bittorrent.Client
-	SnapshotBuilder		 *snapshotsync.SnapshotMigrator
+	SnapshotBuilder		 *migrator.SnapshotMigrator
 }
 
 type MiningStagesParameters struct {

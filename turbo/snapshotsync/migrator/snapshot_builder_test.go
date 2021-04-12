@@ -421,6 +421,188 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 
 }
 
+func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
+	dir,err:=ioutil.TempDir(os.TempDir(), "tst")
+	if err!=nil {
+		t.Fatal(err)
+	}
+	t.Log(dir)
+	defer func() {
+		err = os.RemoveAll(dir)
+		t.Log(err)
+	}()
+	snapshotsDir:=path.Join(dir, "snapshots")
+	err= os.Mkdir(snapshotsDir, os.ModePerm)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
+	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	err=GenerateHeaderData(db,0, 11)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	sb:=&SnapshotMigrator{
+		SnapshotDir: snapshotsDir,
+		toRemove: make(map[string]struct{}),
+	}
+	currentSnapshotBlock:=uint64(10)
+	go func() {
+		for {
+			snBlock:=atomic.LoadUint64(&currentSnapshotBlock)
+			err = sb.CreateHeadersSnapshot(db, snBlock)
+			if err!=nil {
+				t.Fatal(err)
+			}
+			err = sb.ReplaceHeadersSnapshot(db)
+			if err!=nil {
+				t.Fatal(err)
+			}
+			err = sb.RemoveHeadersData(db)
+			if err!=nil {
+				t.Fatal(err)
+			}
+
+			err = sb.RemovePreviousVersion()
+			if err!=nil {
+				t.Fatal(err)
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+	tt:=time.Now()
+	for !(sb.IsFinished(10) && sb.Cleaned(10)) {}
+	fmt.Println("finished", time.Since(tt), sb.IsFinished(10), sb.Cleaned(10) )
+	sa:=db.KV().(ethdb.SnapshotUpdater)
+	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
+
+	var headerNumber uint64
+	headerNumber=11
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	headerNumber = 0
+	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 11 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber = 0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+
+
+	err = GenerateHeaderData(db, 12, 20)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	tx,err:=db.Begin(context.Background(), ethdb.RO)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	tx.Get(dbutils.HeadersBucket, []byte{})
+	defer tx.Rollback()
+
+
+	atomic.StoreUint64(&currentSnapshotBlock, 20)
+	tt=time.Now()
+
+	fmt.Println("wait finished")
+	c:=time.After(time.Second*5)
+	for !(sb.IsFinished(20) && sb.Cleaned(20)){
+		select {
+			case <-c:
+				fmt.Println("+Rollback")
+				tx.Rollback()
+				fmt.Println("-Rollback", sb.Replacing)
+			default:
+
+		}
+	}
+	fmt.Println("finished 20", time.Since(tt))
+
+
+
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		t.Fatal("main db must be empty here")
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	headerNumber=0
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	pringSbState(sb)
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber=0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+		t.Fatal("snapshot exsists")
+	}
+
+}
+
 func pringSbState(sb *SnapshotMigrator)  {
 	fmt.Println("to block", sb.MigrateToHeadersSnapshotBlock)
 	fmt.Println("current block", sb.CurrentHeadersSnapshotBlock)
@@ -465,4 +647,5 @@ func (s *torrentStub) SeedSnapshot(db ethdb.Database, networkID uint64, path str
 func (s *torrentStub) StopSeeding(hash metainfo.Hash) error {
 	return s.StopStub(hash)
 }
+
 
