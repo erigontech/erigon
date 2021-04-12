@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 1f677208b309786e6466599eb57c084e6db9200cfd4b1133b8eea47029ae7fcf_v0_9_3_89_g80fad7a0
+#define MDBX_BUILD_SOURCERY 190ff851bc39425868c497bf7324a780f7755889e341f31bfbb4c9a813edd10b_v0_9_3_90_g0dd27a46
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -13612,8 +13612,7 @@ __cold static intptr_t get_reasonable_db_maxsize(intptr_t *cached_result) {
       const size_t threshold = (size_t)*cached_result >> 4;
       const bool down =
           *cached_result - floor < ceil - *cached_result || ceil > MAX_MAPSIZE;
-      if (threshold <
-          (down ? *cached_result - floor : ceil - *cached_result))
+      if (threshold < (down ? *cached_result - floor : ceil - *cached_result))
         break;
       *cached_result = down ? floor : ceil;
     }
@@ -27251,9 +27250,9 @@ __dll_export
         0,
         9,
         3,
-        89,
-        {"2021-04-08T02:21:27+03:00", "26b099d8eeea94987e50ce44f368784df2c84da9", "80fad7a0c1777e727c13f6934a6acb01181a4419",
-         "v0.9.3-89-g80fad7a0"},
+        90,
+        {"2021-04-10T17:48:40+03:00", "1c5801e3a8e6f83828d3ac61cb78afb345ef1fed", "0dd27a46eeb0ef3ba197c512775ccf27ad947e41",
+         "v0.9.3-90-g0dd27a46"},
         sourcery};
 
 __dll_export
