@@ -124,7 +124,7 @@ func (h Header) EncodingSize() int {
 	encodingSize += timeLen
 	encodingSize += 1 + len(h.Extra)
 	if len(h.Extra) >= 56 {
-		encodingSize += bits.Len(uint(len(h.Extra))+7) / 8
+		encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
 	}
 	var baseFeeLen int
 	if h.eip1559 {
@@ -173,7 +173,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	encodingSize += timeLen
 	encodingSize += 1 + len(h.Extra)
 	if len(h.Extra) >= 56 {
-		encodingSize += bits.Len(uint(len(h.Extra))+7) / 8
+		encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
 	}
 	var baseFeeLen int
 	if h.eip1559 {
@@ -236,31 +236,31 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
 		return err
 	}
-	if diffLen > 0 && h.Difficulty.BitLen() < 8 {
+	if h.Difficulty.BitLen() > 0 && h.Difficulty.BitLen() < 8 {
 		b[0] = byte(h.Difficulty.Uint64())
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(diffLen)
-		h.Difficulty.FillBytes(b[1:])
+		h.Difficulty.FillBytes(b[1 : 1+diffLen])
 		if _, err := w.Write(b[:1+diffLen]); err != nil {
 			return err
 		}
 	}
-	if numberLen > 0 && h.Number.BitLen() < 8 {
+	if h.Number.BitLen() > 0 && h.Number.BitLen() < 8 {
 		b[0] = byte(h.Number.Uint64())
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(numberLen)
-		h.Number.FillBytes(b[1:])
+		h.Number.FillBytes(b[1 : 1+numberLen])
 		if _, err := w.Write(b[:1+numberLen]); err != nil {
 			return err
 		}
 	}
-	if gasLimitLen > 0 && h.GasLimit < 128 {
+	if h.GasLimit > 0 && h.GasLimit < 128 {
 		b[0] = byte(h.GasLimit)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -272,7 +272,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if gasUsedLen > 0 && h.GasUsed < 128 {
+	if h.GasUsed > 0 && h.GasUsed < 128 {
 		b[0] = byte(h.GasUsed)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -284,7 +284,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if timeLen > 0 && h.Time < 128 {
+	if h.Time > 0 && h.Time < 128 {
 		b[0] = byte(h.Time)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -319,14 +319,14 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	if h.eip1559 {
-		if baseFeeLen > 0 && h.BaseFee.BitLen() < 8 {
+		if h.BaseFee.BitLen() > 0 && h.BaseFee.BitLen() < 8 {
 			b[0] = byte(h.BaseFee.Uint64())
 			if _, err := w.Write(b[:1]); err != nil {
 				return err
 			}
 		} else {
 			b[0] = 128 + byte(baseFeeLen)
-			h.BaseFee.FillBytes(b[1:])
+			h.BaseFee.FillBytes(b[1 : 1+baseFeeLen])
 			if _, err := w.Write(b[:1+baseFeeLen]); err != nil {
 				return err
 			}

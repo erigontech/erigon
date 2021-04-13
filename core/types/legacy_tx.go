@@ -190,7 +190,7 @@ func (tx LegacyTx) EncodingSize() int {
 	encodingSize += valueLen
 	encodingSize += 1 + len(tx.Data)
 	if len(tx.Data) >= 56 {
-		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 	}
 	encodingSize++
 	var vLen int
@@ -262,7 +262,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	encodingSize += valueLen
 	encodingSize += 1 + len(tx.Data)
 	if len(tx.Data) >= 56 {
-		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 	}
 	encodingSize++
 	var vLen int
@@ -287,7 +287,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if nonceLen > 0 && tx.Nonce < 128 {
+	if tx.Nonce > 0 && tx.Nonce < 128 {
 		b[0] = byte(tx.Nonce)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -302,7 +302,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	if err := tx.GasPrice.EncodeRLP(w); err != nil {
 		return err
 	}
-	if gasLen > 0 && tx.Gas < 128 {
+	if tx.Gas > 0 && tx.Gas < 128 {
 		b[0] = byte(tx.Gas)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -355,21 +355,21 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	var err error
 	s.NewList(uint64(encodingSize))
 	if tx.Nonce, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read Nonce: %v", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read GasPrice: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read Gas: %v", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read To: %v", err)
 	}
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
@@ -379,37 +379,40 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Value: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Data: %v", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read V: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read R: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read S: %v", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S = new(uint256.Int).SetBytes(b)
-	return s.ListEnd()
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close tx struct: %v", err)
+	}
+	return nil
 }
 
 // AsMessage returns the transaction as a core.Message.

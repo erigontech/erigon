@@ -163,7 +163,7 @@ func (tx AccessListTx) EncodingSize() int {
 	// size of Data
 	encodingSize += 1 + len(tx.Data)
 	if len(tx.Data) >= 56 {
-		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 	}
 	// size of AccessList
 	encodingSize++
@@ -305,7 +305,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	// size of Data
 	encodingSize += 1 + len(tx.Data)
 	if len(tx.Data) >= 56 {
-		encodingSize += bits.Len(uint(len(tx.Data))+7) / 8
+		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 	}
 	// size of AccessList
 	encodingSize++
@@ -345,7 +345,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Nonce
-	if nonceLen > 0 && tx.Nonce < 128 {
+	if tx.Nonce > 0 && tx.Nonce < 128 {
 		b[0] = byte(tx.Nonce)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
@@ -362,7 +362,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Gas
-	if gasLen > 0 && tx.Gas < 128 {
+	if tx.Gas > 0 && tx.Gas < 128 {
 		b[0] = byte(tx.Gas)
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
