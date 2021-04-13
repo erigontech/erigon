@@ -426,7 +426,7 @@ func (s *Suite) dial() (*Conn, error) {
 }
 
 func (s *Suite) TestTransaction(t *utesting.T) {
-	tests := []*types.Transaction{
+	tests := []types.Transaction{
 		getNextTxFromChain(t, s),
 		unknownTx(t, s),
 	}
@@ -437,7 +437,7 @@ func (s *Suite) TestTransaction(t *utesting.T) {
 }
 
 func (s *Suite) TestMaliciousTx(t *utesting.T) {
-	tests := []*types.Transaction{
+	tests := []types.Transaction{
 		getOldTxFromChain(t, s),
 		invalidNonceTx(t, s),
 		hugeAmount(t, s),
