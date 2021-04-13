@@ -33,7 +33,7 @@ const SelfDestructorABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"
 var SelfDestructorBin = "0x6080604052348015600f57600080fd5b50600160005560708060226000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80639cb8a26a14602d575b600080fd5b60336035565b005b600080fffea2646970667358221220a74afcbd1431019f7f78bcea3f22970f82560adb72829f56b28140de356bf95164736f6c63430007020033"
 
 // DeploySelfDestructor deploys a new Ethereum contract, binding an instance of SelfDestructor to it.
-func DeploySelfDestructor(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *SelfDestructor, error) {
+func DeploySelfDestructor(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *SelfDestructor, error) {
 	parsed, err := abi.JSON(strings.NewReader(SelfDestructorABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_SelfDestructor *SelfDestructorRaw) Call(opts *bind.CallOpts, result *[]in
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_SelfDestructor *SelfDestructorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _SelfDestructor.Contract.SelfDestructorTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_SelfDestructor *SelfDestructorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _SelfDestructor.Contract.SelfDestructorTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,32 +179,32 @@ func (_SelfDestructor *SelfDestructorCallerRaw) Call(opts *bind.CallOpts, result
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_SelfDestructor *SelfDestructorTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _SelfDestructor.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_SelfDestructor *SelfDestructorTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _SelfDestructor.Contract.contract.Transact(opts, method, params...)
 }
 
 // SelfDestruct is a paid mutator transaction binding the contract method 0x9cb8a26a.
 //
 // Solidity: function selfDestruct() returns()
-func (_SelfDestructor *SelfDestructorTransactor) SelfDestruct(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorTransactor) SelfDestruct(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _SelfDestructor.contract.Transact(opts, "selfDestruct")
 }
 
 // SelfDestruct is a paid mutator transaction binding the contract method 0x9cb8a26a.
 //
 // Solidity: function selfDestruct() returns()
-func (_SelfDestructor *SelfDestructorSession) SelfDestruct() (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorSession) SelfDestruct() (types.Transaction, error) {
 	return _SelfDestructor.Contract.SelfDestruct(&_SelfDestructor.TransactOpts)
 }
 
 // SelfDestruct is a paid mutator transaction binding the contract method 0x9cb8a26a.
 //
 // Solidity: function selfDestruct() returns()
-func (_SelfDestructor *SelfDestructorTransactorSession) SelfDestruct() (*types.Transaction, error) {
+func (_SelfDestructor *SelfDestructorTransactorSession) SelfDestruct() (types.Transaction, error) {
 	return _SelfDestructor.Contract.SelfDestruct(&_SelfDestructor.TransactOpts)
 }

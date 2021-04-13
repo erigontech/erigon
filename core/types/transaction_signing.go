@@ -58,6 +58,12 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	return &signer
 }
 
+func MakeFrontierSigner() *Signer {
+	var signer Signer
+	signer.maleable = true
+	return &signer
+}
+
 // LatestSigner returns the 'most permissive' Signer available for the given chain
 // configuration. Specifically, this enables support of EIP-155 replay protection and
 // EIP-2930 access list transactions when their respective forks are scheduled to occur at

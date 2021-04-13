@@ -84,7 +84,7 @@ type vmExecMarshaling struct {
 func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr)))
+	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), blockNr)
 	state, err := MakePreState2(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
@@ -158,8 +158,8 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		Transfer:    transfer,
 		GetHash:     vmTestBlockHash,
 		Coinbase:    t.json.Env.Coinbase,
-		BlockNumber: new(big.Int).SetUint64(t.json.Env.Number),
-		Time:        new(big.Int).SetUint64(t.json.Env.Timestamp),
+		BlockNumber: t.json.Env.Number,
+		Time:        t.json.Env.Timestamp,
 		GasLimit:    t.json.Env.GasLimit,
 		Difficulty:  t.json.Env.Difficulty,
 	}

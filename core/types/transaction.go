@@ -36,7 +36,6 @@ var (
 	ErrUnexpectedProtection = errors.New("transaction type does not supported EIP-155 protected signatures")
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
-	errEmptyTypedTx         = errors.New("empty typed transaction bytes")
 )
 
 // Transaction types.

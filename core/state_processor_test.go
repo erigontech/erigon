@@ -40,7 +40,7 @@ import (
 // contain invalid transactions
 func TestStateProcessorErrors(t *testing.T) {
 	var (
-		signer     = types.HomesteadSigner{}
+		signer     = types.LatestSignerForChainID(nil)
 		testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		db         = ethdb.NewMemDatabase()
 		gspec      = &core.Genesis{
@@ -48,50 +48,50 @@ func TestStateProcessorErrors(t *testing.T) {
 		}
 		genesis = gspec.MustCommit(db)
 	)
-	var makeTx = func(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *types.Transaction {
-		tx, _ := types.SignTx(types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, data), signer, testKey)
+	var makeTx = func(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) types.Transaction {
+		tx, _ := types.SignTx(types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, data), *signer, testKey)
 		return tx
 	}
 
 	uint256Zero := uint256.NewInt()
 	uint256FF, _ := uint256.FromBig(big.NewInt(0xffffff))
 	for i, tt := range []struct {
-		txs  []*types.Transaction
+		txs  []types.Transaction
 		want string
 	}{
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 1 [0x36bfa6d14f1cd35a1be8cc2322982a595fabc0e799f09c1de3bad7bd5b1f7626]: nonce too low: address 0x71562b71999873DB5b286dF957af199Ec94617F7, tx: 0 state: 1",
 		},
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(100, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 0 [0x51cd272d41ef6011d8138e18bf4043797aca9b713c7d39a97563f9bbe6bdbe6f]: nonce too high: address 0x71562b71999873DB5b286dF957af199Ec94617F7, tx: 100 state: 0",
 		},
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(0, common.Address{}, uint256Zero, 21000000, nil, nil),
 			},
 			want: "could not apply tx 0 [0x54c58b530824b0bb84b7a98183f08913b5d74e1cebc368515ef3c65edf8eb56a]: gas limit reached",
 		},
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(0, common.Address{}, uint256.NewInt().SetUint64(1), params.TxGas, nil, nil),
 			},
 			want: "could not apply tx 0 [0x3094b17498940d92b13baccf356ce8bfd6f221e926abc903d642fa1466c5b50e]: insufficient funds for transfer: address 0x71562b71999873DB5b286dF957af199Ec94617F7",
 		},
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(0, common.Address{}, uint256Zero, params.TxGas, uint256FF, nil),
 			},
 			want: "could not apply tx 0 [0xaa3f7d86802b1f364576d9071bf231e31d61b392d306831ac9cf706ff5371ce0]: insufficient funds for gas * price + value: address 0x71562b71999873DB5b286dF957af199Ec94617F7 have 0 want 352321515000",
 		},
 		{
-			txs: []*types.Transaction{
+			txs: []types.Transaction{
 				makeTx(0, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 				makeTx(1, common.Address{}, uint256Zero, params.TxGas, nil, nil),
 				makeTx(2, common.Address{}, uint256Zero, params.TxGas, nil, nil),
@@ -123,7 +123,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
 		Difficulty: engine.CalcDifficulty(&core.FakeChainReader{Cfg: params.TestChainConfig}, parent.Time()+10,
-			parent.Time(), parent.Difficulty(), parent.Number(), parent.Hash(), parent.UncleHash()),
+			parent.Time(), parent.Difficulty(), parent.Number().Uint64(), parent.Hash(), parent.UncleHash()),
 		GasLimit:  core.CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:    new(big.Int).Add(parent.Number(), common.Big1),
 		Time:      parent.Time() + 10,
@@ -141,11 +141,11 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		txh := tx.Hash()
 		//nolint:errcheck
 		hasher.Write(txh[:])
-		receipt := types.NewReceipt(false, cumulativeGas+tx.Gas())
+		receipt := types.NewReceipt(false, cumulativeGas+tx.GetGas())
 		receipt.TxHash = tx.Hash()
-		receipt.GasUsed = tx.Gas()
+		receipt.GasUsed = tx.GetGas()
 		receipts = append(receipts, receipt)
-		cumulativeGas += tx.Gas()
+		cumulativeGas += tx.GetGas()
 	}
 	header.Root = common.BytesToHash(hasher.Sum(nil))
 	// Assemble and return the final block for sealing

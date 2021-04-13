@@ -143,7 +143,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
 	encodingSize++
 	var diffLen int
-	if h.Difficulty.BitLen() >= 8 {
+	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
 		diffLen = (h.Difficulty.BitLen() + 7) / 8
 	}
 	encodingSize += diffLen
@@ -236,14 +236,16 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
 		return err
 	}
-	if h.Difficulty.BitLen() > 0 && h.Difficulty.BitLen() < 8 {
+	if h.Difficulty != nil && h.Difficulty.BitLen() > 0 && h.Difficulty.BitLen() < 8 {
 		b[0] = byte(h.Difficulty.Uint64())
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(diffLen)
-		h.Difficulty.FillBytes(b[1 : 1+diffLen])
+		if h.Difficulty != nil {
+			h.Difficulty.FillBytes(b[1 : 1+diffLen])
+		}
 		if _, err := w.Write(b[:1+diffLen]); err != nil {
 			return err
 		}
@@ -591,6 +593,123 @@ func (b *Body) SendersFromTxs() []common.Address {
 	return senders
 }
 
+func (bb Body) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range bb.Transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *LegacyTx:
+			txLen = t.EncodingSize()
+		case *AccessListTx:
+			txLen = t.EncodingSize()
+		case *DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range bb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.Transactions {
+		switch t := tx.(type) {
+		case *LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (bb *Body) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx Transaction
+	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+		bb.Transactions = append(bb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Uncles = append(bb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
+}
+
 // NewBlock creates a new block. The input data is copied,
 // changes to header and to the field values will not affect the
 // block.
@@ -665,11 +784,13 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode header
+	fmt.Printf("Decode header\n")
 	var h Header
 	if err = h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
+	fmt.Printf("Decoded header\n")
 	// decode Transactions
 	if _, err = s.List(); err != nil {
 		return err
@@ -686,6 +807,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Uncles
+	fmt.Printf("Decode uncles\n")
 	if _, err = s.List(); err != nil {
 		return err
 	}
@@ -703,6 +825,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
+	fmt.Printf("Decoded uncles\n")
 	if err = s.ListEnd(); err != nil {
 		return err
 	}

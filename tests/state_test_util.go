@@ -182,7 +182,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
-	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
+	ctx = config.WithEIPsFlags(ctx, writeBlockNr)
 
 	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	//_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
