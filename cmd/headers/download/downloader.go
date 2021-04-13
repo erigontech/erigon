@@ -484,144 +484,22 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	return nil
 }
 
-func getAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
-	if ancestor > number {
-		return common.Hash{}, 0
-	}
-	if ancestor == 1 {
-		// in this case it is cheaper to just read the header
-		if header := rawdb.ReadHeader(db, hash, number); header != nil {
-			return header.ParentHash, number - 1
-		}
-		return common.Hash{}, 0
-	}
-	for ancestor != 0 {
-		h, err := rawdb.ReadCanonicalHash(db, number)
-		if err != nil {
-			panic(err)
-		}
-		if h == hash {
-			ancestorHash, err := rawdb.ReadCanonicalHash(db, number-ancestor)
-			if err != nil {
-				panic(err)
-			}
-			h, err := rawdb.ReadCanonicalHash(db, number)
-			if err != nil {
-				panic(err)
-			}
-			if h == hash {
-				number -= ancestor
-				return ancestorHash, number
-			}
-		}
-		if *maxNonCanonical == 0 {
-			return common.Hash{}, 0
-		}
-		*maxNonCanonical--
-		ancestor--
-		header := rawdb.ReadHeader(db, hash, number)
-		if header == nil {
-			return common.Hash{}, 0
-		}
-		hash = header.ParentHash
-		number--
-	}
-	return hash, number
-}
-
-func queryHeaders(db ethdb.Getter, query *eth.GetBlockHeadersPacket) ([]*types.Header, error) {
-	hashMode := query.Origin.Hash != (common.Hash{})
-	first := true
-	maxNonCanonical := uint64(100)
-	// Gather headers until the fetch or network limits is reached
-	var (
-		bytes   common.StorageSize
-		headers []*types.Header
-		unknown bool
-	)
-	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit && len(headers) < downloader.MaxHeaderFetch {
-		// Retrieve the next header satisfying the query
-		var origin *types.Header
-		var err error
-		if hashMode {
-			if first {
-				first = false
-				if origin, err = rawdb.ReadHeaderByHash(db, query.Origin.Hash); err != nil {
-					return nil, err
-				}
-				if origin != nil {
-					query.Origin.Number = origin.Number.Uint64()
-				}
-			} else {
-				origin = rawdb.ReadHeader(db, query.Origin.Hash, query.Origin.Number)
-			}
-		} else {
-			origin = rawdb.ReadHeaderByNumber(db, query.Origin.Number)
-		}
-		if origin == nil {
-			break
-		}
-		headers = append(headers, origin)
-		bytes += estHeaderRlpSize
-
-		// Advance to the next header of the query
-		switch {
-		case hashMode && query.Reverse:
-			// Hash based traversal towards the genesis block
-			ancestor := query.Skip + 1
-			if ancestor == 0 {
-				unknown = true
-			} else {
-				query.Origin.Hash, query.Origin.Number = getAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
-				unknown = (query.Origin.Hash == common.Hash{})
-			}
-		case hashMode && !query.Reverse:
-			// Hash based traversal towards the leaf block
-			var (
-				current = origin.Number.Uint64()
-				next    = current + query.Skip + 1
-			)
-			if next <= current {
-				log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
-				unknown = true
-			} else {
-				if header := rawdb.ReadHeaderByNumber(db, next); header != nil {
-					nextHash := header.Hash()
-					expOldHash, _ := getAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
-					if expOldHash == query.Origin.Hash {
-						query.Origin.Hash, query.Origin.Number = nextHash, next
-					} else {
-						unknown = true
-					}
-				} else {
-					unknown = true
-				}
-			}
-		case query.Reverse:
-			// Number based traversal towards the genesis block
-			if query.Origin.Number >= query.Skip+1 {
-				query.Origin.Number -= query.Skip + 1
-			} else {
-				unknown = true
-			}
-
-		case !query.Reverse:
-			// Number based traversal towards the leaf block
-			query.Origin.Number += query.Skip + 1
-		}
-	}
-	return headers, nil
-}
-
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.GetBlockHeadersPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	headers, err1 := queryHeaders(cs.db, &query)
-	if err1 != nil {
-		return fmt.Errorf("querying BlockHeaders: %w", err1)
+	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return err
 	}
+	defer tx.Rollback()
+	headers, err := eth.AnswerGetBlockHeadersQuery(tx, &query)
+	if err != nil {
+		return fmt.Errorf("querying BlockHeaders: %w", err)
+	}
+	tx.Rollback()
+
 	b, err := rlp.EncodeToBytes(headers)
 	if err != nil {
 		return fmt.Errorf("encode header response: %v", err)
