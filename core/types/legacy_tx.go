@@ -355,21 +355,21 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	var err error
 	s.NewList(uint64(encodingSize))
 	if tx.Nonce, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Nonce: %v", err)
+		return fmt.Errorf("read Nonce: %w", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read GasPrice: %v", err)
+		return fmt.Errorf("read GasPrice: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %v", err)
+		return fmt.Errorf("read Gas: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read To: %v", err)
+		return fmt.Errorf("read To: %w", err)
 	}
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
@@ -379,38 +379,38 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Value: %v", err)
+		return fmt.Errorf("read Value: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %v", err)
+		return fmt.Errorf("read Data: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read V: %v", err)
+		return fmt.Errorf("read V: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read R: %v", err)
+		return fmt.Errorf("read R: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read S: %v", err)
+		return fmt.Errorf("read S: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S = new(uint256.Int).SetBytes(b)
 	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close tx struct: %v", err)
+		return fmt.Errorf("close tx struct: %w", err)
 	}
 	return nil
 }

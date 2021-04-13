@@ -338,93 +338,93 @@ func (h Header) EncodeRLP(w io.Writer) error {
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("open header struct: %v", err)
+		return fmt.Errorf("open header struct: %w", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read ParentHash: %v", err)
+		return fmt.Errorf("read ParentHash: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for ParentHash: %d", len(b))
 	}
 	copy(h.ParentHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read UncleHash: %v", err)
+		return fmt.Errorf("read UncleHash: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for UncleHash: %d", len(b))
 	}
 	copy(h.UncleHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Coinbase: %v", err)
+		return fmt.Errorf("read Coinbase: %w", err)
 	}
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for Coinbase: %d", len(b))
 	}
 	copy(h.Coinbase[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Root: %v", err)
+		return fmt.Errorf("read Root: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for Root: %d", len(b))
 	}
 	copy(h.Root[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read TxHash: %v", err)
+		return fmt.Errorf("read TxHash: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for TxHash: %d", len(b))
 	}
 	copy(h.TxHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read ReceiptHash: %v", err)
+		return fmt.Errorf("read ReceiptHash: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for ReceiptHash: %d", len(b))
 	}
 	copy(h.ReceiptHash[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Bloom: %v", err)
+		return fmt.Errorf("read Bloom: %w", err)
 	}
 	if len(b) != 256 {
 		return fmt.Errorf("wrong size for Bloom: %d", len(b))
 	}
 	copy(h.Bloom[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Difficulty: %v", err)
+		return fmt.Errorf("read Difficulty: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
 	}
 	h.Difficulty = new(big.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Number: %v", err)
+		return fmt.Errorf("read Number: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Number: %d", len(b))
 	}
 	h.Number = new(big.Int).SetBytes(b)
 	if h.GasLimit, err = s.Uint(); err != nil {
-		return fmt.Errorf("read GasLimit: %v", err)
+		return fmt.Errorf("read GasLimit: %w", err)
 	}
 	if h.GasUsed, err = s.Uint(); err != nil {
-		return fmt.Errorf("read GasUsed: %v", err)
+		return fmt.Errorf("read GasUsed: %w", err)
 	}
 	if h.Time, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Time: %v", err)
+		return fmt.Errorf("read Time: %w", err)
 	}
 	if h.Extra, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Extra: %v", err)
+		return fmt.Errorf("read Extra: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read MixDigest: %v", err)
+		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for MixDigest: %d", len(b))
 	}
 	copy(h.MixDigest[:], b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Nonce: %v", err)
+		return fmt.Errorf("read Nonce: %w", err)
 	}
 	if len(b) != 8 {
 		return fmt.Errorf("wrong size for Nonce: %d", len(b))
@@ -435,11 +435,11 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			h.BaseFee = nil
 			h.eip1559 = false
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no basefee): %v", err)
+				return fmt.Errorf("close header struct (no basefee): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read BaseFee: %v", err)
+		return fmt.Errorf("read BaseFee: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
@@ -447,7 +447,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.eip1559 = true
 	h.BaseFee = new(big.Int).SetBytes(b)
 	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close header struct: %v", err)
+		return fmt.Errorf("close header struct: %w", err)
 	}
 	return nil
 }
@@ -659,24 +659,140 @@ func CopyHeader(h *Header) *Header {
 }
 
 // DecodeRLP decodes the Ethereum
-func (b *Block) DecodeRLP(s *rlp.Stream) error {
-	var eb extblock
-	_, size, _ := s.Kind()
-	if err := s.Decode(&eb); err != nil {
+func (bb *Block) DecodeRLP(s *rlp.Stream) error {
+	size, err := s.List()
+	if err != nil {
 		return err
 	}
-	b.header, b.uncles, b.transactions = eb.Header, eb.Uncles, eb.Txs
-	b.size.Store(common.StorageSize(rlp.ListSize(size)))
+	// decode header
+	var h Header
+	if err = h.DecodeRLP(s); err != nil {
+		return err
+	}
+	bb.header = &h
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx Transaction
+	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+		bb.transactions = append(bb.transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.uncles = append(bb.uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	bb.size.Store(common.StorageSize(rlp.ListSize(size)))
 	return nil
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (b *Block) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, extblock{
-		Header: b.header,
-		Txs:    b.transactions,
-		Uncles: b.uncles,
-	})
+func (bb Block) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Header
+	encodingSize++
+	headerLen := bb.header.EncodingSize()
+	encodingSize += headerLen
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range bb.transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *LegacyTx:
+			txLen = t.EncodingSize()
+		case *AccessListTx:
+			txLen = t.EncodingSize()
+		case *DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range bb.uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Header
+	if err := bb.header.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.transactions {
+		switch t := tx.(type) {
+		case *LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // [deprecated by eth/63]
