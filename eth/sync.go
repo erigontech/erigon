@@ -66,7 +66,6 @@ func (h *handler) syncTransactions(p *eth.Peer) {
 		hashes[i] = tx.Hash()
 	}
 	p.AsyncSendPooledTransactionHashes(hashes)
-	return
 }
 
 // txsyncLoop64 takes care of the initial transaction sync for each new
