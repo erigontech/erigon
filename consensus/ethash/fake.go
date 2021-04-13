@@ -1,7 +1,6 @@
 package ethash
 
 import (
-	"errors"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -173,23 +172,6 @@ func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, res
 	return nil
 }
 
-func (f *FakeEthash) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, seal bool) error {
-	if len(parents) == 0 {
-		return errors.New("need a parent to verify the header")
-	}
-
-	err := f.verifyHeader(chain, header, parents[len(parents)-1], false, false)
-	if err != nil {
-		return err
-	}
-
-	if seal {
-		return f.VerifySeal(chain, header)
-	}
-
-	return nil
-}
-
 type FullFakeEthash FakeEthash
 
 // NewFullFaker creates an ethash consensus engine with a full fake scheme that
@@ -220,12 +202,5 @@ func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []
 }
 
 func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Block) error {
-	return nil
-}
-
-func (f *FullFakeEthash) Verify(_ consensus.ChainHeaderReader, _ *types.Header, parents []*types.Header, _ bool, _ bool) error {
-	if len(parents) == 0 {
-		return errors.New("need a parent to verify the header")
-	}
 	return nil
 }

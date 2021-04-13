@@ -289,25 +289,57 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 		close(abort)
 	}
 
+	if len(headers) == 0 {
+		close(results)
+		return cancel, results
+	}
+
+	for n := headers[0].Number.Uint64(); n > 0; n-- {
+		has, err := hasSnapshot(c.db, n)
+		if has {
+			fmt.Println("VerifyHeaders-0-HAS", n, err, len(headers), headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
+			break
+		}
+	}
+	fmt.Println("VerifyHeaders", len(headers), headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
+
+	// fixme make it fixed rather than spawn a goroutine each time
 	go func() {
-		var doneCount int
+		ancestorsTillSnapshot := c.getAncestors(chain, headers[0].Number.Uint64(), headers[0].Hash(), headers[0].ParentHash)
+
+		n := len(ancestorsTillSnapshot)
+		if n > 0 {
+			ancestorsTillSnapshot = append(ancestorsTillSnapshot, headers...)
+		} else {
+			ancestorsTillSnapshot = headers
+		}
+
+		var hs string
+		for i, h := range ancestorsTillSnapshot {
+			hs += fmt.Sprintf("%d-%d ", i, h.Number.Uint64())
+		}
+		fmt.Println("VerifyHeaders-ANCESTORS", hs)
 
 		for i, header := range headers {
-			err := c.verifyHeader(chain, header, headers[:i])
+			idx := i + n - 1
+			fmt.Println("VerifyHeaders-loop", i, idx, header.Number.Uint64(), ancestorsTillSnapshot[0].Number.Uint64(), ancestorsTillSnapshot[idx].Number.Uint64())
 
 			select {
 			case <-abort:
 				return
-			case results <- err:
-				doneCount++
-				if doneCount == len(headers) {
-					close(results)
-				}
+			case results <- c.verifyHeader(chain, header, ancestorsTillSnapshot[:i+n]):
 			}
 		}
+
+		close(results)
 	}()
 
 	return cancel, results
+}
+
+type VerifyHeaderResponse struct {
+	Results chan error
+	Cancel  func()
 }
 
 func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
@@ -762,6 +794,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	} else {
 		return nil, err
 	}
+
 	cur, err1 := tx.Cursor(dbutils.CliqueSeparateBucket)
 	if err1 != nil {
 		return nil, err1

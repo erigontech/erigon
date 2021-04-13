@@ -21,6 +21,11 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return err
 	}
 
+	has, err := hasSnapshotData(c.db, header.Number.Uint64(), header.Hash())
+	fmt.Println("###-verifyHeader-1", header.Number.Uint64(), has, err)
+	has, err = hasSnapshotData(c.db, header.Number.Uint64()-1, header.ParentHash)
+	fmt.Println("###-verifyHeader-2", header.Number.Uint64()-1, has, err)
+
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFieldsByAncestors(chain, header, parents)
 }
@@ -111,12 +116,15 @@ func (c *Clique) verifyCascadingFieldsByAncestors(chain consensus.ChainHeaderRea
 	// Retrieve the snapshot needed to verify this header and cache it
 	var parent *types.Header
 	if len(parents) > 0 {
+		fmt.Println("verifyCascadingFieldsByAncestors-0.WithParents")
 		parent = parents[len(parents)-1]
 	} else {
+		fmt.Println("verifyCascadingFieldsByAncestors-0.NoParents")
 		parent = chain.GetHeader(header.ParentHash, number-1)
 		parents = []*types.Header{parent}
 	}
 
+	fmt.Println("verifyCascadingFieldsByAncestors-1", header.Number.Uint64(), len(parents), parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64())
 	snap, err := c.snapshotFromAncestors(&parents)
 	if err != nil {
 		return err
@@ -202,7 +210,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, num uint64, hash co
 		parentHash = parent.Hash()
 	}
 
-	return c.getAncestors(chain, num, hash, parentHash)
+	return c.getHeaderSnapshot(chain, num, hash, parentHash)
 }
 
 // Search for a snapshot in memory or on disk for checkpoints
@@ -218,6 +226,8 @@ func (c *Clique) snapshotFromAncestors(parentsRef *[]*types.Header) (*Snapshot, 
 		s *Snapshot
 		p *types.Header
 	)
+
+	fmt.Println("!!!!-0 parents", len(parents))
 
 	for i = len(parents) - 1; i >= 0; i-- {
 		p = parents[i]
@@ -264,17 +274,6 @@ func (c *Clique) snapshotFromAncestors(parentsRef *[]*types.Header) (*Snapshot, 
 		}
 
 		return nil, fmt.Errorf("a nil snap for %d ancestors: %w", len(parents), consensus.ErrUnknownAncestor)
-	}
-
-	if len(parents) > 0 {
-		m := make(map[int64]struct{})
-		for _, p := range parents {
-			_, ok := m[p.Number.Int64()]
-			if ok {
-				continue
-			}
-			m[p.Number.Int64()] = struct{}{}
-		}
 	}
 
 	// we always need at least 1 parent for further validation
@@ -369,7 +368,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
-func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
+func (c *Clique) getHeaderSnapshot(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
 	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
 	if ancestorsNum == 0 {
 		return c.snapshotByHeader(num, hash), nil
@@ -377,13 +376,13 @@ func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, has
 
 	ancestors := make([]*types.Header, 0, ancestorsNum)
 
-	var i uint64
 	for n := int(num - 1); n >= int(num)-int(ancestorsNum); n-- {
-		i++
 		ans := chain.GetHeader(parentHash, uint64(n))
 		ancestors = append(ancestors, ans)
 		parentHash = ans.ParentHash
 	}
+
+	fmt.Println("verifyCascadingFieldsByAncestors-2", num, ancestorsNum, len(ancestors))
 
 	snap, err := c.snapshotFromAncestors(&ancestors)
 	if err != nil {
@@ -391,6 +390,27 @@ func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, has
 	}
 
 	return snap, nil
+}
+
+func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) []*types.Header {
+	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
+	if ancestorsNum == 0 {
+		return nil
+	}
+
+	ancestors := make([]*types.Header, 0, ancestorsNum)
+
+	n := int(num) - int(ancestorsNum)
+	if n < 0 {
+		n = 0
+	}
+	for ; n < int(num-1); n++ {
+		ans := chain.GetHeader(parentHash, uint64(n))
+		ancestors = append(ancestors, ans)
+		parentHash = ans.ParentHash
+	}
+
+	return ancestors
 }
 
 func (c *Clique) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash) int {

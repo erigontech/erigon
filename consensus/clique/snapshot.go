@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -402,7 +401,6 @@ type storage struct {
 	ch        chan *snapObj
 	chStatus  *uint32
 	db        ethdb.Database
-	saveMu    sync.Mutex
 	exit      chan struct{}
 	exitDone  chan struct{}
 	batchSize int
@@ -523,9 +521,6 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 
 		blobs[i] = blob
 	}
-
-	st.saveMu.Lock()
-	defer st.saveMu.Unlock()
 
 	batch := st.db.NewBatch()
 	defer batch.Rollback()
