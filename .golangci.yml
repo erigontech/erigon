@@ -44,3 +44,6 @@ issues:
         - gosec
         - unused
         - deadcode
+    - path: metrics/sample\.go
+      linters:
+        - gosec
