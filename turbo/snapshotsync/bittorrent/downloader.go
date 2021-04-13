@@ -56,6 +56,15 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
+func (cli *Client) Torrents() []metainfo.Hash {
+	t:=cli.Cli.Torrents()
+	hashes:=make([]metainfo.Hash, 0, len(t))
+	for k,v:=range t {
+		fmt.Println(k, v.Name(), v.InfoHash().String())
+		hashes = append(hashes,v.InfoHash())
+	}
+	return hashes
+}
 func (cli *Client) Load(db ethdb.Database) error {
 	log.Info("Load added torrents")
 	return db.Walk(dbutils.SnapshotInfoBucket, []byte{}, 0, func(k, infoHashBytes []byte) (bool, error) {

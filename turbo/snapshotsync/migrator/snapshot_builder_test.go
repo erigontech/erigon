@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"io/ioutil"
 	"math"
 	"os"
@@ -600,6 +601,393 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
+
+}
+func TestSnapshotMigrator2(t *testing.T) {
+	dir,err:=ioutil.TempDir(os.TempDir(), "tst")
+	if err!=nil {
+		t.Fatal(err)
+	}
+	t.Log(dir)
+	defer func() {
+		err = os.RemoveAll(dir)
+		t.Log(err)
+	}()
+	snapshotsDir:=path.Join(dir, "snapshots")
+	err= os.Mkdir(snapshotsDir, os.ModePerm)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	btCli,err:=bittorrent.New(snapshotsDir, true, "12345123451234512345")
+	if err!=nil {
+		t.Fatal(err)
+	}
+	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
+	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	err=GenerateHeaderData(db,0, 11)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	sb:=&SnapshotMigrator2{
+		snapshotsDir: snapshotsDir,
+	}
+	currentSnapshotBlock:=uint64(10)
+	go func() {
+		for {
+			tx, err := db.Begin(context.Background(), ethdb.RW)
+			if err!=nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+			snBlock:=atomic.LoadUint64(&currentSnapshotBlock)
+			err = sb.Migrate(db, tx, snBlock, btCli)
+			if err!=nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+			err = tx.Commit()
+			if err!=nil {
+				t.Fatal(err)
+			}
+			tx.Rollback()
+			time.Sleep(time.Second)
+		}
+	}()
+	tt:=time.Now()
+	for !(sb.Finished(10)) {
+		fmt.Println("processing", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage),!(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+		time.Sleep(time.Second)
+	}
+	fmt.Println("finished", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+	sa:=db.KV().(ethdb.SnapshotUpdater)
+	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
+
+	var headerNumber uint64
+	headerNumber=11
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Log(k)
+		}
+		headerNumber++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	headerNumber = 0
+	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 11 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber = 0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+	trnts:=btCli.Torrents()
+	fmt.Println("trnts", trnts)
+
+
+	err = GenerateHeaderData(db, 12, 20)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	tx,err:=db.Begin(context.Background(), ethdb.RO)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	tx.Get(dbutils.HeadersBucket, []byte{})
+	defer tx.Rollback()
+
+
+	atomic.StoreUint64(&currentSnapshotBlock, 20)
+	tt=time.Now()
+
+	rollbacked:=false
+	fmt.Println("wait finished")
+	c:=time.After(time.Second*3)
+	for !(sb.Finished(20)) {
+		select {
+		case <-c:
+			tx.Rollback()
+			rollbacked=true
+		default:
+		}
+		fmt.Println("processing", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage),!(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+		time.Sleep(time.Second)
+	}
+	fmt.Println("finished 20", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+
+	if !rollbacked {
+		t.Fatal("it's not possible to close db without rollback. something went wrong")
+	}
+
+
+
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		t.Fatal("main db must be empty here")
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	headerNumber=0
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	//pringSbState(sb)
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber=0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	trnts = btCli.Torrents()
+	fmt.Println("trnts 20 ",trnts)
+	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+		t.Fatal("snapshot exsists")
+	}
+	t.Log("Success")
+
+}
+
+/*
+0 headers10 a2f0207c82d2ad0f2c92dd102f47de86312863ce
+trnts [a2f0207c82d2ad0f2c92dd102f47de86312863ce]
+ */
+
+func TestSnapshotMigratorStage(t *testing.T) {
+	dir,err:=ioutil.TempDir(os.TempDir(), "tst")
+	if err!=nil {
+		t.Fatal(err)
+	}
+	t.Log(dir)
+	defer func() {
+		err = os.RemoveAll(dir)
+		t.Log(err)
+	}()
+	snapshotsDir:=path.Join(dir, "snapshots")
+	err= os.Mkdir(snapshotsDir, os.ModePerm)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	btCli,err:=bittorrent.New(snapshotsDir, true, "12345123451234512345")
+	if err!=nil {
+		t.Fatal(err)
+	}
+	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
+	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	err=GenerateHeaderData(db,0, 11)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	sb:=&SnapshotMigrator2{
+		snapshotsDir: snapshotsDir,
+	}
+	currentSnapshotBlock:=uint64(10)
+	go func() {
+		for {
+			tx, err := db.Begin(context.Background(), ethdb.RW)
+			if err!=nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+			snBlock:=atomic.LoadUint64(&currentSnapshotBlock)
+			err = sb.Migrate(db, tx, snBlock, btCli)
+			if err!=nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+			tx.Rollback()
+			time.Sleep(time.Second)
+		}
+	}()
+	tt:=time.Now()
+	for !(sb.Finished(10)) {
+		fmt.Println("processing", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage),!(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+		time.Sleep(time.Second)
+	}
+	fmt.Println("finished", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+	sa:=db.KV().(ethdb.SnapshotUpdater)
+	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
+
+	var headerNumber uint64
+	headerNumber=11
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Log(k)
+		}
+		headerNumber++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	headerNumber = 0
+	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 11 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber = 0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	if headerNumber!=12 {
+		t.Fatal(headerNumber)
+	}
+
+
+	err = GenerateHeaderData(db, 12, 20)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	tx,err:=db.Begin(context.Background(), ethdb.RO)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	tx.Get(dbutils.HeadersBucket, []byte{})
+	defer tx.Rollback()
+
+
+	atomic.StoreUint64(&currentSnapshotBlock, 20)
+	tt=time.Now()
+
+	rollbacked:=false
+	fmt.Println("wait finished")
+	c:=time.After(time.Second*3)
+	for !(sb.Finished(20)) {
+		select {
+		case <-c:
+			tx.Rollback()
+			rollbacked=true
+		default:
+		}
+		fmt.Println("processing", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage),!(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+		time.Sleep(time.Second)
+	}
+	fmt.Println("finished 20", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
+
+	if !rollbacked {
+		t.Fatal("it's not possible to close db without rollback. something went wrong")
+	}
+
+
+
+	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		t.Fatal("main db must be empty here")
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	headerNumber=0
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	//pringSbState(sb)
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber=0
+	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if headerNumber!=21 {
+		t.Fatal(headerNumber)
+	}
+	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+		t.Fatal("snapshot exsists")
+	}
+	t.Log("Success")
 
 }
 

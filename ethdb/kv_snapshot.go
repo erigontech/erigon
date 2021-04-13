@@ -195,7 +195,19 @@ type snTX struct {
 	snapshots map[string]snapshotData
 	snTX      map[string]Tx
 }
+type rwSnTX struct {
+	dbTX      RwTx
+	snapshots map[string]snapshotData
+	snTX      map[string]Tx
+}
 
+type DBTX interface {
+	DBTX() RwTx
+}
+
+func (s *rwSnTX) DBTX() RwTx {
+	return s.dbTX
+}
 func (s *snTX) DropBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).DropBucket(bucket)
 }

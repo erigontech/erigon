@@ -239,8 +239,11 @@ var (
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
+
 	BittorrentPeerID 		 = "peerID"
 	CurrentHeadersSnapshotHash 		 = []byte("CurrentHeadersSnapshotHash")
+	CurrentHeadersSnapshotBlock 		 = []byte("CurrentHeadersSnapshotHash")
+	MigrateToHeadersSnapshotBlock 		 = []byte("MigrateToHeadersSnapshotBlock")
 )
 
 // Metrics
