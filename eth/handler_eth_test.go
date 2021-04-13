@@ -80,8 +80,7 @@ func (h *testEthHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit64(t *testing.T) { testForkIDSplit(t, 64) }
-func TestForkIDSplit65(t *testing.T) { testForkIDSplit(t, 65) }
+func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -111,24 +110,26 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false)
 
 		ethNoFork, _ = newHandler(&handlerConfig{
-			Database:   dbNoFork,
-			Chain:      chainNoFork,
-			genesis:    chainNoFork.Genesis(),
-			vmConfig:   chainNoFork.GetVMConfig(),
-			engine:     chainNoFork.Engine(),
-			TxPool:     newTestTxPool(),
-			Network:    1,
-			BloomCache: 1,
+			Database:    dbNoFork,
+			Chain:       chainNoFork,
+			ChainConfig: configNoFork,
+			genesis:     chainNoFork.Genesis(),
+			vmConfig:    chainNoFork.GetVMConfig(),
+			engine:      chainNoFork.Engine(),
+			TxPool:      newTestTxPool(),
+			Network:     1,
+			BloomCache:  1,
 		})
 		ethProFork, _ = newHandler(&handlerConfig{
-			Database:   dbProFork,
-			Chain:      chainProFork,
-			genesis:    chainNoFork.Genesis(),
-			vmConfig:   chainNoFork.GetVMConfig(),
-			engine:     chainNoFork.Engine(),
-			TxPool:     newTestTxPool(),
-			Network:    1,
-			BloomCache: 1,
+			Database:    dbProFork,
+			Chain:       chainProFork,
+			ChainConfig: configProFork,
+			genesis:     chainNoFork.Genesis(),
+			vmConfig:    chainNoFork.GetVMConfig(),
+			engine:      chainNoFork.Engine(),
+			TxPool:      newTestTxPool(),
+			Network:     1,
+			BloomCache:  1,
 		})
 	)
 	ethNoFork.Start(1000)
@@ -250,8 +251,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 }
 
 // Tests that received transactions are added to the local pool.
-func TestRecvTransactions64(t *testing.T) { testRecvTransactions(t, 64) }
-func TestRecvTransactions65(t *testing.T) { testRecvTransactions(t, 65) }
+func TestRecvTransactions66(t *testing.T) { testRecvTransactions(t, eth.ETH66) }
 
 func testRecvTransactions(t *testing.T, protocol uint) {
 	// Create a message handler, configure it to accept transactions and watch them
@@ -310,8 +310,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 }
 
 // This test checks that pending transactions are sent.
-func TestSendTransactions64(t *testing.T) { testSendTransactions(t, 64) }
-func TestSendTransactions65(t *testing.T) { testSendTransactions(t, 65) }
+func TestSendTransactions66(t *testing.T) { testSendTransactions(t, eth.ETH66) }
 
 func testSendTransactions(t *testing.T, protocol uint) {
 	// Create a message handler and fill the pool with big transactions
@@ -373,19 +372,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	seen := make(map[common.Hash]struct{})
 	for len(seen) < len(insert) {
 		switch protocol {
-		case 63, 64:
-			select {
-			case <-anns:
-				t.Errorf("tx announce received on pre eth/65")
-			case txs := <-bcasts:
-				for _, tx := range txs {
-					if _, ok := seen[tx.Hash()]; ok {
-						t.Errorf("duplicate transaction announced: %x", tx.Hash())
-					}
-					seen[tx.Hash()] = struct{}{}
-				}
-			}
-		case 65:
+		case eth.ETH66:
 			select {
 			case hashes := <-anns:
 				for _, hash := range hashes {
@@ -422,7 +409,6 @@ func TestBroadcastBloc26Peers(t *testing.T)   { testBroadcastBlock(t, 26, 5) }
 func TestBroadcastBlock100Peers(t *testing.T) { testBroadcastBlock(t, 100, 10) }
 
 func testBroadcastBlock(t *testing.T, peers, bcasts int) {
-	t.Skip("restore to TG")
 	// Create a source handler to broadcast blocks from and a number of sinks
 	// to receive them.
 	source := newTestHandlerWithBlocks(1)
@@ -448,8 +434,8 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		defer sourcePipe.Close()
 		defer sinkPipe.Close()
 
-		sourcePeer := eth.NewPeer(eth.ETH64, p2p.NewPeer(enode.ID{byte(i)}, "", nil), sourcePipe, nil)
-		sinkPeer := eth.NewPeer(eth.ETH64, p2p.NewPeer(enode.ID{0}, "", nil), sinkPipe, nil)
+		sourcePeer := eth.NewPeer(eth.ETH66, p2p.NewPeer(enode.ID{byte(i)}, "", nil), sourcePipe, nil)
+		sinkPeer := eth.NewPeer(eth.ETH66, p2p.NewPeer(enode.ID{0}, "", nil), sinkPipe, nil)
 		defer sourcePeer.Close()
 		defer sinkPeer.Close()
 
@@ -500,7 +486,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 	}
 }
 
-func TestBroadcastMalformedBlock65(t *testing.T) { testBroadcastMalformedBlock(t, 65) }
+func TestBroadcastMalformedBlock66(t *testing.T) { testBroadcastMalformedBlock(t, eth.ETH66) }
 
 func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	// Create a source handler to broadcast blocks from and a number of sinks

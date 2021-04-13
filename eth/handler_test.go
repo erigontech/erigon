@@ -152,14 +152,15 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	txpool := newTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
-		Database:   db,
-		Chain:      chain,
-		genesis:    chain.Genesis(),
-		vmConfig:   chain.GetVMConfig(),
-		engine:     chain.Engine(),
-		TxPool:     txpool,
-		Network:    1,
-		BloomCache: 1,
+		Database:    db,
+		Chain:       chain,
+		ChainConfig: chain.Config(),
+		genesis:     chain.Genesis(),
+		vmConfig:    chain.GetVMConfig(),
+		engine:      chain.Engine(),
+		TxPool:      txpool,
+		Network:     1,
+		BloomCache:  1,
 	})
 	handler.Start(1000)
 

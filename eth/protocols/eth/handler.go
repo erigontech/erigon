@@ -162,19 +162,6 @@ type Decoder interface {
 	Time() time.Time
 }
 
-var eth64 = map[uint64]msgHandler{
-	GetBlockHeadersMsg: handleGetBlockHeaders,
-	BlockHeadersMsg:    handleBlockHeaders,
-	GetBlockBodiesMsg:  handleGetBlockBodies,
-	BlockBodiesMsg:     handleBlockBodies,
-	GetNodeDataMsg:     handleGetNodeData,
-	NodeDataMsg:        handleNodeData,
-	GetReceiptsMsg:     handleGetReceipts,
-	ReceiptsMsg:        handleReceipts,
-	NewBlockHashesMsg:  handleNewBlockhashes,
-	NewBlockMsg:        handleNewBlock,
-	TransactionsMsg:    handleTransactions,
-}
 var eth65 = map[uint64]msgHandler{
 	// old 64 messages
 	GetBlockHeadersMsg: handleGetBlockHeaders,
@@ -227,10 +214,8 @@ func handleMessage(backend Backend, peer *Peer) error {
 	}
 	defer msg.Discard()
 
-	var handlers = eth64
-	if peer.Version() == ETH65 {
-		handlers = eth65
-	} else if peer.Version() >= ETH66 {
+	var handlers = eth65
+	if peer.Version() >= ETH66 {
 		handlers = eth66
 	}
 
