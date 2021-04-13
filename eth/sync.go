@@ -61,19 +61,12 @@ func (h *handler) syncTransactions(p *eth.Peer) {
 	// The eth/65 protocol introduces proper transaction announcements, so instead
 	// of dripping transactions across multiple peers, just send the entire list as
 	// an announcement and let the remote side decide what they need (likely nothing).
-	if p.Version() >= eth.ETH65 {
-		hashes := make([]common.Hash, len(txs))
-		for i, tx := range txs {
-			hashes[i] = tx.Hash()
-		}
-		p.AsyncSendPooledTransactionHashes(hashes)
-		return
+	hashes := make([]common.Hash, len(txs))
+	for i, tx := range txs {
+		hashes[i] = tx.Hash()
 	}
-	// Out of luck, peer is running legacy protocols, drop the txs over
-	select {
-	case h.txsyncCh <- &txsync{p: p, txs: txs}:
-	case <-h.quitSync:
-	}
+	p.AsyncSendPooledTransactionHashes(hashes)
+	return
 }
 
 // txsyncLoop64 takes care of the initial transaction sync for each new
