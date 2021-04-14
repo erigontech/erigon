@@ -54,7 +54,7 @@ func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Tra
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt().SetUint64(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(params.TestChainConfig.ChainID), key)
+	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt().SetUint64(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(nil), key)
 	return tx
 }
 
@@ -63,7 +63,7 @@ func pricedDataTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int,
 	// it is only a test, so insecure random is fine here
 	rand.Read(data) //nolint:gosec
 
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(), gaslimit, gasprice, data), *types.LatestSignerForChainID(params.TestChainConfig.ChainID), key)
+	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(), gaslimit, gasprice, data), *types.LatestSignerForChainID(nil), key)
 	return tx
 }
 
@@ -144,7 +144,7 @@ func validateEvents(events chan NewTxsEvent, count int) error {
 }
 
 func deriveSender(tx types.Transaction) (common.Address, error) {
-	return types.Sender(*types.LatestSignerForChainID(params.TestChainConfig.ChainID), tx)
+	return types.Sender(*types.LatestSignerForChainID(nil), tx)
 }
 
 // This test simulates a scenario where a new block is imported during a
@@ -350,7 +350,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 	}
 	resetState()
 
-	signer := types.LatestSignerForChainID(params.TestChainConfig.ChainID)
+	signer := types.LatestSignerForChainID(nil)
 	tx1, _ := types.SignTx(types.NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(100), 100000, uint256.NewInt().SetUint64(1), nil), *signer, key)
 	tx2, _ := types.SignTx(types.NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(100), 1000000, uint256.NewInt().SetUint64(2), nil), *signer, key)
 	tx3, _ := types.SignTx(types.NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(100), 1000000, uint256.NewInt().SetUint64(1), nil), *signer, key)

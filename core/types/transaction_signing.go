@@ -36,8 +36,6 @@ var ErrInvalidChainId = errors.New("invalid chain id for signer")
 func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	var signer Signer
 	chainId, _ := uint256.FromBig(config.ChainID)
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
 	signer.unprotected = true
 	switch {
 	case config.IsAleut(blockNumber):
@@ -45,11 +43,17 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 		signer.protected = true
 		signer.accesslist = true
 		signer.dynamicfee = true
+		signer.chainID.Set(chainId)
+		signer.chainIDMul.Mul(chainId, u256.Num2)
 	case config.IsBerlin(blockNumber):
 		signer.protected = true
 		signer.accesslist = true
+		signer.chainID.Set(chainId)
+		signer.chainIDMul.Mul(chainId, u256.Num2)
 	case config.IsEIP155(blockNumber):
 		signer.protected = true
+		signer.chainID.Set(chainId)
+		signer.chainIDMul.Mul(chainId, u256.Num2)
 	case config.IsHomestead(blockNumber):
 	default:
 		// Only allow malleable transactions in Frontier
@@ -189,6 +193,7 @@ func (sg Signer) Sender(tx Transaction) (common.Address, error) {
 func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (common.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
+	signChainID := sg.chainID.ToBig() // This is reset to nil if tx is unprotected
 	// recoverPlain below will subract 27 from V
 	switch t := tx.(type) {
 	case *LegacyTx:
@@ -196,6 +201,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 			if !sg.unprotected {
 				return common.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
 			}
+			signChainID = nil
 			V.Set(t.V)
 		} else {
 			if !sg.protected {
@@ -233,7 +239,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	return recoverPlain(context, tx.SigningHash(sg.chainID.ToBig()), R, S, &V, !sg.maleable)
+	return recoverPlain(context, tx.SigningHash(signChainID), R, S, &V, !sg.maleable)
 }
 
 // SignatureValues returns the raw R, S, V values corresponding to the
