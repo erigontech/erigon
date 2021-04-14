@@ -39,6 +39,7 @@ eth_tx,212580,47829931,6132023,969755142
 var (
 	HeaderNumberGenerationStage    = stages.SyncStage("snapshot_header_number")
 	HeaderCanonicalGenerationStage = stages.SyncStage("snapshot_canonical")
+	HeadersPostProcessingStage = stages.SyncStage("snapshot_canonical")
 	Snapshot11kkTD = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
@@ -237,130 +238,107 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 
 
 
-func generateHeaderIndexesStep1(ctx context.Context, db ethdb.Database) error {
-	v, err1 := stages.GetStageProgress(db, HeaderNumber)
-	if err1 != nil {
-		return err1
+func generateHeaderHashToNumberIndex(ctx context.Context, tx ethdb.DbWithPendingMutations) error {
+	log.Info("Generate headers hash to number index")
+	headHashBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
+	if innerErr != nil {
+		return innerErr
 	}
 
-	if v == 0 {
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		log.Info("Generate headers hash to number index")
-		headHashBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
-		if innerErr != nil {
-			return innerErr
-		}
-
-		headNumberBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
-		if innerErr != nil {
-			return innerErr
-		}
-
-		headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
-		headHash := common.BytesToHash(headHashBytes)
-
-		innerErr = etl.Transform("Torrent post-processing 1", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderNumberBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
-		}, etl.IdentityLoadFunc, etl.TransformArgs{
-			Quit:          ctx.Done(),
-			ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
-		})
-		if innerErr != nil {
-			return innerErr
-		}
-		if err = stages.SaveStageProgress(tx, HeaderNumber, 1); err != nil {
-			return err
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
+	headNumberBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
+	if innerErr != nil {
+		return innerErr
 	}
-	return nil
+
+	headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
+	headHash := common.BytesToHash(headHashBytes)
+
+	return etl.Transform("Torrent post-processing 1", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderNumberBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:          ctx.Done(),
+		ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
+	})
 }
 
-func generateHeaderIndexesStep2(ctx context.Context, db ethdb.Database) error {
+func generateHeaderTDAndCanonicalIndexes(ctx context.Context, tx ethdb.DbWithPendingMutations) error {
 	var hash common.Hash
 	var number uint64
+	var err error
 
-	v, err1 := stages.GetStageProgress(db, HeaderCanonical)
-	if err1 != nil {
-		return err1
+	h := rawdb.ReadHeaderByNumber(tx, 0)
+	td := h.Difficulty
+
+	log.Info("Generate TD index & canonical")
+	err = etl.Transform("Torrent post-processing 2", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderTDBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		header := &types.Header{}
+		innerErr := rlp.DecodeBytes(v, header)
+		if innerErr != nil {
+			return innerErr
+		}
+		number = header.Number.Uint64()
+		hash = header.Hash()
+		td = td.Add(td, header.Difficulty)
+		tdBytes, innerErr := rlp.EncodeToBytes(td)
+		if innerErr != nil {
+			return innerErr
+		}
+
+		return next(k, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), tdBytes)
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit: ctx.Done(),
+	})
+	if err != nil {
+		return err
 	}
-	if v == 0 {
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		h := rawdb.ReadHeaderByNumber(tx, 0)
-		td := h.Difficulty
-
-		log.Info("Generate TD index & canonical")
-		err = etl.Transform("Torrent post-processing 2", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderTDBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			header := &types.Header{}
-			innerErr := rlp.DecodeBytes(v, header)
-			if innerErr != nil {
-				return innerErr
-			}
-			number = header.Number.Uint64()
-			hash = header.Hash()
-			td = td.Add(td, header.Difficulty)
-			tdBytes, innerErr := rlp.EncodeToBytes(td)
-			if innerErr != nil {
-				return innerErr
-			}
-
-			return next(k, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), tdBytes)
-		}, etl.IdentityLoadFunc, etl.TransformArgs{
-			Quit: ctx.Done(),
-		})
-		if err != nil {
-			return err
-		}
-		log.Info("Generate TD index & canonical")
-		err = etl.Transform("Torrent post-processing 2", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			return next(k, common.CopyBytes(k[:8]), common.CopyBytes(k[8:]))
-		}, etl.IdentityLoadFunc, etl.TransformArgs{
-			Quit: ctx.Done(),
-		})
-		if err != nil {
-			return err
-		}
-		rawdb.WriteHeadHeaderHash(tx, hash)
-		rawdb.WriteHeaderNumber(tx, hash, number)
-		err = stages.SaveStageProgress(tx, stages.Headers, number)
-		if err != nil {
-			return err
-		}
-		err = stages.SaveStageProgress(tx, stages.BlockHashes, number)
-		if err != nil {
-			return err
-		}
-		rawdb.WriteHeadBlockHash(tx, hash)
-		if err = stages.SaveStageProgress(tx, HeaderCanonical, number); err != nil {
-			return err
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-		log.Info("Last processed block", "num", number, "hash", hash.String())
+	log.Info("Generate TD index & canonical")
+	err = etl.Transform("Torrent post-processing 2", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		return next(k, common.CopyBytes(k[:8]), common.CopyBytes(k[8:]))
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit: ctx.Done(),
+	})
+	if err != nil {
+		return err
 	}
-
+	rawdb.WriteHeadHeaderHash(tx, hash)
+	rawdb.WriteHeaderNumber(tx, hash, number)
+	err = stages.SaveStageProgress(tx, stages.Headers, number)
+	if err != nil {
+		return err
+	}
+	err = stages.SaveStageProgress(tx, stages.BlockHashes, number)
+	if err != nil {
+		return err
+	}
+	rawdb.WriteHeadBlockHash(tx, hash)
+	log.Info("Last processed block", "num", number, "hash", hash.String())
 	return nil
 }
 
 func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
-	if err := generateHeaderIndexesStep1(ctx, db); err != nil {
-		return err
+	v, err1 := stages.GetStageProgress(db, HeadersPostProcessingStage)
+	if err1 != nil {
+		return err1
 	}
-	if err := generateHeaderIndexesStep2(ctx, db); err != nil {
-		return err
+
+	if v==0 {
+		tx,err:=db.Begin(context.Background(), ethdb.RW)
+		if err!=nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err = generateHeaderHashToNumberIndex(ctx, tx); err != nil {
+			return err
+		}
+		if err = generateHeaderTDAndCanonicalIndexes(ctx, tx); err != nil {
+			return err
+		}
+		err = stages.SaveStageProgress(db, HeadersPostProcessingStage, 1)
+		if err != nil{
+			return err1
+		}
+
+		return tx.Commit()
 	}
 	return nil
 }

@@ -61,7 +61,7 @@ type StageParameters struct {
 	mining                *MiningStagesParameters
 	snapshotsDir		 string
 	btClient			 *bittorrent.Client
-	SnapshotBuilder		 *migrator.SnapshotMigrator
+	SnapshotBuilder		 *migrator.SnapshotMigrator2
 }
 
 type MiningStagesParameters struct {
@@ -566,7 +566,7 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateHeadersSnapshot,
 				Description: "Create headers snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnHeadersSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState) error {
 					return u.Done(world.DB)

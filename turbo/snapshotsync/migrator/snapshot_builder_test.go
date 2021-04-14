@@ -38,7 +38,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err=GenerateHeaderData(db,0, 11)
 	if err!=nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 	tt:=time.Now()
 	for !(sb.IsFinished(10) && sb.Cleaned(10)) {}
 	fmt.Println("finished", time.Since(tt), sb.IsFinished(10), sb.Cleaned(10) )
-	sa:=db.KV().(ethdb.SnapshotUpdater)
+	sa:=db.RwKV().(ethdb.SnapshotUpdater)
 	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
 
 	var headerNumber uint64
@@ -93,7 +93,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -145,7 +145,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -204,7 +204,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -256,7 +256,7 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err=GenerateHeaderData(db,0, 11)
 	if err!=nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 	tt:=time.Now()
 	for !(sb.IsFinished(10) && sb.Cleaned(10)) {}
 	fmt.Println("finished", time.Since(tt), sb.IsFinished(10), sb.Cleaned(10) )
-	sa:=db.KV().(ethdb.SnapshotUpdater)
+	sa:=db.RwKV().(ethdb.SnapshotUpdater)
 	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
 
 	var headerNumber uint64
@@ -311,7 +311,7 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -386,7 +386,7 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -438,7 +438,7 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err=GenerateHeaderData(db,0, 11)
 	if err!=nil {
 		t.Fatal(err)
@@ -474,7 +474,7 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 	tt:=time.Now()
 	for !(sb.IsFinished(10) && sb.Cleaned(10)) {}
 	fmt.Println("finished", time.Since(tt), sb.IsFinished(10), sb.Cleaned(10) )
-	sa:=db.KV().(ethdb.SnapshotUpdater)
+	sa:=db.RwKV().(ethdb.SnapshotUpdater)
 	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
 
 	var headerNumber uint64
@@ -493,7 +493,7 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -568,7 +568,7 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -623,7 +623,7 @@ func TestSnapshotMigrator2(t *testing.T) {
 		t.Fatal(err)
 	}
 	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err=GenerateHeaderData(db,0, 11)
 	if err!=nil {
 		t.Fatal(err)
@@ -659,7 +659,7 @@ func TestSnapshotMigrator2(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	fmt.Println("finished", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
-	sa:=db.KV().(ethdb.SnapshotUpdater)
+	sa:=db.RwKV().(ethdb.SnapshotUpdater)
 	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
 
 	var headerNumber uint64
@@ -678,7 +678,7 @@ func TestSnapshotMigrator2(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -760,7 +760,7 @@ func TestSnapshotMigrator2(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -824,7 +824,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	db:=ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetKV(ethdb.NewSnapshotKV().DB(db.KV()).Open())
+	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err=GenerateHeaderData(db,0, 11)
 	if err!=nil {
 		t.Fatal(err)
@@ -846,7 +846,10 @@ func TestSnapshotMigratorStage(t *testing.T) {
 				tx.Rollback()
 				t.Fatal(err)
 			}
-			tx.Rollback()
+			err = tx.Commit()
+			if err!=nil {
+				t.Fatal(err)
+			}
 			time.Sleep(time.Second)
 		}
 	}()
@@ -856,7 +859,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	fmt.Println("finished", time.Since(tt),atomic.LoadUint64(&sb.HeadersNewSnapshot), atomic.LoadUint64(&sb.HeadersCurrentSnapshot), atomic.LoadUint64(&sb.Stage), !(atomic.LoadUint64(&sb.HeadersNewSnapshot)!= atomic.LoadUint64(&sb.HeadersCurrentSnapshot) && sb.Stage!=StageStart&& atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=currentSnapshotBlock))
-	sa:=db.KV().(ethdb.SnapshotUpdater)
+	sa:=db.RwKV().(ethdb.SnapshotUpdater)
 	wodb:=ethdb.NewObjectDatabase(sa.WriteDB())
 
 	var headerNumber uint64
@@ -875,7 +878,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket))
+	snodb:=ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -954,7 +957,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerNumber=0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}

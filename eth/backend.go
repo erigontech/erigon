@@ -279,7 +279,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					return nil, err
 				}
 				defer tx.Rollback()
-				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
+				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
 				if err = tx.Commit(); err != nil {
 					return nil, err
 				}
@@ -292,7 +292,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	} else  {
 		//manually wrap current db for snapshot generation
-		chainDb.(ethdb.HasKV).SetKV(ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasKV).KV()).Open())
+		chainDb.(ethdb.HasRwKV).SetRwKV(ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV()).Open())
 	}
 	btEnabled=true
 

@@ -1293,11 +1293,15 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
-	tx,err:=kv.Begin(context.Background())
+	tx,err:=kv.BeginRo(context.Background())
 	if err!=nil {
 		t.Fatal(err)
 	}
-	c:=tx.Cursor(dbutils.PlainStateBucket)
+	c, err:=tx.Cursor(dbutils.PlainStateBucket)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
 	k,v, err:=c.First()
 	if err!=nil {
 		t.Fatal(err)
@@ -1307,12 +1311,16 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	done:=make(chan struct{})
 	kv.(*SnapshotKV).UpdateSnapshots([]string{dbutils.PlainStateBucket}, snapshotDB2, done)
 
-	tx2,err:=kv.Begin(context.Background())
+	tx2,err:=kv.BeginRo(context.Background())
 	if err!=nil {
 		t.Fatal(err)
 	}
 
-	c2:=tx2.Cursor(dbutils.PlainStateBucket)
+	c2,err:=tx2.Cursor(dbutils.PlainStateBucket)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
 	k2,v2, err2:=c2.First()
 	if err2!=nil {
 		t.Fatal(err2)
@@ -1365,7 +1373,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	}
 }
 
-func printBucket(kv KV, bucket string) {
+func printBucket(kv RoKV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
 		fmt.Println("-Print bucket", bucket)

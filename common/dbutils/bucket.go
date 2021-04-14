@@ -238,8 +238,7 @@ var (
 
 	BittorrentPeerID 		 = "peerID"
 	CurrentHeadersSnapshotHash 		 = []byte("CurrentHeadersSnapshotHash")
-	CurrentHeadersSnapshotBlock 		 = []byte("CurrentHeadersSnapshotHash")
-	MigrateToHeadersSnapshotBlock 		 = []byte("MigrateToHeadersSnapshotBlock")
+	CurrentHeadersSnapshotBlock 		 = []byte("CurrentHeadersSnapshotBlock")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.

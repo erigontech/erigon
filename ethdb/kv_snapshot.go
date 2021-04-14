@@ -14,10 +14,13 @@ import (
 
 var (
 	_ RwKV             = &SnapshotKV{}
+	_ RoKV             = &SnapshotKV{}
 	_ Tx             = &snTX{}
 	_ BucketMigrator = &snTX{}
+	_ RwCursor       = &snCursor{}
 	_ Cursor         = &snCursor{}
 )
+
 
 type SnapshotUpdater interface {
 	UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{})
@@ -51,7 +54,7 @@ func (opts snapshotOpts) DB(db RwKV) snapshotOpts {
 	return opts
 }
 
-func (opts snapshotOpts) MustOpen() RwKV {
+func (opts snapshotOpts) Open() RwKV {
 	snapshots := make(map[string]snapshotData)
 	for i, v := range opts.snapshots {
 		for _, bucket := range v.buckets {
@@ -177,7 +180,7 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rwSnTX{
+	return &snTX{
 		dbTX:      dbTx,
 		snapshots: s.copySnapshots(),
 		snTX:      map[string]Tx{},
@@ -205,23 +208,47 @@ type DBTX interface {
 	DBTX() RwTx
 }
 
-func (s *rwSnTX) DBTX() RwTx {
-	return s.dbTX
+func (s *snTX) DBTX() RwTx {
+	return s.dbTX.(RwTx)
 }
-func (s *rwSnTX) DropBucket(bucket string) error {
+func (s *snTX) RwCursor(bucket string) (RwCursor, error) {
+	tx, err := s.getSnapshotTX(bucket)
+	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
+		panic(err.Error())
+	}
+	//process only db buckets
+	if errors.Is(err, ErrUnavailableSnapshot) {
+		return s.dbTX.(RwTx).RwCursor(bucket)
+	}
+	dbCursor, err := s.dbTX.(RwTx).RwCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	snCursor2, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &snCursor{
+		dbCursor: dbCursor,
+		snCursor: snCursor2,
+	}, nil
+
+}
+
+func (s *snTX) DropBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).DropBucket(bucket)
 }
 
-func (s *rwSnTX) CreateBucket(bucket string) error {
+func (s *snTX) CreateBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).CreateBucket(bucket)
 }
 
-func (s *rwSnTX) ExistsBucket(bucket string) bool {
+func (s *snTX) ExistsBucket(bucket string) bool {
 	//todo snapshot check?
 	return s.dbTX.(BucketMigrator).ExistsBucket(bucket)
 }
 
-func (s *rwSnTX) ClearBucket(bucket string) error {
+func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).ClearBucket(bucket)
 }
 
@@ -252,8 +279,8 @@ func (s *snTX) Cursor(bucket string) (Cursor, error) {
 	}, nil
 }
 
-func (s *RwCursor) RwCursor(bucket string) (RwCursor, error) {
-	c, err := s.Cursor(bucket)
+func (s *rwSnTX) RwCursor(bucket string) (RwCursor, error) {
+	c, err := s.RwCursor(bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +353,7 @@ func (s *snTX) Put(bucket string, k, v []byte) error {
 }
 
 func (s *snTX) Delete(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).Delete(bucket, k, v)
+	return s.dbTX.(RwTx).Put(bucket, k, DeletedValue)
 }
 
 func (s *snTX) getSnapshotTX(bucket string) (Tx, error) {
@@ -410,6 +437,19 @@ func (s *snTX) ReadSequence(bucket string) (uint64, error) {
 func (s *snTX) CHandle() unsafe.Pointer {
 	return s.dbTX.CHandle()
 }
+
+func (s *snTX) BucketExists(bucket string) (bool, error) {
+	panic("implement me")
+}
+
+func (s *snTX) ClearBuckets(buckets ...string) error {
+	panic("implement me")
+}
+
+func (s *snTX) DropBuckets(buckets ...string) error {
+	panic("implement me")
+}
+
 
 var DeletedValue = []byte("it is deleted value")
 

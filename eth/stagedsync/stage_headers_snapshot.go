@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
 	"os"
 	"path"
 	"time"
@@ -34,7 +34,7 @@ if hasTx, ok := tx.(ethdb.HasTx); !ok || hasTx.Tx() != nil {
 
  */
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, snapshotDir string, torrentClient *bittorrent.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *migrator.SnapshotMigrator2, snapshotDir string, torrentClient *bittorrent.Client, quit <-chan struct{}) error {
 	tx, err := db.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
@@ -70,10 +70,11 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, snaps
 		return fmt.Errorf("creation %s, return %w", dbPath, err)
 	}
 
-	err = snapshotsync.CreateHeadersSnapshot(tx,toBlock, dbPath)
+	err = migrator.CreateHeadersSnapshot(context.Background(), db,toBlock, dbPath)
 	if err!=nil {
 		return err
 	}
+
 
 	info,err:=bittorrent.BuildInfoBytesForSnapshot(dbPath, bittorrent.LmdbFilename)
 	if err!=nil {
@@ -97,19 +98,23 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, snaps
 		return err
 	}
 	log.Info("Headers snapshot db opened")
+
 	done:=make(chan struct{})
-	if _, ok:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); ok {
-		db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
+	if _, ok:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater); ok {
+		db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
 		select {
 		case <-time.After(time.Minute*10):
 			return errors.New("timout on closing snapshot database")
 		case <-done:
 			log.Info("Headers snapshot db switched")
-			rmTX,err:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
+			rmTX,err:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
 			if err!=nil {
 				return err
 			}
-			rmCursor:=rmTX.RwCursor(dbutils.HeadersBucket)
+			rmCursor,err :=rmTX.RwCursor(dbutils.HeadersBucket)
+			if err!=nil {
+				return err
+			}
 			err = ethdb.NewObjectDatabase(snapshotKV).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 				innerErr:=rmCursor.Delete(k, nil)
 				if innerErr!=nil {

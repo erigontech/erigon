@@ -118,11 +118,11 @@ func (sb *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database) error
 		log.Error("snapshot path is empty")
 		return errors.New("snapshot path is empty")
 	}
-	if _, ok := chainDB.(ethdb.HasKV); !ok {
+	if _, ok := chainDB.(ethdb.HasRwKV); !ok {
 		return errors.New("db don't implement hasKV interface")
 	}
 
-	if _, ok := chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+	if _, ok := chainDB.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
 	fmt.Println("sb.Replacing = true")
@@ -139,7 +139,7 @@ func (sb *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database) error
 			sb.Replacing = false
 		}()
 		done := make(chan struct{})
-		chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
+		chainDB.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
 		fmt.Println("-Update snapshots")
 		select {
 		case <-time.After(time.Minute):
@@ -179,19 +179,19 @@ func (sb *SnapshotMigrator) RemoveHeadersData(db ethdb.Database) (err error) {
 
 	log.Info("Remove data", "from", from, "to", sb.toClean.To)
 	fmt.Println("Remove data", "from", from, "to", sb.toClean.To)
-	if _, ok := db.(ethdb.HasKV); !ok {
+	if _, ok := db.(ethdb.HasRwKV); !ok {
 		return errors.New("db don't implement hasKV interface")
 	}
 
-	if _, ok := db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+	if _, ok := db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	headerSnapshot:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
 	if headerSnapshot == nil {
 		return  nil
 	}
-	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot)
-	wdb:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).WriteDB()
+	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
+	wdb:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).WriteDB()
 	if wdb == nil {
 		return nil
 	}
@@ -199,7 +199,10 @@ func (sb *SnapshotMigrator) RemoveHeadersData(db ethdb.Database) (err error) {
 	if err != nil {
 		return err
 	}
-	rmCursor := rmTX.RwCursor(dbutils.HeadersBucket)
+	rmCursor,err:= rmTX.RwCursor(dbutils.HeadersBucket)
+	if err!=nil {
+		return err
+	}
 	var lastCleaned uint64
 	defer func() {
 		if err == nil {
@@ -219,7 +222,7 @@ func (sb *SnapshotMigrator) RemoveHeadersData(db ethdb.Database) (err error) {
 		return err
 	}
 
-	return rmTX.Commit(context.Background())
+	return rmTX.Commit()
 }
 
 func (sb *SnapshotMigrator) RemovePreviousVersion() error {
@@ -258,7 +261,7 @@ func (sb *SnapshotMigrator) StopSeeding() error {
 	}()
 	return nil
 }
-func OpenHeadersSnapshot(dbPath string) (ethdb.KV, error) {
+func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
 	return ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
@@ -287,7 +290,7 @@ func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.Database, toBlock 
 	if err!=nil {
 		return err
 	}
-	err=sntx.Commit(context.Background())
+	err=sntx.Commit()
 	if err!=nil {
 		return err
 	}
@@ -298,9 +301,11 @@ func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.Database, toBlock 
 }
 
 func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.RwTx, toBlock uint64) error {
-	headerCursor:=sntx.RwCursor(dbutils.HeadersBucket)
+	headerCursor,err :=sntx.RwCursor(dbutils.HeadersBucket)
+	if err!=nil {
+		return err
+	}
 	var hash common.Hash
-	var err error
 	var header []byte
 	for i := uint64(0); i <= toBlock; i++ {
 		if common.IsCanceled(ctx) {
@@ -420,6 +425,9 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			if len(infohash)==20 {
 				var hash metainfo.Hash
 				copy(hash[:], infohash)
+				fmt.Println("--------------------------------------------------------------")
+				fmt.Println("stop seeding", common.Bytes2Hex(infohash))
+				fmt.Println("--------------------------------------------------------------")
 
 				err = bittorrent.StopSeeding(hash)
 				if err!=nil {
@@ -436,7 +444,9 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				fmt.Println("-------seed snaopshot err", err)
 			}
 			sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
+			fmt.Println("--------------------------------------------------------------")
 			fmt.Println("start seeding", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash))
+			fmt.Println("--------------------------------------------------------------")
 			atomic.StoreUint64(&sm.Stage, StageRemoveOldSnapshot)
 			sm.mtx.RLock()
 			defer sm.mtx.RUnlock()
@@ -451,7 +461,6 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 		}()
 
 	case StagePruneDB:
-
 		var wtx ethdb.RwTx
 		var useExternalTx bool
 		var err error
@@ -459,7 +468,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			wtx = tx.(ethdb.HasTx).Tx().(ethdb.DBTX).DBTX()
 			useExternalTx = true
 		} else {
-			wtx, err = tx.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
+			wtx, err = tx.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
 			if err!=nil {
 				return err
 			}
@@ -470,7 +479,10 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			fmt.Println("RemoveHeadersData err", err)
 			return err
 		}
-		c:=wtx.RwCursor(dbutils.BittorrentInfoBucket)
+		c,err:=wtx.RwCursor(dbutils.BittorrentInfoBucket)
+		if err!=nil {
+			return err
+		}
 		if len(sm.HeadersNewSnapshotInfohash)==20 {
 			err = c.Put(dbutils.CurrentHeadersSnapshotHash, sm.HeadersNewSnapshotInfohash)
 			if err!=nil {
@@ -483,7 +495,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 		}
 
 		if !useExternalTx {
-			err = wtx.Commit(context.Background())
+			err = wtx.Commit()
 			if err!=nil {
 				return err
 			}
@@ -494,6 +506,9 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 		fmt.Println("+Finish")
 		v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 		fmt.Println("+Finish")
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil
+		}
 		if err!=nil {
 			fmt.Println("err ", err)
 			return err
@@ -524,11 +539,11 @@ func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snap
 		log.Error("snapshot path is empty")
 		return errors.New("snapshot path is empty")
 	}
-	if _, ok := chainDB.(ethdb.HasKV); !ok {
+	if _, ok := chainDB.(ethdb.HasRwKV); !ok {
 		return errors.New("db don't implement hasKV interface")
 	}
 
-	if _, ok := chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+	if _, ok := chainDB.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
 	snapshotKV,err:=OpenHeadersSnapshot(snapshotPath)
@@ -537,7 +552,7 @@ func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snap
 	}
 
 	done := make(chan struct{})
-	chainDB.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
+	chainDB.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
 	select {
 	case <-time.After(time.Minute):
 		panic("timeout")
@@ -552,14 +567,14 @@ func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snap
 func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx) (err error) {
 	log.Info("Remove data", "from", sb.HeadersCurrentSnapshot, "to", sb.HeadersNewSnapshot)
 	fmt.Println("Remove data", "from", sb.HeadersCurrentSnapshot, "to", sb.HeadersNewSnapshot)
-	if _, ok := db.(ethdb.HasKV); !ok {
+	if _, ok := db.(ethdb.HasRwKV); !ok {
 		return errors.New("db don't implement hasKV interface")
 	}
 
-	if _, ok := db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater); !ok {
+	if _, ok := db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot:=db.(ethdb.HasKV).KV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	headerSnapshot:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
 	if headerSnapshot == nil {
 		return  nil
 	}
@@ -572,8 +587,11 @@ func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx)
 		}
 	 */
 
-	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot)
-	c:=tx.RwCursor(dbutils.HeadersBucket)
+	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
+	c,err:=tx.RwCursor(dbutils.HeadersBucket)
+	if err!=nil {
+		return err
+	}
 	err = snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(sb.HeadersCurrentSnapshot), 0, func(k, v []byte) (bool, error) {
 		innerErr := c.Delete(k, nil)
 		if innerErr != nil {
@@ -586,7 +604,10 @@ func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx)
 	}
 	v:=make([]byte, 8)
 	binary.BigEndian.PutUint64(v, sb.HeadersNewSnapshot)
-	c2:=tx.RwCursor(dbutils.BittorrentInfoBucket)
+	c2, err:=tx.RwCursor(dbutils.BittorrentInfoBucket)
+	if err!=nil {
+		return err
+	}
 	err = c2.Put(dbutils.CurrentHeadersSnapshotBlock, v)
 	if err!=nil {
 		return err
