@@ -14538,12 +14538,6 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
     goto bailout;
 #endif /* MADV_DODUMP */
 
-#ifdef MADV_WILLNEED
-  err = madvise(env->me_lck, size, MADV_WILLNEED) ? ignore_enosys(errno)
-                                                  : MDBX_SUCCESS;
-  if (unlikely(MDBX_IS_ERROR(err)))
-    goto bailout;
-#endif /* MADV_WILLNEED */
 #endif /* MDBX_ENABLE_MADVISE */
 
   struct MDBX_lockinfo *const lck = env->me_lck;
