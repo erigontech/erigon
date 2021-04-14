@@ -8457,8 +8457,6 @@ static __always_inline __maybe_unused int ignore_enosys(int err) {
 /* Turn on/off readahead. It's harmful when the DB is larger than RAM. */
 static __cold int mdbx_set_readahead(MDBX_env *env, const size_t offset,
                                      const size_t length, const bool enable) {
-    enable = false;
-
   assert(length > 0);
   mdbx_notice("readahead %s %u..%u", enable ? "ON" : "OFF",
               bytes2pgno(env, offset), bytes2pgno(env, offset + length));
@@ -8468,39 +8466,6 @@ static __cold int mdbx_set_readahead(MDBX_env *env, const size_t offset,
     return errno;
 #endif /* F_RDAHEAD */
 
-  if (enable) {
-#if defined(F_RDADVISE)
-    struct radvisory hint;
-    hint.ra_offset = offset;
-    hint.ra_count = length;
-    (void)/* Ignore ENOTTY for DB on the ram-disk and so on */ fcntl(
-        env->me_lazy_fd, F_RDADVISE, &hint);
-#endif /* F_RDADVISE */
-#if defined(MADV_WILLNEED)
-    int err = madvise(env->me_map + offset, length, MADV_WILLNEED)
-                  ? ignore_enosys(errno)
-                  : MDBX_SUCCESS;
-    if (unlikely(MDBX_IS_ERROR(err)))
-      return err;
-#elif defined(POSIX_MADV_WILLNEED)
-    int err = ignore_enosys(
-        posix_madvise(env->me_map + offset, length, POSIX_MADV_WILLNEED));
-    if (unlikely(MDBX_IS_ERROR(err)))
-      return err;
-#elif defined(_WIN32) || defined(_WIN64)
-    if (mdbx_PrefetchVirtualMemory) {
-      WIN32_MEMORY_RANGE_ENTRY hint;
-      hint.VirtualAddress = env->me_map + offset;
-      hint.NumberOfBytes = length;
-      (void)mdbx_PrefetchVirtualMemory(GetCurrentProcess(), 1, &hint, 0);
-    }
-#elif defined(POSIX_FADV_WILLNEED)
-    int err = ignore_enosys(
-        posix_fadvise(env->me_lazy_fd, offset, length, POSIX_FADV_WILLNEED));
-    if (unlikely(MDBX_IS_ERROR(err)))
-      return err;
-#endif /* MADV_WILLNEED */
-  } else {
 #if defined(MADV_RANDOM)
     int err = madvise(env->me_map + offset, length, MADV_RANDOM)
                   ? ignore_enosys(errno)
@@ -8518,7 +8483,7 @@ static __cold int mdbx_set_readahead(MDBX_env *env, const size_t offset,
     if (unlikely(MDBX_IS_ERROR(err)))
       return err;
 #endif /* MADV_RANDOM */
-  }
+
   return MDBX_SUCCESS;
 }
 #endif /* MDBX_ENABLE_MADVISE */
@@ -14640,8 +14605,6 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
 }
 
 __cold int mdbx_is_readahead_reasonable(size_t volume, intptr_t redundancy) {
-    return MDBX_RESULT_FALSE;
-
   if (volume <= 1024 * 1024 * 4ul)
     return MDBX_RESULT_TRUE;
 
