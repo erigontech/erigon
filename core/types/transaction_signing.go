@@ -65,6 +65,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 func MakeFrontierSigner() *Signer {
 	var signer Signer
 	signer.maleable = true
+	signer.unprotected = true
 	return &signer
 }
 
@@ -181,7 +182,7 @@ type Signer struct {
 }
 
 func (sg Signer) String() string {
-	return fmt.Sprintf("Signer[chainId=%d,malleable=%t,unprotected=%t,protected=%t,accesslist=%t,dynamicfee=%t", sg.chainID, sg.maleable, sg.unprotected, sg.protected, sg.accesslist, sg.dynamicfee)
+	return fmt.Sprintf("Signer[chainId=%s,malleable=%t,unprotected=%t,protected=%t,accesslist=%t,dynamicfee=%t", &sg.chainID, sg.maleable, sg.unprotected, sg.protected, sg.accesslist, sg.dynamicfee)
 }
 
 // Sender returns the sender address of the transaction.
