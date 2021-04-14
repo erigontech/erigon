@@ -806,7 +806,6 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	bb.header = &h
-	fmt.Printf("Decode block %d %x\n", h.Number.Uint64(), h.Hash())
 	// decode Transactions
 	if _, err = s.List(); err != nil {
 		return err
@@ -849,11 +848,13 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb Block) EncodeRLP(w io.Writer) error {
-	fmt.Printf("Encode block %d %x\n", bb.NumberU64(), bb.Hash())
 	encodingSize := 0
 	// size of Header
 	encodingSize++
 	headerLen := bb.header.EncodingSize()
+	if headerLen >= 56 {
+		encodingSize += (bits.Len(uint(headerLen)) + 7) / 8
+	}
 	encodingSize += headerLen
 	// size of Transactions
 	encodingSize++

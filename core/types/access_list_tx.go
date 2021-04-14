@@ -202,30 +202,45 @@ func (tx AccessListTx) EncodingSize() int {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
+	// Add envelope size and type size
+	if encodingSize >= 56 {
+		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	encodingSize += 2
 	return encodingSize
 }
 
 func accessListSize(al AccessList) int {
 	var accessListLen int
 	for _, tuple := range al {
-		accessListLen += 21 + 1 // For the address and prefix for storage keys
+		tupleLen := 21 // For the address
+		// size of StorageKeys
+		tupleLen++
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(tuple.StorageKeys)
 		if storageLen >= 56 {
-			accessListLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
 		}
+		tupleLen += storageLen
+		accessListLen++
+		if tupleLen >= 56 {
+			accessListLen += (bits.Len(uint(tupleLen)) + 7) / 8 // BE encoding of the length of the storage keys
+		}
+		accessListLen += tupleLen
 	}
 	return accessListLen
 }
 
 func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 	for _, tuple := range al {
-		tupleLen := 21 + 1
+		tupleLen := 21
+		tupleLen++
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(tuple.StorageKeys)
 		if storageLen >= 56 {
 			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
 		}
+		tupleLen += storageLen
 		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
@@ -353,7 +368,22 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
+	envelopeSize := encodingSize + 1
+	if encodingSize >= 56 {
+		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	// size of TxType
+	envelopeSize++
 	var b [33]byte
+	// envelope
+	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
 	// prefix
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
@@ -415,6 +445,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// prefix
+	fmt.Printf("accessListLen: %d\n", accessListLen)
 	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
 		return err
 	}
@@ -440,22 +471,23 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return err
+		return fmt.Errorf("open accessList: %w", err)
 	}
 	var b []byte
+	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
 		*al = append(*al, AccessTuple{})
 		tuple := &(*al)[len(*al)-1]
 		if b, err = s.Bytes(); err != nil {
-			return err
+			return fmt.Errorf("read Address: %w", err)
 		}
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for AccessTuple address: %d", len(b))
 		}
 		copy(tuple.Address[:], b)
 		if _, err = s.List(); err != nil {
-			return err
+			return fmt.Errorf("open StorageKeys: %w", err)
 		}
 		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
 			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
@@ -465,21 +497,25 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
 		}
 		if !errors.Is(err, rlp.EOL) {
-			return err
+			return fmt.Errorf("read StorageKey: %w", err)
 		}
 		// end of StorageKeys list
 		if err = s.ListEnd(); err != nil {
-			return err
+			return fmt.Errorf("close StorageKeys: %w", err)
 		}
 		// end of tuple
 		if err = s.ListEnd(); err != nil {
-			return err
+			return fmt.Errorf("close AccessTuple: %w", err)
 		}
+		i++
 	}
 	if !errors.Is(err, rlp.EOL) {
-		return err
+		return fmt.Errorf("open accessTuple: %d %w", i, err)
 	}
-	return s.ListEnd()
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close accessList: %w", err)
+	}
+	return nil
 }
 
 func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
@@ -531,25 +567,25 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	// decode AccessList
 	tx.AccessList = AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
+		return fmt.Errorf("read AccessList: %w", err)
 	}
 	// decode V
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read V: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read R: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read S: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))

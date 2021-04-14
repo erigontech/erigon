@@ -303,11 +303,6 @@ func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint
 		txId++
 
 		buf.Reset()
-		if tx.Type() != types.LegacyTxType {
-			if err := buf.WriteByte(tx.Type()); err != nil {
-				return err
-			}
-		}
 		if err := rlp.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}

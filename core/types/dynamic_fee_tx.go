@@ -202,6 +202,11 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
+	// Add envelope size and type size
+	if encodingSize >= 56 {
+		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	encodingSize += 2
 	return encodingSize
 }
 
@@ -307,7 +312,22 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
+	envelopeSize := encodingSize + 1
+	if encodingSize >= 56 {
+		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	// size of TxType
+	envelopeSize++
 	var b [33]byte
+	// envelope
+	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
 	// prefix
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
