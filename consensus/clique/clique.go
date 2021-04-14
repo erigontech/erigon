@@ -304,7 +304,7 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	snapBlock := chain.GetHeaderByNumber(lastSnap)
 	snapHash := snapBlock.Hash()
 
-	_, ok := c.getSnapshot(lastSnap, &snapHash)
+	snap, ok := c.getSnapshot(lastSnap, &snapHash)
 	if !ok {
 		// genesis case
 		if lastSnap == 0 {
@@ -313,9 +313,6 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 				log.Error("can't create a genesis Clique snapshot", "block", lastSnap, "hash", snapHash, "err", err)
 				return
 			}
-
-			snapHash = snap.Hash
-			lastSnap = snap.Number
 		} else {
 			log.Error("can't find latest Clique snapshot", "block", snapBlock, "hash", snapHash, "err", err)
 			return
@@ -326,34 +323,18 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	var percent int
 	var prevPercent int
 
-	ancestors := make([]*types.Header, 0, c.snapshotConfig.CheckpointInterval)
-
 	for n := lastSnap + 1; n <= current.Number.Uint64(); n++ {
-		if !isSnapshot(n, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-			h := chain.GetHeaderByNumber(n)
-			if h == nil {
-				log.Error("can't regenerate snapshot. block does not exist", "block", n)
-				return
-			}
-
-			ancestors = append(ancestors, chain.GetHeaderByNumber(n))
-			i++
-			continue
+		current = chain.GetHeaderByNumber(n)
+		if current == nil {
+			log.Error("can't regenerate snapshot. block does not exist", "block", n)
+			return
 		}
 
-		if len(ancestors) > 1 {
-			for left, right := 0, len(ancestors)-1; left < right; left, right = left+1, right-1 {
-				ancestors[left], ancestors[right] = ancestors[right], ancestors[left]
-			}
-		}
-
-		_, err = c.snapshotFromAncestors(&ancestors)
+		err = c.applyAndStoreSnapshot(snap, false, current)
 		if err != nil {
 			log.Error("can't regenerate snapshot", "block", n, "err", err)
 			return
 		}
-
-		ancestors = ancestors[:0]
 
 		i++
 		percent = int(float64(i) / float64(total) * 100)
