@@ -14538,7 +14538,7 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
     goto bailout;
 #endif /* MADV_DODUMP */
 
-#ifdef MADV_WILLNEED
+#ifdef MADV_RANDOM
   err = madvise(env->me_lck, size, MADV_RANDOM) ? ignore_enosys(errno)
                                                   : MDBX_SUCCESS;
   if (unlikely(MDBX_IS_ERROR(err)))
@@ -14713,8 +14713,6 @@ __cold int mdbx_is_readahead_reasonable(size_t volume, intptr_t redundancy) {
 #endif
   if (avail_ram_pages < 1)
     return MDBX_ENOSYS;
-
-  mdbx_notice("available: %u %u %u", volume_pages, redundancy_pages, avail_ram_pages);
 
   return (volume_pages + redundancy_pages >= avail_ram_pages)
              ? MDBX_RESULT_FALSE
