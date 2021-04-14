@@ -349,7 +349,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 			GasPrice: &gasPrice,
 			Value:    &value,
 			Data:     tx.tx.Data(),
-		}, []string{TraceTypeTrace, TraceTypeStateDiff, TraceTypeVmTrace}})
+		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
 	}
 
 	calls, callsErr := json.Marshal(toExecute)
