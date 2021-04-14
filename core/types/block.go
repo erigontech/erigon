@@ -632,6 +632,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	if unclesLen >= 56 {
 		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
 	}
+	encodingSize += unclesLen
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {

@@ -275,11 +275,11 @@ func (sg Signer) ChainID() *uint256.Int {
 // Equal returns true if the given signer is the same as the receiver.
 func (sg Signer) Equal(other Signer) bool {
 	return sg.chainID.Eq(&other.chainID) &&
-		sg.maleable == sg.maleable &&
-		sg.unprotected == sg.unprotected &&
-		sg.protected == sg.protected &&
-		sg.accesslist == sg.accesslist &&
-		sg.dynamicfee == sg.dynamicfee
+		sg.maleable == other.maleable &&
+		sg.unprotected == other.unprotected &&
+		sg.protected == other.protected &&
+		sg.accesslist == other.accesslist &&
+		sg.dynamicfee == other.dynamicfee
 }
 
 func decodeSignature(sig []byte) (r, s, v *uint256.Int) {

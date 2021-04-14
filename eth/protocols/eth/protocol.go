@@ -339,6 +339,7 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 	if unclesLen >= 56 {
 		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
 	}
+	encodingSize += unclesLen
 	var b [33]byte
 	// prefix
 	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
