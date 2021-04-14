@@ -24,7 +24,7 @@ type TraceAPI interface {
 	// Filtering (see ./trace_filtering.go)
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
-	BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
+	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
 	Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
 }
 

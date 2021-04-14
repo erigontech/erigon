@@ -87,8 +87,8 @@ func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, bl
 
 		recording := rec != nil // This flag will be set to false if recording is not to be performed
 		reqGen.reqID++
-		request := reqGen.traceBlockByNumber(bn)
-		res = reqGen.TurboGeth2("trace_BlockByNumber", request)
+		request := reqGen.traceBlock(bn)
+		res = reqGen.TurboGeth2("trace_block", request)
 		if res.Err != nil {
 			fmt.Printf("Could not trace block (turbo-geth) %d: %v\n", bn, res.Err)
 			return
@@ -98,7 +98,7 @@ func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, bl
 			return
 		}
 		if needCompare {
-			resg := reqGen.Geth2("trace_BlockByNumber", request)
+			resg := reqGen.Geth2("trace_block", request)
 			if resg.Err != nil {
 				fmt.Printf("Could not trace block (OE) %d: %v\n", bn, resg.Err)
 				return
