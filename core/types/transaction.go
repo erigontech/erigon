@@ -385,19 +385,26 @@ type Message struct {
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
-	return Message{
+	m := Message{
 		from:       from,
 		to:         to,
 		nonce:      nonce,
 		amount:     *amount,
 		gasLimit:   gasLimit,
-		gasPrice:   *gasPrice,
-		feeCap:     *feeCap,
-		tip:        *tip,
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
 	}
+	if gasPrice != nil {
+		m.gasPrice.Set(gasPrice)
+	}
+	if tip != nil {
+		m.feeCap.Set(tip)
+	}
+	if feeCap != nil {
+		m.feeCap.Set(feeCap)
+	}
+	return m
 }
 
 func (m Message) From() common.Address   { return m.from }
