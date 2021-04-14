@@ -336,20 +336,20 @@ type TransactionWithSender struct {
 }
 
 func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]ParityTrace, error) {
-	toExecute := []TraceCallParam{}
+	toExecute := []interface{}{}
 
 	for _, tx := range txs {
 		gas := hexutil.Uint64(tx.tx.Gas())
 		gasPrice := hexutil.Big(*tx.tx.GasPrice().ToBig())
 		value := hexutil.Big(*tx.tx.Value().ToBig())
-		toExecute = append(toExecute, TraceCallParam{
+		toExecute = append(toExecute, []interface{}{TraceCallParam{
 			From:     &tx.sender,
 			To:       tx.tx.To(),
 			Gas:      &gas,
 			GasPrice: &gasPrice,
 			Value:    &value,
 			Data:     tx.tx.Data(),
-		})
+		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
 	}
 
 	calls, callsErr := json.Marshal(toExecute)
