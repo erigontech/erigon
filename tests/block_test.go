@@ -55,7 +55,6 @@ func TestBlockchain(t *testing.T) {
 
 	// FIXME: failing tests after Berlin rebase
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp.json.*`, "Needs to be fixed for TG (Berlin)")
-
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailureWithName(t, name+"/trie", test.Run(false)); err != nil {
 			t.Errorf("test without snapshotter failed: %v", err)
@@ -64,6 +63,7 @@ func TestBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
+
 	// There is also a LegacyTests folder, containing blockchain tests generated
 	// prior to Istanbul. However, they are all derived from GeneralStateTests,
 	// which run natively, so there's no reason to run them here.

@@ -3,7 +3,6 @@ package migrations
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -17,7 +16,7 @@ const oldExecutionKey = 4 // it won't change anymore, not before we apply this m
 func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageProgressOld1)
 	})
 	require.NoError(err)
@@ -39,10 +38,11 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, i)
 
-	_, err = db.Get(dbutils.SyncStageProgress, []byte{byte(oldExecutionKey)})
-	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
+	v, err := db.GetOne(dbutils.SyncStageProgress, []byte{byte(oldExecutionKey)})
+	require.NoError(err)
+	require.Nil(v)
 
-	v, err := db.Get(dbutils.SyncStageProgress, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageProgress, stages.Execution)
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }
@@ -50,7 +50,7 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.SyncStageUnwindOld1)
 	})
 	require.NoError(err)
@@ -72,10 +72,11 @@ func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, i)
 
-	_, err = db.Get(dbutils.SyncStageUnwind, []byte{byte(oldExecutionKey)})
-	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
+	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte{byte(oldExecutionKey)})
+	require.NoError(err)
+	require.Nil(v)
 
-	v, err := db.Get(dbutils.SyncStageUnwind, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageUnwind, stages.Execution)
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }

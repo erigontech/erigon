@@ -162,7 +162,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.db)
+	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(ethdb.RwTx))
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.db)
+	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(ethdb.RwTx))
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	return nil
 }
 
-func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.GetterPutter) error {
+func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.RwTx) error {
 	buf := bytes.NewBuffer(nil)
 	for _, change := range changes.Changes {
 		k := dbutils.CompositeKeyWithoutIncarnation(change.Key)

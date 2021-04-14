@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -20,20 +21,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
+	OnNewPendingLogs(types.Logs)
+	OnNewPendingBlock(*types.Block)
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	d            DownloaderGlue
-	ChainConfig  *params.ChainConfig
-	chainContext *core.TinyChainContext
-	vmConfig     *vm.Config
-	DB           ethdb.Database
+	d           DownloaderGlue
+	ChainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	Engine      consensus.Engine
+	DB          ethdb.Database
 	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
@@ -48,7 +52,7 @@ type StageParameters struct {
 	headersFetchers       []func() error
 	txPool                *core.TxPool
 	poolStart             func() error
-	prefetchedBlocks      *PrefetchedBlocks
+	prefetchedBlocks      *bodydownload.PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier
@@ -70,15 +74,18 @@ type MiningStagesParameters struct {
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
 	noempty      bool
-	pendingTxs   map[common.Address]types.Transactions
-	txPoolLocals []common.Address
+	PendingTxs   types.TransactionsGroupedBySender
+	TxPoolLocals []common.Address
+
+	resultCh     chan<- *types.Block
+	miningCancel <-chan struct{}
 
 	// runtime dat
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs map[common.Address]types.Transactions, txPoolLocals []common.Address) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, pendingTxs: pendingTxs, txPoolLocals: txPoolLocals, Block: &miningBlock{}}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
 
 }
 
@@ -208,7 +215,7 @@ func DefaultStages() StageBuilders {
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.ChainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.Engine, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -323,14 +330,14 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
@@ -386,7 +393,7 @@ func DefaultStages() StageBuilders {
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.TX)
 						if err != nil {
 							return err
 						}
@@ -424,13 +431,13 @@ func MiningStages() StageBuilders {
 						return SpawnMiningCreateBlockStage(s, world.TX,
 							world.mining.Block,
 							world.ChainConfig,
-							world.chainContext.Engine(),
+							world.Engine,
 							world.mining.ExtraData,
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
-							world.mining.txPoolLocals,
-							world.mining.pendingTxs,
+							world.mining.TxPoolLocals,
+							world.mining.PendingTxs,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -448,11 +455,12 @@ func MiningStages() StageBuilders {
 							world.mining.Block,
 							world.ChainConfig,
 							world.vmConfig,
-							world.chainContext,
-							world.mining.Block.localTxs,
-							world.mining.Block.remoteTxs,
+							world.Engine,
+							world.mining.Block.LocalTxs,
+							world.mining.Block.RemoteTxs,
 							world.mining.Etherbase,
 							world.mining.noempty,
+							world.notifier,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -483,7 +491,7 @@ func MiningStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-						world.mining.Block.header.Root = stateRoot
+						world.mining.Block.Header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
@@ -497,11 +505,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.chainContext.Engine(), world.ChainConfig, world.QuitCh)
-						if err != nil {
-							return err
-						}
-						return nil
+						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.Engine, world.ChainConfig, world.mining.resultCh, world.mining.miningCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

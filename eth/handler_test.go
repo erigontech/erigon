@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -91,7 +90,7 @@ func (p *testTxPool) AddRemotes(txs []*types.Transaction) []error {
 }
 
 // Pending returns all the transactions known to the pool
-func (p *testTxPool) Pending() (map[common.Address]types.Transactions, error) {
+func (p *testTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
@@ -100,10 +99,12 @@ func (p *testTxPool) Pending() (map[common.Address]types.Transactions, error) {
 		from, _ := types.Sender(types.HomesteadSigner{}, tx)
 		batches[from] = append(batches[from], tx)
 	}
+	groups := types.TransactionsGroupedBySender{}
 	for _, batch := range batches {
 		sort.Sort(types.TxByNonce(batch))
+		groups = append(groups, batch)
 	}
-	return batches, nil
+	return groups, nil
 }
 
 // SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
@@ -151,12 +152,15 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	txpool := newTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
-		Database:   db,
-		Chain:      chain,
-		TxPool:     txpool,
-		Network:    1,
-		Sync:       downloader.StagedSync,
-		BloomCache: 1,
+		Database:    db,
+		Chain:       chain,
+		ChainConfig: chain.Config(),
+		genesis:     chain.Genesis(),
+		vmConfig:    chain.GetVMConfig(),
+		engine:      chain.Engine(),
+		TxPool:      txpool,
+		Network:     1,
+		BloomCache:  1,
 	})
 	handler.Start(1000)
 

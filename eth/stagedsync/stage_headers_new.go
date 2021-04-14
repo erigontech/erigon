@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
@@ -26,6 +27,7 @@ func HeadersForward(
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	blockPropagator adapter.BlockPropagator,
 	initialCycle bool,
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
@@ -74,7 +76,7 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	localTd, err1 := rawdb.ReadTd(tx, headHash, headerProgress)
+	localTd, err1 := rawdb.ReadTd(tx, hash, headerProgress)
 	if err1 != nil {
 		return err1
 	}
@@ -114,7 +116,7 @@ func HeadersForward(
 			peer = headerReqSend(ctx, req)
 		}
 		// Load headers into the database
-		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
+		if err = hd.InsertHeaders(headerInserter.FeedHeader, blockPropagator); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(batchSize) {
@@ -150,8 +152,10 @@ func HeadersForward(
 			break
 		}
 	}
-	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
-		return err
+	if headerInserter.AnythingDone() {
+		if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return err
+		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
 		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
@@ -177,6 +181,7 @@ func HeadersForward(
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}
+	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
 	return nil
 }
 

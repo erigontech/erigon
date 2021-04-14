@@ -14,12 +14,12 @@ import (
 )
 
 type chainContext struct {
-	db ethdb.Database
+	tx ethdb.Tx
 }
 
-func NewChainContext(db ethdb.Database) *chainContext {
+func NewChainContext(tx ethdb.Tx) *chainContext {
 	return &chainContext{
-		db: db,
+		tx: tx,
 	}
 }
 
@@ -49,7 +49,8 @@ func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header 
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	panic("must not be called")
 }
-func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+
+func (c *powEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	panic("must not be called")
 }
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
@@ -71,7 +72,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(c.db, hash, number)
+	return rawdb.ReadHeader(ethdb.NewRoTxDb(c.tx), hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {

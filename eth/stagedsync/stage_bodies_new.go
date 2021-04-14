@@ -13,8 +13,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
+
+var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
@@ -25,6 +29,7 @@ func BodiesForward(
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	blockPropagator adapter.BlockPropagator,
 	wakeUpChan chan struct{},
 	timeout int,
 	batchSize datasize.ByteSize) error {
@@ -86,7 +91,7 @@ func BodiesForward(
 		*/
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
+			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime, blockPropagator)
 		}
 		peer = nil
 		if req != nil {
@@ -101,7 +106,7 @@ func BodiesForward(
 		}
 		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
+			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime, blockPropagator)
 			peer = nil
 			if req != nil {
 				peer = bodyReqSend(ctx, req)
@@ -159,6 +164,7 @@ func BodiesForward(
 		case <-wakeUpChan:
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
+		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)

@@ -90,7 +90,7 @@ type RemoteBackend struct {
 	log              log.Logger
 }
 
-func NewRemoteBackend(kv ethdb.KV) *RemoteBackend {
+func NewRemoteBackend(kv ethdb.RoKV) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(kv.(*ethdb.RemoteKV).GrpcConn()),
 		log:              log.New("remote_db"),

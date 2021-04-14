@@ -27,9 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -39,11 +37,8 @@ import (
 
 // Node is a container on which services can be registered.
 type Node struct {
-	eventmux      *event.TypeMux
 	config        *Config
-	accman        *accounts.Manager
 	log           log.Logger
-	ephemKeystore string            // if non-empty, the key directory that will be removed by Stop
 	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
 	stop          chan struct{}     // Channel to wait for termination notifications
 	server        *p2p.Server       // Currently running P2P networking layer
@@ -91,9 +86,6 @@ func New(conf *Config) (*Node, error) {
 	if strings.ContainsAny(conf.Name, `/\`) {
 		return nil, errors.New(`Config.Name must not contain '/' or '\'`)
 	}
-	if conf.Name == datadirDefaultKeyStore {
-		return nil, errors.New(`Config.Name cannot be "` + datadirDefaultKeyStore + `"`)
-	}
 	if strings.HasSuffix(conf.Name, ".ipc") {
 		return nil, errors.New(`Config.Name cannot end in ".ipc"`)
 	}
@@ -101,13 +93,11 @@ func New(conf *Config) (*Node, error) {
 	node := &Node{
 		config:        conf,
 		inprocHandler: rpc.NewServer(),
-		eventmux:      new(event.TypeMux),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		server:        &p2p.Server{Config: conf.P2P},
 		databases:     make([]ethdb.Closer, 0),
 	}
-
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
 
@@ -116,25 +106,13 @@ func New(conf *Config) (*Node, error) {
 		return nil, err
 	}
 
-	// Ensure that the AccountManager method works before the node has started. We rely on
-	// this in cmd/geth.
-	accManagerConf, err := conf.AccountConfig()
-	if err != nil {
-		return nil, err
-	}
-	am, ephemeralKeystore, err := MakeAccountManager(accManagerConf)
-	if err != nil {
-		return nil, err
-	}
-	node.accman = am
-	node.ephemKeystore = ephemeralKeystore
-
+	var err error
 	// Initialize the p2p server. This creates the node key and discovery databases.
 	node.server.Config.PrivateKey, err = node.config.NodeKey()
 	if err != nil {
 		return nil, err
 	}
-	node.server.Config.Name = node.config.NodeName()
+	node.server.Config.Name = node.Config().NodeName()
 	node.server.Config.Logger = node.log
 	if node.server.Config.StaticNodes == nil {
 		node.server.Config.StaticNodes, err = node.config.StaticNodes()
@@ -256,15 +234,6 @@ func (n *Node) doClose(errs []error) error {
 		closer.Close()
 	}
 	n.lock.Unlock()
-
-	if err := n.accman.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if n.ephemKeystore != "" {
-		if err := os.RemoveAll(n.ephemKeystore); err != nil {
-			errs = append(errs, err)
-		}
-	}
 
 	// Release instance directory lock.
 	n.closeDataDir()
@@ -471,7 +440,6 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	// Remove the keystore if it was created ephemerally.
 	if n.state != initializingState {
 		panic("can't register protocols on running/stopped node")
 	}
@@ -547,11 +515,6 @@ func (n *Node) InstanceDir() string {
 	return n.config.instanceDir()
 }
 
-// AccountManager retrieves the account manager used by the protocol stack.
-func (n *Node) AccountManager() *accounts.Manager {
-	return n.accman
-}
-
 // IPCEndpoint retrieves the current IPC endpoint used by the protocol stack.
 func (n *Node) IPCEndpoint() string {
 	return n.ipc.endpoint
@@ -569,12 +532,6 @@ func (n *Node) WSEndpoint() string {
 		return "ws://" + n.http.listenAddr() + n.http.wsConfig.prefix
 	}
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
-}
-
-// EventMux retrieves the event multiplexer used by all the network services in
-// the current protocol stack.
-func (n *Node) EventMux() *event.TypeMux {
-	return n.eventmux
 }
 
 // OpenDatabase opens an existing database with the given name (or creates one if no

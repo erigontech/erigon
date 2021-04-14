@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"fmt"
 	"math/big"
 	"os"
 	"sync"
@@ -54,9 +53,6 @@ var (
 	testChainForkLightA   *testChain
 	testChainForkLightAMu sync.Mutex
 
-	testChainForkLightB   *testChain
-	testChainForkLightBMu sync.Mutex
-
 	testChainForkHeavy   *testChain
 	testChainForkHeavyMu sync.Mutex
 )
@@ -68,14 +64,6 @@ func getTestChainForkLightA() *testChain {
 		testChainForkLightA = getTestChainBase().makeFork(getForkLen(), false, 1)
 	}
 	return testChainForkLightA
-}
-func getTestChainForkLightB() *testChain {
-	testChainForkLightBMu.Lock()
-	defer testChainForkLightBMu.Unlock()
-	if testChainForkLightB == nil {
-		testChainForkLightB = getTestChainBase().makeFork(getForkLen(), false, 2)
-	}
-	return testChainForkLightB
 }
 func getTestChainForkHeavy() *testChain {
 	testChainForkHeavyMu.Lock()
@@ -136,15 +124,6 @@ func (tc *testChain) makeFork(length int, heavy bool, seed byte) *testChain {
 	fork := tc.copy(tc.len() + length)
 	fork.generate(length, seed, tc.headBlock(), heavy)
 	return fork
-}
-
-// shorten creates a copy of the chain with the given length. It panics if the
-// length is longer than the number of available blocks.
-func (tc *testChain) shorten(length int) *testChain {
-	if length > tc.len() {
-		panic(fmt.Errorf("can't shorten test chain to %d blocks, it's only %d blocks long", length, tc.len()))
-	}
-	return tc.copy(length)
 }
 
 func (tc *testChain) copy(newlen int) *testChain {
@@ -244,7 +223,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	// Convert the block-chain into a hash-chain and header/block maps
 	td := new(big.Int).Set(tc.td(parent.Hash()))
 	for i, b := range blocks[existingLen:] {
-		td := td.Add(td, b.Difficulty())
+		td = td.Add(td, b.Difficulty())
 		hash := b.Hash()
 		tc.chain = append(tc.chain, hash)
 		tc.blockm[hash] = b
@@ -293,17 +272,6 @@ func (tc *testChain) headersByNumber(origin uint64, amount int, skip int, revers
 		}
 	}
 	return result
-}
-
-// receipts returns the receipts of the given block hashes.
-func (tc *testChain) receipts(hashes []common.Hash) [][]*types.Receipt {
-	results := make([][]*types.Receipt, 0, len(hashes))
-	for _, hash := range hashes {
-		if receipt, ok := tc.receiptm[hash]; ok {
-			results = append(results, receipt)
-		}
-	}
-	return results
 }
 
 // bodies returns the block bodies of the given block hashes.

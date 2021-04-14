@@ -19,12 +19,15 @@ func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
 	db := ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
 		if err != nil {
 			return err
 		}
-		c := tx.RwCursor(dbutils.HeaderPrefixOld)
+		c, err := tx.RwCursor(dbutils.HeaderPrefixOld)
+		if err != nil {
+			return err
+		}
 		for i := uint64(0); i < 10; i++ {
 			//header
 			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))

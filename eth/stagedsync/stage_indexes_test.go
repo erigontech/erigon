@@ -24,12 +24,13 @@ import (
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	kv := db.RwKV()
 
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
-			db := ethdb.NewMemDatabase()
-			defer db.Close()
-			tx, err := db.Begin(context.Background(), ethdb.RW)
+			tx, err := kv.BeginRw(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,11 +64,13 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	kv := db.RwKV()
 	for i := range buckets {
 		csbucket := buckets[i]
-		db := ethdb.NewMemDatabase()
-		defer db.Close()
-		tx, err := db.Begin(context.Background(), ethdb.RW)
+
+		tx, err := kv.BeginRw(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,11 +178,10 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 		//})
 		tx.Rollback()
-		db.Close()
 	}
 }
 
-func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
+func generateTestData(t *testing.T, db ethdb.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
 	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
@@ -248,7 +250,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 	}
 }
 
-func checkIndex(t *testing.T, db ethdb.Getter, bucket string, k []byte, expected []uint64) {
+func checkIndex(t *testing.T, db ethdb.Tx, bucket string, k []byte, expected []uint64) {
 	t.Helper()
 	k = dbutils.CompositeKeyWithoutIncarnation(k)
 	m, err := bitmapdb.Get64(db, bucket, k, 0, math.MaxUint32)

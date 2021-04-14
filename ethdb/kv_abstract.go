@@ -15,59 +15,43 @@ var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
-	dbSize             = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)
-	tableScsLeaf       = metrics.GetOrRegisterGauge("table/scs/leaf", metrics.DefaultRegistry)       //nolint
-	tableScsBranch     = metrics.GetOrRegisterGauge("table/scs/branch", metrics.DefaultRegistry)     //nolint
-	tableScsOverflow   = metrics.GetOrRegisterGauge("table/scs/overflow", metrics.DefaultRegistry)   //nolint
-	tableScsEntries    = metrics.GetOrRegisterGauge("table/scs/entries", metrics.DefaultRegistry)    //nolint
-	tableStateLeaf     = metrics.GetOrRegisterGauge("table/state/leaf", metrics.DefaultRegistry)     //nolint
-	tableStateBranch   = metrics.GetOrRegisterGauge("table/state/branch", metrics.DefaultRegistry)   //nolint
-	tableStateOverflow = metrics.GetOrRegisterGauge("table/state/overflow", metrics.DefaultRegistry) //nolint
-	tableStateEntries  = metrics.GetOrRegisterGauge("table/state/entries", metrics.DefaultRegistry)  //nolint
-	tableLogLeaf       = metrics.GetOrRegisterGauge("table/log/leaf", metrics.DefaultRegistry)       //nolint
-	tableLogBranch     = metrics.GetOrRegisterGauge("table/log/branch", metrics.DefaultRegistry)     //nolint
-	tableLogOverflow   = metrics.GetOrRegisterGauge("table/log/overflow", metrics.DefaultRegistry)   //nolint
-	tableLogEntries    = metrics.GetOrRegisterGauge("table/log/entries", metrics.DefaultRegistry)    //nolint
-	tableTxLeaf        = metrics.GetOrRegisterGauge("table/tx/leaf", metrics.DefaultRegistry)        //nolint
-	tableTxBranch      = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)      //nolint
-	tableTxOverflow    = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)    //nolint
-	tableTxEntries     = metrics.GetOrRegisterGauge("table/tx/entries", metrics.DefaultRegistry)     //nolint
-	tableGcLeaf        = metrics.GetOrRegisterGauge("table/gc/leaf", metrics.DefaultRegistry)        //nolint
-	tableGcBranch      = metrics.GetOrRegisterGauge("table/gc/branch", metrics.DefaultRegistry)      //nolint
-	tableGcOverflow    = metrics.GetOrRegisterGauge("table/gc/overflow", metrics.DefaultRegistry)    //nolint
-	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
+	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
 )
 
-// KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
-//
-// Common pattern for short-living transactions:
-//
-//  if err := db.View(ctx, func(tx ethdb.Tx) error {
-//     ... code which uses database in transaction
-//  }); err != nil {
-//		return err
-// }
-//
-// Common pattern for long-living transactions:
-//	tx, err := db.Begin(ethdb.RW)
-//	if err != nil {
-//		return err
-//	}
-//	defer tx.Rollback()
-//
-//	... code which uses database in transaction
-//
-//	err := tx.Commit()
-//	if err != nil {
-//		return err
-//	}
-//
-type KV interface {
-	View(ctx context.Context, f func(tx Tx) error) error
-	Update(ctx context.Context, f func(tx RwTx) error) error
-	Close()
+type Has interface {
+	// Has indicates whether a key exists in the database.
+	Has(bucket string, key []byte) (bool, error)
+}
 
-	// Begin - creates transaction
+type KVGetter interface {
+	Has
+
+	GetOne(bucket string, key []byte) (val []byte, err error)
+}
+
+// Putter wraps the database write operations.
+type Putter interface {
+	// Put inserts or updates a single entry.
+	Put(bucket string, key, value []byte) error
+}
+
+// Deleter wraps the database delete operations.
+type Deleter interface {
+	// Delete removes a single entry.
+	Delete(bucket string, k, v []byte) error
+}
+
+type Closer interface {
+	Close()
+}
+
+// Read-only version of KV.
+type RoKV interface {
+	Closer
+
+	View(ctx context.Context, f func(tx Tx) error) error
+
+	// BeginRo - creates transaction
 	// 	tx may be discarded by .Rollback() method
 	//
 	// A transaction and its cursors must only be used by a single
@@ -80,55 +64,92 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context) (Tx, error)
-	BeginRw(ctx context.Context) (RwTx, error)
+	BeginRo(ctx context.Context) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 
 	CollectMetrics()
 }
 
-type TxFlags uint
+// KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
+//
+// Common pattern for short-living transactions:
+//
+//  if err := db.View(ctx, func(tx ethdb.Tx) error {
+//     ... code which uses database in transaction
+//  }); err != nil {
+//		return err
+// }
+//
+// Common pattern for long-living transactions:
+//	tx, err := db.Begin()
+//	if err != nil {
+//		return err
+//	}
+//	defer tx.Rollback()
+//
+//	... code which uses database in transaction
+//
+//	err := tx.Commit()
+//	if err != nil {
+//		return err
+//	}
+//
+type RwKV interface {
+	RoKV
 
-const (
-	RW TxFlags = 0x00 // default
-	RO TxFlags = 0x02
-)
+	Update(ctx context.Context, f func(tx RwTx) error) error
 
-type Tx interface {
-	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
-	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
-	// Otherwise - object of interface Cursor created
-	//
-	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
-	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
-	Cursor(bucket string) Cursor
-	CursorDupSort(bucket string) CursorDupSort // CursorDupSort - can be used if bucket has lmdb.DupSort flag
-	GetOne(bucket string, key []byte) (val []byte, err error)
-	HasOne(bucket string, key []byte) (bool, error)
+	BeginRw(ctx context.Context) (RwTx, error)
+}
 
-	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
-	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
+type StatelessReadTx interface {
+	KVGetter
 
-	BucketSize(name string) (uint64, error)
-
-	Comparator(bucket string) dbutils.CmpFunc
+	Commit() error // Commit all the operations of a transaction into the database.
+	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
 
 	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	ReadSequence(bucket string) (uint64, error)
+}
+
+type StatelessWriteTx interface {
+	Putter
+	Deleter
+
+	IncrementSequence(bucket string, amount uint64) (uint64, error)
+}
+
+type StatelessRwTx interface {
+	StatelessReadTx
+	StatelessWriteTx
+}
+
+type Tx interface {
+	StatelessReadTx
+
+	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
+	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
+	// Otherwise - object of interface Cursor created
+	//
+	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
+	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
+	Cursor(bucket string) (Cursor, error)
+	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
+
+	Comparator(bucket string) dbutils.CmpFunc
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 type RwTx interface {
 	Tx
+	StatelessWriteTx
 
-	RwCursor(bucket string) RwCursor
-	RwCursorDupSort(bucket string) RwCursorDupSort
-
-	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	RwCursor(bucket string) (RwCursor, error)
+	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
@@ -205,5 +226,6 @@ type RwCursorDupSort interface {
 }
 
 type HasStats interface {
+	BucketSize(name string) (uint64, error)
 	DiskSize(context.Context) (uint64, error) // db size
 }

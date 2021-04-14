@@ -5,17 +5,17 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
-const prof = false // whether to profile
-
 type StagedSync struct {
-	PrefetchedBlocks *PrefetchedBlocks
+	PrefetchedBlocks *bodydownload.PrefetchedBlocks
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
 	params           OptionalParameters
@@ -44,7 +44,7 @@ type OptionalParameters struct {
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
 	return &StagedSync{
-		PrefetchedBlocks: NewPrefetchedBlocks(),
+		PrefetchedBlocks: bodydownload.NewPrefetchedBlocks(),
 		stageBuilders:    stages,
 		unwindOrder:      unwindOrder,
 		params:           params,
@@ -54,7 +54,7 @@ func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameter
 func (stagedSync *StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
-	chainContext *core.TinyChainContext,
+	engine consensus.Engine,
 	vmConfig *vm.Config,
 	db ethdb.Database,
 	tx ethdb.Database,
@@ -88,7 +88,7 @@ func (stagedSync *StagedSync) Prepare(
 		StageParameters{
 			d:                     d,
 			ChainConfig:           chainConfig,
-			chainContext:          chainContext,
+			Engine:                engine,
 			vmConfig:              vmConfig,
 			DB:                    db,
 			TX:                    tx,

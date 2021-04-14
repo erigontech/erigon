@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-//go:generate gencodec -type AccessTuple -out gen_access_tuple.go
+// go:generate gencodec -type AccessTuple -out gen_access_tuple.go
 
 // AccessList is an EIP-2930 access list.
 type AccessList []AccessTuple
@@ -96,7 +96,6 @@ func (tx *AccessListTx) copy() TxData {
 
 func (tx *AccessListTx) txType() byte           { return AccessListTxType }
 func (tx *AccessListTx) chainID() *uint256.Int  { return tx.ChainID }
-func (tx *AccessListTx) protected() bool        { return true } //nolint:unused
 func (tx *AccessListTx) accessList() AccessList { return tx.AccessList }
 func (tx *AccessListTx) data() []byte           { return tx.Data }
 func (tx *AccessListTx) gas() uint64            { return tx.Gas }

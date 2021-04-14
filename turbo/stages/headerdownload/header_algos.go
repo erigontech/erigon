@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -138,20 +139,20 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	var prevLink *Link
+	// var prevLink *Link
 	for link != nil && !link.preverified {
 		link.preverified = true
-		if prevLink != nil && len(link.next) > 1 {
-			// Remove all non-canonical links
-			var toRemove []*Link
-			for _, n := range link.next {
-				if n != prevLink {
-					toRemove = append(toRemove, n)
-				}
-			}
-			hd.removeUpwards(toRemove)
-			link.next = append(link.next[:0], prevLink)
-		}
+		// if prevLink != nil && len(link.next) > 1 {
+		// 	// Remove all non-canonical links
+		// 	var toRemove []*Link
+		// 	for _, n := range link.next {
+		// 		if n != prevLink {
+		// 			toRemove = append(toRemove, n)
+		// 		}
+		// 	}
+		// 	hd.removeUpwards(toRemove)
+		// 	link.next = append(link.next[:0], prevLink)
+		// }
 		link = hd.links[link.header.ParentHash]
 	}
 }
@@ -435,8 +436,11 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
-	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeadersBucket)
+	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
@@ -524,7 +528,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, blockPropagator adapter.BlockPropagator) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for len(hd.insertList) > 0 {
@@ -543,6 +547,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
+			go blockPropagator.PropagateNewBlockHashes(context.Background(), link.header.Hash(), link.header.Number.Uint64())
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err

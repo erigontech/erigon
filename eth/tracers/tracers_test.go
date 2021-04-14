@@ -124,7 +124,6 @@ type callTracerTest struct {
 }
 
 func TestPrestateTracerCreate2(t *testing.T) {
-	t.Skip("to implement without trieDbState")
 	unsignedTx := types.NewTransaction(1, common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		uint256.NewInt(), 5000000, uint256.NewInt().SetUint64(1), []byte{})
 
@@ -175,7 +174,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb, _, _ := tests.MakePreState(ctx, ethdb.NewMemoryDatabase(), alloc, context.BlockNumber.Uint64())
+	statedb, _ := tests.MakePreState2(ctx, ethdb.NewMemoryDatabase(), alloc, context.BlockNumber.Uint64())
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer", txContext)
@@ -209,13 +208,11 @@ func TestPrestateTracerCreate2(t *testing.T) {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracer(t *testing.T) {
-	t.Skip("to implement without trieDbState")
-
 	ctx := context.TODO()
 
-	files, err := ioutil.ReadDir("testdata")
-	if err != nil {
-		t.Fatalf("failed to retrieve tracer test suite: %v", err)
+	files, filesErr := ioutil.ReadDir("testdata")
+	if filesErr != nil {
+		t.Fatalf("failed to retrieve tracer test suite: %v", filesErr)
 	}
 	for _, file := range files {
 		if !strings.HasPrefix(file.Name(), "call_tracer_") {
@@ -226,9 +223,9 @@ func TestCallTracer(t *testing.T) {
 			t.Parallel()
 
 			// Call tracer test found, read if from disk
-			blob, err := ioutil.ReadFile(filepath.Join("testdata", file.Name()))
-			if err != nil {
-				t.Fatalf("failed to read testcase: %v", err)
+			blob, blobErr := ioutil.ReadFile(filepath.Join("testdata", file.Name()))
+			if blobErr != nil {
+				t.Fatalf("failed to read testcase: %v", blobErr)
 			}
 			test := new(callTracerTest)
 			if err := json.Unmarshal(blob, test); err != nil {
@@ -254,7 +251,7 @@ func TestCallTracer(t *testing.T) {
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
-			statedb, _, _ := tests.MakePreState(ctx, ethdb.NewMemoryDatabase(), test.Genesis.Alloc, uint64(test.Context.Number))
+			statedb, _ := tests.MakePreState2(ctx, ethdb.NewMemoryDatabase(), test.Genesis.Alloc, uint64(test.Context.Number))
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer", txContext)

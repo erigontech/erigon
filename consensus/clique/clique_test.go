@@ -74,7 +74,7 @@ func TestReimportMirroredState(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			block.AddTxWithChain(chain, tx)
+			block.AddTxWithChain(chain.GetHeader, chain.Engine(), tx)
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {

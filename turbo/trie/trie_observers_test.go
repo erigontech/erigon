@@ -166,7 +166,7 @@ func TestObserverCodeSizeChanged(t *testing.T) {
 		hex := keybytesToHex(key)
 		hex = hex[:len(hex)-1]
 		newSize, ok := observer.createdNodes[common.Bytes2Hex(hex)]
-		assert.True(t, ok, "account should be registed as created")
+		assert.True(t, ok, "account should be registered as created")
 		assert.Equal(t, 100, int(newSize), "account size should increase when the account code grows")
 
 		code2 := genByteArrayOfLen(50)
@@ -176,7 +176,7 @@ func TestObserverCodeSizeChanged(t *testing.T) {
 		trie.UpdateAccountCode(key, codeNode(code2)) //nolint:errcheck
 
 		newSize2, ok := observer.createdNodes[common.Bytes2Hex(hex)]
-		assert.True(t, ok, "account should be registed as created")
+		assert.True(t, ok, "account should be registered as created")
 		assert.Equal(t, -50, int(newSize2)-int(newSize), "account size should decrease when the account code shrinks")
 	}
 }

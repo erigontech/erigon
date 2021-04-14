@@ -102,8 +102,7 @@ type (
 		account *common.Address
 	}
 	resetObjectChange struct {
-		prev         *stateObject
-		prevdestruct bool
+		prev *stateObject
 	}
 	suicideChange struct {
 		account     *common.Address
@@ -129,11 +128,6 @@ type (
 		account  *common.Address
 		prevcode []byte
 		prevhash common.Hash
-	}
-	storageSizeChange struct {
-		account     *common.Address
-		prevHasSize bool
-		prevsize    uint64
 	}
 
 	// Changes to other state values.

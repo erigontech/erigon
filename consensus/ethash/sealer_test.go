@@ -22,12 +22,14 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/internal/testlog"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.
@@ -55,7 +57,9 @@ func TestRemoteNotify(t *testing.T) {
 	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
 
-	_ = ethash.Seal(consensus.NewCancel(), nil, block, nil, nil)
+	if err := ethash.Seal(nil, block, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case work := <-sink:
 		if want := ethash.SealHash(header).Hex(); work[0] != want {
@@ -73,10 +77,57 @@ func TestRemoteNotify(t *testing.T) {
 	}
 }
 
+// Tests whether remote HTTP servers are correctly notified of new work. (Full pending block body / --miner.notify.full)
+func TestRemoteNotifyFull(t *testing.T) {
+	// Start a simple web server to capture notifications.
+	sink := make(chan map[string]interface{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		blob, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			t.Errorf("failed to read miner notification: %v", err)
+		}
+		var work map[string]interface{}
+		if err := json.Unmarshal(blob, &work); err != nil {
+			t.Errorf("failed to unmarshal miner notification: %v", err)
+		}
+		sink <- work
+	}))
+	defer server.Close()
+
+	// Create the custom ethash engine.
+	config := Config{
+		PowMode:    ModeTest,
+		NotifyFull: true,
+		Log:        testlog.Logger(t, log.LvlWarn),
+	}
+	ethash := New(config, []string{server.URL}, false)
+	defer ethash.Close()
+
+	// Stream a work task and ensure the notification bubbles out.
+	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
+	block := types.NewBlockWithHeader(header)
+
+	if err := ethash.Seal(nil, block, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case work := <-sink:
+		if want := "0x" + strconv.FormatUint(header.Number.Uint64(), 16); work["number"] != want {
+			t.Errorf("pending block number mismatch: have %v, want %v", work["number"], want)
+		}
+		if want := "0x" + header.Difficulty.Text(16); work["difficulty"] != want {
+			t.Errorf("pending block difficulty mismatch: have %s, want %s", work["difficulty"], want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("notification timed out")
+	}
+}
+
 // Tests that pushing work packages fast to the miner doesn't cause any data race
 // issues in the notifications.
 func TestRemoteMultiNotify(t *testing.T) {
 	t.Skip("Often fails spuriously, needs to be investiaged")
+
 	// Start a simple web server to capture notifications.
 	sink := make(chan [3]string, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -94,18 +145,75 @@ func TestRemoteMultiNotify(t *testing.T) {
 
 	// Create the custom ethash engine.
 	ethash := NewTester([]string{server.URL}, false)
+	ethash.config.Log = testlog.Logger(t, log.LvlWarn)
 	defer ethash.Close()
 
 	// Provide a results reader.
 	// Otherwise the unread results will be logged asynchronously
 	// and this can happen after the test is finished, causing a panic.
-	results := make(chan consensus.ResultWithContext, cap(sink))
+	results := make(chan *types.Block, cap(sink))
 
 	// Stream a lot of work task and ensure all the notifications bubble out.
 	for i := 0; i < cap(sink); i++ {
 		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
 		block := types.NewBlockWithHeader(header)
-		_ = ethash.Seal(consensus.NewCancel(), nil, block, results, nil)
+		err := ethash.Seal(nil, block, results, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 0; i < cap(sink); i++ {
+		select {
+		case <-sink:
+			<-results
+		case <-time.After(10 * time.Second):
+			t.Fatalf("notification %d timed out", i)
+		}
+	}
+}
+
+// Tests that pushing work packages fast to the miner doesn't cause any data race
+// issues in the notifications. Full pending block body / --miner.notify.full)
+func TestRemoteMultiNotifyFull(t *testing.T) {
+	t.Skip("Often fails spuriously, needs to be investiaged")
+	// Start a simple web server to capture notifications.
+	sink := make(chan map[string]interface{}, 64)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		blob, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			t.Errorf("failed to read miner notification: %v", err)
+		}
+		var work map[string]interface{}
+		if err := json.Unmarshal(blob, &work); err != nil {
+			t.Errorf("failed to unmarshal miner notification: %v", err)
+		}
+		sink <- work
+	}))
+	defer server.Close()
+
+	// Create the custom ethash engine.
+	config := Config{
+		PowMode:    ModeTest,
+		NotifyFull: true,
+		Log:        testlog.Logger(t, log.LvlWarn),
+	}
+	ethash := New(config, []string{server.URL}, false)
+	defer ethash.Close()
+
+	// Provide a results reader.
+	// Otherwise the unread results will be logged asynchronously
+	// and this can happen after the test is finished, causing a panic.
+	results := make(chan *types.Block, cap(sink))
+
+	// Stream a lot of work task and ensure all the notifications bubble out.
+	for i := 0; i < cap(sink); i++ {
+		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
+		block := types.NewBlockWithHeader(header)
+		err := ethash.Seal(nil, block, results, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	for i := 0; i < cap(sink); i++ {
@@ -167,11 +275,14 @@ func TestStaleSubmission(t *testing.T) {
 			false,
 		},
 	}
-	results := make(chan consensus.ResultWithContext, 16)
+	results := make(chan *types.Block, 16)
 
 	for id, c := range testcases {
 		for _, h := range c.headers {
-			_ = ethash.Seal(consensus.NewCancel(), nil, types.NewBlockWithHeader(h), results, nil)
+			err := ethash.Seal(nil, types.NewBlockWithHeader(h), results, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		if res := api.SubmitWork(fakeNonce, ethash.SealHash(c.headers[c.submitIndex]), fakeDigest); res != c.submitRes {
 			t.Errorf("case %d submit result mismatch, want %t, get %t", id+1, c.submitRes, res)

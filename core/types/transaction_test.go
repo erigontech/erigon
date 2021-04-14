@@ -274,12 +274,20 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	signer := HomesteadSigner{}
 
 	// Generate a batch of transactions with overlapping values, but shifted nonces
-	groups := map[common.Address]Transactions{}
+	idx := map[common.Address]int{}
+	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
 			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(uint64(start+i)), nil), signer, key)
-			groups[addr] = append(groups[addr], tx)
+
+			j, ok := idx[addr]
+			if ok {
+				groups[j] = append(groups[j], tx)
+			} else {
+				idx[addr] = len(groups)
+				groups = append(groups, Transactions{tx})
+			}
 		}
 	}
 	// Sort the transactions and cross check the nonce ordering
@@ -325,14 +333,20 @@ func TestTransactionTimeSort(t *testing.T) {
 	signer := HomesteadSigner{}
 
 	// Generate a batch of transactions with overlapping prices, but different creation times
-	groups := map[common.Address]Transactions{}
+	idx := map[common.Address]int{}
+	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 
 		tx, _ := SignTx(NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(1), nil), signer, key)
 		tx.time = time.Unix(0, int64(len(keys)-start))
-
-		groups[addr] = append(groups[addr], tx)
+		i, ok := idx[addr]
+		if ok {
+			groups[i] = append(groups[i], tx)
+		} else {
+			idx[addr] = len(groups)
+			groups = append(groups, Transactions{tx})
+		}
 	}
 	// Sort the transactions and cross check the nonce ordering
 	txset := NewTransactionsByPriceAndNonce(signer, groups)

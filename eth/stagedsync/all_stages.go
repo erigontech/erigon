@@ -88,7 +88,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.ChainConfig, world.chainContext, world.vmConfig,
+							world.ChainConfig, world.Engine, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
@@ -134,42 +134,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						/*
-							var a accounts.Account
-							c := world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
-							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-								if err != nil {
-									return err
-								}
-								if len(k) != 20 {
-									fmt.Printf("%x => %x\n", k, v)
-								} else {
-									if err1 := a.DecodeForStorage(v); err1 != nil {
-										return err1
-									}
-									fmt.Printf("%x => bal: %d nonce: %d codehash: %x, inc: %d\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash, a.Incarnation)
-								}
-							}
-							c.Close()
-						*/
-						/*
-							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
-							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-								if err != nil {
-									return err
-								}
-								if len(k) != 32 {
-									fmt.Printf("%x => %x\n", k, v)
-								} else {
-									if err1 := a.DecodeForStorage(v); err1 != nil {
-										return err1
-									}
-									fmt.Printf("%x => bal: %d nonce: %d codehash: %x, inc: %d\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash, a.Incarnation)
-								}
-							}
-							c.Close()
-						*/
-						_, err := SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, checkRoot, world.cache, world.TmpDir, world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -238,14 +203,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.chainContext, world.TmpDir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.chainContext, world.QuitCh,
+						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
 							CallTracesStageParams{
 								Cache:     world.cache,
 								BatchSize: world.BatchSize,
@@ -286,7 +251,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.TX)
 						if err != nil {
 							return err
 						}
@@ -314,20 +279,19 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		return err
 	}
 	rawdb.WriteHeadBlockHash(db, newHeadHash)
-	rawdb.WriteHeadHeaderHash(db, newHeadHash)
+	if writeErr := rawdb.WriteHeadHeaderHash(db, newHeadHash); writeErr != nil {
+		return writeErr
+	}
 	if err = stages.SaveStageProgress(db, stages.Headers, newHead); err != nil {
 		return err
 	}
 	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
-	cc := &core.TinyChainContext{}
-	cc.SetDB(nil)
-	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,
-		cc,
+		engine,
 		vmConfig,
 		db,
 		db,
@@ -385,11 +349,19 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, err
 	}
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
-	if err1 != nil {
-		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return false, nil
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
 		return false, err
@@ -398,8 +370,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
-		if err1 = tx.Commit(); err1 != nil {
-			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		if !useExternalTx {
+			if err1 := tx.Commit(); err1 != nil {
+				return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+			}
 		}
 		return false, nil // No change of the chain
 	}
@@ -416,7 +390,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,
-		cc,
+		engine,
 		vmConfig,
 		tx,
 		tx,
@@ -444,12 +418,39 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-	if err1 = tx.Commit(); err1 != nil {
-		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+	if !useExternalTx {
+		if err1 := tx.Commit(); err1 != nil {
+			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		}
 	}
 	return true, nil
 }
 
 func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
 	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
+}
+
+// UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
+// need to fix it in future
+func UpdateMetrics(db ethdb.Getter) error {
+	var progress uint64
+	var err error
+	progress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	stageHeadersGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	stageBodiesGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return err
+	}
+	stageExecutionGauge.Update(int64(progress))
+	return nil
 }

@@ -3,7 +3,6 @@ package migrations
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"path"
 
@@ -183,8 +182,8 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 		commitFuncCalled := false // commit function must be called if no error, protection against people's mistake
 
 		log.Info("Apply migration", "name", v.Name)
-		progress, err := tx.Get(dbutils.Migrations, []byte("_progress_"+v.Name))
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		progress, err := tx.GetOne(dbutils.Migrations, []byte("_progress_"+v.Name))
+		if err != nil {
 			return err
 		}
 
@@ -241,16 +240,16 @@ func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
 	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
 	for _, stage := range stages.AllStages {
-		v, err := db.Get(dbutils.SyncStageProgress, stage)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		v, err := db.GetOne(dbutils.SyncStageProgress, stage)
+		if err != nil {
 			return nil, err
 		}
 		if len(v) > 0 {
 			s[string(stage)] = common.CopyBytes(v)
 		}
 
-		v, err = db.Get(dbutils.SyncStageUnwind, stage)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		v, err = db.GetOne(dbutils.SyncStageUnwind, stage)
+		if err != nil {
 			return nil, err
 		}
 		if len(v) > 0 {

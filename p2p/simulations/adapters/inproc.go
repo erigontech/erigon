@@ -100,8 +100,7 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 			Dialer:          s,
 			EnableMsgEvents: config.EnableMsgEvents,
 		},
-		ExternalSigner: config.ExternalSigner,
-		Logger:         log.New("node.id", id.String()),
+		Logger: log.New("node.id", id.String()),
 	})
 	if err != nil {
 		return nil, err
@@ -137,7 +136,9 @@ func (s *SimAdapter) Dial(ctx context.Context, dest *enode.Node) (conn net.Conn,
 	// this is simulated 'listening'
 	// asynchronously call the dialed destination node's p2p server
 	// to set up connection on the 'listening' side
-	go srv.SetupConn(pipe1, 0, nil)
+	go func() {
+		_ = srv.SetupConn(pipe1, 0, nil)
+	}()
 	return pipe2, nil
 }
 

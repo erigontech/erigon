@@ -17,51 +17,9 @@
 package eth
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
-
-// ethEntry is the "eth" ENR entry which advertises eth protocol
-// on the discovery network.
-type ethEntry struct {
-	ForkID forkid.ID // Fork identifier per EIP-2124
-
-	// Ignore additional fields (for forward compatibility).
-	Rest []rlp.RawValue `rlp:"tail"`
-}
-
-// ENRKey implements enr.Entry.
-func (e ethEntry) ENRKey() string {
-	return "eth"
-}
-
-// startEthEntryUpdate starts the ENR updater loop.
-func (eth *Ethereum) startEthEntryUpdate(ln *enode.LocalNode) {
-	var newHead = make(chan core.ChainHeadEvent, 10)
-	sub := eth.blockchain.SubscribeChainHeadEvent(newHead)
-
-	go func() {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case <-newHead:
-				ln.Set(eth.currentEthEntry())
-			case <-sub.Err():
-				// Would be nice to sync with eth.Stop, but there is no
-				// good way to do that.
-				return
-			}
-		}
-	}()
-}
-
-func (eth *Ethereum) currentEthEntry() *ethEntry {
-	return &ethEntry{ForkID: forkid.NewID(eth.blockchain.Config(), eth.blockchain.Genesis().Hash(),
-		eth.blockchain.CurrentHeader().Number.Uint64())}
-}
 
 // setupDiscovery creates the node discovery source for the `eth` and `snap`
 // protocols.

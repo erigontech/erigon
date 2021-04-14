@@ -20,8 +20,10 @@ func main() {
 		fullTest    bool
 		gethURL     string
 		tgURL       string
-		blockNum    uint64
+		blockFrom   uint64
+		blockTo     uint64
 		chaindata   string
+		recordFile  string
 	)
 	withTGUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545", "turbogeth rpcdaemon url")
@@ -30,10 +32,14 @@ func main() {
 		cmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
 	}
 	withBlockNum := func(cmd *cobra.Command) {
-		cmd.Flags().Uint64Var(&blockNum, "block", 2000000, "Block number")
+		cmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
+		cmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 	}
 	withNeedCompare := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&needCompare, "needCompare", false, "need compare with geth")
+	}
+	withRecord := func(cmd *cobra.Command) {
+		cmd.Flags().StringVar(&recordFile, "recordFile", "", "File where to record requests and responses to")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -46,10 +52,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench1(tgURL, gethURL, needCompare, fullTest, blockNum)
+			rpctest.Bench1(tgURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench1Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum)
+	with(bench1Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 	bench1Cmd.Flags().BoolVar(&fullTest, "fullTest", false, "some text")
 
 	var bench2Cmd = &cobra.Command{
@@ -114,10 +120,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench8(tgURL, gethURL, needCompare, blockNum)
+			rpctest.Bench8(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench8Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum)
+	with(bench8Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
@@ -134,53 +140,54 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench10(tgURL, gethURL, blockNum)
+			err := rpctest.Bench10(tgURL, gethURL, blockFrom, blockTo, recordFile)
 			if err != nil {
 				log.Error("bench 10 err", "err", err)
 			}
 		},
 	}
-	with(bench10Cmd, withGethUrl, withTGUrl, withBlockNum)
+	with(bench10Cmd, withGethUrl, withTGUrl, withBlockNum, withRecord)
 
 	var bench11Cmd = &cobra.Command{
 		Use:   "bench11",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench11(tgURL, gethURL, needCompare, blockNum)
+			rpctest.Bench11(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench11Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum)
+	with(bench11Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench12Cmd = &cobra.Command{
 		Use:   "bench12",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench12(tgURL, gethURL, needCompare, blockNum)
+			rpctest.Bench12(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench12Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum)
+	with(bench12Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench13Cmd = &cobra.Command{
 		Use:   "bench13",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench13(tgURL, gethURL, needCompare, blockNum)
+			rpctest.Bench13(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench13Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum)
+	with(bench13Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var proofsCmd = &cobra.Command{
 		Use:   "proofs",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Proofs(chaindata, gethURL, blockNum)
+			rpctest.Proofs(chaindata, gethURL, blockFrom)
 		},
 	}
 	proofsCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
+	with(proofsCmd, withGethUrl, withBlockNum)
 
 	var fixStateCmd = &cobra.Command{
 		Use:   "fixstate",
@@ -191,6 +198,17 @@ func main() {
 		},
 	}
 	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
+	with(fixStateCmd, withGethUrl)
+
+	var replayCmd = &cobra.Command{
+		Use:   "replay",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.Replay(tgURL, recordFile)
+		},
+	}
+	with(replayCmd, withTGUrl, withRecord)
 
 	var tmpDataDir, tmpDataDirOrig string
 	var notRegenerateGethData bool
@@ -199,7 +217,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockNum, notRegenerateGethData)
+			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData)
 		},
 	}
 	with(compareAccountRange, withTGUrl, withGethUrl, withBlockNum)
@@ -210,7 +228,8 @@ func main() {
 	var rootCmd = &cobra.Command{Use: "test"}
 	rootCmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545", "turbogeth rpcdaemon url")
 	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
-	rootCmd.Flags().Uint64Var(&blockNum, "block", 2000000, "Block number")
+	rootCmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
+	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
 		bench1Cmd,
@@ -229,6 +248,7 @@ func main() {
 		proofsCmd,
 		fixStateCmd,
 		compareAccountRange,
+		replayCmd,
 	)
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
 		fmt.Println(err)

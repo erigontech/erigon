@@ -3,7 +3,6 @@ package etl
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -107,19 +106,18 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
+func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		if c.autoClean {
 			c.Close(logPrefix)
 		}
 	}()
 	if !c.allFlushed {
-		if err := c.flushBuffer(nil, true); err != nil {
-			return err
+		if e := c.flushBuffer(nil, true); e != nil {
+			return e
 		}
 	}
-	err = loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args)
-	if err != nil {
+	if err := loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args); err != nil {
 		return err
 	}
 	return nil
@@ -129,7 +127,7 @@ func (c *Collector) Close(logPrefix string) {
 	disposeProviders(logPrefix, c.dataProviders)
 }
 
-func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 
@@ -145,26 +143,19 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			panic(eee)
 		}
 	}
+	var c ethdb.RwCursor
 
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	currentTable := &currentTableReader{tx, bucket}
+	currentTable := &currentTableReader{db, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
 	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
+		var err error
+		c, err = db.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
 		var errLast error
-		lastKey, _, errLast = tx.Last(bucket)
+		lastKey, _, errLast = c.Last()
 		if errLast != nil {
 			return errLast
 		}
@@ -203,7 +194,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			return nil // nothing to delete after end of bucket
 		}
 		if len(v) == 0 {
-			if err := tx.Delete(bucket, k, nil); err != nil {
+			if err := c.Delete(k, nil); err != nil {
 				return err
 			}
 			return nil
@@ -211,24 +202,24 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 		if canUseAppend {
 			if isDupSort {
 				if bytes.Equal(k, pervK) {
-					if err := tx.AppendDup(bucket, k, v); err != nil {
+					if err := c.(ethdb.RwCursorDupSort).AppendDup(k, v); err != nil {
 						return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, pervK=%x %w", logPrefix, bucket, k, pervK, err)
 					}
 				} else {
-					if err := tx.Append(bucket, k, v); err != nil {
+					if err := c.Append(k, v); err != nil {
 						return fmt.Errorf("%s: bucket: %s, append: k=%x, pervK=%x, %w", logPrefix, bucket, k, pervK, err)
 					}
 				}
 				pervK = k
 			} else {
-				if err := tx.Append(bucket, k, v); err != nil {
+				if err := c.Append(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, append: k=%x, %w", logPrefix, bucket, k, err)
 				}
 			}
 
 			return nil
 		}
-		if err := tx.Put(bucket, k, v); err != nil {
+		if err := c.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", logPrefix, k, err)
 		}
 		return nil
@@ -251,25 +242,11 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			return fmt.Errorf("%s: error while reading next element from disk: %v", logPrefix, err)
 		}
 	}
-	// Final commit
-	if args.OnLoadCommit != nil {
-		if err := args.OnLoadCommit(tx, []byte{}, true); err != nil {
-			return err
-		}
-	}
-	commitTimer := time.Now()
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	commitTook := time.Since(commitTimer)
 
 	runtime.ReadMemStats(&m)
 	log.Debug(
 		fmt.Sprintf("[%s] Committed batch", logPrefix),
 		"bucket", bucket,
-		"commit", commitTook,
 		"records", i,
 		"current key", makeCurrentKeyStr(nil),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))

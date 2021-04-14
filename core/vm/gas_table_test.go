@@ -90,13 +90,12 @@ func TestEIP2200(t *testing.T) {
 
 			db := ethdb.NewMemDatabase()
 			defer db.Close()
-			tds := state.NewTrieDbState(common.Hash{}, db, 0)
-			s := state.New(tds)
+			s := state.New(state.NewPlainStateReader(db))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
 
-			_ = s.CommitBlock(context.Background(), tds.DbStateWriter())
+			_ = s.CommitBlock(context.Background(), state.NewPlainStateWriter(db, db, 0))
 			vmctx := BlockContext{
 				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
 				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},

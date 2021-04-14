@@ -69,15 +69,12 @@ type fetchResult struct {
 	Receipts     types.Receipts
 }
 
-func newFetchResult(header *types.Header, fastSync bool) *fetchResult {
+func newFetchResult(header *types.Header) *fetchResult {
 	item := &fetchResult{
 		Header: header,
 	}
 	if !header.EmptyBody() {
 		item.pending |= (1 << bodyType)
-	}
-	if fastSync && !header.EmptyReceipts() {
-		item.pending |= (1 << receiptType)
 	}
 	return item
 }
@@ -109,8 +106,6 @@ func (f *fetchResult) Done(kind uint) bool {
 
 // queue represents hashes that are either need fetching or are being fetched
 type queue struct {
-	mode SyncMode // Synchronisation mode to decide on the block parts to schedule for fetching
-
 	// Headers are "special", they download in batches, supported by a skeleton chain
 	headerHead      common.Hash                    // [eth/62] Hash of the last queued header to verify order
 	headerTaskPool  map[uint64]common.Hash         // [eth/62] Pending header retrieval tasks, mapping starting indexes to skeleton headers
@@ -161,7 +156,6 @@ func (q *queue) Reset(blockCacheLimit int, thresholdInitialSize int) {
 	defer q.lock.Unlock()
 
 	q.closed = false
-	q.mode = FullSync
 
 	q.headerHead = common.Hash{}
 	q.headerPendPool = make(map[string]*fetchRequest)
@@ -338,15 +332,6 @@ func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
 		} else {
 			q.blockTaskPool[hash] = header
 			q.blockTaskQueue.Push(header, -int64(header.Number.Uint64()))
-		}
-		// Queue for receipt retrieval
-		if q.mode == FastSync && !header.EmptyReceipts() {
-			if _, ok := q.receiptTaskPool[hash]; ok {
-				log.Warn("Header already scheduled for receipt fetch", "number", header.Number, "hash", hash)
-			} else {
-				q.receiptTaskPool[hash] = header
-				q.receiptTaskQueue.Push(header, -int64(header.Number.Uint64()))
-			}
 		}
 		inserts = append(inserts, header)
 		q.headerHead = hash
@@ -525,7 +510,7 @@ func (q *queue) reserveHeaders(p *peerConnection, count int, taskPool map[common
 		// we can ask the resultcache if this header is within the
 		// "prioritized" segment of blocks. If it is not, we need to throttle
 
-		stale, throttle, item, err := q.resultCache.AddFetch(header, q.mode == FastSync)
+		stale, throttle, item, err := q.resultCache.AddFetch(header)
 		if stale {
 			// Don't put back in the task queue, this item has already been
 			// delivered upstream
@@ -923,11 +908,10 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 
 // Prepare configures the result cache to allow accepting and caching inbound
 // fetch results.
-func (q *queue) Prepare(offset uint64, mode SyncMode) {
+func (q *queue) Prepare(offset uint64) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
 	// Prepare the queue for sync results
 	q.resultCache.Prepare(offset)
-	q.mode = mode
 }

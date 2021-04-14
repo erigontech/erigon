@@ -193,8 +193,8 @@ func (t *UDPv4) Resolve(n *enode.Node) *enode.Node {
 	result := t.LookupPubkey((*ecdsa.PublicKey)(&key))
 	for _, rn := range result {
 		if rn.ID() == n.ID() {
-			if rn, err := t.RequestENR(rn); err == nil {
-				return rn
+			if rn1, err := t.RequestENR(rn); err == nil {
+				return rn1
 			}
 		}
 	}
@@ -563,7 +563,7 @@ func (t *UDPv4) handlePacket(from *net.UDPAddr, buf []byte) error {
 	}
 	packet := t.wrapPacket(rawpacket)
 	fromID := fromKey.ID()
-	if err == nil && packet.preverify != nil {
+	if packet.preverify != nil {
 		err = packet.preverify(packet, from, fromID, fromKey)
 	}
 	t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", from, "err", err)

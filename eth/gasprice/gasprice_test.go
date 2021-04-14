@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -36,25 +37,26 @@ import (
 )
 
 type testBackend struct {
-	chain *core.BlockChain
+	db  ethdb.Database
+	cfg *params.ChainConfig
 }
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	if number == rpc.LatestBlockNumber {
-		return b.chain.CurrentBlock().Header(), nil
+		return rawdb.ReadCurrentHeader(b.db), nil
 	}
-	return b.chain.GetHeaderByNumber(uint64(number)), nil
+	return rawdb.ReadHeaderByNumber(b.db, uint64(number)), nil
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	if number == rpc.LatestBlockNumber {
-		return b.chain.CurrentBlock(), nil
+		return rawdb.ReadCurrentBlock(b.db), nil
 	}
-	return b.chain.GetBlockByNumber(uint64(number)), nil
+	return rawdb.ReadBlockByNumber(b.db, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *params.ChainConfig {
-	return b.chain.Config()
+	return b.cfg
 }
 
 func newTestBackend(t *testing.T) *testBackend {
@@ -77,9 +79,9 @@ func newTestBackend(t *testing.T) *testBackend {
 	// Generate testing blocks
 	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		tx, err := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt().SetUint64(100), 21000, uint256.NewInt().SetUint64(uint64(int64(i+1)*params.GWei)), nil), signer, key)
-		if err != nil {
-			t.Fatalf("failed to create tx: %v", err)
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt().SetUint64(100), 21000, uint256.NewInt().SetUint64(uint64(int64(i+1)*params.GWei)), nil), signer, key)
+		if txErr != nil {
+			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
 	}, false)
@@ -87,22 +89,19 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	chain, err := core.NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to create local chain, %v", err)
-	}
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{chain: chain}
+	return &testBackend{db: db, cfg: params.TestChainConfig}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
-	return b.chain.CurrentHeader()
+	return rawdb.ReadCurrentHeader(b.db)
 }
 
 func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	return b.chain.GetBlockByNumber(number)
+	r, _ := rawdb.ReadBlockByNumber(b.db, number)
+	return r
 }
 
 func TestSuggestPrice(t *testing.T) {

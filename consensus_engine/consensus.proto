@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+import "types/types.proto";
+
+package consensus;
+
+option go_package = "./consensus;consensus";
+option java_multiple_files = true;
+
+message Error {
+    uint32 code = 1;
+    string description = 2;
+}
+
+message Result {
+    bool ok = 1;
+    optional Error error = 2;
+}
+
+message BlockHeader {
+    types.H256 parent_hash = 1;
+    types.H256 uncle_hash = 2;
+    bytes coinbase = 3;
+    types.H256 root_hash = 4;
+    types.H256 tx_hash = 5;
+    types.H256 receipt_hash = 6;
+    bytes bloom = 7;
+    types.H256 difficulty = 8;
+    uint64 number = 9;
+    uint64 gas_limit = 10;
+    uint64 gas_used = 11;
+    uint64 time = 12;
+    bytes extra = 13;
+    types.H256 mix_digest = 14;
+    uint64 nonce = 15;
+}
+
+message Transaction {
+}
+
+message Block {
+    BlockHeader header = 1;
+    repeated BlockHeader uncles = 2;
+    repeated Transaction transactions = 3;
+    bytes total_difficulty = 4;
+}
+
+message GetAuthorRequest {
+    BlockHeader header = 1;
+}
+
+message GetAuthorResponse {
+    Result result = 1;
+    types.H160 address = 2;
+}
+
+message VerifyHeaderRequest {
+    BlockHeader header = 1;
+    bool seal = 2;
+}
+
+message VerifyHeaderResponse {
+    Result result = 1;
+}
+
+message VerifyHeadersRequest {
+    repeated BlockHeader headers = 1;
+    repeated bool seal = 2;
+}
+
+message VerifyHeadersResponse {
+    Result result = 1;
+}
+
+message VerifyUnclesRequest {
+    Block block = 1;
+}
+
+message VerifyUnclesResponse {
+    Result result = 1;
+}
+
+message SealBlockRequest {
+    Result result = 1;
+    Block block = 2;
+}
+
+message SealBlockResponse {
+    Result result = 1;
+    Block block = 2;
+}
+
+message PrepareRequest {
+    BlockHeader header = 1;
+}
+
+message PrepareResponse {
+    Result result = 1;
+}
+
+message FinalizeRequest {
+    BlockHeader header = 1;
+    repeated BlockHeader uncles = 2;
+}
+
+message FinalizeResponse {
+    Result result = 1;
+    types.H256 miner_reward = 2;
+    repeated types.H256 uncle_rewards = 3;
+}
+
+service ConsensusEngine {
+    rpc GetAuthor(GetAuthorRequest) returns(GetAuthorResponse);
+    rpc VerifyHeader(stream VerifyHeaderRequest) returns(stream VerifyHeaderResponse);
+    rpc VerifyHeaders(stream VerifyHeadersRequest) returns(stream VerifyHeadersResponse);
+    rpc VerifyUncles(stream VerifyUnclesRequest) returns(stream VerifyUnclesResponse);
+    rpc Prepare(stream PrepareRequest) returns(stream PrepareResponse);
+    rpc Finalize(stream FinalizeRequest) returns(stream FinalizeResponse);
+    rpc Seal(SealBlockRequest) returns(stream SealBlockResponse);
+}

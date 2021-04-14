@@ -236,8 +236,8 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if gasLimit == 0 {
 		// Gas estimation cannot succeed without code for method invocations
 		if contract != nil {
-			if code, err := c.transactor.PendingCodeAt(ensureContext(opts.Context), c.address); err != nil {
-				return nil, err
+			if code, codeErr := c.transactor.PendingCodeAt(ensureContext(opts.Context), c.address); codeErr != nil {
+				return nil, codeErr
 			} else if len(code) == 0 {
 				return nil, ErrNoCode
 			}
@@ -301,7 +301,7 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]int
 	if err != nil {
 		return nil, nil, err
 	}
-	sub, err := event.NewSubscription(func(quit <-chan struct{}) error {
+	sub := event.NewSubscription(func(quit <-chan struct{}) error {
 		for _, log := range buff {
 			select {
 			case logs <- log:
@@ -310,11 +310,8 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]int
 			}
 		}
 		return nil
-	}), nil
+	})
 
-	if err != nil {
-		return nil, nil, err
-	}
 	return logs, sub, nil
 }
 

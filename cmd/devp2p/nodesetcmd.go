@@ -95,8 +95,6 @@ var filterFlags = map[string]nodeFilterC{
 	"-ip":          {1, ipFilter},
 	"-min-age":     {1, minAgeFilter},
 	"-eth-network": {1, ethFilter},
-	"-les-server":  {0, lesFilter},
-	"-snap":        {0, snapFilter},
 }
 
 func parseFilters(args []string) ([]nodeFilter, error) {
@@ -180,26 +178,6 @@ func ethFilter(args []string) (nodeFilter, error) {
 			return false
 		}
 		return filter(eth.ForkID) == nil
-	}
-	return f, nil
-}
-
-func lesFilter(args []string) (nodeFilter, error) {
-	f := func(n nodeJSON) bool {
-		var les struct {
-			_ []rlp.RawValue `rlp:"tail"`
-		}
-		return n.N.Load(enr.WithEntry("les", &les)) == nil
-	}
-	return f, nil
-}
-
-func snapFilter(args []string) (nodeFilter, error) {
-	f := func(n nodeJSON) bool {
-		var snap struct {
-			_ []rlp.RawValue `rlp:"tail"`
-		}
-		return n.N.Load(enr.WithEntry("snap", &snap)) == nil
 	}
 	return f, nil
 }

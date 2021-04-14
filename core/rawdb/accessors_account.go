@@ -20,10 +20,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // ReadAccount reading account object from multiple buckets of db
-func ReadAccount(db databaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+func ReadAccount(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.HashedAccountsBucket, addrHashBytes)
 	if err != nil {
@@ -35,7 +36,7 @@ func ReadAccount(db databaseReader, addrHash common.Hash, acc *accounts.Account)
 	return true, nil
 }
 
-func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account) error {
+func WriteAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
 	//fmt.Printf("WriteAccount: %x %x\n", addrHash, acc.Root)
 	addrHashBytes := addrHash[:]
 	value := make([]byte, acc.EncodingLengthForStorage())
@@ -43,11 +44,11 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 	return db.Put(dbutils.HashedAccountsBucket, addrHashBytes, value)
 }
 
-func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
+func DeleteAccount(db ethdb.Deleter, addrHash common.Hash) error {
 	return db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil)
 }
 
-func PlainReadAccount(db databaseReader, address common.Address, acc *accounts.Account) (bool, error) {
+func PlainReadAccount(db ethdb.DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
 	enc, err := db.Get(dbutils.PlainStateBucket, address[:])
 	if err != nil {
 		return false, err
@@ -58,13 +59,13 @@ func PlainReadAccount(db databaseReader, address common.Address, acc *accounts.A
 	return true, nil
 }
 
-func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.Account) error {
+func PlainWriteAccount(db ethdb.Putter, address common.Address, acc accounts.Account) error {
 	//fmt.Printf("PlainWriteAccount: %x %x\n", addrHash, acc.Root)
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
 	return db.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
-func PlainDeleteAccount(db DatabaseDeleter, address common.Address) error {
+func PlainDeleteAccount(db ethdb.Deleter, address common.Address) error {
 	return db.Delete(dbutils.PlainStateBucket, address[:], nil)
 }

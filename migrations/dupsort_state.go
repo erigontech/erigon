@@ -32,14 +32,17 @@ var dupSortHashState = Migration{
 
 		if err := etl.Transform(
 			"dupsort_hash_state",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.CurrentStateBucketOld1,
 			dbutils.CurrentStateBucketOld2,
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 
@@ -68,14 +71,17 @@ var dupSortPlainState = Migration{
 
 		if err := etl.Transform(
 			"dupsort_plain_state",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.PlainStateBucketOld1,
 			dbutils.PlainStateBucket,
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 
@@ -233,17 +239,13 @@ var splitHashStateBucket = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorS.Load(logPrefix, db, dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorS.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = collectorA.Load(logPrefix, db, dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorA.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HashedAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 
@@ -253,7 +255,7 @@ var splitIHBucket = Migration{
 		logPrefix := "db_migration: split_ih_bucket"
 
 		const loadStep = "load"
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(db.(ethdb.HasTx).Tx().(ethdb.RwTx)); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
@@ -277,7 +279,7 @@ var splitIHBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpdir, expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {
@@ -295,7 +297,7 @@ var deleteExtensionHashesFromTrieBucket = Migration{
 		logPrefix := "db_migration: delete_extension_hashes_from_trie"
 
 		const loadStep = "load"
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(db.(ethdb.HasTx).Tx().(ethdb.RwTx)); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
@@ -319,7 +321,7 @@ var deleteExtensionHashesFromTrieBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpdir, expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {

@@ -12,10 +12,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -24,20 +22,20 @@ import (
 )
 
 type miningBlock struct {
-	header   *types.Header
-	uncles   []*types.Header
-	txs      []*types.Transaction
-	receipts types.Receipts
+	Header   *types.Header
+	Uncles   []*types.Header
+	Txs      []*types.Transaction
+	Receipts types.Receipts
 
-	localTxs  *types.TransactionsByPriceAndNonce
-	remoteTxs *types.TransactionsByPriceAndNonce
+	LocalTxs  types.TransactionsStream
+	RemoteTxs types.TransactionsStream
 }
 
 // SpawnMiningCreateBlockStage
 //TODO:
-// - interrupt - variable is not implemented, see miner/worker.go:798
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs types.TransactionsGroupedBySender, quit <-chan struct{}) error {
+
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -64,14 +62,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{chainConfig, tx}
+	chain := ChainReader{Cfg: chainConfig, Db: tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := chain.GetBlock(hash, *number)
+			block := rawdb.ReadBlockWithoutTransactions(tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -82,25 +80,17 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		return
 	}
 
-	batch := tx.NewBatch()
-	defer batch.Rollback()
-
 	type envT struct {
 		signer    types.Signer
 		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
 		family    mapset.Set // family set (used for checking uncle invalidity)
 		uncles    mapset.Set // uncle set
-
-		ibs         *state.IntraBlockState // apply state changes here
-		stateWriter state.WriterWithChangeSets
 	}
 	env := &envT{
-		signer:      types.NewEIP155Signer(chainConfig.ChainID),
-		ancestors:   mapset.NewSet(),
-		family:      mapset.NewSet(),
-		uncles:      mapset.NewSet(),
-		ibs:         state.New(state.NewPlainStateReader(batch)),
-		stateWriter: state.NewPlainStateWriter(batch, batch, blockNum),
+		signer:    types.NewEIP155Signer(chainConfig.ChainID),
+		ancestors: mapset.NewSet(),
+		family:    mapset.NewSet(),
+		uncles:    mapset.NewSet(),
 	}
 
 	// re-written miner/worker.go:commitNewWork
@@ -131,7 +121,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return fmt.Errorf("mining failed")
+		return fmt.Errorf("[%s] mining failed", logPrefix)
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
@@ -146,9 +136,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
 		}
-	}
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(env.ibs)
 	}
 
 	// analog of miner.Worker.updateSnapshot
@@ -221,19 +208,33 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		}
 	}
 
-	current.header = header
-	current.uncles = makeUncles(env.uncles)
+	current.Header = header
+	current.Uncles = makeUncles(env.uncles)
 
 	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pendingTxs
-	for _, account := range txPoolLocals {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
+	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+	for _, txs := range pendingTxs {
+		if len(txs) == 0 {
+			continue
+		}
+		from, _ := types.Sender(signer, txs[0])
+		isLocal := false
+		for _, local := range txPoolLocals {
+			if local == from {
+				isLocal = true
+				break
+			}
+		}
+
+		if isLocal {
+			localTxs = append(localTxs, txs)
+		} else {
+			remoteTxs = append(remoteTxs, txs)
 		}
 	}
-	current.localTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
-	current.remoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
+
+	current.LocalTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
+	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
 	s.Done()
 	return nil
 }

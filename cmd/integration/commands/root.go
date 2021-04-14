@@ -48,7 +48,7 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 			db = ethdb.NewObjectDatabase(openKV(path, false))
 		}
 	}
-	metrics.AddCallback(db.KV().CollectMetrics)
+	metrics.AddCallback(db.RwKV().CollectMetrics)
 	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
 		panic(err)
 	}
@@ -63,7 +63,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 	return openDatabase2(path, applyMigrations, snapshotDir, mode)
 }
 
-func openKV(path string, exclusive bool) ethdb.KV {
+func openKV(path string, exclusive bool) ethdb.RwKV {
 	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
 		if exclusive {

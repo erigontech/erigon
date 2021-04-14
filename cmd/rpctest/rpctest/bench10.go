@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func Bench10(tgUrl, gethUrl string, bn uint64) error {
+func Bench10(tgUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile string) error {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -19,9 +19,9 @@ func Bench10(tgUrl, gethUrl string, bn uint64) error {
 	reqGen.reqID++
 
 	var b EthBlockByNumber
-	res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(int(bn)), &b)
+	res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(blockFrom), &b)
 	if res.Err != nil {
-		return fmt.Errorf("retrieve block (turbo-geth) %d: %v", bn, res.Err)
+		return fmt.Errorf("retrieve block (turbo-geth) %d: %v", blockFrom, res.Err)
 	}
 	if b.Error != nil {
 		return fmt.Errorf("retrieving block (turbo-geth): %d %s", b.Error.Code, b.Error.Message)
@@ -51,7 +51,7 @@ func Bench10(tgUrl, gethUrl string, bn uint64) error {
 		}
 		if res.Err == nil && trace.Error == nil {
 			if !compareTraces(&trace, &traceg) {
-				return fmt.Errorf("different traces block %d, tx %s", bn, tx.Hash)
+				return fmt.Errorf("different traces block %d, tx %s", blockFrom, tx.Hash)
 			}
 		}
 		reqGen.reqID++

@@ -16,11 +16,11 @@ import (
 )
 
 var (
-	sentryAddr    string // Address of the sentry <host>:<port>
-	coreAddr      string // Address of the core <host>:<port>
-	chaindata     string // Path to chaindata
-	database      string // Type of database (lmdb or mdbx)
-	mapSizeStr    string // Map size for LMDB
+	sentryAddr    string   // Address of the sentry <host>:<port>
+	sentryAddrs   []string // Address of the sentry <host>:<port>
+	chaindata     string   // Path to chaindata
+	database      string   // Type of database (lmdb or mdbx)
+	mapSizeStr    string   // Map size for LMDB
 	freelistReuse int
 )
 
@@ -89,7 +89,7 @@ func openDatabase(path string) *ethdb.ObjectDatabase {
 	return db
 }
 
-func openKV(path string, exclusive bool) ethdb.KV {
+func openKV(path string, exclusive bool) ethdb.RwKV {
 	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
 		if exclusive {

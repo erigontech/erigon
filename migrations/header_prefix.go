@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -113,22 +114,16 @@ var headerPrefixToSeparateBuckets = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = canonicalCollector.Load(logPrefix, db, dbutils.HeaderCanonicalBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = canonicalCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeaderCanonicalBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = tdCollector.Load(logPrefix, db, dbutils.HeaderTDBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = tdCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeaderTDBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		if err = headersCollector.Load(logPrefix, db, dbutils.HeadersBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = headersCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 

@@ -26,19 +26,23 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
-// Putter wraps the database write operations.
-type Putter interface {
-	// Put inserts or updates a single entry.
-	Put(bucket string, key, value []byte) error
+type TxFlags uint
+
+const (
+	RW TxFlags = 0x00 // default
+	RO TxFlags = 0x02
+)
+
+type DatabaseReader interface {
+	KVGetter
+
+	// Get returns the value for a given key if it's present.
+	Get(bucket string, key []byte) ([]byte, error)
 }
 
 // Getter wraps the database read operations.
 type Getter interface {
-	// Get returns the value for a given key if it's present.
-	Get(bucket string, key []byte) ([]byte, error)
-
-	// Has indicates whether a key exists in the database.
-	Has(bucket string, key []byte) (bool, error)
+	DatabaseReader
 
 	// Walk iterates over entries with keys greater or equal to startkey.
 	// Only the keys whose first fixedbits match those of startkey are iterated over.
@@ -47,24 +51,26 @@ type Getter interface {
 	Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
 }
 
+type GetterTx interface {
+	Getter
+
+	Rollback()
+}
+
+type GetterBeginner interface {
+	Getter
+
+	BeginGetter(ctx context.Context) (GetterTx, error)
+}
+
 type GetterPutter interface {
 	Getter
 	Putter
 }
 
-// Deleter wraps the database delete operations.
-type Deleter interface {
-	// Delete removes a single entry.
-	Delete(bucket string, k, v []byte) error
-}
-
-type Closer interface {
-	Close()
-}
-
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
-	Getter
+	GetterBeginner
 	Putter
 	Deleter
 	Closer
@@ -139,9 +145,9 @@ type DbWithPendingMutations interface {
 	BatchSize() int
 }
 
-type HasKV interface {
-	KV() KV
-	SetKV(kv KV)
+type HasRwKV interface {
+	RwKV() RwKV
+	SetRwKV(kv RwKV)
 }
 
 type HasTx interface {
@@ -156,6 +162,16 @@ type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
+}
+
+func getOneWrapper(dat []byte, err error) ([]byte, error) {
+	if err != nil {
+		return nil, err
+	}
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, nil
 }
 
 var errNotSupported = errors.New("not supported")

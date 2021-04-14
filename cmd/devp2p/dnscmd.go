@@ -25,9 +25,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/console/prompt"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	cli "github.com/urfave/cli"
@@ -55,7 +54,7 @@ var (
 	dnsSignCommand = cli.Command{
 		Name:      "sign",
 		Usage:     "Sign a DNS discovery tree",
-		ArgsUsage: "<tree-directory> <key-file>",
+		ArgsUsage: "<tree-directory> <key>",
 		Action:    dnsSign,
 		Flags:     []cli.Flag{dnsDomainFlag, dnsSeqFlag},
 	}
@@ -133,7 +132,7 @@ func dnsSign(ctx *cli.Context) error {
 	}
 	var (
 		defdir  = ctx.Args().Get(0)
-		keyfile = ctx.Args().Get(1)
+		keyText = ctx.Args().Get(1)
 		def     = loadTreeDefinition(defdir)
 		domain  = directoryName(defdir)
 	)
@@ -157,7 +156,10 @@ func dnsSign(ctx *cli.Context) error {
 		return err
 	}
 
-	key := loadSigningKey(keyfile)
+	key, keyErr := crypto.HexToECDSA(keyText)
+	if keyErr != nil {
+		return fmt.Errorf("invalid signing key: %v", keyErr)
+	}
 	url, err := t.Sign(key, domain)
 	if err != nil {
 		return fmt.Errorf("can't sign: %v", err)
@@ -218,20 +220,6 @@ func dnsToRoute53(ctx *cli.Context) error {
 	}
 	client := newRoute53Client(ctx)
 	return client.deploy(domain, t)
-}
-
-// loadSigningKey loads a private key in Ethereum keystore format.
-func loadSigningKey(keyfile string) *ecdsa.PrivateKey {
-	keyjson, err := ioutil.ReadFile(keyfile)
-	if err != nil {
-		exit(fmt.Errorf("failed to read the keyfile at '%s': %v", keyfile, err))
-	}
-	password, _ := prompt.Stdin.PromptPassword("Please enter the password for '" + keyfile + "': ")
-	key, err := keystore.DecryptKey(keyjson, password)
-	if err != nil {
-		exit(fmt.Errorf("error decrypting key: %v", err))
-	}
-	return key.PrivateKey
 }
 
 // dnsClient configures the DNS discovery client from command line flags.

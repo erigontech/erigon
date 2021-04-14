@@ -35,18 +35,13 @@ import (
 
 // Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.db.Begin(ctx, ethdb.RO)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Issuance{}, err
 	}
 	defer tx.Rollback()
 
-	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
-	if err != nil {
-		return Issuance{}, err
-	}
-	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return Issuance{}, err
 	}
@@ -74,12 +69,12 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 	return ret, nil
 }
 
-func (api *TgImpl) getBlockByRPCNumber(db ethdb.Database, blockNr rpc.BlockNumber) (*types.Block, error) {
-	blockNum, err := getBlockNumber(blockNr, db)
+func (api *TgImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(db, blockNum)
+	return rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
 }
 
 // Issuance structure to return information about issuance

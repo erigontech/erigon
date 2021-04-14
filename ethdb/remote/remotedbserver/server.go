@@ -26,10 +26,10 @@ const MaxTxTTL = 30 * time.Second
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.KV
+	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -37,7 +37,6 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 	}
 
 	kv2Srv := NewKvServer(kv)
-	dbSrv := NewDBServer(kv)
 	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -71,7 +70,6 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 		opts = append(opts, grpc.Creds(*creds))
 	}
 	grpcServer = grpc.NewServer(opts...)
-	remote.RegisterDBServer(grpcServer, dbSrv)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	remote.RegisterKVServer(grpcServer, kv2Srv)
 
@@ -88,12 +86,12 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.KV) *KvServer {
+func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
-	tx, errBegin := s.kv.Begin(stream.Context())
+	tx, errBegin := s.kv.BeginRo(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
@@ -137,13 +135,17 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 
 			tx.Rollback()
-			tx, errBegin = s.kv.Begin(stream.Context())
+			tx, errBegin = s.kv.BeginRo(stream.Context())
 			if errBegin != nil {
 				return fmt.Errorf("server-side error: %w", errBegin)
 			}
 
 			for _, c := range cursors { // restore all cursors position
-				c.c = tx.Cursor(c.bucket)
+				var err error
+				c.c, err = tx.Cursor(c.bucket)
+				if err != nil {
+					return err
+				}
 				switch casted := c.c.(type) {
 				case ethdb.CursorDupSort:
 					v, err := casted.SeekBothRange(c.k, c.v)
@@ -176,9 +178,14 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		switch in.Op {
 		case remote.Op_OPEN:
 			CursorID++
+			var err error
+			c, err = tx.Cursor(in.BucketName)
+			if err != nil {
+				return err
+			}
 			cursors[CursorID] = &CursorInfo{
 				bucket: in.BucketName,
-				c:      tx.Cursor(in.BucketName),
+				c:      c,
 			}
 			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)

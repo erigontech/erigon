@@ -41,7 +41,7 @@ func NewPersistentUnwindStack() *PersistentUnwindStack {
 	return &PersistentUnwindStack{make([]UnwindState, 0)}
 }
 
-func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncStage) error {
+func (s *PersistentUnwindStack) AddFromDB(db ethdb.KVGetter, stageID stages.SyncStage) error {
 	u, err := s.LoadFromDB(db, stageID)
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncSt
 	return nil
 }
 
-func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) (*UnwindState, error) {
+func (s *PersistentUnwindStack) LoadFromDB(db ethdb.KVGetter, stageID stages.SyncStage) (*UnwindState, error) {
 	unwindPoint, err := stages.GetStageUnwind(db, stageID)
 	if err != nil {
 		return nil, err

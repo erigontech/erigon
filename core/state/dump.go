@@ -31,10 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-type trieHasher interface {
-	GetTrieHash() common.Hash
-}
-
 type Dumper struct {
 	blockNumber uint64
 	db          ethdb.Tx
@@ -134,7 +130,8 @@ func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, startAddress common.Address, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, startAddress common.Address, maxResults int) ([]byte, error) {
+	var nextKey []byte
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
@@ -146,7 +143,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 	var acc accounts.Account
 	numberOfResults := 0
 
-	if err = WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
+	if err := WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -158,10 +155,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		if len(k) > 32 {
 			return true, nil
 		}
-		//fmt.Printf("Got account %x\n", k)
-		var err error
-		if err = acc.DecodeForStorage(v); err != nil {
-			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
+		if e := acc.DecodeForStorage(v); e != nil {
+			return false, fmt.Errorf("decoding %x for %x: %v", v, k, e)
 		}
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
@@ -185,9 +180,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
 		if incarnation > 0 {
-			var codeHash []byte
-			codeHash, err = ethdb.Get(d.db, dbutils.PlainContractCodeBucket, storagePrefix)
-			if err != nil && err != ethdb.ErrKeyNotFound {
+			codeHash, err := d.db.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+			if err != nil {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
 			if codeHash != nil {
@@ -207,7 +201,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 
 		if !excludeStorage {
 			t := trie.New(common.Hash{})
-			err = WalkAsOfStorage(d.db,
+			if err := WalkAsOfStorage(d.db,
 				addr,
 				incarnation,
 				common.Hash{}, /* startLocation */
@@ -217,8 +211,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 					h, _ := common.HashData(loc)
 					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
-				})
-			if err != nil {
+				}); err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addr, err)
 			}
 			account.Root = t.Hash().String()

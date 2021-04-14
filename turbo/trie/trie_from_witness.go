@@ -66,7 +66,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 			}
 
 			// Incarnation is always needed for a hashbuilder.
-			// but it is just our implementation detail needed for contract self-descruction suport with our
+			// but it is just our implementation detail needed for contract self-descruction support with our
 			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
 			incarnation := uint64(0)
 

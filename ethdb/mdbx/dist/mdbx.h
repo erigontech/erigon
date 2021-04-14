@@ -2858,6 +2858,12 @@ LIBMDBX_INLINE_API(int, mdbx_env_get_maxdbs,
  * page and usually exactly match it. */
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API size_t mdbx_default_pagesize(void);
 
+/** \brief Returns basic information about system RAM.
+ * \ingroup c_statinfo
+ */
+LIBMDBX_API int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
+                                    intptr_t *avail_pages);
+
 /** \brief Get the maximum size of keys can write.
  * \ingroup c_statinfo
  *

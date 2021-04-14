@@ -1186,7 +1186,7 @@ func (t *Trie) getHasher() *hasher {
 }
 
 // DeepHash returns internal hash of a node reachable by the specified key prefix.
-// Note that if the prefix points into the middle of a key for a leaf node or of an extention
+// Note that if the prefix points into the middle of a key for a leaf node or of an extension
 // node, it will return the hash of a modified leaf node or extension node, where the
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.

@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -23,7 +23,7 @@ import (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	dbtx, err := api.db.Begin(ctx, ethdb.RO)
+	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, err
 	}
 
-	result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, overrides, api.GasCap, chainConfig)
+	result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -47,9 +47,51 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
+func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
+	db := ethdb.NewRoTxDb(tx)
+	if blockLabel, ok := blockNrOrHash.Number(); ok {
+		blockNum, err := getBlockNumber(blockLabel, tx)
+		if err != nil {
+			return nil, err
+		}
+		return rawdb.ReadHeaderByNumber(db, blockNum), nil
+	}
+	if hash, ok := blockNrOrHash.Hash(); ok {
+		header, err := rawdb.ReadHeaderByHash(db, hash)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
+			return nil, errors.New("header for hash not found")
+		}
+
+		if blockNrOrHash.RequireCanonical {
+			can, err := rawdb.ReadCanonicalHash(db, header.Number.Uint64())
+			if err != nil {
+				return nil, err
+			}
+			if can != hash {
+				return nil, errors.New("hash is not currently canonical")
+			}
+		}
+
+		h := rawdb.ReadHeader(db, hash, header.Number.Uint64())
+		if h == nil {
+			return nil, errors.New("header found, but block body is missing")
+		}
+		return h, nil
+	}
+	return nil, errors.New("invalid arguments; neither block nor hash specified")
+}
+
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
-	dbtx, err := api.db.Begin(ctx, ethdb.RO)
+func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -66,24 +108,18 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 		args.From = new(common.Address)
 	}
 
-	chainConfig, err := api.chainConfig(dbtx)
-	if err != nil {
-		return 0, err
-	}
-
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		var blockNumber uint64
-		blockNumber, err = stages.GetStageProgress(dbtx, stages.Execution)
+		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
 		if err != nil {
-			return 0, fmt.Errorf("could not get stage progress for Execution: %v", err)
+			return 0, err
 		}
-		header := rawdb.ReadHeaderByNumber(dbtx, blockNumber)
-		hi = header.GasLimit
+		hi = h.GasLimit
 	}
+
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
 		stateReader := state.NewPlainStateReader(dbtx)
@@ -119,11 +155,16 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 	cap = hi
 	var lastBlockNum = rpc.LatestBlockNumber
 
+	chainConfig, err := api.chainConfig(dbtx)
+	if err != nil {
+		return 0, err
+	}
+
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig)
+		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.pending)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

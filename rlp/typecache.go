@@ -112,14 +112,14 @@ func structFields(typ reflect.Type) (fields []field, err error) {
 	lastPublic := lastPublicField(typ)
 	for i := 0; i < typ.NumField(); i++ {
 		if f := typ.Field(i); f.PkgPath == "" { // exported
-			tags, err := parseStructTag(typ, i, lastPublic)
+			t, err := parseStructTag(typ, i, lastPublic)
 			if err != nil {
 				return nil, err
 			}
-			if tags.ignored {
+			if t.ignored {
 				continue
 			}
-			info := cachedTypeInfo1(f.Type, tags)
+			info := cachedTypeInfo1(f.Type, t)
 			fields = append(fields, field{i, info})
 		}
 	}

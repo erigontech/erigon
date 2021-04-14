@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -156,31 +155,26 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	lock                   sync.RWMutex
-	bufferLimit            int
-	filesDir               string
-	files                  []string
-	badHeaders             map[common.Hash]struct{}
-	anchors                map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
-	preverifiedHashes      map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
-	preverifiedHeight      uint64                   // Block height corresponding to the last preverified hash
-	links                  map[common.Hash]*Link    // Links by header hash
-	linkLimit              int                      // Maximum allowed number of links
-	persistedLinkLimit     int                      // Maximum allowed number of persisted links
-	anchorLimit            int                      // Maximum allowed number of anchors
-	highestTotalDifficulty uint256.Int
-	engine                 consensus.Engine
-	headerReader           consensus.ChainHeaderReader
-	highestInDb            uint64 // Height of the highest block header in the database
-	initialHash            common.Hash
-	stageReady             bool
-	stageReadyCh           chan struct{}
-	stageHeight            uint64
-	topSeenHeight          uint64
-	insertList             []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
-	persistedLinkQueue     *LinkQueue   // Priority queue of persisted links used to limit their number
-	linkQueue              *LinkQueue   // Priority queue of non-persisted links used to limit their number
-	anchorQueue            *AnchorQueue // Priority queue of anchors used to sequence the header requests
+	lock               sync.RWMutex
+	badHeaders         map[common.Hash]struct{}
+	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
+	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
+	preverifiedHeight  uint64                   // Block height corresponding to the last preverified hash
+	links              map[common.Hash]*Link    // Links by header hash
+	linkLimit          int                      // Maximum allowed number of links
+	persistedLinkLimit int                      // Maximum allowed number of persisted links
+	anchorLimit        int                      // Maximum allowed number of anchors
+	engine             consensus.Engine
+	headerReader       consensus.ChainHeaderReader
+	highestInDb        uint64 // Height of the highest block header in the database
+	stageReady         bool
+	stageReadyCh       chan struct{}
+	stageHeight        uint64
+	topSeenHeight      uint64
+	insertList         []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
+	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
+	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header

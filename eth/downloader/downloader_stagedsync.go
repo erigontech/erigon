@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
 // externsions for downloader needed for staged sync
@@ -19,7 +20,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	id string,
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
-	prefetchedBlocks *stagedsync.PrefetchedBlocks,
+	prefetchedBlocks *bodydownload.PrefetchedBlocks,
 ) (bool, error) {
 	d.bodiesState = s
 	d.bodiesUnwinder = u
@@ -45,7 +46,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	var headers = make(map[common.Hash]*types.Header) // We use map because there might be more than one header by block number
 	var hashCount = 0
 	startKey := dbutils.EncodeBlockNumber(currentNumber)
-	err := d.stateDB.Walk(dbutils.HeaderCanonicalBucket, startKey, 0, func(k, v []byte) (bool, error) {
+	if err := d.stateDB.Walk(dbutils.HeaderCanonicalBucket, startKey, 0, func(k, v []byte) (bool, error) {
 		// This is how we learn about canonical chain
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		if blockNumber != currentNumber {
@@ -62,12 +63,11 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 		return true, nil
 
-	})
-	if err != nil {
+	}); err != nil {
 		return false, fmt.Errorf("%s: walking over canonical hashes: %w", logPrefix, err)
 	}
 
-	err = d.stateDB.Walk(dbutils.HeadersBucket, startKey, 0, func(k, v []byte) (bool, error) {
+	if err := d.stateDB.Walk(dbutils.HeadersBucket, startKey, 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return false, err
 		}
@@ -79,8 +79,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 		headers[common.BytesToHash(k[8:])] = header
 		return currentNumber > binary.BigEndian.Uint64(k[:8]), nil
-	})
-	if err != nil {
+	}); err != nil {
 		return false, fmt.Errorf("%s: walking over headers: %w", logPrefix, err)
 	}
 	if missingHeader != 0 {
@@ -101,8 +100,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		h := hashes[prefetchedHashes]
 		if block := prefetchedBlocks.Pop(h); block != nil {
 			fr := fetchResultFromBlock(block)
-			execute := false
-			_, err := d.importBlockResults(logPrefix, []*fetchResult{fr}, execute)
+			_, err := d.importBlockResults(logPrefix, []*fetchResult{fr})
 			if err != nil {
 				return false, err
 			}
@@ -117,7 +115,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	}
 	log.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix), "count", hashCount)
 	from := origin + 1
-	d.queue.Prepare(from, d.getMode())
+	d.queue.Prepare(from)
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
 	to := from + uint64(hashCount)
 
@@ -161,7 +159,7 @@ func (d *Downloader) processBodiesStage(logPrefix string, to uint64) error {
 		if len(results) == 0 {
 			return nil
 		}
-		lastNumber, err := d.importBlockResults(logPrefix, results, false /* execute */)
+		lastNumber, err := d.importBlockResults(logPrefix, results)
 		if err != nil {
 			return err
 		}

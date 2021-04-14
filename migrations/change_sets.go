@@ -111,12 +111,10 @@ var accChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorR.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainAccountChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 
@@ -216,13 +214,12 @@ var storageChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-			Comparator:   cmp,
+		if err = collectorR.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.PlainStorageChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+			Comparator: cmp,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 

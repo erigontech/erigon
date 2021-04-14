@@ -82,9 +82,9 @@ func (db *ChecksumDB) DownloadFile(url, dstPath string) error {
 	fmt.Printf("%s is stale\n", dstPath)
 	fmt.Printf("downloading from %s\n", url)
 
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("download error: %v", err)
+	resp, respErr := http.Get(url)
+	if respErr != nil {
+		return fmt.Errorf("download error: %v", respErr)
 	} else if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download error: status %d", resp.StatusCode)
 	}
@@ -92,15 +92,15 @@ func (db *ChecksumDB) DownloadFile(url, dstPath string) error {
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return err
 	}
-	fd, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
+	fd, fdErr := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if fdErr != nil {
+		return fdErr
 	}
 	dst := newDownloadWriter(fd, resp.ContentLength)
-	_, err = io.Copy(dst, resp.Body)
+	_, cpErr := io.Copy(dst, resp.Body)
 	dst.Close()
-	if err != nil {
-		return err
+	if cpErr != nil {
+		return cpErr
 	}
 
 	return db.Verify(dstPath)

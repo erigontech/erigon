@@ -146,7 +146,7 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 			writeTrace = true
 		}
 		var receipt *types.Receipt
-		receipt, err = ApplyTransaction(p.config, p.bc, nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg)
+		receipt, err = ApplyTransaction(p.config, p.bc.GetHeader, p.bc.Engine(), nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg)
 		// This code is useful when debugging a certain transaction. If uncommented, together with the code
 		// at the end of this function, after the execution of transaction with given hash, the file
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
@@ -212,7 +212,7 @@ func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState,
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 
 	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
-	context := NewEVMBlockContext(header, bc, author)
+	context := NewEVMBlockContext(header, getHeader, engine, author)
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
@@ -274,13 +274,13 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
 	}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, bc, author)
+	blockContext := NewEVMBlockContext(header, getHeader, engine, author)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
-	return applyTransaction(msg, config, bc, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(msg, config, getHeader, engine, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

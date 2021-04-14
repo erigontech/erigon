@@ -296,8 +296,7 @@ type Stat struct {
 // See mdbx_env_stat.
 func (env *Env) Stat() (*Stat, error) {
 	var _stat C.MDBX_stat
-	var ret C.int
-	ret = C.mdbx_env_stat_ex(env._env, nil, &_stat, C.size_t(unsafe.Sizeof(_stat)))
+	var ret C.int = C.mdbx_env_stat_ex(env._env, nil, &_stat, C.size_t(unsafe.Sizeof(_stat)))
 	if ret != success {
 		return nil, operrno("mdbx_env_stat_ex", ret)
 	}
