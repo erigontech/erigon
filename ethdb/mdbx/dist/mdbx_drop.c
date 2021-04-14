@@ -36,7 +36,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY c8e8b43f71c4237d9c7788bc9a518eb0e4a5835fa9adbb2ac3ff9d77ddb57afa_v0_9_3_78_gdcee0784
+#define MDBX_BUILD_SOURCERY e5b89e7b7b018e0aed1c53131dc07195cbc187ab023cd52bcfd27565099b903f_v0_9_3_101_gb5c5d17a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -2033,7 +2033,12 @@ typedef struct MDBX_meta {
  * in the snapshot: Either used by a database or listed in a GC record. */
 typedef struct MDBX_page {
   union {
-    uint64_t mp_txnid;         /* txnid that committed this page */
+#define IS_FROZEN(txn, p) ((p)->mp_txnid < (txn)->mt_txnid)
+#define IS_SPILLED(txn, p) ((p)->mp_txnid == (txn)->mt_txnid)
+#define IS_SHADOWED(txn, p) ((p)->mp_txnid > (txn)->mt_txnid)
+#define IS_VALID(txn, p) ((p)->mp_txnid <= (txn)->mt_front)
+#define IS_MODIFIABLE(txn, p) ((p)->mp_txnid == (txn)->mt_front)
+    uint64_t mp_txnid;
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
@@ -2041,12 +2046,13 @@ typedef struct MDBX_page {
 #define P_LEAF 0x02        /* leaf page */
 #define P_OVERFLOW 0x04    /* overflow page */
 #define P_META 0x08        /* meta page */
-#define P_DIRTY 0x10       /* dirty page, also set for P_SUBP pages */
+#define P_SPILLED 0x10     /* spilled in parent txn */
 #define P_LEAF2 0x20       /* for MDBX_DUPFIXED records */
 #define P_SUBP 0x40        /* for MDBX_DUPSORT sub-pages */
 #define P_BAD 0x80         /* explicit flag for invalid/bad page */
 #define P_LOOSE 0x4000     /* page was dirtied then freed, can be reused */
 #define P_KEEP 0x8000      /* leave this page alone during spill */
+#define P_ILL_BITS (~(P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW | P_SPILLED))
   uint16_t mp_flags;
   union {
     uint32_t mp_pages; /* number of overflow pages */
@@ -2194,7 +2200,7 @@ typedef struct MDBX_lockinfo {
    * Zero means timed auto-sync is disabled. */
   MDBX_atomic_uint64_t mti_autosync_period;
 
-  /* Marker to distinguish uniqueness of DB/CLK.*/
+  /* Marker to distinguish uniqueness of DB/CLK. */
   MDBX_atomic_uint64_t mti_bait_uniqueness;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
@@ -2219,6 +2225,9 @@ typedef struct MDBX_lockinfo {
 
   /* Timestamp of the last readers check. */
   MDBX_atomic_uint64_t mti_reader_check_timestamp;
+
+  /* Shared anchor for tracking readahead edge and enabled/disabled status. */
+  pgno_t mti_readahead_anchor;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
 
@@ -2423,6 +2432,8 @@ struct MDBX_txn {
    * Only committed write transactions increment the ID. If a transaction
    * aborts, the ID may be re-used by the next writer. */
   txnid_t mt_txnid;
+  txnid_t mt_front;
+
   MDBX_env *mt_env; /* the DB environment */
   /* Array of records for each DB known in the environment. */
   MDBX_dbx *mt_dbxs;
@@ -2438,8 +2449,7 @@ struct MDBX_txn {
 #define DBI_CREAT MDBX_DBI_CREAT /* Named-DB handle created in this txn */
 #define DBI_VALID 0x10           /* DB handle is valid, see also DB_VALID */
 #define DBI_USRVALID 0x20        /* As DB_VALID, but not set for FREE_DBI */
-#define DBI_DUPDATA 0x40         /* DB is MDBX_DUPSORT data */
-#define DBI_AUDITED 0x80         /* Internal flag for accounting during audit */
+#define DBI_AUDITED 0x40         /* Internal flag for accounting during audit */
   /* Array of flags for each DB */
   uint8_t *mt_dbistate;
   /* Number of DB records in use, or 0 when the txn is finished.
@@ -2558,8 +2568,6 @@ typedef struct MDBX_xcursor {
   MDBX_db mx_db;
   /* The auxiliary DB record for this Dup DB */
   MDBX_dbx mx_dbx;
-  /* The mt_dbistate for this Dup DB */
-  uint8_t mx_dbistate;
 } MDBX_xcursor;
 
 typedef struct MDBX_cursor_couple {
@@ -2634,6 +2642,7 @@ struct MDBX_env {
   atomic_pgno_t *me_unsynced_pages;
   atomic_pgno_t *me_autosync_threshold;
   atomic_pgno_t *me_discarded_tail;
+  pgno_t *me_readahead_anchor;
   MDBX_atomic_uint32_t *me_meta_sync_txnid;
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
   unsigned me_dp_reserve_len;
@@ -2657,6 +2666,7 @@ struct MDBX_env {
     atomic_pgno_t autosync_pending;
     atomic_pgno_t autosync_threshold;
     atomic_pgno_t discarded_tail;
+    pgno_t readahead_anchor;
     MDBX_atomic_uint32_t meta_sync_txnid;
   } me_lckless_stub;
 #if MDBX_DEBUG
@@ -2938,8 +2948,6 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
 #define IS_OVERFLOW(p) unlikely(((p)->mp_flags & P_OVERFLOW) != 0)
 /* Test if a page is a sub page */
 #define IS_SUBP(p) (((p)->mp_flags & P_SUBP) != 0)
-/* Test if a page is dirty */
-#define IS_DIRTY(p) (((p)->mp_flags & P_DIRTY) != 0)
 
 #define PAGETYPE(p) ((p)->mp_flags & (P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW))
 
@@ -3051,6 +3059,23 @@ floor_powerof2(size_t value, size_t granularity) {
 MDBX_NOTHROW_CONST_FUNCTION static __always_inline __maybe_unused size_t
 ceil_powerof2(size_t value, size_t granularity) {
   return floor_powerof2(value + granularity - 1, granularity);
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused unsigned log2n(size_t value) {
+  assert(value > 0 && value < INT32_MAX && is_powerof2(value));
+  assert((value & -(int32_t)value) == value);
+#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
+  return __builtin_ctzl(value);
+#elif defined(_MSC_VER)
+  unsigned long index;
+  _BitScanForward(&index, (unsigned long)value);
+  return index;
+#else
+  static const uint8_t debruijn_ctz32[32] = {
+      0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
+      31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
+  return debruijn_ctz32[(uint32_t)(value * 0x077CB531u) >> 27];
+#endif
 }
 
 /* Only a subset of the mdbx_env flags can be changed
