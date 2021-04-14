@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY e5b89e7b7b018e0aed1c53131dc07195cbc187ab023cd52bcfd27565099b903f_v0_9_3_101_gb5c5d17a
+#define MDBX_BUILD_SOURCERY ae952107e9ef79b10938353246db3c1ad3472520ce329559e432faf866794c89_v0_9_3_102_gb39cdcab
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -15926,7 +15926,7 @@ static int mdbx_fetch_sdb(MDBX_txn *txn, MDBX_dbi dbi) {
 
   memcpy(db, data.iov_base, sizeof(MDBX_db));
 #if !MDBX_DISABLE_PAGECHECKS
-  mdbx_tassert(txn, txn->mt_txnid >= pp_txnid);
+  mdbx_tassert(txn, txn->mt_front >= pp_txnid);
   if (unlikely(db->md_mod_txnid > pp_txnid)) {
     mdbx_error("db.md_mod_txnid (%" PRIaTXN ") > page-txnid (%" PRIaTXN ")",
                db->md_mod_txnid, pp_txnid);
@@ -27287,9 +27287,9 @@ __dll_export
         0,
         9,
         3,
-        101,
-        {"2021-04-14T16:53:28+03:00", "b45eec5ba5eb06be945e6afa07e4a9ade7069cca", "b5c5d17abb80d114c74b26ed7a098322fde5b212",
-         "v0.9.3-101-gb5c5d17a"},
+        102,
+        {"2021-04-14T17:44:31+03:00", "c39b04bb45adc3fba7364a7d108aa7fb8a26addc", "b39cdcab8463c350a2d7cdbbb7c58cc90ba40123",
+         "v0.9.3-102-gb39cdcab"},
         sourcery};
 
 __dll_export
