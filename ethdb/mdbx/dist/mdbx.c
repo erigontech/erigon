@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 190ff851bc39425868c497bf7324a780f7755889e341f31bfbb4c9a813edd10b_v0_9_3_90_g0dd27a46
+#define MDBX_BUILD_SOURCERY c8e8b43f71c4237d9c7788bc9a518eb0e4a5835fa9adbb2ac3ff9d77ddb57afa_v0_9_3_78_gdcee0784
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -3029,23 +3029,6 @@ ceil_powerof2(size_t value, size_t granularity) {
   return floor_powerof2(value + granularity - 1, granularity);
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused unsigned log2n(size_t value) {
-  assert(value > 0 && value < INT32_MAX && is_powerof2(value));
-  assert((value & -(int32_t)value) == value);
-#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
-  return __builtin_ctzl(value);
-#elif defined(_MSC_VER)
-  unsigned long index;
-  _BitScanForward(&index, (unsigned long)value);
-  return index;
-#else
-  static const uint8_t debruijn_ctz32[32] = {
-      0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
-      31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
-  return debruijn_ctz32[(uint32_t)(value * 0x077CB531u) >> 27];
-#endif
-}
-
 /* Only a subset of the mdbx_env flags can be changed
  * at runtime. Changing other flags requires closing the
  * environment and re-opening it with the new flags. */
@@ -3113,6 +3096,23 @@ static __maybe_unused void static_checks(void) {
 
 /*------------------------------------------------------------------------------
  * Internal inline functions */
+
+MDBX_NOTHROW_CONST_FUNCTION static unsigned log2n(size_t value) {
+  assert(value > 0 && value < INT32_MAX && is_powerof2(value));
+  assert((value & -(int32_t)value) == value);
+#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
+  return __builtin_ctzl(value);
+#elif defined(_MSC_VER)
+  unsigned long index;
+  _BitScanForward(&index, (unsigned long)value);
+  return index;
+#else
+  static const uint8_t debruijn_ctz32[32] = {
+      0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
+      31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
+  return debruijn_ctz32[(uint32_t)(value * 0x077CB531u) >> 27];
+#endif
+}
 
 MDBX_NOTHROW_CONST_FUNCTION static unsigned branchless_abs(int value) {
   assert(value > INT_MIN);
@@ -8457,6 +8457,8 @@ static __always_inline __maybe_unused int ignore_enosys(int err) {
 /* Turn on/off readahead. It's harmful when the DB is larger than RAM. */
 static __cold int mdbx_set_readahead(MDBX_env *env, const size_t offset,
                                      const size_t length, const bool enable) {
+    enable = false;
+
   assert(length > 0);
   mdbx_notice("readahead %s %u..%u", enable ? "ON" : "OFF",
               bytes2pgno(env, offset), bytes2pgno(env, offset + length));
@@ -13591,35 +13593,6 @@ bailout:
   return rc;
 }
 
-__cold static intptr_t get_reasonable_db_maxsize(intptr_t *cached_result) {
-  if (*cached_result == 0) {
-    intptr_t pagesize, total_ram_pages;
-    if (unlikely(mdbx_get_sysraminfo(&pagesize, &total_ram_pages, nullptr) !=
-                 MDBX_SUCCESS))
-      return MAX_MAPSIZE32 /* the 32-bit limit is good enough for fallback */;
-
-    if (unlikely((size_t)total_ram_pages * 2 > MAX_MAPSIZE / (size_t)pagesize))
-      return MAX_MAPSIZE;
-    assert(MAX_MAPSIZE >= (size_t)(total_ram_pages * pagesize * 2));
-
-    /* Suggesting should not be more than golden ratio of the size of RAM. */
-    *cached_result = (intptr_t)((size_t)total_ram_pages * 207 >> 7) * pagesize;
-
-    /* Round to the nearest human-readable granulation. */
-    for (size_t unit = MEGABYTE; unit; unit <<= 5) {
-      const size_t floor = floor_powerof2(*cached_result, unit);
-      const size_t ceil = ceil_powerof2(*cached_result, unit);
-      const size_t threshold = (size_t)*cached_result >> 4;
-      const bool down =
-          *cached_result - floor < ceil - *cached_result || ceil > MAX_MAPSIZE;
-      if (threshold < (down ? *cached_result - floor : ceil - *cached_result))
-        break;
-      *cached_result = down ? floor : ceil;
-    }
-  }
-  return *cached_result;
-}
-
 __cold LIBMDBX_API int
 mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
                       intptr_t size_upper, intptr_t growth_step,
@@ -13638,7 +13611,6 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
     shrink_threshold = 1;
 #endif
 
-  intptr_t reasonable_maxsize = 0;
   bool need_unlock = false;
   if (env->me_map) {
     /* env already mapped */
@@ -13708,7 +13680,7 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
       else if (max_size == 0 /* minimal */)
         max_size = MIN_MAPSIZE;
       else if (max_size >= (intptr_t)MAX_MAPSIZE /* maximal */)
-        max_size = get_reasonable_db_maxsize(&reasonable_maxsize);
+        max_size = MAX_MAPSIZE;
 
       while (max_size > pagesize * (int64_t)MAX_PAGENO &&
              pagesize < MAX_PAGESIZE)
@@ -13728,7 +13700,7 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
       size_lower = MIN_PAGENO * pagesize;
   }
   if (size_lower >= INTPTR_MAX) {
-    size_lower = get_reasonable_db_maxsize(&reasonable_maxsize);
+    size_lower = MAX_MAPSIZE;
     if ((size_t)size_lower / pagesize > MAX_PAGENO)
       size_lower = pagesize * MAX_PAGENO;
   }
@@ -13739,14 +13711,14 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
       size_now = size_upper;
   }
   if (size_now >= INTPTR_MAX) {
-    size_now = get_reasonable_db_maxsize(&reasonable_maxsize);
+    size_now = MAX_MAPSIZE;
     if ((size_t)size_now / pagesize > MAX_PAGENO)
       size_now = pagesize * MAX_PAGENO;
   }
 
   if (size_upper <= 0) {
-    if (size_now >= get_reasonable_db_maxsize(&reasonable_maxsize) / 2)
-      size_upper = get_reasonable_db_maxsize(&reasonable_maxsize);
+    if ((size_t)size_now >= MAX_MAPSIZE / 2)
+      size_upper = MAX_MAPSIZE;
     else if (MAX_MAPSIZE != MAX_MAPSIZE32 &&
              (size_t)size_now >= MAX_MAPSIZE32 / 2 &&
              (size_t)size_now <= MAX_MAPSIZE32 / 4 * 3)
@@ -13759,7 +13731,7 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
     if ((size_t)size_upper / pagesize > MAX_PAGENO)
       size_upper = pagesize * MAX_PAGENO;
   } else if (size_upper >= INTPTR_MAX) {
-    size_upper = get_reasonable_db_maxsize(&reasonable_maxsize);
+    size_upper = MAX_MAPSIZE;
     if ((size_t)size_upper / pagesize > MAX_PAGENO)
       size_upper = pagesize * MAX_PAGENO;
   }
@@ -14668,15 +14640,66 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
 }
 
 __cold int mdbx_is_readahead_reasonable(size_t volume, intptr_t redundancy) {
+    return MDBX_RESULT_FALSE;
+
   if (volume <= 1024 * 1024 * 4ul)
     return MDBX_RESULT_TRUE;
 
-  intptr_t pagesize, total_ram_pages;
-  int err = mdbx_get_sysraminfo(&pagesize, &total_ram_pages, nullptr);
-  if (unlikely(err != MDBX_SUCCESS))
-    return err;
+  const intptr_t pagesize = mdbx_syspagesize();
+  if (unlikely(pagesize < MIN_PAGESIZE || !is_powerof2(pagesize)))
+    return MDBX_INCOMPATIBLE;
 
+#if defined(_WIN32) || defined(_WIN64)
+  MEMORYSTATUSEX info;
+  memset(&info, 0, sizeof(info));
+  info.dwLength = sizeof(info);
+  if (!GlobalMemoryStatusEx(&info))
+    return GetLastError();
+#endif
   const int log2page = log2n(pagesize);
+
+#if defined(_WIN32) || defined(_WIN64)
+  const intptr_t total_ram_pages = (intptr_t)(info.ullTotalPhys >> log2page);
+#elif defined(_SC_PHYS_PAGES)
+  const intptr_t total_ram_pages = sysconf(_SC_PHYS_PAGES);
+  if (total_ram_pages == -1)
+    return errno;
+#elif defined(_SC_AIX_REALMEM)
+  const intptr_t total_ram_Kb = sysconf(_SC_AIX_REALMEM);
+  if (total_ram_Kb == -1)
+    return errno;
+  const intptr_t total_ram_pages = (total_ram_Kb << 10) >> log2page;
+#elif defined(HW_USERMEM) || defined(HW_PHYSMEM64) || defined(HW_MEMSIZE) ||   \
+    defined(HW_PHYSMEM)
+  size_t ram, len = sizeof(ram);
+  static const int mib[] = {
+    CTL_HW,
+#if defined(HW_USERMEM)
+    HW_USERMEM
+#elif defined(HW_PHYSMEM64)
+    HW_PHYSMEM64
+#elif defined(HW_MEMSIZE)
+    HW_MEMSIZE
+#else
+    HW_PHYSMEM
+#endif
+  };
+  if (sysctl(
+#ifdef SYSCTL_LEGACY_NONCONST_MIB
+          (int *)
+#endif
+              mib,
+          ARRAY_LENGTH(mib), &ram, &len, NULL, 0) != 0)
+    return errno;
+  if (len != sizeof(ram))
+    return MDBX_ENOSYS;
+  const intptr_t total_ram_pages = (intptr_t)(ram >> log2page);
+#else
+#error "FIXME: Get User-accessible or physical RAM"
+#endif
+  if (total_ram_pages < 1)
+    return MDBX_ENOSYS;
+
   const intptr_t volume_pages = (volume + pagesize - 1) >> log2page;
   const intptr_t redundancy_pages =
       (redundancy < 0) ? -(intptr_t)((-redundancy + pagesize - 1) >> log2page)
@@ -14685,10 +14708,48 @@ __cold int mdbx_is_readahead_reasonable(size_t volume, intptr_t redundancy) {
       volume_pages + redundancy_pages >= total_ram_pages)
     return MDBX_RESULT_FALSE;
 
-  intptr_t avail_ram_pages;
-  err = mdbx_get_sysraminfo(nullptr, nullptr, &avail_ram_pages);
-  if (unlikely(err != MDBX_SUCCESS))
-    return err;
+#if defined(_WIN32) || defined(_WIN64)
+  const intptr_t avail_ram_pages = (intptr_t)(info.ullAvailPhys >> log2page);
+#elif defined(_SC_AVPHYS_PAGES)
+  const intptr_t avail_ram_pages = sysconf(_SC_AVPHYS_PAGES);
+  if (avail_ram_pages == -1)
+    return errno;
+#elif defined(__MACH__)
+  mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
+  vm_statistics_data_t vmstat;
+  mach_port_t mport = mach_host_self();
+  kern_return_t kerr = host_statistics(mach_host_self(), HOST_VM_INFO,
+                                       (host_info_t)&vmstat, &count);
+  mach_port_deallocate(mach_task_self(), mport);
+  if (unlikely(kerr != KERN_SUCCESS))
+    return MDBX_ENOSYS;
+  const intptr_t avail_ram_pages = vmstat.free_count;
+#elif defined(VM_TOTAL) || defined(VM_METER)
+  struct vmtotal info;
+  size_t len = sizeof(info);
+  static const int mib[] = {
+    CTL_VM,
+#if defined(VM_TOTAL)
+    VM_TOTAL
+#elif defined(VM_METER)
+    VM_METER
+#endif
+  };
+  if (sysctl(
+#ifdef SYSCTL_LEGACY_NONCONST_MIB
+          (int *)
+#endif
+              mib,
+          ARRAY_LENGTH(mib), &info, &len, NULL, 0) != 0)
+    return errno;
+  if (len != sizeof(info))
+    return MDBX_ENOSYS;
+  const intptr_t avail_ram_pages = info.t_free;
+#else
+#error "FIXME: Get Available RAM"
+#endif
+  if (avail_ram_pages < 1)
+    return MDBX_ENOSYS;
 
   return (volume_pages + redundancy_pages >= avail_ram_pages)
              ? MDBX_RESULT_FALSE
@@ -15101,20 +15162,8 @@ __cold int mdbx_env_open(MDBX_env *env, const char *pathname,
     while (atomic_load32(&env->me_lck->mti_envmode, mo_AcquireRelease) ==
            MDBX_RDONLY) {
       if (atomic_cas32(&env->me_lck->mti_envmode, MDBX_RDONLY,
-                       env->me_flags & mode_flags)) {
-        /* The case:
-         *  - let's assume that for some reason the DB file is smaller
-         *    than it should be according to the geometry,
-         *    but not smaller than the last page used;
-         *  - the first process that opens the database (lc_rc = true)
-         *    does this in readonly mode and therefore cannot bring
-         *    the file size back to normal;
-         *  - some next process (lc_rc = false) opens the DB in read-write
-         *    mode and now is here.
-         *
-         * FIXME: Should we re-check and set the size of DB-file right here? */
+                       env->me_flags & mode_flags))
         break;
-      }
       atomic_yield();
     }
 
@@ -15481,8 +15530,6 @@ static int __hot cmp_lenfast(const MDBX_val *a, const MDBX_val *b) {
 
 static bool unsure_equal(MDBX_cmp_func cmp, const MDBX_val *a,
                          const MDBX_val *b) {
-  /* checking for the use of a known good comparator
-   * or/otherwise for a full byte-to-byte match */
   return cmp == cmp_lenfast || cmp == cmp_lexical || cmp == cmp_reverse ||
          cmp == cmp_int_unaligned || cmp_lenfast(a, b) == 0;
 }
@@ -17336,10 +17383,10 @@ int mdbx_cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data,
 
       /* Is the ov page large enough? */
       if (unlikely(mc->mc_flags & C_GCFREEZE)
-              ? (ovpages >= dpages)
-              : (ovpages ==
-                 /* TODO: add configurable threshold to keep reserve space */
-                 dpages)) {
+              ? ovpages >= dpages
+              : ovpages ==
+                    /* LY: add configurable threshold to keep reserve space */
+                    dpages) {
         if (!IS_DIRTY(omp) && (level || (env->me_flags & MDBX_WRITEMAP))) {
           rc2 = mdbx_page_unspill(mc->mc_txn, omp, &omp);
           if (unlikely(rc2))
@@ -19325,16 +19372,12 @@ static int mdbx_rebalance(MDBX_cursor *mc) {
   STATIC_ASSERT(P_BRANCH == 1);
   const unsigned minkeys = (pagetype & P_BRANCH) + 1;
 
-  /* The threshold of minimum page fill factor, in form of a negative binary
-   * exponent, i.e. X = 2 means 1/(2**X) == 1/(2**2) == 1/4 == 25%.
+  /* The threshold of minimum page fill, as a number of free bytes on a page.
    * Pages emptier than this are candidates for merging. */
-  const unsigned threshold_fill_exp2 = 2;
-
-  /* The threshold of minimum page fill factor, as a number of free bytes on a
-   * page. Pages emptier than this are candidates for merging. */
-  unsigned room_threshold =
-      page_space(mc->mc_txn->mt_env) -
-      (page_space(mc->mc_txn->mt_env) >> threshold_fill_exp2);
+  unsigned room_threshold = (mc->mc_dbi == FREE_DBI)
+                                ? page_space(mc->mc_txn->mt_env) * 2u / 3u
+                                : page_space(mc->mc_txn->mt_env) / 2u;
+  mdbx_cassert(mc, room_threshold * 2 >= page_space(mc->mc_txn->mt_env));
 
   const MDBX_page *const tp = mc->mc_pg[mc->mc_top];
   const unsigned numkeys = page_numkeys(tp);
@@ -20509,7 +20552,7 @@ static int mdbx_page_split(MDBX_cursor *mc, const MDBX_val *const newkey,
       for (i = 0; i < mc->mc_top; i++)
         mc->mc_ki[i] = mn.mc_ki[i];
     } else if (mc->mc_ki[mc->mc_top - 1] == 0) {
-      for (i = 2; i <= mc->mc_top; ++i)
+      for (unsigned i = 2; i <= mc->mc_top; ++i)
         if (mc->mc_ki[mc->mc_top - i]) {
           get_key(
               page_node(mc->mc_pg[mc->mc_top - i], mc->mc_ki[mc->mc_top - i]),
@@ -27102,127 +27145,6 @@ __cold MDBX_INTERNAL_FUNC bin128_t mdbx_osal_bootid(void) {
 
   return bin;
 }
-
-__cold int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
-                               intptr_t *avail_pages) {
-  if (!page_size && !total_pages && !avail_pages)
-    return MDBX_EINVAL;
-  if (total_pages)
-    *total_pages = -1;
-  if (avail_pages)
-    *avail_pages = -1;
-
-  const intptr_t pagesize = mdbx_syspagesize();
-  if (page_size)
-    *page_size = pagesize;
-  if (unlikely(pagesize < MIN_PAGESIZE || !is_powerof2(pagesize)))
-    return MDBX_INCOMPATIBLE;
-
-  __maybe_unused const int log2page = log2n(pagesize);
-  assert(pagesize == (INT64_C(1) << log2page));
-  (void)log2page;
-
-#if defined(_WIN32) || defined(_WIN64)
-  MEMORYSTATUSEX info;
-  memset(&info, 0, sizeof(info));
-  info.dwLength = sizeof(info);
-  if (!GlobalMemoryStatusEx(&info))
-    return GetLastError();
-#endif
-
-  if (total_pages) {
-#if defined(_WIN32) || defined(_WIN64)
-    const intptr_t total_ram_pages = (intptr_t)(info.ullTotalPhys >> log2page);
-#elif defined(_SC_PHYS_PAGES)
-    const intptr_t total_ram_pages = sysconf(_SC_PHYS_PAGES);
-    if (total_ram_pages == -1)
-      return errno;
-#elif defined(_SC_AIX_REALMEM)
-    const intptr_t total_ram_Kb = sysconf(_SC_AIX_REALMEM);
-    if (total_ram_Kb == -1)
-      return errno;
-    const intptr_t total_ram_pages = (total_ram_Kb << 10) >> log2page;
-#elif defined(HW_USERMEM) || defined(HW_PHYSMEM64) || defined(HW_MEMSIZE) ||   \
-    defined(HW_PHYSMEM)
-    size_t ram, len = sizeof(ram);
-    static const int mib[] = {
-      CTL_HW,
-#if defined(HW_USERMEM)
-      HW_USERMEM
-#elif defined(HW_PHYSMEM64)
-      HW_PHYSMEM64
-#elif defined(HW_MEMSIZE)
-      HW_MEMSIZE
-#else
-      HW_PHYSMEM
-#endif
-    };
-    if (sysctl(
-#ifdef SYSCTL_LEGACY_NONCONST_MIB
-            (int *)
-#endif
-                mib,
-            ARRAY_LENGTH(mib), &ram, &len, NULL, 0) != 0)
-      return errno;
-    if (len != sizeof(ram))
-      return MDBX_ENOSYS;
-    const intptr_t total_ram_pages = (intptr_t)(ram >> log2page);
-#else
-#error "FIXME: Get User-accessible or physical RAM"
-#endif
-    *total_pages = total_ram_pages;
-    if (total_ram_pages < 1)
-      return MDBX_ENOSYS;
-  }
-
-  if (avail_pages) {
-#if defined(_WIN32) || defined(_WIN64)
-    const intptr_t avail_ram_pages = (intptr_t)(info.ullAvailPhys >> log2page);
-#elif defined(_SC_AVPHYS_PAGES)
-    const intptr_t avail_ram_pages = sysconf(_SC_AVPHYS_PAGES);
-    if (avail_ram_pages == -1)
-      return errno;
-#elif defined(__MACH__)
-    mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
-    vm_statistics_data_t vmstat;
-    mach_port_t mport = mach_host_self();
-    kern_return_t kerr = host_statistics(mach_host_self(), HOST_VM_INFO,
-                                         (host_info_t)&vmstat, &count);
-    mach_port_deallocate(mach_task_self(), mport);
-    if (unlikely(kerr != KERN_SUCCESS))
-      return MDBX_ENOSYS;
-    const intptr_t avail_ram_pages = vmstat.free_count;
-#elif defined(VM_TOTAL) || defined(VM_METER)
-    struct vmtotal info;
-    size_t len = sizeof(info);
-    static const int mib[] = {
-      CTL_VM,
-#if defined(VM_TOTAL)
-      VM_TOTAL
-#elif defined(VM_METER)
-      VM_METER
-#endif
-    };
-    if (sysctl(
-#ifdef SYSCTL_LEGACY_NONCONST_MIB
-            (int *)
-#endif
-                mib,
-            ARRAY_LENGTH(mib), &info, &len, NULL, 0) != 0)
-      return errno;
-    if (len != sizeof(info))
-      return MDBX_ENOSYS;
-    const intptr_t avail_ram_pages = info.t_free;
-#else
-#error "FIXME: Get Available RAM"
-#endif
-    *avail_pages = avail_ram_pages;
-    if (avail_ram_pages < 1)
-      return MDBX_ENOSYS;
-  }
-
-  return MDBX_SUCCESS;
-}
 /* This is CMake-template for libmdbx's version.c
  ******************************************************************************/
 
@@ -27250,9 +27172,9 @@ __dll_export
         0,
         9,
         3,
-        90,
-        {"2021-04-10T17:48:40+03:00", "1c5801e3a8e6f83828d3ac61cb78afb345ef1fed", "0dd27a46eeb0ef3ba197c512775ccf27ad947e41",
-         "v0.9.3-90-g0dd27a46"},
+        78,
+        {"2021-03-29T01:10:49+03:00", "7db8dd8213d69ec5267077d13fe5e29623bbeb35", "dcee0784b6b5fd3bdb24d8f80747a077a1f479ed",
+         "v0.9.3-78-gdcee0784"},
         sourcery};
 
 __dll_export

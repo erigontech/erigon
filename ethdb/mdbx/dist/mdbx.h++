@@ -791,7 +791,9 @@ struct LIBMDBX_API_TYPE slice : public ::MDBX_val {
 
   /// \brief Build an invalid slice which non-zero length and refers to null
   /// address.
-  inline static slice invalid() noexcept { return slice(size_t(-1)); }
+  MDBX_CXX11_CONSTEXPR static slice invalid() noexcept {
+    return slice(size_t(-1));
+  }
 
 protected:
   MDBX_CXX11_CONSTEXPR slice(size_t invalid_length) noexcept
