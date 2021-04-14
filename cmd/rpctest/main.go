@@ -255,6 +255,7 @@ func main() {
 		bench11Cmd,
 		bench12Cmd,
 		bench13Cmd,
+		benchTraceBlockCmd,
 		proofsCmd,
 		fixStateCmd,
 		compareAccountRange,
