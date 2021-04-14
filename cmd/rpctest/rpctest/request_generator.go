@@ -167,7 +167,7 @@ func (g *RequestGenerator) debugTraceCall(from common.Address, to *common.Addres
 
 func (g *RequestGenerator) traceBlockByNumber(bn uint64) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_blockByNumber", "params": [%d, {}]`, bn)
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_blockByNumber", "params": [%d]`, bn)
 	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
 
 	return sb.String()
