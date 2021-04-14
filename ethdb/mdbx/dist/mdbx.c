@@ -14605,6 +14605,8 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
 }
 
 __cold int mdbx_is_readahead_reasonable(size_t volume, intptr_t redundancy) {
+    return MDBX_RESULT_FALSE;
+
   if (volume <= 1024 * 1024 * 4ul)
     return MDBX_RESULT_TRUE;
 
