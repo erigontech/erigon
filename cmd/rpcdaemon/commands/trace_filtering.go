@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -96,8 +97,14 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, nil
 	}
 
+	blockTxs := block.Transactions()
+
+	if len(blockTxs) != len(senders) {
+		return nil, errors.New("block txs len != senders len")
+	}
+
 	txs := make([]TransactionWithSender, 0, len(senders))
-	for n, tx := range block.Transactions() {
+	for n, tx := range blockTxs {
 		txs = append(txs, TransactionWithSender{
 			tx:     *tx,
 			sender: senders[n],
@@ -338,17 +345,20 @@ type TransactionWithSender struct {
 func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]ParityTrace, error) {
 	toExecute := []interface{}{}
 
-	for _, tx := range txs {
-		gas := hexutil.Uint64(tx.tx.Gas())
-		gasPrice := hexutil.Big(*tx.tx.GasPrice().ToBig())
-		value := hexutil.Big(*tx.tx.Value().ToBig())
+	for _, txWithSender := range txs {
+		tx := txWithSender.tx
+		sender := txWithSender.sender
+
+		gas := hexutil.Uint64(tx.Gas())
+		gasPrice := hexutil.Big(*tx.GasPrice().ToBig())
+		value := hexutil.Big(*tx.Value().ToBig())
 		toExecute = append(toExecute, []interface{}{TraceCallParam{
-			From:     &tx.sender,
-			To:       tx.tx.To(),
+			From:     &sender,
+			To:       tx.To(),
 			Gas:      &gas,
 			GasPrice: &gasPrice,
 			Value:    &value,
-			Data:     tx.tx.Data(),
+			Data:     tx.Data(),
 		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
 	}
 
@@ -367,8 +377,15 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 	}
 
 	out := make([]ParityTrace, 0, len(traces))
-	for _, trace := range traces {
+	bn := uint64(blockNo)
+	for txno, trace := range traces {
+		txhash := txs[txno].tx.Hash()
+		txpos := uint64(txno)
 		for _, pt := range trace.Trace {
+			pt.BlockHash = &blockHash
+			pt.BlockNumber = &bn
+			pt.TransactionHash = &txhash
+			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
 		}
 	}
