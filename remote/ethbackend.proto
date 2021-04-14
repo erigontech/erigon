@@ -89,7 +89,7 @@ message SubmitWorkReply {
 }
 
 message SubmitHashRateRequest {
-uint64 rate = 1;
+  uint64 rate = 1;
   bytes id = 2;
 }
 message SubmitHashRateReply {

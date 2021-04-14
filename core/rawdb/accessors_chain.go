@@ -537,6 +537,17 @@ func ReadReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receip
 	}
 	return receipts
 }
+func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil
+	}
+	receipts := ReadReceipts(db, hash, *number)
+	if receipts == nil {
+		return nil
+	}
+	return receipts
+}
 
 func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
 	h, _ := ReadCanonicalHash(db, number)
@@ -954,8 +965,47 @@ func ReadHeaderByHash(db ethdb.KVGetter, hash common.Hash) (*types.Header, error
 	return ReadHeader(db, hash, *number), nil
 }
 
-// FIXME: implement in Turbo-Geth
-// WriteAncientBlock writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlock(db ethdb.Putter, block *types.Block, receipts types.Receipts, td *big.Int) int {
-	panic("not implemented")
+func ReadAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	if ancestor > number {
+		return common.Hash{}, 0
+	}
+	if ancestor == 1 {
+		// in this case it is cheaper to just read the header
+		if header := ReadHeader(db, hash, number); header != nil {
+			return header.ParentHash, number - 1
+		}
+		return common.Hash{}, 0
+	}
+	for ancestor != 0 {
+		h, err := ReadCanonicalHash(db, number)
+		if err != nil {
+			panic(err)
+		}
+		if h == hash {
+			ancestorHash, err := ReadCanonicalHash(db, number-ancestor)
+			if err != nil {
+				panic(err)
+			}
+			h, err := ReadCanonicalHash(db, number)
+			if err != nil {
+				panic(err)
+			}
+			if h == hash {
+				number -= ancestor
+				return ancestorHash, number
+			}
+		}
+		if *maxNonCanonical == 0 {
+			return common.Hash{}, 0
+		}
+		*maxNonCanonical--
+		ancestor--
+		header := ReadHeader(db, hash, number)
+		if header == nil {
+			return common.Hash{}, 0
+		}
+		hash = header.ParentHash
+		number--
+	}
+	return hash, number
 }

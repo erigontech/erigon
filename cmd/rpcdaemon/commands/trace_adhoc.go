@@ -566,6 +566,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	}
 	defer dbtx.Rollback()
 
+	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash)
+}
+
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
