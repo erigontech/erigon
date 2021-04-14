@@ -15,8 +15,8 @@ import (
 // parameters:
 // needCompare - if false - doesn't call TurboGeth and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
-func BenchTraceBlock(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, gethURL)
+func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(tgURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -72,11 +72,11 @@ func BenchTraceBlock(tgURL, gethURL string, needCompare bool, blockFrom uint64, 
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
 			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+				fmt.Printf("Could not retrieve block (OE) %d: %v\n", bn, res.Err)
 				return
 			}
 			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+				fmt.Printf("Error retrieving block (OE): %d %s\n", bg.Error.Code, bg.Error.Message)
 				return
 			}
 			if !compareBlocks(&b, &bg) {
@@ -98,20 +98,20 @@ func BenchTraceBlock(tgURL, gethURL string, needCompare bool, blockFrom uint64, 
 			return
 		}
 		if needCompare {
-			resg := reqGen.Geth2("debug_traceBlockByNumber", reqGen.debugTraceBlockByNumber(bn))
+			resg := reqGen.Geth2("trace_BlockByNumber", request)
 			if resg.Err != nil {
-				fmt.Printf("Could not trace block (geth) %d: %v\n", bn, resg.Err)
+				fmt.Printf("Could not trace block (OE) %d: %v\n", bn, resg.Err)
 				return
 			}
 			if errVal := resg.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing call (geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+				fmt.Printf("Error tracing call (OE): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 				return
 			}
 			if resg.Err == nil && resg.Result.Get("error") == nil {
 				if err := compareResults(res.Result, resg.Result); err != nil {
 					fmt.Printf("Different traces block %d, block %d: %v\n", bn, bn, err)
 					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-					fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
+					fmt.Printf("\n\nOE response=================================\n%s\n", resg.Response)
 					return
 				}
 			}

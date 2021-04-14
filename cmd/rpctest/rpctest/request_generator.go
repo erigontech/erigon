@@ -173,14 +173,6 @@ func (g *RequestGenerator) traceBlockByNumber(bn uint64) string {
 	return sb.String()
 }
 
-func (g *RequestGenerator) debugTraceBlockByNumber(bn uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "debug_traceBlockByNumber", "params": [%d, {}]`, bn)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-
-	return sb.String()
-}
-
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(g.client, routes[target], body, response)
