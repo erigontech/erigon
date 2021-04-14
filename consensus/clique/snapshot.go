@@ -438,6 +438,10 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 		for {
 			select {
 			case snap := <-st.ch:
+				if snap == nil {
+					continue
+				}
+
 				snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 
 				if len(snaps) >= batchSize || snap.number == 0 {
@@ -450,6 +454,9 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 				}
 			case <-st.exit:
 				for snap := range st.ch {
+					if snap == nil {
+						continue
+					}
 					snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 				}
 
