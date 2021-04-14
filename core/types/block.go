@@ -122,10 +122,21 @@ func (h Header) EncodingSize() int {
 		timeLen = (bits.Len64(h.Time) + 7) / 8
 	}
 	encodingSize += timeLen
-	encodingSize += 1 + len(h.Extra)
-	if len(h.Extra) >= 56 {
-		encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+	// size of Extra
+	encodingSize++
+	switch len(h.Extra) {
+	case 0:
+	case 1:
+		if h.Extra[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(h.Extra) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+		}
+		encodingSize += len(h.Extra)
 	}
+	// size of BaseFee
 	var baseFeeLen int
 	if h.eip1559 {
 		encodingSize++
@@ -171,9 +182,19 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		timeLen = (bits.Len64(h.Time) + 7) / 8
 	}
 	encodingSize += timeLen
-	encodingSize += 1 + len(h.Extra)
-	if len(h.Extra) >= 56 {
-		encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+	// size of Extra
+	encodingSize++
+	switch len(h.Extra) {
+	case 0:
+	case 1:
+		if h.Extra[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(h.Extra) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+		}
+		encodingSize += len(h.Extra)
 	}
 	var baseFeeLen int
 	if h.eip1559 {
@@ -298,13 +319,8 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if err := EncodeStringSizePrefix(len(h.Extra), w, b[:]); err != nil {
+	if err := EncodeString(h.Extra, w, b[:]); err != nil {
 		return err
-	}
-	if len(h.Extra) > 0 {
-		if _, err := w.Write(h.Extra); err != nil {
-			return err
-		}
 	}
 	b[0] = 128 + 32
 	if _, err := w.Write(b[:1]); err != nil {
@@ -785,13 +801,12 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode header
-	fmt.Printf("Decode header\n")
 	var h Header
 	if err = h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
-	fmt.Printf("Decoded header\n")
+	fmt.Printf("Decode block %d %x\n", h.Number.Uint64(), h.Hash())
 	// decode Transactions
 	if _, err = s.List(); err != nil {
 		return err
@@ -808,7 +823,6 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode Uncles
-	fmt.Printf("Decode uncles\n")
 	if _, err = s.List(); err != nil {
 		return err
 	}
@@ -826,7 +840,6 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
-	fmt.Printf("Decoded uncles\n")
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
@@ -836,6 +849,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb Block) EncodeRLP(w io.Writer) error {
+	fmt.Printf("Encode block %d %x\n", bb.NumberU64(), bb.Hash())
 	encodingSize := 0
 	// size of Header
 	encodingSize++

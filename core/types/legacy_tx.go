@@ -188,10 +188,21 @@ func (tx LegacyTx) EncodingSize() int {
 		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
 	encodingSize += valueLen
-	encodingSize += 1 + len(tx.Data)
-	if len(tx.Data) >= 56 {
-		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+	// size of Data
+	encodingSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+		}
+		encodingSize += len(tx.Data)
 	}
+	// size of V
 	encodingSize++
 	var vLen int
 	if tx.V.BitLen() >= 8 {
@@ -211,6 +222,34 @@ func (tx LegacyTx) EncodingSize() int {
 	}
 	encodingSize += sLen
 	return encodingSize
+}
+
+func EncodeString(s []byte, w io.Writer, b []byte) error {
+	switch len(s) {
+	case 0:
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	case 1:
+		if s[0] >= 128 {
+			b[0] = 129
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
+	default:
+		if err := EncodeStringSizePrefix(len(s), w, b); err != nil {
+			return err
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func EncodeStringSizePrefix(size int, w io.Writer, b []byte) error {
@@ -260,9 +299,19 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
 	encodingSize += valueLen
-	encodingSize += 1 + len(tx.Data)
-	if len(tx.Data) >= 56 {
-		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+	// size of Data
+	encodingSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+		}
+		encodingSize += len(tx.Data)
 	}
 	encodingSize++
 	var vLen int
@@ -330,13 +379,8 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	if err := tx.Value.EncodeRLP(w); err != nil {
 		return err
 	}
-	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
+	if err := EncodeString(tx.Data, w, b[:]); err != nil {
 		return err
-	}
-	if len(tx.Data) > 0 {
-		if _, err := w.Write(tx.Data); err != nil {
-			return err
-		}
 	}
 	if err := tx.V.EncodeRLP(w); err != nil {
 		return err

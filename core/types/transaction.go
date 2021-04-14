@@ -90,12 +90,16 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
+	if kind != rlp.List {
+		return nil, fmt.Errorf("expected List at the beginning of tx encoding")
+	}
 	switch kind {
 	case rlp.List:
 		tx := &LegacyTx{}
 		if err = tx.DecodeRLP(s, size); err != nil {
 			return nil, err
 		}
+		fmt.Printf("Decoded legacy Tx\n")
 		return tx, nil
 	case rlp.Byte, rlp.String:
 		var b []byte
@@ -111,12 +115,14 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			if err = tx.DecodeRLP(s); err != nil {
 				return nil, err
 			}
+			fmt.Printf("Decoded access list Tx\n")
 			return tx, nil
 		case DynamicFeeTxType:
 			tx := &DynamicFeeTransaction{}
 			if err = tx.DecodeRLP(s); err != nil {
 				return nil, err
 			}
+			fmt.Printf("Decoded dynamic fee Tx\n")
 			return tx, nil
 		default:
 			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])

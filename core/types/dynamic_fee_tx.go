@@ -161,9 +161,18 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 	}
 	encodingSize += valueLen
 	// size of Data
-	encodingSize += 1 + len(tx.Data)
-	if len(tx.Data) >= 56 {
-		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+	encodingSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+		}
+		encodingSize += len(tx.Data)
 	}
 	// size of AccessList
 	encodingSize++
@@ -257,9 +266,18 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	}
 	encodingSize += valueLen
 	// size of Data
-	encodingSize += 1 + len(tx.Data)
-	if len(tx.Data) >= 56 {
-		encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+	encodingSize++
+	switch len(tx.Data) {
+	case 0:
+	case 1:
+		if tx.Data[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(tx.Data) >= 56 {
+			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+		}
+		encodingSize += len(tx.Data)
 	}
 	// size of AccessList
 	encodingSize++
@@ -351,13 +369,8 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Data
-	if err := EncodeStringSizePrefix(len(tx.Data), w, b[:]); err != nil {
+	if err := EncodeString(tx.Data, w, b[:]); err != nil {
 		return err
-	}
-	if len(tx.Data) > 0 {
-		if _, err := w.Write(tx.Data); err != nil {
-			return err
-		}
 	}
 	// prefix
 	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
