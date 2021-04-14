@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -60,14 +61,63 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	os.RemoveAll(dbPath)
 
 	if s.BlockNumber == toBlock {
-	//	// we already did snapshot creation for this block
-	//	s.Done()
-	//	return nil
-
+		// we already did snapshot creation for this block
+		s.Done()
+		return nil
 	}
+
 	log.Info("Snapshot dir", "dbpath",dbPath, "snapshotDir", snapshotDir)
 	if err := os.MkdirAll(dbPath, 0700); err != nil {
 		return fmt.Errorf("creation %s, return %w", dbPath, err)
+	}
+
+	snapshotPath:=migrator.SnapshotName(snapshotDir, "headers", toBlock)
+	err=migrator.CreateHeadersSnapshot(context.Background(), db, toBlock, snapshotPath)
+	if err!=nil {
+		fmt.Println("-----------------------Create Error!", err)
+		return err
+	}
+	err = sm.ReplaceHeadersSnapshot(db, snapshotPath)
+	if err!=nil {
+		fmt.Println("-----------------------Replace Error!", err)
+		return err
+	}
+	infohash,err:=db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		fmt.Println("-------get infohash err", err)
+		return err
+	}
+	if len(infohash)==20 {
+		fmt.Println("stop seeding", common.Bytes2Hex(infohash))
+		var hash metainfo.Hash
+		copy(hash[:], infohash)
+		fmt.Println("--------------------------------------------------------------")
+		fmt.Println("stop seeding", common.Bytes2Hex(infohash))
+		fmt.Println("--------------------------------------------------------------")
+
+		err = torrentClient.StopSeeding(hash)
+		if err!=nil {
+			fmt.Println("-----------------------stop seeding!", err)
+			return err
+		}
+	}
+
+	seedingInfoHash, err := torrentClient.SeedSnapshot("headers", snapshotPath)
+	if err!=nil {
+		fmt.Println("-------seed snaopshot err", err)
+		return err
+	}
+	sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
+	fmt.Println("--------------------------------------------------------------")
+	fmt.Println("start seeding", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash))
+	fmt.Println("--------------------------------------------------------------")
+	//todo update HeadersCurrentSnapshot and HeadersNewSnapshot + initial load
+	if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot {
+		oldSnapshotPath:= migrator.SnapshotName(snapshotDir,"headers", sm.HeadersCurrentSnapshot)
+		err = os.RemoveAll(oldSnapshotPath)
+		if err!=nil {
+			fmt.Println("snapshot hasn't removed")
+		}
 	}
 
 	err = migrator.CreateHeadersSnapshot(context.Background(), db,toBlock, dbPath)

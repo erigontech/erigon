@@ -22,6 +22,10 @@ import (
 )
 
 
+func SnapshotName(baseDir, name string, blockNum uint64) string  {
+	return path.Join(baseDir, name)+strconv.FormatUint(blockNum, 10)
+}
+
 
 
 type SnapshotMigrator struct {
@@ -56,9 +60,6 @@ func (sb *SnapshotMigrator) IsFinished(blockNum uint64) bool  {
 func (sb *SnapshotMigrator) Cleaned(blockNum uint64) bool  {
 	return atomic.LoadUint64(&sb.CleanedTo)>=blockNum && len(sb.toRemove)==0
 }
-func snapshotName(baseDir, name string, blockNum uint64) string  {
-	return path.Join(baseDir, name)+strconv.FormatUint(blockNum, 10)
-}
 func (sb *SnapshotMigrator) CreateHeadersSnapshot(chainDB ethdb.Database, toBlock uint64) error {
 	if sb.CurrentHeadersSnapshotBlock >= toBlock {
 		return nil
@@ -73,7 +74,7 @@ func (sb *SnapshotMigrator) CreateHeadersSnapshot(chainDB ethdb.Database, toBloc
 
 	sb.HeadersSnapshotGeneration = true
 
-	snapshotPath:=snapshotName(sb.SnapshotDir, "headers", toBlock)
+	snapshotPath:=SnapshotName(sb.SnapshotDir, "headers", toBlock)
 	if err:= os.RemoveAll(snapshotPath); err!=nil {
 		return err
 	}
@@ -402,7 +403,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				sm.cancel = nil
 				sm.mtx.Unlock()
 			}()
-			snapshotPath:=snapshotName(sm.snapshotsDir, "headers", toBlock)
+			snapshotPath:=SnapshotName(sm.snapshotsDir, "headers", toBlock)
 			err=CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath)
 			if err!=nil {
 				fmt.Println("-----------------------Create Error!", err)
@@ -439,7 +440,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				fmt.Println("not correct infohash", len(infohash))
 			}
 
-			seedingInfoHash, err := bittorrent.SeedSnapshot(db, 0, snapshotPath)
+			seedingInfoHash, err := bittorrent.SeedSnapshot("headers", snapshotPath)
 			if err!=nil {
 				fmt.Println("-------seed snaopshot err", err)
 			}
@@ -451,7 +452,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			sm.mtx.RLock()
 			defer sm.mtx.RUnlock()
 			if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot {
-				oldSnapshotPath:= snapshotName(sm.snapshotsDir,"headers", sm.HeadersCurrentSnapshot)
+				oldSnapshotPath:= SnapshotName(sm.snapshotsDir,"headers", sm.HeadersCurrentSnapshot)
 				err = os.RemoveAll(oldSnapshotPath)
 				if err!=nil {
 					fmt.Println("snapshot hasn't removed")
@@ -556,7 +557,7 @@ func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snap
 	select {
 	case <-time.After(time.Minute):
 		panic("timeout")
-		log.Error("timout on closing headers snapshot database" )
+		log.Error("timout on closing headers snapshot database")
 	case <-done:
 	}
 

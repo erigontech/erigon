@@ -301,7 +301,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 	return mp, nil
 }
 
-func (cli *Client) SeedSnapshot(db ethdb.Database, networkID uint64, path string) (metainfo.Hash, error) {
+func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error) {
 	info,err:=BuildInfoBytesForSnapshot(path, LmdbFilename)
 	if err!=nil {
 		return [20]byte{}, err
@@ -313,7 +313,7 @@ func (cli *Client) SeedSnapshot(db ethdb.Database, networkID uint64, path string
 	}
 
 
-	t, err := cli.AddTorrentSpec("headers", metainfo.HashBytes(infoBytes), infoBytes)
+	t, err := cli.AddTorrentSpec(name, metainfo.HashBytes(infoBytes), infoBytes)
 	if err!=nil {
 		return [20]byte{}, err
 	}

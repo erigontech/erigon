@@ -799,11 +799,6 @@ func TestSnapshotMigrator2(t *testing.T) {
 
 }
 
-/*
-0 headers10 a2f0207c82d2ad0f2c92dd102f47de86312863ce
-trnts [a2f0207c82d2ad0f2c92dd102f47de86312863ce]
- */
-
 func TestSnapshotMigratorStage(t *testing.T) {
 	dir,err:=ioutil.TempDir(os.TempDir(), "tst")
 	if err!=nil {

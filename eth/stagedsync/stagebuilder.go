@@ -398,8 +398,7 @@ func DefaultStages() StageBuilders {
 							return err
 						}
 
-						sm:=&migrator.SnapshotMigrator2{}
-						err = sm.Migrate(world.DB, world.TX, executionAt, world.btClient)
+						err = world.SnapshotBuilder.Migrate(world.DB, world.TX, executionAt, world.btClient)
 						if err!=nil {
 							return err
 						}
