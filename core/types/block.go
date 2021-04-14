@@ -356,7 +356,8 @@ func (h Header) EncodeRLP(w io.Writer) error {
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("open header struct: %w", err)
+		return err
+		//return fmt.Errorf("open header struct: %w", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {

@@ -445,7 +445,6 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// prefix
-	fmt.Printf("accessListLen: %d\n", accessListLen)
 	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
 		return err
 	}
