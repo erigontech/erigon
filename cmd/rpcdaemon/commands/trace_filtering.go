@@ -71,7 +71,7 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
+func (api *TraceAPIImpl) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
 	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
