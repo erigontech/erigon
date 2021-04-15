@@ -283,7 +283,6 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
-			d
 		}
 
 		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
