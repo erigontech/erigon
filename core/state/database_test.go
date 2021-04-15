@@ -73,7 +73,7 @@ func TestCreate2Revive(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
-		signer  = types.HomesteadSigner{}
+		signer  = types.LatestSignerForChainID(nil)
 	)
 
 	engine := ethash.NewFaker()
@@ -96,7 +96,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -112,7 +112,7 @@ func TestCreate2Revive(t *testing.T) {
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,7 +245,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
-		signer  = types.HomesteadSigner{}
+		signer  = types.LatestSignerForChainID(nil)
 	)
 
 	engine := ethash.NewFaker()
@@ -268,7 +268,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -285,7 +285,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 2:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -302,7 +302,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 4:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,7 +318,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			}
 			block.AddTx(tx)
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -480,7 +480,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -514,7 +514,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	transactOptsLonger.GasLimit = 1000000
 
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -616,7 +616,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -643,7 +643,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -762,7 +762,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -885,7 +885,7 @@ func TestEip2200Gas(t *testing.T) {
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -968,7 +968,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var err error
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -1070,7 +1070,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			},
 		}
 		genesis = gspec.MustCommit(db)
-		signer  = types.HomesteadSigner{}
+		signer  = types.LatestSignerForChainID(nil)
 	)
 
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
@@ -1085,11 +1085,11 @@ func TestWrongIncarnation2(t *testing.T) {
 	var contractAddress common.Address
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1120,11 +1120,11 @@ func TestWrongIncarnation2(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1336,7 +1336,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var err error
 
 	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -1397,7 +1397,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
