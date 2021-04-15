@@ -295,7 +295,8 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	}
 
 	current := chain.CurrentHeader()
-	total := int(current.Number.Uint64()) - int(lastSnap)
+	currentBlock := current.Number.Uint64()
+	total := int(currentBlock) - int(lastSnap)
 
 	if total < 1024 {
 		return
@@ -305,10 +306,10 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	snapHash := snapBlock.Hash()
 
 	snap, ok := c.getSnapshot(lastSnap, &snapHash)
-	if !ok {
+	if !ok || snap == nil {
 		// genesis case
 		if lastSnap == 0 {
-			snap, err := c.storeGenesisSnapshot(snapBlock)
+			snap, err = c.storeGenesisSnapshot(snapBlock)
 			if err != nil || snap == nil {
 				log.Error("can't create a genesis Clique snapshot", "block", lastSnap, "hash", snapHash, "err", err)
 				return
@@ -323,7 +324,7 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	var percent int
 	var prevPercent int
 
-	for n := lastSnap + 1; n <= current.Number.Uint64(); n++ {
+	for n := lastSnap + 1; n <= currentBlock; n++ {
 		current = chain.GetHeaderByNumber(n)
 		if current == nil {
 			log.Error("can't regenerate snapshot. block does not exist", "block", n)
@@ -332,7 +333,7 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 
 		err = c.applyAndStoreSnapshot(snap, false, current)
 		if err != nil {
-			log.Error("can't regenerate snapshot", "block", n, "err", err)
+			log.Error("can't regenerate snapshot", "block", n, "current", current.Number.Uint64(), "i", i, "err", err)
 			return
 		}
 
@@ -343,6 +344,8 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 		}
 		prevPercent = percent
 	}
+
+	log.Info("regenerating clique snapshots finished")
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
