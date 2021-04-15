@@ -110,6 +110,7 @@ func (tx *AccessListTx) Size() common.StorageSize {
 		return size.(common.StorageSize)
 	}
 	c := tx.EncodingSize()
+	c++ // TxType
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
@@ -119,7 +120,16 @@ func (tx AccessListTx) Protected() bool {
 }
 
 func (tx AccessListTx) EncodingSize() int {
-	encodingSize := 0
+	encodingSize, _, _, _ := tx.encodingSizeNoEnvelope()
+	// Add envelope size and type size
+	if encodingSize >= 56 {
+		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	encodingSize += 2
+	return encodingSize
+}
+
+func (tx AccessListTx) encodingSizeNoEnvelope() (encodingSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	encodingSize++
 	var chainIdLen int
@@ -129,7 +139,6 @@ func (tx AccessListTx) EncodingSize() int {
 	encodingSize += chainIdLen
 	// size of Nonce
 	encodingSize++
-	var nonceLen int
 	if tx.Nonce >= 128 {
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
@@ -143,7 +152,6 @@ func (tx AccessListTx) EncodingSize() int {
 	encodingSize += gasPriceLen
 	// size of Gas
 	encodingSize++
-	var gasLen int
 	if tx.Gas >= 128 {
 		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
@@ -176,7 +184,7 @@ func (tx AccessListTx) EncodingSize() int {
 	}
 	// size of AccessList
 	encodingSize++
-	accessListLen := accessListSize(tx.AccessList)
+	accessListLen = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
 		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
 	}
@@ -202,12 +210,7 @@ func (tx AccessListTx) EncodingSize() int {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
-	// Add envelope size and type size
-	if encodingSize >= 56 {
-		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
-	}
-	encodingSize += 2
-	return encodingSize
+	return encodingSize, nonceLen, gasLen, accessListLen
 }
 
 func accessListSize(al AccessList) int {
@@ -284,96 +287,22 @@ func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 	return nil
 }
 
+// MarshalBinary returns the canonical encoding of the transaction.
+// For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
+// transactions, it returns the type and payload.
+func (tx AccessListTx) MarshalBinary(w io.Writer) error {
+	return nil
+}
+
+// EncodeRLP implements rlp.Encoder
 func (tx AccessListTx) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of ChainID
-	encodingSize++
-	var chainIdLen int
-	if tx.ChainID.BitLen() >= 8 {
-		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
-	}
-	encodingSize += chainIdLen
-	// size of Nonce
-	encodingSize++
-	var nonceLen int
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
-	encodingSize += nonceLen
-	// size of GasPrice
-	encodingSize++
-	var gasPriceLen int
-	if tx.GasPrice.BitLen() >= 8 {
-		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
-	}
-	encodingSize += gasPriceLen
-	// size of Gas
-	encodingSize++
-	var gasLen int
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
-	encodingSize += gasLen
-	// size of To
-	encodingSize++
-	if tx.To != nil {
-		encodingSize += 20
-	}
-	// size of Value
-	encodingSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	encodingSize += valueLen
-	// size of Data
-	encodingSize++
-	switch len(tx.Data) {
-	case 0:
-	case 1:
-		if tx.Data[0] >= 128 {
-			encodingSize++
-		}
-	default:
-		if len(tx.Data) >= 56 {
-			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
-		}
-		encodingSize += len(tx.Data)
-	}
-	// size of AccessList
-	encodingSize++
-	var accessListLen int = accessListSize(tx.AccessList)
-	if accessListLen >= 56 {
-		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
-	}
-	encodingSize += accessListLen
-	// size of V
-	encodingSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	encodingSize += vLen
-	// size of R
-	encodingSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	encodingSize += rLen
-	// size of S
-	encodingSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	encodingSize += sLen
-	envelopeSize := encodingSize + 1
+	encodingSize, nonceLen, gasLen, accessListLen := tx.encodingSizeNoEnvelope()
+	envelopeSize := encodingSize
 	if encodingSize >= 56 {
 		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
 	}
-	// size of TxType
-	envelopeSize++
+	// size of struct prefix and TxType
+	envelopeSize += 2
 	var b [33]byte
 	// envelope
 	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
@@ -524,27 +453,27 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read ChainID: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
 	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read Nonce: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read GasPrice: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
-		return err
+		return fmt.Errorf("read Gas: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read To: %w", err)
 	}
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
@@ -554,14 +483,14 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Value: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Data: %w", err)
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
@@ -590,7 +519,10 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S = new(uint256.Int).SetBytes(b)
-	return s.ListEnd()
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close AccessListTx: %w", err)
+	}
+	return nil
 }
 
 // AsMessage returns the transaction as a core.Message.

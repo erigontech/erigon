@@ -312,12 +312,12 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
-	envelopeSize := encodingSize + 1
+	envelopeSize := encodingSize
 	if encodingSize >= 56 {
 		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
 	}
-	// size of TxType
-	envelopeSize++
+	// size of struct prefix and TxType
+	envelopeSize += 2
 	var b [33]byte
 	// envelope
 	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {

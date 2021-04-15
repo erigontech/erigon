@@ -134,7 +134,7 @@ func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
 		case *types.LegacyTx:
 			txLen = t.EncodingSize()
 		case *types.AccessListTx:
-			txLen = t.EncodingSize()
+			txLen, _, _, _ = t.EncodingSize()
 		case *types.DynamicFeeTransaction:
 			txLen = t.EncodingSize()
 		}
@@ -311,7 +311,7 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 		case *types.LegacyTx:
 			txLen = t.EncodingSize()
 		case *types.AccessListTx:
-			txLen = t.EncodingSize()
+			txLen, _, _, _ = t.EncodingSize()
 		case *types.DynamicFeeTransaction:
 			txLen = t.EncodingSize()
 		}
@@ -501,7 +501,7 @@ func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
 		case *types.LegacyTx:
 			txLen = t.EncodingSize()
 		case *types.AccessListTx:
-			txLen = t.EncodingSize()
+			txLen, _, _, _ = t.EncodingSize()
 		case *types.DynamicFeeTransaction:
 			txLen = t.EncodingSize()
 		}
