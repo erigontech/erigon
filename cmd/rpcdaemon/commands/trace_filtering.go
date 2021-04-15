@@ -99,7 +99,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	txs := make([]TransactionWithSender, 0, len(senders))
 	for n, tx := range block.Transactions() {
 		txs = append(txs, TransactionWithSender{
-			tx:     *tx,
+			tx:     tx,
 			sender: senders[n],
 		})
 	}
@@ -339,16 +339,16 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 	toExecute := []interface{}{}
 
 	for _, tx := range txs {
-		gas := hexutil.Uint64(tx.tx.Gas())
-		gasPrice := hexutil.Big(*tx.tx.GasPrice().ToBig())
-		value := hexutil.Big(*tx.tx.Value().ToBig())
+		gas := hexutil.Uint64(tx.tx.GetGas())
+		gasPrice := hexutil.Big(*tx.tx.GetPrice().ToBig())
+		value := hexutil.Big(*tx.tx.GetValue().ToBig())
 		toExecute = append(toExecute, []interface{}{TraceCallParam{
 			From:     &tx.sender,
-			To:       tx.tx.To(),
+			To:       tx.tx.GetTo(),
 			Gas:      &gas,
 			GasPrice: &gasPrice,
 			Value:    &value,
-			Data:     tx.tx.Data(),
+			Data:     tx.tx.GetData(),
 		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
 	}
 
