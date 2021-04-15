@@ -86,8 +86,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	receiptBatch := chainDb.NewBatch()
-	defer receiptBatch.Rollback()
+	rwtx, err := chainDb.RwKV().BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer rwtx.Rollback()
 
 	execAt, err1 := stages.GetStageProgress(chainDb, stages.Execution)
 	if err1 != nil {
@@ -142,7 +145,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				}
 			}
 
-			if err := rawdb.AppendReceipts(receiptBatch, block.NumberU64(), receipts); err != nil {
+			if err := rawdb.AppendReceipts(rwtx, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 		}
@@ -216,8 +219,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			fmt.Println("interrupted, please wait for cleanup...")
 		case <-commitEvery.C:
 			if writeReceipts {
-				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(receiptBatch.BatchSize()))
-				if err := receiptBatch.CommitAndBegin(context.Background()); err != nil {
+				log.Info("Committing receipts", "up to block", block.NumberU64())
+				if err = rwtx.Commit(); err != nil {
+					return err
+				}
+				rwtx, err = chainDb.RwKV().BeginRw(context.Background())
+				if err != nil {
 					return err
 				}
 			}
@@ -225,8 +232,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		}
 	}
 	if writeReceipts {
-		log.Info("Committing final receipts", "batch size", common.StorageSize(receiptBatch.BatchSize()))
-		if err := receiptBatch.Commit(); err != nil {
+		log.Info("Committing final receipts", "batch size")
+		if err = rwtx.Commit(); err != nil {
 			return err
 		}
 	}
