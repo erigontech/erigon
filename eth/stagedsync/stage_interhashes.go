@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -25,8 +24,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
-	to, err := s.ExecutionAt(db)
+func SpawnIntermediateHashesStage(s *StageState, tx ethdb.RwTx, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
+	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
@@ -39,18 +38,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 	}
 	//fmt.Printf("\n\n%d->%d\n", s.BlockNumber, to)
 
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-		defer tx.Rollback()
-	}
 	if cache != nil {
 		if err = cacheWarmUpIfNeed(tx, cache); err != nil {
 			return trie.EmptyRoot, err
@@ -83,12 +70,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 
 	if err = s.DoneAndUpdate(tx, to); err != nil {
 		return trie.EmptyRoot, err
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return trie.EmptyRoot, err
-		}
 	}
 
 	return root, nil
@@ -440,29 +421,15 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
 	var cache *shards.StateCache
-	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("read canonical hash: %w", err)
 	}
-	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
+	syncHeadHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
 	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
-
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		var txErr error
-		tx, txErr = db.Begin(context.Background(), ethdb.RW)
-		if txErr != nil {
-			return fmt.Errorf("open transcation: %w", txErr)
-		}
-		defer tx.Rollback()
-	}
 
 	// if cache != nil {
 	// 	if err = cacheWarmUpIfNeed(tx, cache); err != nil {
@@ -476,11 +443,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	}
 	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %w", logPrefix, err)
-	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -602,13 +564,18 @@ func assertSubset(a, b uint16) {
 	}
 }
 
-func cacheWarmUpIfNeed(db ethdb.Getter, cache *shards.StateCache) error {
+func cacheWarmUpIfNeed(db ethdb.Tx, cache *shards.StateCache) error {
 	if cache.HasAccountWithInPrefix([]byte{0}) {
 		return nil
 	}
 
+	c, err := db.Cursor(dbutils.TrieOfAccountsBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 	//TODO: re-implement by seeks - don't scan full table
-	if err := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := ethdb.Walk(c, nil, 0, func(k, v []byte) (bool, error) {
 		if len(k) > 2 {
 			return true, nil
 		}

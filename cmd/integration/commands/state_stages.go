@@ -449,7 +449,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	}
 	_ = st.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = clearUnwindStack(tx, context.Background())
