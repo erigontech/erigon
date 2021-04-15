@@ -134,11 +134,11 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), checkRoot, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, checkRoot, world.cache, world.TmpDir, world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), world.cache, world.TmpDir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
