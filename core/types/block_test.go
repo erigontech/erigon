@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -55,8 +56,8 @@ func TestBlockEncoding(t *testing.T) {
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 
-	tx1 := NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt().SetUint64(10), 50000, uint256.NewInt().SetUint64(10), nil)
-	tx1, _ = tx1.WithSignature(HomesteadSigner{}, common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+	var tx1 Transaction = NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt().SetUint64(10), 50000, uint256.NewInt().SetUint64(10), nil)
+	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 	check("len(Transactions)", len(block.Transactions()), 1)
 	check("Transactions[0].Hash", block.Transactions()[0].Hash(), tx1.Hash())
 	ourBlockEnc, err := rlp.EncodeToBytes(&block)
@@ -93,8 +94,8 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 	check("BaseFee", block.BaseFee(), new(big.Int).SetUint64(params.InitialBaseFee))
 
-	tx1 := NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), big.NewInt(10), 50000, big.NewInt(10), nil)
-	tx1, _ = tx1.WithSignature(HomesteadSigner{}, common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+	var tx1 Transaction = NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), new(uint256.Int).SetUint64(10), 50000, new(uint256.Int).SetUint64(10), nil)
+	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	accesses := AccessList{AccessTuple{
@@ -104,18 +105,20 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		},
 	}}
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-	txdata := &DynamicFeeTransaction{
-		ChainID:    big.NewInt(1),
-		Nonce:      0,
-		To:         &to,
-		Gas:        123457,
-		FeeCap:     new(big.Int).Set(block.BaseFee()),
-		Tip:        big.NewInt(0),
+	feeCap, _ := uint256.FromBig(block.BaseFee())
+	var tx2 Transaction = &DynamicFeeTransaction{
+		ChainID: u256.Num1,
+		CommonTx: CommonTx{
+			Nonce: 0,
+			To:    &to,
+			Gas:   123457,
+			Data:  []byte{},
+		},
+		FeeCap:     feeCap,
+		Tip:        u256.Num0,
 		AccessList: accesses,
-		Data:       []byte{},
 	}
-	tx2 := NewTx(txdata)
-	tx2, err := tx2.WithSignature(LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
+	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
 	if err != nil {
 		t.Fatal("invalid signature error: ", err)
 	}
@@ -157,30 +160,36 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 
 	// Create legacy tx.
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-	ten, _ := uint256.FromBig(big.NewInt(10))
-	tx1 := NewTx(&LegacyTx{
-		Nonce:    0,
-		To:       &to,
-		Value:    ten,
-		Gas:      50000,
+	ten := new(uint256.Int).SetUint64(10)
+	var tx1 Transaction = &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce: 0,
+			To:    &to,
+			Value: ten,
+			Gas:   50000,
+		},
 		GasPrice: ten,
-	})
+	}
 	sig := common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100")
-	tx1, _ = tx1.WithSignature(HomesteadSigner{}, sig)
+	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), sig)
 
 	chainID, _ := uint256.FromBig(big.NewInt(1))
 	// Create ACL tx.
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	tx2 := NewTx(&AccessListTx{
-		ChainID:    chainID,
-		Nonce:      0,
-		To:         &to,
-		Gas:        123457,
-		GasPrice:   ten,
+	var tx2 Transaction = &AccessListTx{
+		ChainID: chainID,
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 0,
+				To:    &to,
+				Gas:   123457,
+			},
+			GasPrice: ten,
+		},
 		AccessList: AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}},
-	})
+	}
 	sig2 := common.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
-	tx2, _ = tx2.WithSignature(NewEIP2930Signer(big.NewInt(1)), sig2)
+	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
 
 	check("len(Transactions)", len(block.Transactions()), 2)
 	check("Transactions[0].Hash", block.Transactions()[0].Hash(), tx1.Hash())
@@ -222,7 +231,7 @@ func BenchmarkEncodeBlock(b *testing.B) {
 func makeBenchBlock() *Block {
 	var (
 		key, _   = crypto.GenerateKey()
-		txs      = make([]*Transaction, 70)
+		txs      = make([]Transaction, 70)
 		receipts = make([]*Receipt, len(txs))
 		signer   = LatestSigner(params.TestChainConfig)
 		uncles   = make([]*Header, 3)
@@ -240,12 +249,12 @@ func makeBenchBlock() *Block {
 		price := uint256.NewInt().SetUint64(300000)
 		data := make([]byte, 100)
 		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
-		signedTx, err := SignTx(tx, signer, key)
+		signedTx, err := SignTx(tx, *signer, key)
 		if err != nil {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.Gas())
+		receipts[i] = NewReceipt(false, tx.GetGas())
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
