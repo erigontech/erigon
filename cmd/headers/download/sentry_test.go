@@ -51,7 +51,7 @@ func testSentryServer(db ethdb.KVGetter, genesis *core.Genesis, genesisHash comm
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
+func TestForkIDSplit65(t *testing.T) { testForkIDSplit(t, eth.ETH65) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
