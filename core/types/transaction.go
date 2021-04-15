@@ -64,6 +64,7 @@ type Transaction interface {
 	GetData() []byte
 	GetAccessList() AccessList
 	Protected() bool
+	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete

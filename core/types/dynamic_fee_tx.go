@@ -553,3 +553,7 @@ func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 
 // accessors for innerTx.
 func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
+
+func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	return tx.V, tx.R, tx.S
+}

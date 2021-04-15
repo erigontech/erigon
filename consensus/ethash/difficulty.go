@@ -133,10 +133,10 @@ func CalcDifficultyHomesteadU256(time uint64, parent *types.Header) *big.Int {
 // MakeDifficultyCalculatorU256 creates a difficultyCalculator with the given bomb-delay.
 // the difficulty is calculated with Byzantium rules, which differs from Homestead in
 // how uncles affect the calculation
-func MakeDifficultyCalculatorU256(bombDelay *big.Int) func(time uint64, parent *types.Header) *big.Int {
+func MakeDifficultyCalculatorU256(bombDelay uint64) func(time uint64, parent *types.Header) *big.Int {
 	// Note, the calculations below looks at the parent number, which is 1 below
 	// the block number. Thus we remove one from the delay given
-	bombDelayFromParent := bombDelay.Uint64() - 1
+	bombDelayFromParent := bombDelay - 1
 	return func(time uint64, parent *types.Header) *big.Int {
 		/*
 			https://github.com/ethereum/EIPs/issues/100

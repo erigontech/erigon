@@ -525,3 +525,7 @@ func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx LegacyTx) Type() byte { return LegacyTxType }
+
+func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	return tx.V, tx.R, tx.S
+}

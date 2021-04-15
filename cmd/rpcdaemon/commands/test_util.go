@@ -42,7 +42,7 @@ func createTestDb() (ethdb.Database, error) {
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
-		signer = types.LatestSignerForChainID(chainId)
+		signer = types.LatestSignerForChainID(nil)
 	)
 	// Create intermediate hash bucket since it is mandatory now
 	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)

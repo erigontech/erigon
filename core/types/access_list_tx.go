@@ -655,3 +655,7 @@ func (tx AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx AccessListTx) Type() byte { return AccessListTxType }
+
+func (tx AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	return tx.V, tx.R, tx.S
+}

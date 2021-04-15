@@ -255,7 +255,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &tx); err != nil {
 		return err
 	}
-	t.tx = &tx
+	t.tx = tx
 	return nil
 }
 
