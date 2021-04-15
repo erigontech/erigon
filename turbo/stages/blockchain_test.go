@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -697,11 +696,8 @@ func TestLogReorgs(t *testing.T) {
 	)
 
 	cacheConfig := &core.CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
+		NoHistory: false,
+		Pruning:   false,
 	}
 	txCacher := core.NewTxSenderCacher(1)
 	blockchain, _ := core.NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
@@ -1099,9 +1095,6 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 	cacheConfig := &core.CacheConfig{
 		Pruning:             false,
 		BlocksBeforePruning: 1024,
-		TrieCleanLimit:      256,
-		TrieDirtyLimit:      256,
-		TrieTimeLimit:       5 * time.Minute,
 		DownloadOnly:        false,
 		NoHistory:           !history,
 	}
@@ -1398,11 +1391,8 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
 	cacheConfig := &core.CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
+		NoHistory: false,
+		Pruning:   false,
 	}
 	txCacher := core.NewTxSenderCacher(1)
 	chain, err := core.NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
@@ -1461,11 +1451,8 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	defer diskdb.Close()
 	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 	cacheConfig := &core.CacheConfig{
-		TrieCleanLimit: 256,
-		TrieDirtyLimit: 256,
-		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
-		Pruning:        false,
+		NoHistory: false,
+		Pruning:   false,
 	}
 	txCacher := core.NewTxSenderCacher(1)
 	chain, err := core.NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)

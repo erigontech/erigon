@@ -118,13 +118,7 @@ const (
 // CacheConfig contains the configuration values for the trie caching/pruning
 // that's resident in a blockchain.
 type CacheConfig struct {
-	Pruning             bool
-	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
-	TrieCleanJournal    string        // Disk journal for saving clean cache entries.
-	TrieCleanRejournal  time.Duration // Time interval to dump clean cache to disk periodically
-	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
-	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
-	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
+	Pruning bool
 
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
@@ -139,9 +133,6 @@ type CacheConfig struct {
 var defaultCacheConfig = &CacheConfig{
 	Pruning:             false,
 	BlocksBeforePruning: 1024,
-	TrieCleanLimit:      256,
-	TrieDirtyLimit:      256,
-	TrieTimeLimit:       5 * time.Minute,
 	DownloadOnly:        false,
 	NoHistory:           false,
 }

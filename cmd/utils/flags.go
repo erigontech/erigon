@@ -277,44 +277,6 @@ var (
 		Value: ethconfig.Defaults.TxPool.Lifetime,
 	}
 	// Performance tuning settings
-	CacheFlag = cli.IntFlag{
-		Name:  "cache",
-		Usage: "Megabytes of memory allocated to internal caching (default = 4096 mainnet full node)",
-		Value: 1024,
-	}
-	CacheDatabaseFlag = cli.IntFlag{
-		Name:  "cache.database",
-		Usage: "Percentage of cache memory allowance to use for database io",
-		Value: 50,
-	}
-	CacheTrieFlag = cli.IntFlag{
-		Name:  "cache.trie",
-		Usage: "Percentage of cache memory allowance to use for trie caching (default = 15% full mode, 30% archive mode)",
-		Value: 15,
-	}
-	CacheTrieJournalFlag = cli.StringFlag{
-		Name:  "cache.trie.journal",
-		Usage: "Disk journal directory for trie cache to survive node restarts",
-		Value: ethconfig.Defaults.TrieCleanCacheJournal,
-	}
-	CacheTrieRejournalFlag = cli.DurationFlag{
-		Name:  "cache.trie.rejournal",
-		Usage: "Time interval to regenerate the trie cache journal",
-		Value: ethconfig.Defaults.TrieCleanCacheRejournal,
-	}
-	CacheGCFlag = cli.IntFlag{
-		Name:  "cache.gc",
-		Usage: "Percentage of cache memory allowance to use for trie pruning (default = 25% full mode, 0% archive mode)",
-		Value: 25,
-	}
-	CacheNoPrefetchFlag = cli.BoolFlag{
-		Name:  "cache.noprefetch",
-		Usage: "Disable heuristic state prefetch during block import (less CPU and disk IO, more time waiting for data)",
-	}
-	TrieCacheGenFlag = cli.IntFlag{
-		Name:  "trie-cache-gens",
-		Usage: "Number of trie node generations to keep in memory",
-	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
 		Usage: "When to switch from full to archive sync",
@@ -1137,13 +1099,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheDatabaseFlag.Name) {
-		cfg.DatabaseCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheDatabaseFlag.Name) / 100
-	}
 	cfg.DatabaseHandles = makeDatabaseHandles()
-	if ctx.GlobalIsSet(AncientFlag.Name) {
-		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
-	}
+	//if ctx.GlobalIsSet(AncientFlag.Name) {
+	//	cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
+	//}
 
 	// todo uncomment after fix pruning
 	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
@@ -1159,19 +1118,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	log.Info("Enabling recording of key preimages since archive mode is used")
 
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
-
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {
-		cfg.TrieCleanCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheTrieFlag.Name) / 100
-	}
-	if ctx.GlobalIsSet(CacheTrieJournalFlag.Name) {
-		cfg.TrieCleanCacheJournal = ctx.GlobalString(CacheTrieJournalFlag.Name)
-	}
-	if ctx.GlobalIsSet(CacheTrieRejournalFlag.Name) {
-		cfg.TrieCleanCacheRejournal = ctx.GlobalDuration(CacheTrieRejournalFlag.Name)
-	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheGCFlag.Name) {
-		cfg.TrieDirtyCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
-	}
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
 	}
