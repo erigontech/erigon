@@ -228,8 +228,6 @@ var (
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeCallTraces - does not build index of call traces
-	StorageModeCallTraces = []byte("smCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
