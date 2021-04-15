@@ -94,13 +94,13 @@ func (h Header) EncodingSize() int {
 		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
 	encodingSize++
 	var diffLen int
-	if h.Difficulty.BitLen() >= 8 {
+	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
 		diffLen = (h.Difficulty.BitLen() + 7) / 8
 	}
 	encodingSize += diffLen
 	encodingSize++
 	var numberLen int
-	if h.Number.BitLen() >= 8 {
+	if h.Number != nil && h.Number.BitLen() >= 8 {
 		numberLen = (h.Number.BitLen() + 7) / 8
 	}
 	encodingSize += numberLen
@@ -160,7 +160,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	encodingSize += diffLen
 	encodingSize++
 	var numberLen int
-	if h.Number.BitLen() >= 8 {
+	if h.Number != nil && h.Number.BitLen() >= 8 {
 		numberLen = (h.Number.BitLen() + 7) / 8
 	}
 	encodingSize += numberLen
@@ -271,14 +271,16 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if h.Number.BitLen() > 0 && h.Number.BitLen() < 8 {
+	if h.Number != nil && h.Number.BitLen() > 0 && h.Number.BitLen() < 8 {
 		b[0] = byte(h.Number.Uint64())
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(numberLen)
-		h.Number.FillBytes(b[1 : 1+numberLen])
+		if h.Number != nil {
+			h.Number.FillBytes(b[1 : 1+numberLen])
+		}
 		if _, err := w.Write(b[:1+numberLen]); err != nil {
 			return err
 		}

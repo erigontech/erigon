@@ -205,19 +205,19 @@ func (tx LegacyTx) EncodingSize() int {
 	// size of V
 	encodingSize++
 	var vLen int
-	if tx.V.BitLen() >= 8 {
+	if tx.V != nil && tx.V.BitLen() >= 8 {
 		vLen = (tx.V.BitLen() + 7) / 8
 	}
 	encodingSize += vLen
 	encodingSize++
 	var rLen int
-	if tx.R.BitLen() >= 8 {
+	if tx.R != nil && tx.R.BitLen() >= 8 {
 		rLen = (tx.R.BitLen() + 7) / 8
 	}
 	encodingSize += rLen
 	encodingSize++
 	var sLen int
-	if tx.S.BitLen() >= 8 {
+	if tx.S != nil && tx.S.BitLen() >= 8 {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
@@ -315,19 +315,19 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	}
 	encodingSize++
 	var vLen int
-	if tx.V.BitLen() >= 8 {
+	if tx.V != nil && tx.V.BitLen() >= 8 {
 		vLen = (tx.V.BitLen() + 7) / 8
 	}
 	encodingSize += vLen
 	encodingSize++
 	var rLen int
-	if tx.R.BitLen() >= 8 {
+	if tx.R != nil && tx.R.BitLen() >= 8 {
 		rLen = (tx.R.BitLen() + 7) / 8
 	}
 	encodingSize += rLen
 	encodingSize++
 	var sLen int
-	if tx.S.BitLen() >= 8 {
+	if tx.S != nil && tx.S.BitLen() >= 8 {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
@@ -382,14 +382,35 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 	if err := EncodeString(tx.Data, w, b[:]); err != nil {
 		return err
 	}
-	if err := tx.V.EncodeRLP(w); err != nil {
-		return err
+	if tx.V == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.V.EncodeRLP(w); err != nil {
+			return err
+		}
 	}
-	if err := tx.R.EncodeRLP(w); err != nil {
-		return err
+	if tx.R == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.R.EncodeRLP(w); err != nil {
+			return err
+		}
 	}
-	if err := tx.S.EncodeRLP(w); err != nil {
-		return err
+	if tx.S == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.S.EncodeRLP(w); err != nil {
+			return err
+		}
 	}
 	return nil
 }
