@@ -493,10 +493,10 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
-		return stagedsync.UnwindLogIndex(u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), ch)
+		return stagedsync.UnwindLogIndex(u, s, tx, ch)
 	}
 
-	if err := stagedsync.SpawnLogIndex(s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnLogIndex(s, tx, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
