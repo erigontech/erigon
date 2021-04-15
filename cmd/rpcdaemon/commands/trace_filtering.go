@@ -111,15 +111,31 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		})
 	}
 
-	if bn > 0 {
-		bn -= 1
+	baseBn := bn
+	if baseBn > 0 {
+		baseBn -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(bn))
+	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
-	return traces, err
+
+	out := make([]ParityTrace, 0, len(traces))
+	blockno := uint64(bn)
+	for txno, trace := range traces {
+		txhash := txs[txno].tx.Hash()
+		txpos := uint64(txno)
+		for _, pt := range trace.Trace {
+			pt.BlockHash = &hash
+			pt.BlockNumber = &blockno
+			pt.TransactionHash = &txhash
+			pt.TransactionPosition = &txpos
+			out = append(out, *pt)
+		}
+	}
+
+	return out, err
 }
 
 // Filter implements trace_filter
@@ -346,7 +362,7 @@ type TransactionWithSender struct {
 	sender common.Address
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]ParityTrace, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]*TraceCallResult, error) {
 	toExecute := []interface{}{}
 
 	for _, txWithSender := range txs {
@@ -380,21 +396,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		return nil, cmErr
 	}
 
-	out := make([]ParityTrace, 0, len(traces))
-	bn := uint64(blockNo)
-	for txno, trace := range traces {
-		txhash := txs[txno].tx.Hash()
-		txpos := uint64(txno)
-		for _, pt := range trace.Trace {
-			pt.BlockHash = &blockHash
-			pt.BlockNumber = &bn
-			pt.TransactionHash = &txhash
-			pt.TransactionPosition = &txpos
-			out = append(out, *pt)
-		}
-	}
-
-	return out, nil
+	return traces, nil
 }
 
 func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
