@@ -80,7 +80,7 @@ func (h *testEthHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
+func TestForkIDSplit65(t *testing.T) { testForkIDSplit(t, eth.ETH65) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
