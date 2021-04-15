@@ -122,7 +122,7 @@ func makeP2PServer(
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
 			Name:           eth.ProtocolName,
-			Version:        eth.ProtocolVersions[1],
+			Version:        eth.ProtocolVersions[0],
 			Length:         17,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
@@ -136,8 +136,8 @@ func makeP2PServer(
 					peerRwMap,
 					peer,
 					rw,
-					eth.ProtocolVersions[1], // version == eth65
-					eth.ProtocolVersions[1], // minVersion == eth65
+					eth.ProtocolVersions[0], // version == eth66
+					eth.ProtocolVersions[0], // minVersion == eth66
 					ss,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
@@ -566,9 +566,16 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		msgcode = eth.BlockHeadersMsg
 	case proto_sentry.MessageId_BlockBodies:
 		msgcode = eth.BlockBodiesMsg
+	case proto_sentry.MessageId_GetReceipts:
+		msgcode = eth.GetReceiptsMsg
+	case proto_sentry.MessageId_Receipts:
+		msgcode = eth.ReceiptsMsg
+	case proto_sentry.MessageId_PooledTransactions:
+		msgcode = eth.PooledTransactionsMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
+
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		ss.peerHeightMap.Delete(peerID)
 		ss.peerTimeMap.Delete(peerID)
