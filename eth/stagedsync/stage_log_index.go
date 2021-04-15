@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"runtime"
@@ -25,7 +26,21 @@ const (
 	bitmapsFlushEvery = 10 * time.Second
 )
 
-func SpawnLogIndex(s *StageState, tx ethdb.RwTx, tmpdir string, quit <-chan struct{}) error {
+func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
@@ -41,11 +56,20 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, tmpdir string, quit <-chan stru
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
 		return err
 	}
 
-	return s.DoneAndUpdate(tx, endBlock)
+	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
@@ -178,14 +202,34 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit dat
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, quitCh <-chan struct{}) error {
+func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	logPrefix := s.state.LogPrefix()
-	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindLogIndex(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), u.UnwindPoint, quitCh); err != nil {
 		return err
 	}
 
 	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: %w", logPrefix, err)
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 
 	return nil
