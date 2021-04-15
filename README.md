@@ -287,3 +287,7 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
+### Blocks Execution is slow on cloud-network-drives
+
+Please read https://github.com/ledgerwatch/turbo-geth/issues/1516#issuecomment-811958891
+In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.

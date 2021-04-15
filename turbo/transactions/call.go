@@ -140,7 +140,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 
 func getHashGetter(requireCanonical bool, tx ethdb.Tx) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
-		hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), n)
+		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {
 			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}

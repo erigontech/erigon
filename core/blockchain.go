@@ -118,13 +118,7 @@ const (
 // CacheConfig contains the configuration values for the trie caching/pruning
 // that's resident in a blockchain.
 type CacheConfig struct {
-	Pruning             bool
-	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
-	TrieCleanJournal    string        // Disk journal for saving clean cache entries.
-	TrieCleanRejournal  time.Duration // Time interval to dump clean cache to disk periodically
-	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
-	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
-	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
+	Pruning bool
 
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
@@ -139,9 +133,6 @@ type CacheConfig struct {
 var defaultCacheConfig = &CacheConfig{
 	Pruning:             false,
 	BlocksBeforePruning: 1024,
-	TrieCleanLimit:      256,
-	TrieDirtyLimit:      256,
-	TrieTimeLimit:       5 * time.Minute,
 	DownloadOnly:        false,
 	NoHistory:           false,
 }
@@ -1037,15 +1028,6 @@ func (bc *BlockChain) GetCanonicalHash(number uint64) common.Hash {
 // hash, fetching towards the genesis block.
 func (bc *BlockChain) GetBlockHashesFromHash(hash common.Hash, max uint64) []common.Hash {
 	return bc.hc.GetBlockHashesFromHash(hash, max)
-}
-
-// GetAncestor retrieves the Nth ancestor of a given block. It assumes that either the given block or
-// a close ancestor of it is canonical. maxNonCanonical points to a downwards counter limiting the
-// number of blocks to be individually checked before we reach the canonical chain.
-//
-// Note: ancestor == 0 returns the same block, 1 returns its parent and so on.
-func (bc *BlockChain) GetAncestor(hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
-	return bc.hc.GetAncestor(hash, number, ancestor, maxNonCanonical)
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number,

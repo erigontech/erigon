@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -117,11 +118,14 @@ func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subs
 // preinitialized with some sane testing defaults and the transaction pool mocked
 // out.
 type testHandler struct {
-	db        ethdb.Database
-	chain     *core.BlockChain
-	txpool    *testTxPool
-	handler   *handler
-	headBlock *types.Block
+	db          ethdb.Database
+	ChainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	genesis     *types.Block
+	engine      consensus.Engine
+	txpool      *testTxPool
+	handler     *handler
+	headBlock   *types.Block
 }
 
 // newTestHandler creates a new handler for testing purposes with no blocks.
@@ -139,8 +143,6 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}).MustCommit(db)
 
-	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
-
 	headBlock := genesis
 	if blocks > 0 {
 		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, nil, false)
@@ -153,11 +155,10 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 
 	handler, _ := newHandler(&handlerConfig{
 		Database:    db,
-		Chain:       chain,
-		ChainConfig: chain.Config(),
-		genesis:     chain.Genesis(),
-		vmConfig:    chain.GetVMConfig(),
-		engine:      chain.Engine(),
+		ChainConfig: params.TestChainConfig,
+		genesis:     genesis,
+		vmConfig:    &vm.Config{},
+		engine:      ethash.NewFaker(),
 		TxPool:      txpool,
 		Network:     1,
 		BloomCache:  1,
@@ -165,16 +166,18 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	handler.Start(1000)
 
 	return &testHandler{
-		db:        db,
-		chain:     chain,
-		txpool:    txpool,
-		handler:   handler,
-		headBlock: headBlock,
+		db:          db,
+		ChainConfig: params.TestChainConfig,
+		genesis:     genesis,
+		vmConfig:    &vm.Config{},
+		engine:      ethash.NewFaker(),
+		txpool:      txpool,
+		handler:     handler,
+		headBlock:   headBlock,
 	}
 }
 
 // close tears down the handler and all its internal constructs.
 func (b *testHandler) close() {
 	b.handler.Stop()
-	b.chain.Stop()
 }

@@ -26,7 +26,21 @@ import (
 )
 
 func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
-	to, err := s.ExecutionAt(db)
+	var tx ethdb.RwTx
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx().(ethdb.RwTx)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		defer tx.Rollback()
+	}
+
+	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
@@ -39,18 +53,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 	}
 	//fmt.Printf("\n\n%d->%d\n", s.BlockNumber, to)
 
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-		defer tx.Rollback()
-	}
 	if cache != nil {
 		if err = cacheWarmUpIfNeed(tx, cache); err != nil {
 			return trie.EmptyRoot, err
@@ -72,11 +74,11 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	var root common.Hash
 	if s.BlockNumber == 0 {
-		if root, err = RegenerateIntermediateHashes(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
+		if root, err = RegenerateIntermediateHashes(logPrefix, tx, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
-		if root, err = incrementIntermediateHashes(logPrefix, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), to, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
+		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
@@ -441,28 +443,28 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 }
 
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
-	var cache *shards.StateCache
-	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
-	if err != nil {
-		return fmt.Errorf("read canonical hash: %w", err)
-	}
-	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
-	expectedRootHash := syncHeadHeader.Root
-	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
-
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
-		var txErr error
-		tx, txErr = db.Begin(context.Background(), ethdb.RW)
-		if txErr != nil {
-			return fmt.Errorf("open transcation: %w", txErr)
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
 		defer tx.Rollback()
 	}
+
+	var cache *shards.StateCache
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return fmt.Errorf("read canonical hash: %w", err)
+	}
+	syncHeadHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
+	expectedRootHash := syncHeadHeader.Root
+	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
 
 	// if cache != nil {
 	// 	if err = cacheWarmUpIfNeed(tx, cache); err != nil {
@@ -471,7 +473,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	// }
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cache, tmpdir, expectedRootHash, quit); err != nil {
+	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cache, tmpdir, expectedRootHash, quit); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
@@ -602,13 +604,18 @@ func assertSubset(a, b uint16) {
 	}
 }
 
-func cacheWarmUpIfNeed(db ethdb.Getter, cache *shards.StateCache) error {
+func cacheWarmUpIfNeed(db ethdb.Tx, cache *shards.StateCache) error {
 	if cache.HasAccountWithInPrefix([]byte{0}) {
 		return nil
 	}
 
+	c, err := db.Cursor(dbutils.TrieOfAccountsBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 	//TODO: re-implement by seeks - don't scan full table
-	if err := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := ethdb.Walk(c, nil, 0, func(k, v []byte) (bool, error) {
 		if len(k) > 2 {
 			return true, nil
 		}
