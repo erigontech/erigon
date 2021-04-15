@@ -111,6 +111,10 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		})
 	}
 
+	if bn > 0 {
+		bn -= 1
+	}
+
 	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(bn))
 	if err != nil {
 		return nil, err
