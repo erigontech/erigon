@@ -2,6 +2,7 @@ package verify
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/big"
 	"os"
@@ -16,7 +17,12 @@ import (
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	ch := make(chan os.Signal, 1)
 	quitCh := make(chan struct{})
@@ -38,11 +44,11 @@ func ValidateTxLookups(chaindata string) error {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
 		}
-		body := rawdb.ReadBody(db, blockHash, blockNum)
+		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNum)
 
 		if body == nil {
 			log.Error("Empty body", "blocknum", blockNum)
@@ -51,8 +57,8 @@ func ValidateTxLookups(chaindata string) error {
 		blockBytes.SetUint64(blockNum)
 		bn := blockBytes.Bytes()
 
-		for _, tx := range body.Transactions {
-			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
+		for _, txn := range body.Transactions {
+			val, err := tx.GetOne(dbutils.TxLookupPrefix, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)

@@ -165,6 +165,14 @@ func (g *RequestGenerator) debugTraceCall(from common.Address, to *common.Addres
 	return sb.String()
 }
 
+func (g *RequestGenerator) traceBlock(bn uint64) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_block", "params": ["0x%x"]`, bn)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+
+	return sb.String()
+}
+
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(g.client, routes[target], body, response)

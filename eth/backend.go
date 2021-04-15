@@ -437,14 +437,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	checkpoint := config.Checkpoint
 	if eth.handler, err = newHandler(&handlerConfig{
-		Database:   chainDb,
-		Chain:      eth.blockchain,
-		genesis:    eth.blockchain.Genesis(),
-		vmConfig:   eth.blockchain.GetVMConfig(),
-		engine:     eth.blockchain.Engine(),
-		TxPool:     eth.txPool,
-		Network:    config.NetworkID,
-		Checkpoint: checkpoint,
+		Database:    chainDb,
+		Chain:       eth.blockchain,
+		ChainConfig: eth.blockchain.Config(),
+		genesis:     eth.blockchain.Genesis(),
+		vmConfig:    eth.blockchain.GetVMConfig(),
+		engine:      eth.blockchain.Engine(),
+		TxPool:      eth.txPool,
+		Network:     config.NetworkID,
+		Checkpoint:  checkpoint,
 
 		Whitelist: config.Whitelist,
 		Mining:    &config.Miner,
