@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -24,7 +25,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, tx ethdb.RwTx, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) (common.Hash, error) {
+	var tx ethdb.RwTx
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx().(ethdb.RwTx)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		defer tx.Rollback()
+	}
+
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return trie.EmptyRoot, err
@@ -70,6 +85,12 @@ func SpawnIntermediateHashesStage(s *StageState, tx ethdb.RwTx, checkRoot bool, 
 
 	if err = s.DoneAndUpdate(tx, to); err != nil {
 		return trie.EmptyRoot, err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return trie.EmptyRoot, err
+		}
 	}
 
 	return root, nil
@@ -421,7 +442,21 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, _ *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	var tx ethdb.RwTx
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx().(ethdb.RwTx)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	var cache *shards.StateCache
 	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 	if err != nil {
@@ -443,6 +478,11 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 	}
 	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %w", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
