@@ -76,8 +76,6 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	defer snTx.Rollback()
 
 	t := time.Now()
-	chunkFile := 30000
-	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
 	var hash common.Hash
 	var header []byte
 	c, err := snTx.RwCursor(dbutils.HeadersBucket)
@@ -101,7 +99,6 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		if err = c.Append(dbutils.HeaderKey(i, hash), header); err != nil {
 			return err
 		}
-		tuples = append(tuples, []byte(dbutils.HeadersBucket))
 		if i%1000 == 0 {
 			log.Info("Committed", "block", i)
 		}
