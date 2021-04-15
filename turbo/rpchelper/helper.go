@@ -19,7 +19,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *P
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		if number == rpc.LatestBlockNumber {
-			blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
+			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
 			}
@@ -28,7 +28,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *P
 		} else if number == rpc.PendingBlockNumber {
 			pendingBlock := pending.Block()
 			if pendingBlock == nil {
-				blockNumber, err = stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.Execution)
+				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 				if err != nil {
 					return 0, common.Hash{}, fmt.Errorf("getting latest block number: %w", err)
 				}
@@ -38,18 +38,18 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *P
 		} else {
 			blockNumber = uint64(number.Int64())
 		}
-		hash, err = rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
+		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, err
 		}
 	} else {
-		number := rawdb.ReadHeaderNumber(ethdb.NewRoTxDb(tx), hash)
+		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return 0, common.Hash{}, fmt.Errorf("block %x not found", hash)
 		}
 		blockNumber = *number
 
-		ch, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
+		ch, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return 0, common.Hash{}, err
 		}
