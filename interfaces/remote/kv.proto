@@ -3,9 +3,6 @@ syntax = "proto3";
 package remote;
 
 option go_package = "./remote;remote";
-option java_multiple_files = true;
-option java_package = "io.turbo-geth.db";
-option java_outer_classname = "KV";
 
 // Provides methods to access key-value data
 service KV { rpc Tx(stream Cursor) returns (stream Pair); }

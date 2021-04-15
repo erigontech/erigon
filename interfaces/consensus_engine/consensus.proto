@@ -5,7 +5,6 @@ import "types/types.proto";
 package consensus;
 
 option go_package = "./consensus;consensus";
-option java_multiple_files = true;
 
 message Error {
     uint32 code = 1;
