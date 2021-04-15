@@ -18,9 +18,9 @@ import (
 func TestLogIndex(t *testing.T) {
 	require := require.New(t)
 
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := db.BeginRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 

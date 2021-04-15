@@ -186,10 +186,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnLogIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
+						return UnwindLogIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), world.QuitCh)
 					},
 				}
 			},
