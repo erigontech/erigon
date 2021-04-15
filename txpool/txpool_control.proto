@@ -5,6 +5,8 @@ import "types/types.proto";
 
 package txpool_control;
 
+option go_package = "./txpool;txpool";
+
 message AccountInfoRequest {
   types.H256 block_hash = 1;
   types.H160 account = 2;
