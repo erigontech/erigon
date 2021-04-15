@@ -189,7 +189,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		for _, addr := range historyFilter {
 
 			addrBytes := addr.Bytes()
-			blockNumbers, errHistory := retrieveHistory(ethdb.NewRoTxDb(tx), addr, fromBlock, toBlock)
+			blockNumbers, errHistory := retrieveHistory(tx, addr, fromBlock, toBlock)
 			if errHistory != nil {
 				return nil, errHistory
 			}
@@ -393,7 +393,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 	return out, nil
 }
 
-func retrieveHistory(tx ethdb.Getter, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
+func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
 	blocks, err := bitmapdb.Get(tx, dbutils.AccountsHistoryBucket, addr.Bytes(), uint32(fromBlock), uint32(toBlock+1))
 	if err != nil {
 		return nil, err
