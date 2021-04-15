@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/spf13/cobra"
-
 	"math/big"
 	"os"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -65,59 +64,65 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	db := ethdb.NewObjectDatabase(kv)
-	snDB := ethdb.NewObjectDatabase(snKV)
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	snTx, err := snKV.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer snTx.Rollback()
 
 	t := time.Now()
 	chunkFile := 30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
 	var hash common.Hash
 	var header []byte
+	c, err := snTx.RwCursor(dbutils.HeadersBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 	for i := uint64(1); i <= toBlock; i++ {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
 
-		hash, err = rawdb.ReadCanonicalHash(db, i)
+		hash, err = rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 		}
-		header = rawdb.ReadHeaderRLP(db, hash, i)
+		header = rawdb.ReadHeaderRLP(tx, hash, i)
 		if len(header) == 0 {
 			return fmt.Errorf("empty header: %v", i)
 		}
-		tuples = append(tuples, []byte(dbutils.HeadersBucket), dbutils.HeaderKey(i, hash), header)
-		if len(tuples) >= chunkFile {
-			log.Info("Committed", "block", i)
-			_, err = snDB.MultiPut(tuples...)
-			if err != nil {
-				log.Crit("Multiput error", "err", err)
-				return err
-			}
-			tuples = tuples[:0]
-		}
-	}
-
-	if len(tuples) > 0 {
-		_, err = snDB.MultiPut(tuples...)
-		if err != nil {
-			log.Crit("Multiput error", "err", err)
+		if err = c.Append(dbutils.HeaderKey(i, hash), header); err != nil {
 			return err
 		}
+		tuples = append(tuples, []byte(dbutils.HeadersBucket))
+		if i%1000 == 0 {
+			log.Info("Committed", "block", i)
+		}
 	}
 
-	err = snDB.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err = snTx.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
 		return err
 	}
-	err = snDB.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
+	err = snTx.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadHash error", "err", err)
 		return err
 	}
+	if err = snTx.Commit(); err != nil {
+		return err
+	}
 
-	snDB.Close()
+	snKV.Close()
+
 	err = os.Remove(snapshotPath + "/lock.mdb")
 	if err != nil {
 		log.Warn("Remove lock", "err", err)
