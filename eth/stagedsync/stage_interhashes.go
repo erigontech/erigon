@@ -59,11 +59,11 @@ func SpawnIntermediateHashesStage(s *StageState, tx ethdb.RwTx, checkRoot bool, 
 	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	var root common.Hash
 	if s.BlockNumber == 0 {
-		if root, err = RegenerateIntermediateHashes(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
+		if root, err = RegenerateIntermediateHashes(logPrefix, tx, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
-		if root, err = incrementIntermediateHashes(logPrefix, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), to, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
+		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, checkRoot, cache, tmpdir, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
@@ -438,7 +438,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 	// }
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cache, tmpdir, expectedRootHash, quit); err != nil {
+	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cache, tmpdir, expectedRootHash, quit); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
