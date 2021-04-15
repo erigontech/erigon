@@ -331,11 +331,11 @@ func accountSavings(db ethdb.RwKV) (int, int) {
 }
 
 func bucketStats(chaindata string) error {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := ethdb.MustOpenKV(chaindata)
 	defer ethDb.Close()
 
 	var bucketList []string
-	if err1 := ethDb.RwKV().View(context.Background(), func(txa ethdb.Tx) error {
+	if err1 := ethDb.View(context.Background(), func(txa ethdb.Tx) error {
 		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
 			bucketList = bl
 		} else {
@@ -348,7 +348,7 @@ func bucketStats(chaindata string) error {
 	}
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-	switch kv := ethDb.RwKV().(type) {
+	switch kv := ethDb.(type) {
 	case *ethdb.LmdbKV:
 		type LmdbStat interface {
 			BucketStat(name string) (*lmdb.Stat, error)
@@ -600,9 +600,9 @@ func trieChart() {
 }
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err
@@ -689,11 +689,14 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 }
 
 func printCurrentBlockNumber(chaindata string) {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := ethdb.MustOpenKV(chaindata)
 	defer ethDb.Close()
-	hash := rawdb.ReadHeadBlockHash(ethDb)
-	number := rawdb.ReadHeaderNumber(ethDb, hash)
-	fmt.Printf("Block number: %d\n", *number)
+	ethDb.View(context.Background(), func(tx ethdb.Tx) error {
+		hash := rawdb.ReadHeadBlockHash(tx)
+		number := rawdb.ReadHeaderNumber(tx, hash)
+		fmt.Printf("Block number: %d\n", *number)
+		return nil
+	})
 }
 
 func printTxHashes() {
@@ -1040,9 +1043,9 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func regenerate(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	tx, err := db.RwKV().BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1074,9 +1077,9 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	tx, err1 := db.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -1150,7 +1153,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := tx.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err1 := tx.GetOne(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
 					return err1
