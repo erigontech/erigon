@@ -149,7 +149,7 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.6/protoc-3.15.6-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
@@ -159,7 +159,8 @@ grpc:
 		types/types.proto \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
-		snapshot_downloader/external_downloader.proto
+		snapshot_downloader/external_downloader.proto \
+		txpool/txpool.proto txpool/txpool_control.proto
 
 prometheus:
 	docker-compose up prometheus grafana
