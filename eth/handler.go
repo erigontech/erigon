@@ -378,6 +378,7 @@ func (h *handler) miningLoop() {
 		}
 		if !works && haveNewTxs {
 			haveNewTxs = false
+			works = true
 			go func() { stepResult <- h.miningStep() }()
 		}
 	}
