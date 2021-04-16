@@ -239,19 +239,22 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, quitCh <-chan st
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
-	start := dbutils.EncodeBlockNumber(to + 1)
 	c, err := db.Cursor(dbutils.Log)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	if err := ethdb.Walk(c, start, 0, func(k, v []byte) (bool, error) {
+	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return false, fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+			return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 		}
 
 		for _, l := range logs {
@@ -260,9 +263,6 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, quitCh <-chan st
 			}
 			addrs[string(l.Address.Bytes())] = struct{}{}
 		}
-		return true, nil
-	}); err != nil {
-		return err
 	}
 
 	if err := truncateBitmaps(db, dbutils.LogTopicIndex, topics, to); err != nil {
