@@ -32,14 +32,14 @@ type Stage3Config struct {
 }
 
 func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -68,13 +68,22 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	if err := tx.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	canonicalC, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	if err != nil {
+		return err
+	}
+	defer canonicalC.Close()
+
+	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, v, err = canonicalC.Next() {
+		if err != nil {
+			return err
+		}
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 
 		if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
-			return false, nil
+			break
 		}
 
 		copy(canonical[currentHeaderIdx][:], v)
@@ -85,12 +94,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s] Preload headedrs", logPrefix), "block_number", binary.BigEndian.Uint64(k))
 		}
-
-		return true, nil
-	}); err != nil {
-		return err
 	}
-
 	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
@@ -135,34 +139,39 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}()
 
-	if err := tx.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	bodiesC, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		return err
+	}
+	defer bodiesC.Close()
+
+	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
+		if err != nil {
+			return err
+		}
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
 		if blockNumber > to {
-			return false, nil
+			break
 		}
 
 		if canonical[blockNumber-s.BlockNumber-1] != blockHash {
 			// non-canonical case
-			return true, nil
+			continue
 		}
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
 
 		select {
 		case err := <-errCh:
 			if err != nil {
-				return false, err
+				return err
 			}
 		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
-
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("walking over the block bodies: %w", err)
 	}
 
 	close(jobs)
@@ -241,9 +250,9 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 	}
 }
 
-func UnwindSendersStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+func UnwindSendersStage(u *UnwindState, s *StageState, db ethdb.Database) error {
 	// Does not require any special processing
-	mutation := stateDB.NewBatch()
+	mutation := db.NewBatch()
 	err := u.Done(mutation)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {

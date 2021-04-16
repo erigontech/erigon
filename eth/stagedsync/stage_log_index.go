@@ -27,14 +27,14 @@ const (
 )
 
 func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -56,7 +56,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
 		return err
 	}
 
@@ -203,14 +203,14 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit dat
 }
 
 func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindLogIndex(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), u.UnwindPoint, quitCh); err != nil {
+	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, quitCh); err != nil {
 		return err
 	}
 

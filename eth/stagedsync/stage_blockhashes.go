@@ -22,14 +22,14 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		dbutils.HeadersBucket,
 		dbutils.HeaderNumberBucket,
 		tmpdir,
