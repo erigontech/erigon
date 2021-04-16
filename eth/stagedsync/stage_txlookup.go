@@ -60,11 +60,11 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 	return nil
 }
 
-func TxLookupTransform(logPrefix string, db ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
-	return etl.Transform(logPrefix, db, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
+	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(db), blockHash, blocknum)
+		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
@@ -100,10 +100,11 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir str
 		}
 		defer tx.Rollback()
 	}
+
 	if err := unwindTxLookup(u, s, tx, tmpdir, quitCh); err != nil {
 		return err
 	}
-	if err := u.Done(db); err != nil {
+	if err := u.Done(tx); err != nil {
 		return err
 	}
 
