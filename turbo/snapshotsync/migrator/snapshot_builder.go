@@ -308,9 +308,17 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 	}
 	var hash common.Hash
 	var header []byte
+	t:=time.NewTicker(time.Second*30)
+	defer t.Stop()
+	tt:=time.Now()
 	for i := uint64(0); i <= toBlock; i++ {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
+		}
+		select {
+		case <-t.C:
+			log.Info("Headers snapshot generation", "t", time.Since(tt), "block", i)
+		default:
 		}
 		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
@@ -345,19 +353,19 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 Проход для каждого снепшота последовательный
 */
 
+func New(snapshotDir string, currentSnapshotBlock uint64, ) *SnapshotMigrator2 {
+	return &SnapshotMigrator2{
+
+	}
+}
 
 type SnapshotMigrator2 struct {
-	epochSize uint64
 	snapshotsDir string
 	HeadersCurrentSnapshot uint64
 	HeadersNewSnapshot uint64
 	HeadersNewSnapshotInfohash []byte
-	HeadersCleanTo uint64
 
 	Stage uint64
-	BodiesCurrentSnapshot uint64
-	BodiesNewSnapshot uint64
-
 	mtx sync.RWMutex
 
 	cancel func()
@@ -566,8 +574,13 @@ func (sm *SnapshotMigrator2) ReplaceHeadersSnapshot(chainDB ethdb.Database, snap
 
 
 func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx) (err error) {
-	log.Info("Remove data", "from", sb.HeadersCurrentSnapshot, "to", sb.HeadersNewSnapshot)
-	fmt.Println("Remove data", "from", sb.HeadersCurrentSnapshot, "to", sb.HeadersNewSnapshot)
+	return RemoveHeadersData(db, tx, sb.HeadersCurrentSnapshot, sb.HeadersNewSnapshot)
+}
+
+
+func RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
+	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
+	fmt.Println("Remove data", "from", currentSnapshot, "to", newSnapshot)
 	if _, ok := db.(ethdb.HasRwKV); !ok {
 		return errors.New("db don't implement hasKV interface")
 	}
@@ -586,14 +599,14 @@ func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx)
 				return err
 			}
 		}
-	 */
+	*/
 
 	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
 	c,err:=tx.RwCursor(dbutils.HeadersBucket)
 	if err!=nil {
 		return err
 	}
-	err = snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(sb.HeadersCurrentSnapshot), 0, func(k, v []byte) (bool, error) {
+	err = snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
 		innerErr := c.Delete(k, nil)
 		if innerErr != nil {
 			return false, innerErr
@@ -604,7 +617,7 @@ func (sb *SnapshotMigrator2) RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx)
 		return err
 	}
 	v:=make([]byte, 8)
-	binary.BigEndian.PutUint64(v, sb.HeadersNewSnapshot)
+	binary.BigEndian.PutUint64(v, newSnapshot)
 	c2, err:=tx.RwCursor(dbutils.BittorrentInfoBucket)
 	if err!=nil {
 		return err

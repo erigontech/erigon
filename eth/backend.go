@@ -157,6 +157,21 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	btEnabled:=config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64()
 	var torrentClient *bittorrent.Client
 	snapshotsDir:= stack.Config().ResolvePath("snapshots")
+	v,err:=chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+	if err!=nil && errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("Get bittorrent peerID","err", err)
+	}
+	torrentClient, err = bittorrent.New(snapshotsDir, config.SnapshotSeeding, string(v))
+	if err != nil {
+		return nil, err
+	}
+	if len(v)==0 {
+		err = torrentClient.SavePeerID(chainDb)
+		if err!=nil {
+			log.Error("Bittorrent peerID haven't saved","err", err)
+		}
+	}
+
 	btEnabled=false
 	if btEnabled {
 		var downloadedSnapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo
@@ -239,21 +254,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, innerErr
 			}
 		} else {
-			dbPath:= stack.Config().ResolvePath("snapshots")
-			v,err:=chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-			if err!=nil && errors.Is(err, ethdb.ErrKeyNotFound) {
-				log.Error("Get bittorrent peerID","err", err)
-			}
-			torrentClient, err = bittorrent.New(dbPath, config.SnapshotSeeding, string(v))
-			if err != nil {
-				return nil, err
-			}
-			if len(v)==0 {
-				err = torrentClient.SavePeerID(chainDb)
-				if err!=nil {
-					log.Error("Bittorrent peerID haven't saved","err", err)
-				}
-			}
+
 
 			err = torrentClient.Load(chainDb)
 			if err != nil {

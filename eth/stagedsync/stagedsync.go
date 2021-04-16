@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -40,6 +41,7 @@ type OptionalParameters struct {
 
 	SnapshotDir string
 	TorrnetClient *bittorrent.Client
+	SnapshotMigrator *migrator.SnapshotMigrator2
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -132,4 +134,10 @@ func (stagedSync *StagedSync) Prepare(
 func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string) {
 	stagedSync.params.TorrnetClient=client
 	stagedSync.params.SnapshotDir = snapshotsDir
+	stagedSync.params.SnapshotMigrator = &migrator.SnapshotMigrator2{
+		HeadersCurrentSnapshot:     0,
+		HeadersNewSnapshot:         0,
+		HeadersNewSnapshotInfohash: nil,
+		Stage:                      0,
+	}
 }

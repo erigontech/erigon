@@ -175,7 +175,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 	if headerNumber!=21 {
 		t.Fatal(headerNumber)
 	}
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 
@@ -235,7 +235,7 @@ func TestBuildHeadersSnapshotAsync(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 20)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 20)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 }
@@ -416,7 +416,7 @@ func TestBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 	if headerNumber!=21 {
 		t.Fatal(headerNumber)
 	}
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 
@@ -598,7 +598,7 @@ func TestSimplifiedBuildHeadersSnapshotAsyncWithNotStoppedTx(t *testing.T) {
 	if headerNumber!=21 {
 		t.Fatal(headerNumber)
 	}
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 
@@ -792,7 +792,7 @@ func TestSnapshotMigrator2(t *testing.T) {
 	}
 	trnts = btCli.Torrents()
 	fmt.Println("trnts 20 ",trnts)
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 	t.Log("Success")
@@ -982,7 +982,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if headerNumber!=21 {
 		t.Fatal(headerNumber)
 	}
-	if _,err = os.Stat(snapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+	if _,err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
 	}
 	t.Log("Success")
