@@ -175,22 +175,21 @@ func handShake(
 
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(protoStatusData.ForkData.Genesis)
-	statusData := &eth.StatusPacket{
-		ProtocolVersion: uint32(version),
-		NetworkID:       protoStatusData.NetworkId,
-		TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
-		Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
-		Genesis:         genesisHash,
-		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock),
-	}
-	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
-	networkID := protoStatusData.NetworkId
 	errc := make(chan error, 2)
 	defer close(errc)
 	go func() {
-		errc <- p2p.Send(rw, eth.StatusMsg, statusData)
+		errc <- p2p.Send(rw, eth.StatusMsg, &eth.StatusPacket{
+			ProtocolVersion: uint32(version),
+			NetworkID:       protoStatusData.NetworkId,
+			TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
+			Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
+			Genesis:         genesisHash,
+			ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock),
+		})
 	}()
 	var readStatus = func() error {
+		forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
+		networkID := protoStatusData.NetworkId
 		// Read handshake message
 		msg, err1 := rw.ReadMsg()
 		if err1 != nil {
