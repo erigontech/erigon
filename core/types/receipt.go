@@ -170,8 +170,8 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		if b, err = s.Bytes(); err != nil {
 			return err
 		}
-		if len(b) != 0 {
-			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		if len(b) != 1 {
+			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes: %w", len(b), errEmptyTypedReceipt)
 		}
 		r.Type = b[0]
 		if r.Type == AccessListTxType || r.Type == DynamicFeeTxType {

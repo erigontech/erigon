@@ -31,13 +31,13 @@ func TestEIP155Signing(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	signer := NewEIP155Signer(big.NewInt(18))
-	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), signer, key)
+	signer := LatestSignerForChainID(big.NewInt(18))
+	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	from, err := Sender(signer, tx)
+	from, err := Sender(*signer, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func TestEIP155ChainId(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	signer := NewEIP155Signer(big.NewInt(18))
-	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), signer, key)
+	signer := LatestSignerForChainID(big.NewInt(18))
+	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,12 +59,12 @@ func TestEIP155ChainId(t *testing.T) {
 		t.Fatal("expected tx to be protected")
 	}
 
-	if tx.ChainId().Cmp(signer.chainID) != 0 {
-		t.Error("expected chainId to be", signer.chainID, "got", tx.ChainId())
+	if tx.GetChainID().Cmp(&signer.chainID) != 0 {
+		t.Error("expected chainId to be", signer.chainID, "got", tx.GetChainID())
 	}
 
 	tx = NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil)
-	tx, err = SignTx(tx, HomesteadSigner{}, key)
+	tx, err = SignTx(tx, *LatestSignerForChainID(nil), key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +73,8 @@ func TestEIP155ChainId(t *testing.T) {
 		t.Error("didn't expect tx to be protected")
 	}
 
-	if tx.ChainId().Sign() != 0 {
-		t.Error("expected chain id to be 0 got", tx.ChainId())
+	if tx.GetChainID().Sign() != 0 {
+		t.Error("expected chain id to be 0 got", tx.GetChainID())
 	}
 }
 
@@ -94,16 +94,16 @@ func TestEIP155SigningVitalik(t *testing.T) {
 		{"f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10", "0x9bddad43f934d313c2b79ca28a432dd2b7281029"},
 		{"f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", "0x3c24d7329e92f84f08556ceb6df1cdb0104ca49f"},
 	} {
-		signer := NewEIP155Signer(big.NewInt(1))
+		signer := LatestSignerForChainID(big.NewInt(1))
 
-		var tx *Transaction
+		var tx Transaction
 		err := rlp.DecodeBytes(common.Hex2Bytes(test.txRlp), &tx)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
 		}
 
-		from, err := Sender(signer, tx)
+		from, err := Sender(*signer, tx)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -120,20 +120,20 @@ func TestEIP155SigningVitalik(t *testing.T) {
 func TestChainId(t *testing.T) {
 	key, _ := defaultTestKey()
 
-	tx := NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+	var tx Transaction = NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
 
 	var err error
-	tx, err = SignTx(tx, NewEIP155Signer(big.NewInt(1)), key)
+	tx, err = SignTx(tx, *LatestSignerForChainID(big.NewInt(1)), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = Sender(NewEIP155Signer(big.NewInt(2)), tx)
+	_, err = Sender(*LatestSignerForChainID(big.NewInt(2)), tx)
 	if err != ErrInvalidChainId {
 		t.Error("expected error:", ErrInvalidChainId)
 	}
 
-	_, err = Sender(NewEIP155Signer(big.NewInt(1)), tx)
+	_, err = Sender(*LatestSignerForChainID(big.NewInt(1)), tx)
 	if err != nil {
 		t.Error("expected no error")
 	}

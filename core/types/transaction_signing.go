@@ -203,7 +203,9 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 				return common.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
 			}
 			signChainID = nil
-			V.Set(t.V)
+			if t.V != nil {
+				V.Set(t.V)
+			}
 		} else {
 			if !sg.protected {
 				return common.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)

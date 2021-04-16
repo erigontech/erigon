@@ -3,10 +3,12 @@ package types
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/valyala/fastjson"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -88,6 +90,44 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	return json.Marshal(&enc)
+}
+
+func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
+	var p fastjson.Parser
+	v, err := p.ParseBytes(input)
+	if err != nil {
+		return nil, fmt.Errorf("parse transaction json: %w", err)
+	}
+	// check the type
+	txTypeHex := v.GetStringBytes("type")
+	var txType hexutil.Uint64 = LegacyTxType
+	if txTypeHex != nil {
+		if err = txType.UnmarshalText(txTypeHex); err != nil {
+			return nil, err
+		}
+	}
+	switch byte(txType) {
+	case LegacyTxType:
+		tx := &LegacyTx{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case AccessListTxType:
+		tx := &AccessListTx{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case DynamicFeeTxType:
+		tx := &DynamicFeeTransaction{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	default:
+		return nil, fmt.Errorf("unknown transaction type: %v", txType)
+	}
 }
 
 func (tx *LegacyTx) UnmarshalJSON(input []byte) error {

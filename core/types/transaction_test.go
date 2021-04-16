@@ -484,25 +484,26 @@ func TestTransactionCoding(t *testing.T) {
 	}
 }
 
-func encodeDecodeJSON(tx *Transaction) (*Transaction, error) {
+func encodeDecodeJSON(tx Transaction) (Transaction, error) {
 	data, err := json.Marshal(tx)
 	if err != nil {
 		return nil, fmt.Errorf("json encoding failed: %v", err)
 	}
-	var parsedTx = &Transaction{}
-	if err := json.Unmarshal(data, &parsedTx); err != nil {
+	var parsedTx Transaction
+	if parsedTx, err = UnmarshalTransactionFromJSON(data); err != nil {
 		return nil, fmt.Errorf("json decoding failed: %v", err)
 	}
 	return parsedTx, nil
 }
 
 func encodeDecodeBinary(tx Transaction) (Transaction, error) {
-	data, err := tx.MarshalBinary()
-	if err != nil {
+	var buf bytes.Buffer
+	var err error
+	if err = tx.MarshalBinary(&buf); err != nil {
 		return nil, fmt.Errorf("rlp encoding failed: %v", err)
 	}
-	var parsedTx = &Transaction{}
-	if err := parsedTx.UnmarshalBinary(data); err != nil {
+	var parsedTx Transaction
+	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %v", err)
 	}
 	return parsedTx, nil
@@ -513,15 +514,15 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 	if want, got := orig.Hash(), cpy.Hash(); want != got {
 		return fmt.Errorf("parsed tx differs from original tx, want %v, got %v", want, got)
 	}
-	if want, got := orig.ChainID(), cpy.ChainId(); want.Cmp(got) != 0 {
+	if want, got := orig.GetChainID(), cpy.GetChainID(); want.Cmp(got) != 0 {
 		return fmt.Errorf("invalid chain id, want %d, got %d", want, got)
 	}
 	if orig.GetAccessList() != nil {
 		if !reflect.DeepEqual(orig.GetAccessList(), cpy.GetAccessList()) {
 			return fmt.Errorf("access list wrong")
 		}
-		if orig.ChainId().Cmp(cpy.ChainId()) != 0 {
-			return fmt.Errorf("invalid chain id, want %d, got %d", orig.ChainId(), cpy.ChainId())
+		if orig.GetChainID().Cmp(cpy.GetChainID()) != 0 {
+			return fmt.Errorf("invalid chain id, want %d, got %d", orig.GetChainID(), cpy.GetChainID())
 		}
 	}
 	return nil

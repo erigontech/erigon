@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,7 @@ const (
 // Transaction is an Ethereum transaction.
 type Transaction interface {
 	Type() byte
+	GetChainID() *uint256.Int
 	GetNonce() uint64
 	GetPrice() *uint256.Int
 	Cost() *uint256.Int
@@ -65,6 +67,7 @@ type Transaction interface {
 	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
+	MarshalBinary(w io.Writer) error
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -100,6 +103,53 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		return tx, nil
 	case rlp.String:
 		s.NewList(size) // Hack - convert String (envelope) into List
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return nil, err
+		}
+		if len(b) != 1 {
+			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		}
+		var tx Transaction
+		switch b[0] {
+		case AccessListTxType:
+			t := &AccessListTx{}
+			if err = t.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			tx = t
+		case DynamicFeeTxType:
+			t := &DynamicFeeTransaction{}
+			if err = t.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			tx = t
+		default:
+			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+		}
+		if err = s.ListEnd(); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	default:
+		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
+	}
+}
+
+func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
+	s := rlp.NewListStream(bytes.NewReader(data), uint64(len(data)))
+	kind, size, err := s.Kind()
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case rlp.List:
+		tx := &LegacyTx{}
+		if err = tx.DecodeRLP(s, size); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case rlp.Byte, rlp.String:
 		var b []byte
 		if b, err = s.Bytes(); err != nil {
 			return nil, err

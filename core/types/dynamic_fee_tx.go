@@ -495,3 +495,7 @@ func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return tx.V, tx.R, tx.S
 }
+
+func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
+	return tx.ChainID
+}

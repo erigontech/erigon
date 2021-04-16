@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -271,10 +272,17 @@ func EncodeStringSizePrefix(size int, w io.Writer, b []byte) error {
 	return nil
 }
 
-func (tx LegacyTx) EncodeRLP(w io.Writer) error {
+func (tx LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	// prefix
 	var b [33]byte
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
@@ -353,6 +361,16 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 		if err := tx.S.EncodeRLP(w); err != nil {
 			return err
 		}
+	}
+	return nil
+
+}
+
+func (tx LegacyTx) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	var b [33]byte
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
 	}
 	return nil
 }
@@ -491,4 +509,8 @@ func (tx LegacyTx) Type() byte { return LegacyTxType }
 
 func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return tx.V, tx.R, tx.S
+}
+
+func (tx LegacyTx) GetChainID() *uint256.Int {
+	return u256.Num0
 }

@@ -125,7 +125,7 @@ func (tx AccessListTx) EncodingSize() int {
 	envelopeSize := payloadSize
 	// Add envelope size and type size
 	if payloadSize >= 56 {
-		payloadSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
 	}
 	envelopeSize += 2
 	return envelopeSize
@@ -611,4 +611,8 @@ func (tx AccessListTx) Type() byte { return AccessListTxType }
 
 func (tx AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return tx.V, tx.R, tx.S
+}
+
+func (tx AccessListTx) GetChainID() *uint256.Int {
+	return tx.ChainID
 }
