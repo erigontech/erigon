@@ -183,7 +183,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}
 
-	if err := collectorSenders.Load(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+	if err := collectorSenders.Load(logPrefix, tx,
 		dbutils.Senders,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
