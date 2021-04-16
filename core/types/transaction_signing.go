@@ -219,7 +219,11 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		if !sg.accesslist {
 			return common.Address{}, fmt.Errorf("accesslist tx is not supported by signer %s", sg)
 		}
-		if !t.ChainID.Eq(&sg.chainID) {
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return common.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
 			return common.Address{}, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
@@ -258,14 +262,22 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 	case *AccessListTx:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
-		if !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return nil, nil, nil, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
 	case *DynamicFeeTransaction:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
-		if !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return nil, nil, nil, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
