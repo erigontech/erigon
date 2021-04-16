@@ -173,10 +173,11 @@ func handShake(
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
 
+	// Send out own handshake in a new thread
+	errc := make(chan error, 2)
+
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
-	errc := make(chan error, 2)
-	defer close(errc)
 	go func() {
 		errc <- p2p.Send(rw, eth.StatusMsg, &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
