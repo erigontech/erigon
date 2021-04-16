@@ -60,9 +60,6 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			Gas:   tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
-			V:     new(uint256.Int),
-			R:     new(uint256.Int),
-			S:     new(uint256.Int),
 		},
 		AccessList: make(AccessList, len(tx.AccessList)),
 		ChainID:    new(uint256.Int),
@@ -82,15 +79,9 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	if tx.FeeCap != nil {
 		cpy.FeeCap.Set(tx.FeeCap)
 	}
-	if tx.V != nil {
-		cpy.V.Set(tx.V)
-	}
-	if tx.R != nil {
-		cpy.R.Set(tx.R)
-	}
-	if tx.S != nil {
-		cpy.S.Set(tx.S)
-	}
+	cpy.V.Set(&tx.V)
+	cpy.R.Set(&tx.R)
+	cpy.S.Set(&tx.S)
 	return cpy
 }
 
@@ -215,11 +206,13 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 
 func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	var err error
-	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
+	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
 		return nil, err
 	}
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
 	cpy.ChainID = signer.ChainID()
 	return cpy, nil
 }
@@ -418,21 +411,21 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
-	tx.V = new(uint256.Int).SetBytes(b)
+	tx.V.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
-	tx.R = new(uint256.Int).SetBytes(b)
+	tx.R.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
-	tx.S = new(uint256.Int).SetBytes(b)
+	tx.S.SetBytes(b)
 	return s.ListEnd()
 
 }
@@ -493,7 +486,7 @@ func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 
 func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	return tx.V, tx.R, tx.S
+	return &tx.V, &tx.R, &tx.S
 }
 
 func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {

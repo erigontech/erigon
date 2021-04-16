@@ -168,27 +168,21 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V, overflow = uint256.FromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("'v' in transaction does not fit in 256 bits")
-	}
+	tx.V.SetFromBig(dec.V.ToInt())
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R, overflow = uint256.FromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("'r' in transaction does not fit in 256 bits")
-	}
+	tx.R.SetFromBig(dec.R.ToInt())
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S, overflow = uint256.FromBig(dec.S.ToInt())
+	tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}
-	withSignature := tx.V.Sign() != 0 || tx.R.Sign() != 0 || tx.S.Sign() != 0
+	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(tx.V, tx.R, tx.S, true); err != nil {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
 			return err
 		}
 	}
@@ -244,27 +238,18 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V, overflow = uint256.FromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("'v' in transaction does not fit in 256 bits")
-	}
+	tx.V.SetFromBig(dec.V.ToInt())
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R, overflow = uint256.FromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("'r' in transaction does not fit in 256 bits")
-	}
+	tx.R.SetFromBig(dec.R.ToInt())
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S, overflow = uint256.FromBig(dec.S.ToInt())
-	if overflow {
-		return errors.New("'s' in transaction does not fit in 256 bits")
-	}
-	withSignature := tx.V.Sign() != 0 || tx.R.Sign() != 0 || tx.S.Sign() != 0
+	tx.S.SetFromBig(dec.S.ToInt())
+	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(tx.V, tx.R, tx.S, false); err != nil {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
 			return err
 		}
 	}
@@ -324,27 +309,21 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V, overflow = uint256.FromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("'v' in transaction does not fit in 256 bits")
-	}
+	tx.V.SetFromBig(dec.V.ToInt())
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R, overflow = uint256.FromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("'r' in transaction does not fit in 256 bits")
-	}
+	tx.R.SetFromBig(dec.R.ToInt())
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S, overflow = uint256.FromBig(dec.S.ToInt())
+	tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}
-	withSignature := tx.V.Sign() != 0 || tx.R.Sign() != 0 || tx.S.Sign() != 0
+	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(tx.V, tx.R, tx.S, false); err != nil {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
 			return err
 		}
 	}

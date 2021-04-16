@@ -838,7 +838,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-		chainId = types.DeriveChainId(t.V)
+		chainId = types.DeriveChainId(&t.V)
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())

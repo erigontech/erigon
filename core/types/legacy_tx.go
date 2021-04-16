@@ -36,7 +36,7 @@ type CommonTx struct {
 	To      *common.Address `rlp:"nil"` // nil means contract creation
 	Value   *uint256.Int    // wei amount
 	Data    []byte          // contract invocation input data
-	V, R, S *uint256.Int    // signature values
+	V, R, S uint256.Int     // signature values
 }
 
 func (ct CommonTx) GetNonce() uint64 {
@@ -81,7 +81,7 @@ func (tx LegacyTx) GetAccessList() AccessList {
 }
 
 func (tx LegacyTx) Protected() bool {
-	return tx.V != nil && isProtectedV(tx.V)
+	return isProtectedV(&tx.V)
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -126,9 +126,6 @@ func (tx LegacyTx) copy() *LegacyTx {
 			Gas:   tx.Gas,
 			// These are initialized below.
 			Value: new(uint256.Int),
-			V:     new(uint256.Int),
-			R:     new(uint256.Int),
-			S:     new(uint256.Int),
 		},
 		GasPrice: new(uint256.Int),
 	}
@@ -138,15 +135,9 @@ func (tx LegacyTx) copy() *LegacyTx {
 	if tx.GasPrice != nil {
 		cpy.GasPrice.Set(tx.GasPrice)
 	}
-	if tx.V != nil {
-		cpy.V.Set(tx.V)
-	}
-	if tx.R != nil {
-		cpy.R.Set(tx.R)
-	}
-	if tx.S != nil {
-		cpy.S.Set(tx.S)
-	}
+	cpy.V.Set(&tx.V)
+	cpy.R.Set(&tx.R)
+	cpy.S.Set(&tx.S)
 	return cpy
 }
 
@@ -208,19 +199,19 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	// size of V
 	payloadSize++
 	var vLen int
-	if tx.V != nil && tx.V.BitLen() >= 8 {
+	if tx.V.BitLen() >= 8 {
 		vLen = (tx.V.BitLen() + 7) / 8
 	}
 	payloadSize += vLen
 	payloadSize++
 	var rLen int
-	if tx.R != nil && tx.R.BitLen() >= 8 {
+	if tx.R.BitLen() >= 8 {
 		rLen = (tx.R.BitLen() + 7) / 8
 	}
 	payloadSize += rLen
 	payloadSize++
 	var sLen int
-	if tx.S != nil && tx.S.BitLen() >= 8 {
+	if tx.S.BitLen() >= 8 {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	payloadSize += sLen
@@ -332,35 +323,14 @@ func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := EncodeString(tx.Data, w, b[:]); err != nil {
 		return err
 	}
-	if tx.V == nil {
-		b[0] = 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		if err := tx.V.EncodeRLP(w); err != nil {
-			return err
-		}
+	if err := tx.V.EncodeRLP(w); err != nil {
+		return err
 	}
-	if tx.R == nil {
-		b[0] = 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		if err := tx.R.EncodeRLP(w); err != nil {
-			return err
-		}
+	if err := tx.R.EncodeRLP(w); err != nil {
+		return err
 	}
-	if tx.S == nil {
-		b[0] = 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		if err := tx.S.EncodeRLP(w); err != nil {
-			return err
-		}
+	if err := tx.S.EncodeRLP(w); err != nil {
+		return err
 	}
 	return nil
 
@@ -419,21 +389,21 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
-	tx.V = new(uint256.Int).SetBytes(b)
+	tx.V.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
-	tx.R = new(uint256.Int).SetBytes(b)
+	tx.R.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
-	tx.S = new(uint256.Int).SetBytes(b)
+	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close tx struct: %w", err)
 	}
@@ -462,11 +432,13 @@ func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 
 func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	var err error
-	cpy.R, cpy.S, cpy.V, err = signer.SignatureValues(tx, sig)
+	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
 		return nil, err
 	}
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
 	return cpy, nil
 }
 
@@ -508,7 +480,7 @@ func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 func (tx LegacyTx) Type() byte { return LegacyTxType }
 
 func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	return tx.V, tx.R, tx.S
+	return &tx.V, &tx.R, &tx.S
 }
 
 func (tx LegacyTx) GetChainID() *uint256.Int {

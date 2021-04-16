@@ -227,7 +227,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(t.V)
+			chainId = types.DeriveChainId(&t.V)
 		}
 	case *types.AccessListTx:
 		chainId = t.ChainID
