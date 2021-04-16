@@ -81,7 +81,6 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 mdbx:
@@ -119,7 +118,6 @@ lintci-deps:
 clean:
 	env GO111MODULE=on go clean -cache
 	rm -fr build/*
-	rm -f semantics/z3/build/libz3.a
 	cd ethdb/mdbx/dist/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
@@ -149,7 +147,7 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.6/protoc-3.15.6-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
@@ -159,7 +157,8 @@ grpc:
 		types/types.proto \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
-		snapshot_downloader/external_downloader.proto
+		snapshot_downloader/external_downloader.proto \
+		txpool/txpool.proto txpool/txpool_control.proto
 
 prometheus:
 	docker-compose up prometheus grafana

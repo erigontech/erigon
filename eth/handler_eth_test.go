@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -80,7 +79,7 @@ func (h *testEthHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
+func TestForkIDSplit65(t *testing.T) { testForkIDSplit(t, eth.ETH65) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -97,19 +96,10 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		dbNoFork  = ethdb.NewMemoryDatabase()
 		dbProFork = ethdb.NewMemoryDatabase()
 
-		gspecNoFork  = &core.Genesis{Config: configNoFork}
-		gspecProFork = &core.Genesis{Config: configProFork}
-
-		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
-		genesisProFork = gspecProFork.MustCommit(dbProFork)
-
-		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false)
-		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false)
-
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:    dbNoFork,
 			ChainConfig: configNoFork,
-			genesis:     genesisNoFork,
+			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
 			TxPool:      newTestTxPool(),
@@ -119,7 +109,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		ethProFork, _ = newHandler(&handlerConfig{
 			Database:    dbProFork,
 			ChainConfig: configProFork,
-			genesis:     genesisNoFork,
+			genesis:     (&core.Genesis{Config: configProFork}).MustCommit(dbProFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
 			TxPool:      newTestTxPool(),
@@ -145,12 +135,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer peerProFork.Close()
 
 	errc := make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -163,31 +149,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[:1], true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
 	atomic.StoreUint64(&ethNoFork.currentHeight, 1)
-	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[:1], true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
 	atomic.StoreUint64(&ethProFork.currentHeight, 1)
 
-	p2pNoFork, p2pProFork = p2p.MsgPipe()
-	defer p2pNoFork.Close()
-	defer p2pProFork.Close()
-
-	peerNoFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
-	peerProFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
-	defer peerNoFork.Close()
-	defer peerProFork.Close()
-
-	errc = make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -199,32 +165,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			t.Fatalf("homestead nofork <-> profork handler timeout")
 		}
 	}
-	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	if _, err := stagedsync.InsertBlocksInStages(dbNoFork, ethdb.DefaultStorageMode, configNoFork, &vm.Config{}, ethash.NewFaker(), blocksNoFork[1:2], true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
 	atomic.StoreUint64(&ethNoFork.currentHeight, 2)
-	if _, err := stagedsync.InsertBlocksInStages(dbProFork, ethdb.DefaultStorageMode, configProFork, &vm.Config{}, ethash.NewFaker(), blocksProFork[1:2], true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
 	atomic.StoreUint64(&ethProFork.currentHeight, 2)
 
-	p2pNoFork, p2pProFork = p2p.MsgPipe()
-	defer p2pNoFork.Close()
-	defer p2pProFork.Close()
-
-	peerNoFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
-	peerProFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
-	defer peerNoFork.Close()
-	defer peerProFork.Close()
-
-	errc = make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
 	var successes int
 	for i := 0; i < 2; i++ {

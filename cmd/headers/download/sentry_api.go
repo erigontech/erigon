@@ -24,16 +24,7 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 	cs.headHeight = height
 	cs.headHash = hash
 	cs.headTd = td
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       cs.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(cs.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(cs.headHash),
-		MaxBlock:        cs.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(cs.genesisHash),
-			Forks:   cs.forks,
-		},
-	}
+	statusMsg := makeStatusData(cs)
 	for _, sentry := range cs.sentries {
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 			log.Error("Update status message for the sentry", "error", err)

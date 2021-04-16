@@ -119,15 +119,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
-	if !config.Pruning && config.TrieDirtyCache > 0 {
-		if config.SnapshotCache > 0 {
-			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
-			config.SnapshotCache += config.TrieDirtyCache * 2 / 5
-		} else {
-			config.TrieCleanCache += config.TrieDirtyCache
-		}
-		config.TrieDirtyCache = 0
-	}
 
 	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
 
@@ -493,10 +484,6 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheCo
 			BlocksBeforePruning: config.BlocksBeforePruning,
 			BlocksToPrune:       config.BlocksToPrune,
 			PruneTimeout:        config.PruningTimeout,
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieTimeLimit:       config.TrieTimeout,
 			DownloadOnly:        config.DownloadOnly,
 			NoHistory:           !config.StorageMode.History,
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),

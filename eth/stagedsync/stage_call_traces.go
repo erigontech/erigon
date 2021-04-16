@@ -321,10 +321,10 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		tos[string(a[:])] = struct{}{}
 	}
 
-	if err := truncateBitmaps(db, dbutils.CallFromIndex, froms, to); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallFromIndex, froms, to); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(db, dbutils.CallToIndex, tos, to); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallToIndex, tos, to); err != nil {
 		return err
 	}
 	return nil
