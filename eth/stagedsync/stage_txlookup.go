@@ -17,14 +17,14 @@ import (
 )
 
 func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -45,7 +45,7 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 
 	logPrefix := s.state.LogPrefix()
 	startKey = dbutils.EncodeBlockNumber(blockNum)
-	if err = TxLookupTransform(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, tmpdir); err != nil {
+	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, tmpdir); err != nil {
 		return err
 	}
 	if err = s.DoneAndUpdate(tx, syncHeadNumber); err != nil {
@@ -53,18 +53,18 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 	}
 
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func TxLookupTransform(logPrefix string, db ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
-	return etl.Transform(logPrefix, db, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
+	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(db), blockHash, blocknum)
+		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
@@ -87,20 +87,24 @@ func TxLookupTransform(logPrefix string, db ethdb.RwTx, startKey, endKey []byte,
 }
 
 func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	if err := unwindTxLookup(u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tmpdir, quitCh); err != nil {
+
+	if err := unwindTxLookup(u, s, tx, tmpdir, quitCh); err != nil {
+		return err
+	}
+	if err := u.Done(tx); err != nil {
 		return err
 	}
 
@@ -109,7 +113,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir str
 			return err
 		}
 	}
-	return u.Done(db)
+	return nil
 }
 
 func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, tmpdir string, quitCh <-chan struct{}) error {
@@ -142,8 +146,8 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, tmpdir string,
 		}
 
 		txs, _ := rawdb.ReadTransactions(ethdb.NewRoTxDb(tx), body.BaseTxId, body.TxAmount)
-		for _, tx := range txs {
-			if err := collector.Collect(tx.Hash().Bytes(), nil); err != nil {
+		for _, txn := range txs {
+			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
 				return false, err
 			}
 		}
