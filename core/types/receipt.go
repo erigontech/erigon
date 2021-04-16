@@ -135,7 +135,7 @@ func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
-func (r *Receipt) EncodeRLP(w io.Writer) error {
+func (r Receipt) EncodeRLP(w io.Writer) error {
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
@@ -151,7 +151,7 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 // DecodeRLP implements rlp.Decoder, and loads the consensus fields of a receipt
 // from an RLP stream.
 func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
-	kind, _, err := s.Kind()
+	kind, size, err := s.Kind()
 	if err != nil {
 		return nil
 	}
@@ -164,27 +164,36 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = LegacyTxType
 		return r.setFromRLP(dec)
-	case rlp.Byte, rlp.String:
+	case rlp.String:
 		// It's an EIP-2718 typed tx receipt.
+		s.NewList(size) // Hack - convert String (envelope) into List
 		var b []byte
 		if b, err = s.Bytes(); err != nil {
-			return err
+			return fmt.Errorf("read TxType: %w", err)
 		}
 		if len(b) != 1 {
 			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes: %w", len(b), errEmptyTypedReceipt)
 		}
 		r.Type = b[0]
-		if r.Type == AccessListTxType || r.Type == DynamicFeeTxType {
+		switch r.Type {
+		case AccessListTxType, DynamicFeeTxType:
 			var dec receiptRLP
-			if err := rlp.DecodeBytes(b[1:], &dec); err != nil {
+			if err = s.Decode(&dec); err != nil {
+				return fmt.Errorf("decode receipt payload: %w", err)
+			}
+			if err = r.setFromRLP(dec); err != nil {
 				return err
 			}
-			return r.setFromRLP(dec)
+		default:
+			return ErrTxTypeNotSupported
 		}
-		return ErrTxTypeNotSupported
+		if err = s.ListEnd(); err != nil {
+			return err
+		}
 	default:
 		return rlp.ErrExpectedList
 	}
+	return nil
 }
 
 func (r *Receipt) setFromRLP(data receiptRLP) error {
