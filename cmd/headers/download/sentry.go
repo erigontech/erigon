@@ -205,22 +205,22 @@ func handShake(
 			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 		}
 		// Decode the handshake and make sure everything matches
-		var status eth.StatusPacket
-		if err1 = msg.Decode(&status); err1 != nil {
+		var reply eth.StatusPacket
+		if err1 = msg.Decode(&reply); err1 != nil {
 			msg.Discard()
 			return fmt.Errorf("decode message %v: %v", msg, err1)
 		}
 		msg.Discard()
-		if status.NetworkID != networkID {
-			return fmt.Errorf("network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
+		if reply.NetworkID != networkID {
+			return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
 		}
-		if uint(status.ProtocolVersion) < minVersion {
-			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
+		if uint(reply.ProtocolVersion) < minVersion {
+			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", reply.ProtocolVersion, minVersion)
 		}
-		if status.Genesis != genesisHash {
-			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
+		if reply.Genesis != genesisHash {
+			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 		}
-		if err1 = forkFilter(status.ForkID); err1 != nil {
+		if err1 = forkFilter(reply.ForkID); err1 != nil {
 			return fmt.Errorf("%v", err1)
 		}
 		//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
