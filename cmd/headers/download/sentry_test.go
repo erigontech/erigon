@@ -83,7 +83,6 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pProFork.Close()
 
 	errc := make(chan error, 2)
-	defer close(errc)
 	go func() { errc <- handShake(ctx, s1.getStatus(), "1", p2pNoFork, protocol, protocol) }()
 	go func() { errc <- handShake(ctx, s2.getStatus(), "2", p2pProFork, protocol, protocol) }()
 
