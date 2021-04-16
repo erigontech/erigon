@@ -369,6 +369,7 @@ func (h *handler) miningLoop() {
 		case <-h.txsCh:
 			haveNewTxs = true
 		case err := <-stepResult:
+			works = false
 			if err != nil {
 				log.Warn("mining", "err", err)
 			}
