@@ -119,98 +119,101 @@ func (tx AccessListTx) Protected() bool {
 	return true
 }
 
+// EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx AccessListTx) EncodingSize() int {
-	encodingSize, _, _, _ := tx.encodingSizeNoEnvelope()
+	payloadSize, _, _, _ := tx.payloadSize()
+	envelopeSize := payloadSize
 	// Add envelope size and type size
-	if encodingSize >= 56 {
-		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	if payloadSize >= 56 {
+		payloadSize += (bits.Len(uint(payloadSize)) + 7) / 8
 	}
-	encodingSize += 2
-	return encodingSize
+	envelopeSize += 2
+	return envelopeSize
 }
 
-func (tx AccessListTx) encodingSizeNoEnvelope() (encodingSize int, nonceLen, gasLen, accessListLen int) {
+// payloadSize calculates the RLP encoidng size of transaction, without TxType and envelope
+func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
-	encodingSize++
+	payloadSize++
 	var chainIdLen int
 	if tx.ChainID.BitLen() >= 8 {
 		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
 	}
-	encodingSize += chainIdLen
+	payloadSize += chainIdLen
 	// size of Nonce
-	encodingSize++
+	payloadSize++
 	if tx.Nonce >= 128 {
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
-	encodingSize += nonceLen
+	payloadSize += nonceLen
 	// size of GasPrice
-	encodingSize++
+	payloadSize++
 	var gasPriceLen int
 	if tx.GasPrice.BitLen() >= 8 {
 		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
 	}
-	encodingSize += gasPriceLen
+	payloadSize += gasPriceLen
 	// size of Gas
-	encodingSize++
+	payloadSize++
 	if tx.Gas >= 128 {
 		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
-	encodingSize += gasLen
+	payloadSize += gasLen
 	// size of To
-	encodingSize++
+	payloadSize++
 	if tx.To != nil {
-		encodingSize += 20
+		payloadSize += 20
 	}
 	// size of Value
-	encodingSize++
+	payloadSize++
 	var valueLen int
 	if tx.Value.BitLen() >= 8 {
 		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
-	encodingSize += valueLen
+	payloadSize += valueLen
 	// size of Data
-	encodingSize++
+	payloadSize++
 	switch len(tx.Data) {
 	case 0:
 	case 1:
 		if tx.Data[0] >= 128 {
-			encodingSize++
+			payloadSize++
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 		}
-		encodingSize += len(tx.Data)
+		payloadSize += len(tx.Data)
 	}
 	// size of AccessList
-	encodingSize++
+	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
-		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
 	}
-	encodingSize += accessListLen
+	payloadSize += accessListLen
 	// size of V
-	encodingSize++
+	payloadSize++
 	var vLen int
 	if tx.V.BitLen() >= 8 {
 		vLen = (tx.V.BitLen() + 7) / 8
 	}
-	encodingSize += vLen
+	payloadSize += vLen
 	// size of R
-	encodingSize++
+	payloadSize++
 	var rLen int
 	if tx.R.BitLen() >= 8 {
 		rLen = (tx.R.BitLen() + 7) / 8
 	}
-	encodingSize += rLen
+	payloadSize += rLen
 	// size of S
-	encodingSize++
+	payloadSize++
 	var sLen int
 	if tx.S.BitLen() >= 8 {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
-	encodingSize += sLen
-	return encodingSize, nonceLen, gasLen, accessListLen
+	payloadSize += sLen
+	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
 func accessListSize(al AccessList) int {
@@ -291,30 +294,22 @@ func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx AccessListTx) MarshalBinary(w io.Writer) error {
-	return nil
-}
-
-// EncodeRLP implements rlp.Encoder
-func (tx AccessListTx) EncodeRLP(w io.Writer) error {
-	encodingSize, nonceLen, gasLen, accessListLen := tx.encodingSizeNoEnvelope()
-	envelopeSize := encodingSize
-	if encodingSize >= 56 {
-		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
-	}
-	// size of struct prefix and TxType
-	envelopeSize += 2
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
-	// envelope
-	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -391,6 +386,32 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	}
 	// encode S
 	if err := tx.S.EncodeRLP(w); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+// EncodeRLP implements rlp.Encoder
+func (tx AccessListTx) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
+	var b [33]byte
+	// envelope
+	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
 		return err
 	}
 	return nil

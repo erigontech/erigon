@@ -159,69 +159,71 @@ func (tx *LegacyTx) Size() common.StorageSize {
 }
 
 func (tx LegacyTx) EncodingSize() int {
-	encodingSize := 0
-	encodingSize++
-	var nonceLen int
+	payloadSize, _, _ := tx.payloadSize()
+	return payloadSize
+}
+
+func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+	payloadSize++
 	if tx.Nonce >= 128 {
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
-	encodingSize += nonceLen
-	encodingSize++
+	payloadSize += nonceLen
+	payloadSize++
 	var gasPriceLen int
 	if tx.GasPrice.BitLen() >= 8 {
 		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
 	}
-	encodingSize += gasPriceLen
-	encodingSize++
-	var gasLen int
+	payloadSize += gasPriceLen
+	payloadSize++
 	if tx.Gas >= 128 {
 		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
-	encodingSize += gasLen
-	encodingSize++
+	payloadSize += gasLen
+	payloadSize++
 	if tx.To != nil {
-		encodingSize += 20
+		payloadSize += 20
 	}
-	encodingSize++
+	payloadSize++
 	var valueLen int
 	if tx.Value.BitLen() >= 8 {
 		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
-	encodingSize += valueLen
+	payloadSize += valueLen
 	// size of Data
-	encodingSize++
+	payloadSize++
 	switch len(tx.Data) {
 	case 0:
 	case 1:
 		if tx.Data[0] >= 128 {
-			encodingSize++
+			payloadSize++
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
 		}
-		encodingSize += len(tx.Data)
+		payloadSize += len(tx.Data)
 	}
 	// size of V
-	encodingSize++
+	payloadSize++
 	var vLen int
 	if tx.V != nil && tx.V.BitLen() >= 8 {
 		vLen = (tx.V.BitLen() + 7) / 8
 	}
-	encodingSize += vLen
-	encodingSize++
+	payloadSize += vLen
+	payloadSize++
 	var rLen int
 	if tx.R != nil && tx.R.BitLen() >= 8 {
 		rLen = (tx.R.BitLen() + 7) / 8
 	}
-	encodingSize += rLen
-	encodingSize++
+	payloadSize += rLen
+	payloadSize++
 	var sLen int
 	if tx.S != nil && tx.S.BitLen() >= 8 {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
-	encodingSize += sLen
-	return encodingSize
+	payloadSize += sLen
+	return payloadSize, nonceLen, gasLen
 }
 
 func EncodeString(s []byte, w io.Writer, b []byte) error {
@@ -270,70 +272,10 @@ func EncodeStringSizePrefix(size int, w io.Writer, b []byte) error {
 }
 
 func (tx LegacyTx) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	encodingSize++
-	var nonceLen int
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
-	encodingSize += nonceLen
-	encodingSize++
-	var gasPriceLen int
-	if tx.GasPrice.BitLen() >= 8 {
-		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
-	}
-	encodingSize += gasPriceLen
-	encodingSize++
-	var gasLen int
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
-	encodingSize += gasLen
-	encodingSize++
-	if tx.To != nil {
-		encodingSize += 20
-	}
-	encodingSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	encodingSize += valueLen
-	// size of Data
-	encodingSize++
-	switch len(tx.Data) {
-	case 0:
-	case 1:
-		if tx.Data[0] >= 128 {
-			encodingSize++
-		}
-	default:
-		if len(tx.Data) >= 56 {
-			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
-		}
-		encodingSize += len(tx.Data)
-	}
-	encodingSize++
-	var vLen int
-	if tx.V != nil && tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	encodingSize += vLen
-	encodingSize++
-	var rLen int
-	if tx.R != nil && tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	encodingSize += rLen
-	encodingSize++
-	var sLen int
-	if tx.S != nil && tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	encodingSize += sLen
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
 	// prefix
 	var b [33]byte
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	if tx.Nonce > 0 && tx.Nonce < 128 {
