@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -102,6 +103,7 @@ type handler struct {
 	chain       *core.BlockChain
 	chainConfig *params.ChainConfig
 	vmConfig    *vm.Config
+	MiningCfg   *params.MiningConfig
 	genesis     *types.Block
 	engine      consensus.Engine
 	maxPeers    int
@@ -113,6 +115,9 @@ type handler struct {
 
 	txsCh  chan core.NewTxsEvent
 	txsSub event.Subscription
+
+	txsChMining  chan core.NewTxsEvent
+	txsSubMining event.Subscription
 
 	whitelist map[uint64]common.Hash
 
@@ -143,6 +148,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		vmConfig:    config.vmConfig,
 		genesis:     config.genesis,
 		engine:      config.engine,
+		MiningCfg:   config.Mining,
 		peers:       newPeerSet(),
 		whitelist:   config.Whitelist,
 		txsyncCh:    make(chan *txsync),
@@ -333,14 +339,95 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
+	if h.MiningCfg != nil && h.MiningCfg.Enabled {
+		//events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
+		//	defer func() {
+		//		if !events.Closed() {
+		//			events.Unsubscribe()
+		//		}
+		//	}()
+		h.txsChMining = make(chan core.NewTxsEvent, txChanSize)
+		h.txsSubMining = h.txpool.SubscribeNewTxsEvent(h.txsChMining)
+		h.wg.Add(1)
+		go h.miningLoop()
+	}
+
 	// start sync handlers
 	h.wg.Add(2)
 	go h.chainSync.loop()
 	go h.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 }
 
+func (h *handler) miningLoop() {
+	defer h.wg.Done()
+	var haveNewTxs bool
+	var works bool
+	stepResult := make(chan error)
+
+	for {
+		select {
+		case <-h.txsCh:
+			haveNewTxs = true
+		case err := <-stepResult:
+			if err != nil {
+				log.Warn("mining", "err", err)
+			}
+		case <-h.txsSub.Err():
+			return
+		}
+		if !works && haveNewTxs {
+			haveNewTxs = false
+			go func() { stepResult <- h.miningStep() }()
+		}
+	}
+}
+
+func (h *handler) miningStep() error {
+	tx, err := h.database.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	miningResultCh := make(chan *types.Block, 1)
+	sealCancel := make(chan struct{})
+
+	miningState, err := h.mining.Prepare(
+		nil,
+		h.chainConfig,
+		h.engine,
+		h.vmConfig,
+		nil,
+		tx,
+		"",
+		ethdb.DefaultStorageMode,
+		h.tmpdir,
+		nil,
+		h.batchSize,
+		h.quitSync,
+		nil,
+		h.txpool.(*core.TxPool),
+		nil,
+		false,
+		stagedsync.NewMiningStagesParameters(h.MiningCfg, true, miningResultCh, sealCancel),
+	)
+	if err != nil {
+		return err
+	}
+	if err = miningState.Run(tx, tx); err != nil {
+		return err
+	}
+	tx.Rollback()
+	// TODO: send mined block to sentry
+	<-miningResultCh
+	return nil
+}
+
 func (h *handler) Stop() {
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop
+	if h.txsSubMining != nil {
+		h.txsSubMining.Unsubscribe()
+	}
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.

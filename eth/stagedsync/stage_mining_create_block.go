@@ -34,7 +34,12 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs types.TransactionsGroupedBySender, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+	txPoolLocals := txPool.Locals()
+	pendingTxs, err := txPool.Pending()
+	if err != nil {
+		return err
+	}
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -126,7 +131,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := chainConfig.DAOForkBlock; daoBlock != nil {
-		// Check whether the block is among the fork extra-override range
+		// Check whether the block is among the fork extra-override rge
 		limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
 		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
 			// Depending whether we support or oppose the fork, override differently
