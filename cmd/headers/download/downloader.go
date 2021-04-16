@@ -74,16 +74,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	}
 
 	// TODO: Make a reconnection loop
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       controlServer.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
-		MaxBlock:        controlServer.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
-			Forks:   controlServer.forks,
-		},
-	}
+	statusMsg := makeStatusData(controlServer)
 
 	for _, sentry := range sentries {
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
@@ -209,18 +200,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err != nil {
 		return err
 	}
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       controlServer.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
-		MaxBlock:        controlServer.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
-			Forks:   controlServer.forks,
-		},
-	}
 
-	if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
+	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
 
@@ -665,5 +646,18 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 		return cs.getPooledTransactions(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
+	}
+}
+
+func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
+	return &proto_sentry.StatusData{
+		NetworkId:       s.networkId,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.headTd),
+		BestHash:        gointerfaces.ConvertHashToH256(s.headHash),
+		MaxBlock:        s.headHeight,
+		ForkData: &proto_sentry.Forks{
+			Genesis: gointerfaces.ConvertHashToH256(s.genesisHash),
+			Forks:   s.forks,
+		},
 	}
 }
