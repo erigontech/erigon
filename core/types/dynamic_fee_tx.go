@@ -112,7 +112,16 @@ func (tx DynamicFeeTransaction) Protected() bool {
 }
 
 func (tx DynamicFeeTransaction) EncodingSize() int {
-	encodingSize := 0
+	encodingSize, _, _, _ := tx.encodingSizeNoEnvelope()
+	// Add envelope size and type size
+	if encodingSize >= 56 {
+		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
+	}
+	encodingSize += 2
+	return encodingSize
+}
+
+func (tx DynamicFeeTransaction) encodingSizeNoEnvelope() (encodingSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	encodingSize++
 	var chainIdLen int
@@ -122,7 +131,6 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 	encodingSize += chainIdLen
 	// size of Nonce
 	encodingSize++
-	var nonceLen int
 	if tx.Nonce >= 128 {
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
@@ -143,7 +151,6 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 	encodingSize += feeCapLen
 	// size of Gas
 	encodingSize++
-	var gasLen int
 	if tx.Gas >= 128 {
 		gasLen = (bits.Len64(tx.Gas) + 7) / 8
 	}
@@ -176,7 +183,7 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 	}
 	// size of AccessList
 	encodingSize++
-	accessListLen := accessListSize(tx.AccessList)
+	accessListLen = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
 		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
 	}
@@ -202,12 +209,7 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 		sLen = (tx.S.BitLen() + 7) / 8
 	}
 	encodingSize += sLen
-	// Add envelope size and type size
-	if encodingSize >= 56 {
-		encodingSize += (bits.Len(uint(encodingSize)) + 7) / 8
-	}
-	encodingSize += 2
-	return encodingSize
+	return encodingSize, nonceLen, gasLen, accessListLen
 }
 
 func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -222,96 +224,7 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 }
 
 func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of ChainID
-	encodingSize++
-	var chainIdLen int
-	if tx.ChainID.BitLen() >= 8 {
-		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
-	}
-	encodingSize += chainIdLen
-	// size of Nonce
-	encodingSize++
-	var nonceLen int
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
-	encodingSize += nonceLen
-	// size of Tip
-	encodingSize++
-	var tipLen int
-	if tx.Tip.BitLen() >= 8 {
-		tipLen = (tx.Tip.BitLen() + 7) / 8
-	}
-	encodingSize += tipLen
-	// size of FeeCap
-	encodingSize++
-	var feeCapLen int
-	if tx.FeeCap.BitLen() >= 8 {
-		feeCapLen = (tx.FeeCap.BitLen() + 7) / 8
-	}
-	encodingSize += feeCapLen
-	// size of Gas
-	encodingSize++
-	var gasLen int
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
-	encodingSize += gasLen
-	// size of To
-	encodingSize++
-	if tx.To != nil {
-		encodingSize += 20
-	}
-	// size of Value
-	encodingSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	encodingSize += valueLen
-	// size of Data
-	encodingSize++
-	switch len(tx.Data) {
-	case 0:
-	case 1:
-		if tx.Data[0] >= 128 {
-			encodingSize++
-		}
-	default:
-		if len(tx.Data) >= 56 {
-			encodingSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
-		}
-		encodingSize += len(tx.Data)
-	}
-	// size of AccessList
-	encodingSize++
-	var accessListLen int = accessListSize(tx.AccessList)
-	if accessListLen >= 56 {
-		encodingSize += (bits.Len(uint(accessListLen)) + 7) / 8
-	}
-	encodingSize += accessListLen
-	// size of V
-	encodingSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	encodingSize += vLen
-	// size of R
-	encodingSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	encodingSize += rLen
-	// size of S
-	encodingSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	encodingSize += sLen
+	encodingSize, nonceLen, gasLen, accessListLen := tx.encodingSizeNoEnvelope()
 	envelopeSize := encodingSize
 	if encodingSize >= 56 {
 		envelopeSize += (bits.Len(uint(encodingSize)) + 7) / 8
