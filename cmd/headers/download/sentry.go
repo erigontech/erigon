@@ -48,6 +48,12 @@ var (
 	gitBranch string
 )
 
+const (
+	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
+	// complete before dropping the connection.= as malicious.
+	handshakeTimeout = 5 * time.Second
+)
+
 func nodeKey() *ecdsa.PrivateKey {
 	keyfile := "nodekey"
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
@@ -135,7 +141,6 @@ func makeP2PServer(
 					peerTimeMap,
 					peerRwMap,
 					peer,
-					rw,
 					eth.ProtocolVersions[0], // version == eth66
 					eth.ProtocolVersions[0], // minVersion == eth66
 					ss,
@@ -156,22 +161,18 @@ func makeP2PServer(
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
-func runPeer(
+func handShake(
 	ctx context.Context,
-	peerHeightMap *sync.Map,
-	peerTimeMap *sync.Map,
-	peerRwMap *sync.Map,
-	peer *p2p.Peer,
+	protoStatusData *proto_sentry.StatusData,
+	peerID string,
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	ss *SentryServerImpl,
 ) error {
-	peerID := peer.ID().String()
-	protoStatusData := ss.getStatus()
 	if protoStatusData == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
+
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(protoStatusData.ForkData.Genesis)
 	statusData := &eth.StatusPacket{
@@ -184,49 +185,89 @@ func runPeer(
 	}
 	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
 	networkID := protoStatusData.NetworkId
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
+	defer close(errc)
 	go func() {
-		defer close(errc)
 		errc <- p2p.Send(rw, eth.StatusMsg, statusData)
 	}()
-	if err := <-errc; err != nil {
+	var readStatus = func() error {
+		// Read handshake message
+		msg, err1 := rw.ReadMsg()
+		if err1 != nil {
+			return err1
+		}
+
+		if msg.Code != eth.StatusMsg {
+			msg.Discard()
+			return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
+		}
+		if msg.Size > eth.ProtocolMaxMsgSize {
+			msg.Discard()
+			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
+		}
+		// Decode the handshake and make sure everything matches
+		var status eth.StatusPacket
+		if err1 = msg.Decode(&status); err1 != nil {
+			msg.Discard()
+			return fmt.Errorf("decode message %v: %v", msg, err1)
+		}
+		msg.Discard()
+		if status.NetworkID != networkID {
+			return fmt.Errorf("network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
+		}
+		if uint(status.ProtocolVersion) < minVersion {
+			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
+		}
+		if status.Genesis != genesisHash {
+			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
+		}
+		if err1 = forkFilter(status.ForkID); err1 != nil {
+			return fmt.Errorf("%v", err1)
+		}
+		//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+		return nil
+	}
+	go func() {
+		errc <- readStatus()
+	}()
+
+	timeout := time.NewTimer(handshakeTimeout)
+	defer timeout.Stop()
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errc:
+			if err != nil {
+				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+			}
+		case <-timeout.C:
+			return p2p.DiscReadTimeout
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func runPeer(
+	ctx context.Context,
+	peerHeightMap *sync.Map,
+	peerTimeMap *sync.Map,
+	peerRwMap *sync.Map,
+	peer *p2p.Peer,
+	version uint,
+	minVersion uint,
+	ss *SentryServerImpl,
+) error {
+	peerID := peer.ID().String()
+	rwRaw, ok := peerRwMap.Load(peerID)
+	if !ok {
+		return fmt.Errorf("peer has been penalized")
+	}
+	rw, _ := rwRaw.(p2p.MsgReadWriter)
+
+	if err := handShake(ctx, ss.getStatus(), peerID, rw, version, minVersion); err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
-
-	// Read handshake message
-	msg, err1 := rw.ReadMsg()
-	if err1 != nil {
-		return err1
-	}
-
-	if msg.Code != eth.StatusMsg {
-		msg.Discard()
-		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
-	}
-	if msg.Size > eth.ProtocolMaxMsgSize {
-		msg.Discard()
-		return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
-	}
-	// Decode the handshake and make sure everything matches
-	var status eth.StatusPacket
-	if err1 = msg.Decode(&status); err1 != nil {
-		msg.Discard()
-		return fmt.Errorf("decode message %v: %v", msg, err1)
-	}
-	msg.Discard()
-	if status.NetworkID != networkID {
-		return fmt.Errorf("network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
-	}
-	if uint(status.ProtocolVersion) < minVersion {
-		return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
-	}
-	if status.Genesis != genesisHash {
-		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
-	}
-	if err1 = forkFilter(status.ForkID); err1 != nil {
-		return fmt.Errorf("%v", err1)
-	}
-	//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
 		var err error
@@ -237,7 +278,7 @@ func runPeer(
 		if _, ok := peerRwMap.Load(peerID); !ok {
 			return fmt.Errorf("peer has been penalized")
 		}
-		msg, err = rw.ReadMsg()
+		msg, err := rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
 		}
