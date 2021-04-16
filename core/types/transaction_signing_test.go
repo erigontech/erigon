@@ -17,6 +17,7 @@
 package types
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -59,8 +60,8 @@ func TestEIP155ChainId(t *testing.T) {
 		t.Fatal("expected tx to be protected")
 	}
 
-	if tx.GetChainID().Cmp(&signer.chainID) != 0 {
-		t.Error("expected chainId to be", signer.chainID, "got", tx.GetChainID())
+	if !tx.GetChainID().Eq(&signer.chainID) {
+		t.Errorf("expected chainId to be %s, got %s", &signer.chainID, tx.GetChainID())
 	}
 
 	tx = NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil)
@@ -96,8 +97,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		var tx Transaction
-		err := rlp.DecodeBytes(common.Hex2Bytes(test.txRlp), &tx)
+		tx, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(common.Hex2Bytes(test.txRlp)), 0))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue

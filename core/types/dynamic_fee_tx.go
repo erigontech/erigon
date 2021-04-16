@@ -452,7 +452,10 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
 
 // Hash computes the hash (but not for signatures!)
 func (tx DynamicFeeTransaction) Hash() common.Hash {
-	return rlpHash([]interface{}{
+	if hash := tx.hash.Load(); hash != nil {
+		return *hash.(*common.Hash)
+	}
+	hash := rlpHash([]interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.Tip,
@@ -464,6 +467,8 @@ func (tx DynamicFeeTransaction) Hash() common.Hash {
 		tx.AccessList,
 		tx.V, tx.R, tx.S,
 	})
+	tx.hash.Store(&hash)
+	return hash
 }
 
 func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {

@@ -25,7 +25,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -444,7 +443,10 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 
 // Hash computes the hash (but not for signatures!)
 func (tx LegacyTx) Hash() common.Hash {
-	return rlpHash([]interface{}{
+	if hash := tx.hash.Load(); hash != nil {
+		return *hash.(*common.Hash)
+	}
+	hash := rlpHash([]interface{}{
 		tx.Nonce,
 		tx.GasPrice,
 		tx.Gas,
@@ -453,9 +455,12 @@ func (tx LegacyTx) Hash() common.Hash {
 		tx.Data,
 		tx.V, tx.R, tx.S,
 	})
+	tx.hash.Store(&hash)
+	return hash
 }
 
 func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+	fmt.Printf("Signing hash for chainID %d\n", chainID)
 	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
@@ -484,5 +489,5 @@ func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.In
 }
 
 func (tx LegacyTx) GetChainID() *uint256.Int {
-	return u256.Num0
+	return DeriveChainId(&tx.V)
 }

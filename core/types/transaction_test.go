@@ -81,9 +81,8 @@ var (
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
 	input := []byte{0x80}
-	var tx Transaction
-	err := rlp.DecodeBytes(input, &tx)
-	if !errors.Is(err, fmt.Errorf("...")) {
+	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
 	}
 }

@@ -148,22 +148,94 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, buf.Bytes())
 }
 
+func (r *Receipt) decodePayload(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read PostStateOrStatus: %w", err)
+	}
+	r.setStatus(b)
+	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
+		return fmt.Errorf("read CumulativeGasUsed: %w", err)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Bloom: %w", err)
+	}
+	if len(b) != 256 {
+		return fmt.Errorf("wrong size for Bloom: %d", len(b))
+	}
+	copy(r.Bloom[:], b)
+	// decode logs
+	if _, err = s.List(); err != nil {
+		return fmt.Errorf("open Logs: %w", err)
+	}
+	if r.Logs != nil && len(r.Logs) > 0 {
+		r.Logs = r.Logs[:0]
+	}
+	for _, err = s.List(); err == nil; _, err = s.List() {
+		r.Logs = append(r.Logs, &Log{})
+		log := r.Logs[len(r.Logs)-1]
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
+		}
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for Log address: %d", len(b))
+		}
+		copy(log.Address[:], b)
+		if _, err = s.List(); err != nil {
+			return fmt.Errorf("open Topics: %w", err)
+		}
+		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+			log.Topics = append(log.Topics, common.Hash{})
+			if len(b) != 32 {
+				return fmt.Errorf("wrong size for Topic: %d", len(b))
+			}
+			copy(log.Topics[len(log.Topics)-1][:], b)
+		}
+		if !errors.Is(err, rlp.EOL) {
+			return fmt.Errorf("read Topic: %w", err)
+		}
+		// end of Topics list
+		if err = s.ListEnd(); err != nil {
+			return fmt.Errorf("close Topics: %w", err)
+		}
+		if log.Data, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read Data: %w", err)
+		}
+		// end of Log
+		if err = s.ListEnd(); err != nil {
+			return fmt.Errorf("close Log: %w", err)
+		}
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return fmt.Errorf("open Log: %w", err)
+	}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close Logs: %w", err)
+	}
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close receipt payload: %w", err)
+	}
+	return nil
+}
+
 // DecodeRLP implements rlp.Decoder, and loads the consensus fields of a receipt
 // from an RLP stream.
 func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 	kind, size, err := s.Kind()
 	if err != nil {
-		return nil
+		return err
 	}
 	switch kind {
 	case rlp.List:
 		// It's a legacy receipt.
-		var dec receiptRLP
-		if err := s.Decode(&dec); err != nil {
+		if err := r.decodePayload(s); err != nil {
 			return err
 		}
 		r.Type = LegacyTxType
-		return r.setFromRLP(dec)
 	case rlp.String:
 		// It's an EIP-2718 typed tx receipt.
 		s.NewList(size) // Hack - convert String (envelope) into List
@@ -177,11 +249,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		r.Type = b[0]
 		switch r.Type {
 		case AccessListTxType, DynamicFeeTxType:
-			var dec receiptRLP
-			if err = s.Decode(&dec); err != nil {
-				return fmt.Errorf("decode receipt payload: %w", err)
-			}
-			if err = r.setFromRLP(dec); err != nil {
+			if err := r.decodePayload(s); err != nil {
 				return err
 			}
 		default:
@@ -194,11 +262,6 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		return rlp.ErrExpectedList
 	}
 	return nil
-}
-
-func (r *Receipt) setFromRLP(data receiptRLP) error {
-	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
-	return r.setStatus(data.PostStateOrStatus)
 }
 
 func (r *Receipt) setStatus(postStateOrStatus []byte) error {
