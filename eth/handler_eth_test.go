@@ -96,16 +96,10 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		dbNoFork  = ethdb.NewMemoryDatabase()
 		dbProFork = ethdb.NewMemoryDatabase()
 
-		gspecNoFork = &core.Genesis{Config: configNoFork}
-		//gspecProFork = &core.Genesis{Config: configProFork}
-
-		genesisNoFork = gspecNoFork.MustCommit(dbNoFork)
-		//genesisProFork = gspecProFork.MustCommit(dbProFork)
-
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:    dbNoFork,
 			ChainConfig: configNoFork,
-			genesis:     genesisNoFork,
+			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
 			TxPool:      newTestTxPool(),
@@ -115,7 +109,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		ethProFork, _ = newHandler(&handlerConfig{
 			Database:    dbProFork,
 			ChainConfig: configProFork,
-			genesis:     genesisNoFork,
+			genesis:     (&core.Genesis{Config: configProFork}).MustCommit(dbProFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
 			TxPool:      newTestTxPool(),
@@ -141,12 +135,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer peerProFork.Close()
 
 	errc := make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -162,22 +152,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	atomic.StoreUint64(&ethNoFork.currentHeight, 1)
 	atomic.StoreUint64(&ethProFork.currentHeight, 1)
 
-	p2pNoFork, p2pProFork = p2p.MsgPipe()
-	defer p2pNoFork.Close()
-	defer p2pProFork.Close()
-
-	peerNoFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
-	peerProFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
-	defer peerNoFork.Close()
-	defer peerProFork.Close()
-
-	errc = make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -192,29 +168,13 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	atomic.StoreUint64(&ethNoFork.currentHeight, 2)
 	atomic.StoreUint64(&ethProFork.currentHeight, 2)
 
-	p2pNoFork, p2pProFork = p2p.MsgPipe()
-	defer p2pNoFork.Close()
-	defer p2pProFork.Close()
+	go func() { errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil }) }()
+	go func() { errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil }) }()
 
-	peerNoFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
-	peerProFork = eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
-	defer peerNoFork.Close()
-	defer peerProFork.Close()
-
-	errc = make(chan error, 2)
-	go func(errc chan error) {
-		errc <- ethNoFork.runEthPeer(peerProFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-	go func(errc chan error) {
-		errc <- ethProFork.runEthPeer(peerNoFork, func(peer *eth.Peer) error { return nil })
-	}(errc)
-
-	fmt.Printf("ea\n")
 	var successes int
 	for i := 0; i < 2; i++ {
 		select {
 		case err := <-errc:
-			fmt.Printf("er:%s\n", err)
 			if err == nil {
 				successes++
 				if successes == 2 { // Only one side disconnects
