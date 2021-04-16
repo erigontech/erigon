@@ -163,33 +163,33 @@ func makeP2PServer(
 
 func handShake(
 	ctx context.Context,
-	protoStatusData *proto_sentry.StatusData,
+	status *proto_sentry.StatusData,
 	peerID string,
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
 ) error {
-	if protoStatusData == nil {
+	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
 
 	// Convert proto status data into the one required by devp2p
-	genesisHash := gointerfaces.ConvertH256ToHash(protoStatusData.ForkData.Genesis)
+	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	errc := make(chan error, 2)
 	defer close(errc)
 	go func() {
 		errc <- p2p.Send(rw, eth.StatusMsg, &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
-			NetworkID:       protoStatusData.NetworkId,
-			TD:              gointerfaces.ConvertH256ToUint256Int(protoStatusData.TotalDifficulty).ToBig(),
-			Head:            gointerfaces.ConvertH256ToHash(protoStatusData.BestHash),
+			NetworkID:       status.NetworkId,
+			TD:              gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty).ToBig(),
+			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock),
+			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
 		})
 	}()
 	var readStatus = func() error {
-		forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
-		networkID := protoStatusData.NetworkId
+		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
+		networkID := status.NetworkId
 		// Read handshake message
 		msg, err1 := rw.ReadMsg()
 		if err1 != nil {
