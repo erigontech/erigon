@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
@@ -220,30 +221,62 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
-	receipt := receipts[txIndex]
+	return marshalReceipt(receipts[txIndex], txn), nil
+}
 
+// GetBlockReceipts - receipts for individual block
+func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := getBlockNumber(number, tx)
+	if err != nil {
+		return nil, err
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+
+	block := rawdb.ReadBlock(ethdb.NewRoTxDb(tx), hash, blockNum)
+	if block == nil {
+		return nil, nil
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := getReceipts(ctx, tx, chainConfig, blockNum, hash)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %v", err)
+	}
+	result := make([]map[string]interface{}, 0, len(receipts))
+	for _, receipt := range receipts {
+		txn := block.Transactions()[receipt.TransactionIndex]
+		result = append(result, marshalReceipt(receipt, txn))
+	}
+
+	return result, nil
+}
+
+func marshalReceipt(receipt *types.Receipt, txn *types.Transaction) map[string]interface{} {
 	var signer types.Signer = types.FrontierSigner{}
 	if txn.Protected() {
 		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
 	}
 	from, _ := types.Sender(signer, txn)
 
-	// Fill in the derived information in the logs
-	if receipt.Logs != nil {
-		for _, log := range receipt.Logs {
-			log.BlockNumber = blockNumber
-			log.TxHash = hash
-			log.TxIndex = uint(txIndex)
-			log.BlockHash = blockHash
-		}
-	}
-
-	// Now reconstruct the bloom filter
 	fields := map[string]interface{}{
-		"blockHash":         blockHash,
-		"blockNumber":       hexutil.Uint64(blockNumber),
-		"transactionHash":   hash,
-		"transactionIndex":  hexutil.Uint64(txIndex),
+		"blockHash":         receipt.BlockHash,
+		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
+		"transactionHash":   txn.Hash(),
+		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
 		"to":                txn.To(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
@@ -266,7 +299,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
-	return fields, nil
+	return fields
 }
 
 func includes(addresses []common.Address, a common.Address) bool {
