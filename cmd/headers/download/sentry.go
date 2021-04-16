@@ -184,9 +184,15 @@ func runPeer(
 	}
 	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash, protoStatusData.MaxBlock)
 	networkID := protoStatusData.NetworkId
-	if err := p2p.Send(rw, eth.StatusMsg, statusData); err != nil {
+	errc := make(chan error, 1)
+	go func() {
+		defer close(errc)
+		errc <- p2p.Send(rw, eth.StatusMsg, statusData)
+	}()
+	if err := <-errc; err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
+
 	// Read handshake message
 	msg, err1 := rw.ReadMsg()
 	if err1 != nil {
