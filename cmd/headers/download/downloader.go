@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -17,9 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -38,12 +35,8 @@ import (
 
 // Methods of Core called by sentry
 
-const (
-	softResponseLimit = 2 * 1024 * 1024 // Target maximum size of returned blocks, headers or node data.
-)
-
 func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
-	// CREATING GRPC CLIENT CONNECTION
+	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -75,22 +68,13 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		sentries[i] = sentry
 	}
 
-	controlServer, err1 := NewControlServer(db, sentries, window, chain)
+	controlServer, err1 := NewControlServer(db, sentries, window, chain, nil)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
 
 	// TODO: Make a reconnection loop
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       controlServer.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
-		MaxBlock:        controlServer.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
-			Forks:   controlServer.forks,
-		},
-	}
+	statusMsg := makeStatusData(controlServer)
 
 	for _, sentry := range sentries {
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
@@ -208,7 +192,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	}
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
-	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain)
+	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain, nil)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -216,18 +200,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err != nil {
 		return err
 	}
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       controlServer.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(controlServer.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(controlServer.headHash),
-		MaxBlock:        controlServer.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(controlServer.genesisHash),
-			Forks:   controlServer.forks,
-		},
-	}
 
-	if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
+	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
 
@@ -269,9 +243,10 @@ type ControlServerImpl struct {
 	protocolVersion      uint32
 	networkId            uint64
 	db                   ethdb.Database
+	txPool               eth.TxPool
 }
 
-func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string, txPool eth.TxPool) (*ControlServerImpl, error) {
 	ethashConfig := &ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
@@ -317,7 +292,15 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
-	cs := &ControlServerImpl{hd: hd, bd: bd, sentries: sentries, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
+	cs := &ControlServerImpl{
+		hd:                   hd,
+		bd:                   bd,
+		sentries:             sentries,
+		requestWakeUpHeaders: make(chan struct{}, 1),
+		requestWakeUpBodies:  make(chan struct{}, 1),
+		db:                   db,
+		txPool:               txPool,
+	}
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = genesisHash
@@ -337,11 +320,14 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
-			Amount:  1,
-			Reverse: false,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: announce.Hash},
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
+			RequestId: rand.Uint64(),
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Amount:  1,
+				Reverse: false,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: announce.Hash},
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("encode header request: %v", err)
@@ -362,36 +348,42 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
-	_, err := rlpStream.List()
-	if err != nil {
-		return fmt.Errorf("decode BlockHeaders: %w", err)
+	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
+		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
+	}
+	if _, err := rlpStream.Uint(); err != nil { // Now stream is at the requestID field
+		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
+	}
+	if _, err := rlpStream.List(); err != nil { // Now stream is at the BlockHeadersPacket, which is list of headers
+		return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 	}
 	var headersRaw [][]byte
-	var headerRaw []byte
-	for headerRaw, err = rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
+	for headerRaw, err := rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
 		if err != nil {
 			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode BlockHeaders: %w", err)
+				return fmt.Errorf("decode 4 BlockHeadersPacket66: %w", err)
 			}
 			break
 		}
 
 		headersRaw = append(headersRaw, headerRaw)
 	}
-	headers := make([]*types.Header, len(headersRaw))
+
+	// Parse the entire request from scratch
+	var request eth.BlockHeadersPacket66
+	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+		return fmt.Errorf("decode 5 BlockHeadersPacket66: %v", err)
+	}
+	headers := request.BlockHeadersPacket
 	var heighestBlock uint64
-	var i int
-	for i, headerRaw = range headersRaw {
-		var h types.Header
-		if err = rlp.DecodeBytes(headerRaw, &h); err != nil {
-			return fmt.Errorf("decode BlockHeaders: %w", err)
-		}
-		headers[i] = &h
+	for _, h := range headers {
 		if h.Number.Uint64() > heighestBlock {
 			heighestBlock = h.Number.Uint64()
 		}
 	}
+
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
@@ -425,20 +417,20 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 1 NewBlockMsg: %w", err)
 	}
 	_, err = rlpStream.List() // Now stream is at the beginning of the header
 	if err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 2 NewBlockMsg: %w", err)
 	}
 	var headerRaw []byte
 	if headerRaw, err = rlpStream.Raw(); err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %w", err)
+		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
 	var request eth.NewBlockPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode NewBlockMsg: %v", err)
+		return fmt.Errorf("decode 4 NewBlockMsg: %v", err)
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
@@ -470,11 +462,12 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 }
 
 func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var request []*types.Body
+	var request eth.BlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodies: %v", err)
+		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
-	delivered, undelivered := cs.bd.DeliverBodies(request)
+	txs, uncles := request.BlockBodiesPacket.Unpack()
+	delivered, undelivered := cs.bd.DeliverBodies(txs, uncles)
 	total := delivered + undelivered
 	if total > 0 {
 		// Approximate numbers
@@ -483,23 +476,29 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	return nil
 }
 
+func (cs *ControlServerImpl) receipts(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	return nil
+}
+
 func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.GetBlockHeadersPacket
+	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
+
 	tx, err := cs.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	headers, err := eth.AnswerGetBlockHeadersQuery(tx, &query)
+	headers, err := eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
 	if err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
-	tx.Rollback()
-
-	b, err := rlp.EncodeToBytes(headers)
+	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          query.RequestId,
+		BlockHeadersPacket: headers,
+	})
 	if err != nil {
 		return fmt.Errorf("encode header response: %v", err)
 	}
@@ -519,41 +518,20 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 }
 
 func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	// Decode the retrieval message
-	msgStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
-	if _, err := msgStream.List(); err != nil {
-		return fmt.Errorf("getting list from RLP stream for GetBlockBodiesMsg: %v", err)
+	var query eth.GetBlockBodiesPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	// Gather blocks until the fetch or network limits is reached
-	var hash common.Hash
-	var bytes int
-	var bodies []rlp.RawValue
-	var hashesStr strings.Builder
-	for bytes < softResponseLimit && len(bodies) < downloader.MaxBlockFetch {
-		// Retrieve the hash of the next block
-		if err := msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
-			break
-		} else if err != nil {
-			return fmt.Errorf("decode hash for GetBlockBodiesMsg: %v", err)
-		}
-		if hashesStr.Len() > 0 {
-			hashesStr.WriteString(",")
-		}
-		hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-		// Retrieve the requested block body, stopping if enough was found
-		number := rawdb.ReadHeaderNumber(cs.db, hash)
-		if number == nil {
-			continue
-		}
-		hashesStr.WriteString(fmt.Sprintf("(%d)", *number))
-		data := rawdb.ReadBodyRLP(cs.db, hash, *number)
-		if len(data) == 0 {
-			continue
-		}
-		bodies = append(bodies, data)
-		bytes += len(data)
+	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return err
 	}
-	b, err := rlp.EncodeToBytes(bodies)
+	defer tx.Rollback()
+	response := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket)
+	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
+		RequestId:            query.RequestId,
+		BlockBodiesRLPPacket: response,
+	})
 	if err != nil {
 		return fmt.Errorf("encode header response: %v", err)
 	}
@@ -561,6 +539,70 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
 			Id:   proto_sentry.MessageId_BlockBodies,
+			Data: b,
+		},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send bodies response: %v", err)
+	}
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
+	return nil
+}
+
+func (cs *ControlServerImpl) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if cs.txPool == nil {
+		return nil
+	}
+	var query eth.GetPooledTransactionsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	_, txs := eth.AnswerGetPooledTransactions(cs.txPool, query.GetPooledTransactionsPacket)
+	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
+		RequestId:                   query.RequestId,
+		PooledTransactionsRLPPacket: txs,
+	})
+	if err != nil {
+		return fmt.Errorf("encode header response: %v", err)
+	}
+	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_PooledTransactions, Data: b},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send pooled transactions response: %v", err)
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	var query eth.GetReceiptsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	receipts, err := eth.AnswerGetReceiptsQuery(tx, query.GetReceiptsPacket)
+	if err != nil {
+		return err
+	}
+	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         query.RequestId,
+		ReceiptsRLPPacket: receipts,
+	})
+	if err != nil {
+		return fmt.Errorf("encode header response: %v", err)
+	}
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_Receipts,
 			Data: b,
 		},
 	}
@@ -596,7 +638,26 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 		return cs.getBlockHeaders(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GetBlockBodies:
 		return cs.getBlockBodies(ctx, inreq, sentry)
+	case proto_sentry.MessageId_Receipts:
+		return cs.receipts(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GetReceipts:
+		return cs.getReceipts(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GetPooledTransactions:
+		return cs.getPooledTransactions(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
+	}
+}
+
+func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
+	return &proto_sentry.StatusData{
+		NetworkId:       s.networkId,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.headTd),
+		BestHash:        gointerfaces.ConvertHashToH256(s.headHash),
+		MaxBlock:        s.headHeight,
+		ForkData: &proto_sentry.Forks{
+			Genesis: gointerfaces.ConvertHashToH256(s.genesisHash),
+			Forks:   s.forks,
+		},
 	}
 }
