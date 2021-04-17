@@ -1,9 +1,6 @@
 package bodydownload
 
 import (
-	//"context"
-	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
 	"context"
 	"fmt"
 	"math/big"
@@ -168,15 +165,15 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	}
 }
 
-// DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
+// DeliverBodies takes the block body received from a peer and adds it to the various data structures
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)
 	var delivered, undelivered int
-	for _, body := range bodies {
-		uncleHash := types.CalcUncleHash(body.Uncles)
-		txHash := types.DeriveSha(types.Transactions(body.Transactions))
+	for i := range txs {
+		uncleHash := types.CalcUncleHash(uncles[i])
+		txHash := types.DeriveSha(types.Transactions(txs[i]))
 		var doubleHash DoubleHash
 		copy(doubleHash[:], uncleHash.Bytes())
 		copy(doubleHash[common.HashLength:], txHash.Bytes())
@@ -184,7 +181,7 @@ func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 		// Also, block numbers can be added to bd.delivered for empty blocks, above
 		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
 			bd.delivered.Add(blockNum)
-			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
+			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {

@@ -18,8 +18,22 @@ import (
 )
 
 func SpawnHashStateStage(s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	var tx ethdb.RwTx
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx().(ethdb.RwTx)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	logPrefix := s.state.LogPrefix()
-	to, err := s.ExecutionAt(db)
+	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
@@ -34,26 +48,13 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, cache *shards.StateCa
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), tmpdir, quit); err != nil {
+		if err := PromoteHashedStateCleanly(logPrefix, tx, tmpdir, quit); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cache, tmpdir, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cache, tmpdir, quit); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
@@ -71,14 +72,14 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, cache *shards.StateCa
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, cach
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cache, tmpdir, quit); err != nil {
+	if err := unwindHashStateStageImpl(logPrefix, u, s, tx, cache, tmpdir, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	if err := u.Done(tx); err != nil {
@@ -100,10 +101,10 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, cach
 	return nil
 }
 
-func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.RwTx, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx ethdb.RwTx, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
-	prom := NewPromoter(stateDB, cache, quit)
+	prom := NewPromoter(tx, cache, quit)
 	prom.TempDir = tmpdir
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err

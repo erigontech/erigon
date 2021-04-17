@@ -86,7 +86,7 @@ func HeadersForward(
 	var req *headerdownload.HeaderRequest
 	var peer []byte
 	stopped := false
-	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
