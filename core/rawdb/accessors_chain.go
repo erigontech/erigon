@@ -718,6 +718,9 @@ func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint
 
 func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
+	if block == nil {
+		return nil, nil, nil
+	}
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
 		return nil, nil, err
