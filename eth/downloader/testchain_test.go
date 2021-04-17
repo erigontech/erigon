@@ -169,7 +169,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	var parentBlock *types.Block
 	existingLen := len(tc.chain) - 1
 	totalLen := existingLen + n
-	signer := types.MakeSigner(params.TestChainConfig, big.NewInt(1))
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 
 	testGenesisNonce := int64(-1)
 	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, totalLen, func(i int, block *core.BlockGen) {
@@ -181,7 +181,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 				if testGenesisNonce == -1 {
 					testGenesisNonce = int64(block.TxNonce(testAddress))
 				}
-				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
+				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), *signer, testKey)
 				if err != nil {
 					panic(err)
 				}
@@ -275,8 +275,8 @@ func (tc *testChain) headersByNumber(origin uint64, amount int, skip int, revers
 }
 
 // bodies returns the block bodies of the given block hashes.
-func (tc *testChain) bodies(hashes []common.Hash) ([][]*types.Transaction, [][]*types.Header) {
-	transactions := make([][]*types.Transaction, 0, len(hashes))
+func (tc *testChain) bodies(hashes []common.Hash) ([][]types.Transaction, [][]*types.Header) {
+	transactions := make([][]types.Transaction, 0, len(hashes))
 	uncles := make([][]*types.Header, 0, len(hashes))
 	for _, hash := range hashes {
 		if block, ok := tc.blockm[hash]; ok {

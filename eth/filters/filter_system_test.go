@@ -233,7 +233,7 @@ func TestPendingTxFilter(t *testing.T) {
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
 
-		transactions = []*types.Transaction{
+		transactions = []types.Transaction{
 			types.NewTransaction(0, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(uint256.Int), 0, new(uint256.Int), nil),
 			types.NewTransaction(1, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(uint256.Int), 0, new(uint256.Int), nil),
 			types.NewTransaction(2, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(uint256.Int), 0, new(uint256.Int), nil),
@@ -647,7 +647,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 			}
 
 			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(), 0, uint256.NewInt(), nil)
-			backend.txFeed.Send(core.NewTxsEvent{Txs: []*types.Transaction{tx}})
+			backend.txFeed.Send(core.NewTxsEvent{Txs: []types.Transaction{tx}})
 			i++
 		}
 	}()
