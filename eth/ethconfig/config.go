@@ -65,15 +65,9 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:               1,
-	TxLookupLimit:           2350000,
-	DatabaseCache:           512,
-	TrieCleanCache:          256,
-	TrieCleanCacheJournal:   "triecache",
-	TrieCleanCacheRejournal: 60 * time.Minute,
-	TrieDirtyCache:          256,
-	TrieTimeout:             60 * time.Minute,
-	StorageMode:             ethdb.DefaultStorageMode,
+	NetworkID:     1,
+	TxLookupLimit: 2350000,
+	StorageMode:   ethdb.DefaultStorageMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -127,7 +121,6 @@ type Config struct {
 	SnapDiscoveryURLs []string
 
 	Pruning       bool   // Whether to disable pruning and flush everything to disk
-	NoPrefetch    bool   // Whether to disable prefetching and only load state on demand
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
 	StorageMode     ethdb.StorageMode
@@ -154,16 +147,9 @@ type Config struct {
 	// Database options
 	SkipBcVersionCheck bool `toml:"-"`
 	DatabaseHandles    int  `toml:"-"`
-	DatabaseCache      int
 	DatabaseFreezer    string
 
-	TrieCleanCache          int
-	TrieCleanCacheJournal   string        `toml:",omitempty"` // Disk journal directory for trie cache to survive node restarts
-	TrieCleanCacheRejournal time.Duration `toml:",omitempty"` // Time interval to regenerate the journal for clean cache
-	TrieDirtyCache          int
-	TrieTimeout             time.Duration
-	SnapshotCache           int
-	Preimages               bool
+	Preimages bool
 
 	// Mining options
 	Miner params.MiningConfig

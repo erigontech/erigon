@@ -76,7 +76,7 @@ func WalkChunkWithKeys(k []byte, m *roaring.Bitmap, sizeLimit uint64, f func(chu
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TruncateRange(db ethdb.Database, bucket string, key []byte, to uint32) error {
+func TruncateRange(db ethdb.RwTx, bucket string, key []byte, to uint32) error {
 	chunkKey := make([]byte, len(key)+4)
 	copy(chunkKey, key)
 	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], to)
@@ -89,7 +89,12 @@ func TruncateRange(db ethdb.Database, bucket string, key []byte, to uint32) erro
 		bm.RemoveRange(uint64(to), uint64(bm.Maximum())+1)
 	}
 
-	if err := db.Walk(bucket, chunkKey, 0, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := ethdb.Walk(c, chunkKey, 0, func(k, v []byte) (bool, error) {
 		if !bytes.HasPrefix(k, key) {
 			return false, nil
 		}
@@ -113,14 +118,19 @@ func TruncateRange(db ethdb.Database, bucket string, key []byte, to uint32) erro
 
 // Get - reading as much chunks as needed to satisfy [from, to] condition
 // join all chunks to 1 bitmap by Or operator
-func Get(db ethdb.Getter, bucket string, key []byte, from, to uint32) (*roaring.Bitmap, error) {
+func Get(db ethdb.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap, error) {
 	var chunks []*roaring.Bitmap
 
 	fromKey := make([]byte, len(key)+4)
 	copy(fromKey, key)
 	binary.BigEndian.PutUint32(fromKey[len(fromKey)-4:], from)
 
-	if err := db.Walk(bucket, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
 		bm := roaring.New()
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {

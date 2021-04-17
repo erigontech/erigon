@@ -471,11 +471,20 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
+	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
+
 	_, _, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetLogIndex(tx) })
 	}
+	var err1 error
+	tx, err1 = tx.Begin(ctx, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+
 	execStage := progress(stages.Execution)
 	s := progress(stages.LogIndex)
 	log.Info("Stage exec", "progress", execStage.BlockNumber)
@@ -484,10 +493,10 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
-		return stagedsync.UnwindLogIndex(u, s, db, ch)
+		return stagedsync.UnwindLogIndex(u, s, tx, ch)
 	}
 
-	if err := stagedsync.SpawnLogIndex(s, db, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnLogIndex(s, tx, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil

@@ -1,9 +1,10 @@
 syntax = "proto3";
 
-import "google/protobuf/empty.proto";
 import "types/types.proto";
 
 package txpool;
+
+option go_package = "./txpool;txpool";
 
 message TxHashes { repeated types.H256 hashes = 1; }
 

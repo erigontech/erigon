@@ -36,7 +36,7 @@ jobs:
           go build -trimpath -o bin/integration.exe ./cmd/integration
           go build -trimpath -o bin/headers.ext ./cmd/headers
       - name: Lint
-        if: matrix.os != 'windows-latest'
+        if: matrix.os == 'ubuntu-latest'
         uses: golangci/golangci-lint-action@v2
         with:
           version: v1.38
