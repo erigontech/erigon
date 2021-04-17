@@ -366,14 +366,15 @@ func (h *handler) miningLoop() {
 
 	for {
 		select {
-		case <-h.txsCh:
+		case <-h.txsChMining:
+			fmt.Printf("got new tx!\n")
 			haveNewTxs = true
 		case err := <-stepResult:
 			works = false
 			if err != nil {
 				log.Warn("mining", "err", err)
 			}
-		case <-h.txsSub.Err():
+		case <-h.txsSubMining.Err():
 			return
 		}
 		if !works && haveNewTxs {
