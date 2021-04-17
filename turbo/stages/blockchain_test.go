@@ -2407,7 +2407,7 @@ func TestEIP2718Transition(t *testing.T) {
 //    feeCap - tip < baseFee.
 // 6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
-	t.Skip("to fix before merge")
+	t.Skip("Still debugging")
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 

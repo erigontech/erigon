@@ -23,7 +23,11 @@ func VerifyEip1559Header(parent, header *types.Header, notFirst bool) error {
 		expectedBaseFee = CalcBaseFee(parent)
 	}
 	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
-		return fmt.Errorf("invalid baseFee: expected: %d, have %d", parent.BaseFee.Int64(), header.BaseFee.Int64())
+		var parentBaseFee big.Int
+		if parent.BaseFee != nil {
+			parentBaseFee.Set(parent.BaseFee)
+		}
+		return fmt.Errorf("invalid baseFee: expected: %d, have %d", &parentBaseFee, header.BaseFee.Int64())
 	}
 
 	return nil
@@ -40,6 +44,10 @@ func CalcBaseFee(parent *types.Header) *big.Int {
 		baseFeeChangeDenominator = new(big.Int).SetUint64(params.BaseFeeChangeDenominator)
 	)
 
+	var parentBaseFee big.Int
+	if parent.BaseFee != nil {
+		parentBaseFee.Set(parent.BaseFee)
+	}
 	if parent.GasUsed > parent.GasLimit {
 		// If the parent block used more gas than its target, the baseFee should increase.
 		gasUsedDelta := new(big.Int).SetUint64(parent.GasUsed - parent.GasLimit)
@@ -54,12 +62,12 @@ func CalcBaseFee(parent *types.Header) *big.Int {
 	} else {
 		// Otherwise if the parent block used less gas than its target, the baseFee should decrease.
 		gasUsedDelta := new(big.Int).SetUint64(parent.GasLimit - parent.GasUsed)
-		x := new(big.Int).Mul(parent.BaseFee, gasUsedDelta)
+		x := new(big.Int).Mul(&parentBaseFee, gasUsedDelta)
 		y := new(big.Int).Div(x, gasLimit)
 		baseFeeDelta := new(big.Int).Div(y, baseFeeChangeDenominator)
 
 		return math.BigMax(
-			new(big.Int).Sub(parent.BaseFee, baseFeeDelta),
+			new(big.Int).Sub(&parentBaseFee, baseFeeDelta),
 			big.NewInt(0),
 		)
 	}

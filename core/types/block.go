@@ -86,7 +86,7 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFee"`
-	eip1559     bool           // to avoid relying on BaseFee != nil for that
+	Eip1559     bool           // to avoid relying on BaseFee != nil for that
 }
 
 func (h Header) EncodingSize() int {
@@ -138,7 +138,7 @@ func (h Header) EncodingSize() int {
 	}
 	// size of BaseFee
 	var baseFeeLen int
-	if h.eip1559 {
+	if h.Eip1559 {
 		encodingSize++
 		if h.BaseFee.BitLen() >= 8 {
 			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
@@ -197,7 +197,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		encodingSize += len(h.Extra)
 	}
 	var baseFeeLen int
-	if h.eip1559 {
+	if h.Eip1559 {
 		encodingSize++
 		if h.BaseFee.BitLen() >= 8 {
 			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
@@ -338,7 +338,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Nonce[:]); err != nil {
 		return err
 	}
-	if h.eip1559 {
+	if h.Eip1559 {
 		if h.BaseFee.BitLen() > 0 && h.BaseFee.BitLen() < 8 {
 			b[0] = byte(h.BaseFee.Uint64())
 			if _, err := w.Write(b[:1]); err != nil {
@@ -454,7 +454,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			h.BaseFee = nil
-			h.eip1559 = false
+			h.Eip1559 = false
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no basefee): %w", err)
 			}
@@ -465,7 +465,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
 	}
-	h.eip1559 = true
+	h.Eip1559 = true
 	h.BaseFee = new(big.Int).SetBytes(b)
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)

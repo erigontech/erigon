@@ -47,9 +47,9 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	} else {
 		beneficiary = *author
 	}
-	var baseFee *uint256.Int
+	var baseFee uint256.Int
 	if header.BaseFee != nil {
-		baseFee, _ = uint256.FromBig(header.BaseFee)
+		baseFee.SetFromBig(header.BaseFee)
 	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
@@ -59,7 +59,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 		BlockNumber: header.Number.Uint64(),
 		Time:        header.Time,
 		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     baseFee,
+		BaseFee:     &baseFee,
 		GasLimit:    header.GasLimit,
 	}
 }
