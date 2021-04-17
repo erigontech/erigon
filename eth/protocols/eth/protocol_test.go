@@ -150,7 +150,8 @@ func TestEth66Messages(t *testing.T) {
 		} {
 			var tx types.Transaction
 			rlpdata := common.FromHex(hexrlp)
-			if err1 := rlp.DecodeBytes(rlpdata, &tx); err1 != nil {
+			tx, err1 := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpdata), 0))
+			if err1 != nil {
 				t.Fatal(err1)
 			}
 			txs = append(txs, tx)

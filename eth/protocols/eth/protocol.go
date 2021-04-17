@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -557,6 +558,103 @@ func (ptp *PooledTransactionsPacket) DecodeRLP(s *rlp.Stream) error {
 type PooledTransactionsPacket66 struct {
 	RequestId uint64
 	PooledTransactionsPacket
+}
+
+func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// Size of RequestID
+	encodingSize++
+	var requestIdLen int
+	if ptp66.RequestId >= 128 {
+		requestIdLen = (bits.Len64(ptp66.RequestId) + 7) / 8
+	}
+	encodingSize += requestIdLen
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range ptp66.PooledTransactionsPacket {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode RequestId
+	if ptp66.RequestId > 0 && ptp66.RequestId < 128 {
+		b[0] = byte(ptp66.RequestId)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], ptp66.RequestId)
+		b[8-requestIdLen] = 128 + byte(requestIdLen)
+		if _, err := w.Write(b[8-requestIdLen : 9]); err != nil {
+			return err
+		}
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range ptp66.PooledTransactionsPacket {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (ptp66 *PooledTransactionsPacket66) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	if ptp66.RequestId, err = s.Uint(); err != nil {
+		return fmt.Errorf("read RequestId: %w", err)
+	}
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		(*ptp66).PooledTransactionsPacket = append((*ptp66).PooledTransactionsPacket, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 // PooledTransactionsPacket is the network packet for transaction distribution, used
