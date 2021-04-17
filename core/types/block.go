@@ -575,13 +575,6 @@ func (b *Block) DeprecatedTd() *big.Int {
 // would otherwise need to be recomputed.
 type StorageBlock Block
 
-// "external" block encoding. used for eth protocol, etc.
-type extblock struct {
-	Header *Header
-	Txs    []Transaction
-	Uncles []*Header
-}
-
 // [deprecated by eth/63]
 // "storage" block encoding. used for database.
 type storageblock struct {

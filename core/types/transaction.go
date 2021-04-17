@@ -76,8 +76,8 @@ type TransactionMisc struct {
 	time time.Time // Time first seen locally (spam avoidance)
 
 	// caches
-	hash atomic.Value
-	size atomic.Value
+	hash atomic.Value //nolint:structcheck
+	size atomic.Value //nolint:structcheck
 	from atomic.Value
 }
 
