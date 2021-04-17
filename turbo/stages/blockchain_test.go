@@ -2407,7 +2407,6 @@ func TestEIP2718Transition(t *testing.T) {
 //    feeCap - tip < baseFee.
 // 6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
-	t.Skip("Still debugging")
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
@@ -2477,15 +2476,11 @@ func TestEIP1559Transition(t *testing.T) {
 	diskdb := ethdb.NewMemoryDatabase()
 	gspec.MustCommit(diskdb)
 
-	chain, err := core.NewBlockChain(diskdb, nil, gspec.Config, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
 	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block := chain.GetBlockByNumber(1)
+	block := blocks[0]
 
 	// 1+2: Ensure EIP-1559 access lists are accounted for via gas usage.
 	expectedGas := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + vm.WarmStorageReadCostEIP2929 + vm.ColdSloadCostEIP2929
@@ -2498,7 +2493,7 @@ func TestEIP1559Transition(t *testing.T) {
 	// 3: Ensure that miner received only the tx's tip.
 	actual := statedb.GetBalance(block.Coinbase())
 	expected := new(uint256.Int).Add(
-		new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64()),
+		new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
 		ethash.ConstantinopleBlockReward,
 	)
 	if actual.Cmp(expected) != 0 {
@@ -2507,12 +2502,12 @@ func TestEIP1559Transition(t *testing.T) {
 
 	// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
 	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
-	expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64() + block.BaseFee().Uint64()))
+	expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
 	if actual.Cmp(expected) != 0 {
-		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
+		t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
 	}
 
-	blocks, _, err = core.GenerateChain(gspec.Config, block, engine, db, 1, func(i int, b *core.BlockGen) {
+	blocks, _, err = core.GenerateChain(gspec.Config, block, engine, diskdb, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
 		var tx types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
@@ -2528,9 +2523,9 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block = chain.GetBlockByNumber(2)
+	block = blocks[0]
 	statedb = state.New(state.NewPlainStateReader(diskdb))
-	effectiveTip := block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64() - block.BaseFee().Uint64()
+	effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 	// 6+5: Ensure that miner received only the tx's effective tip.
 	actual = statedb.GetBalance(block.Coinbase())

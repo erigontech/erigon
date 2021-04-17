@@ -317,8 +317,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	price := st.gasPrice
 	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
-		// price = min(tip, feeCap - baseFee) + baseFee
-		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
+		var feeDiff uint256.Int
+		if st.evm.Context.BaseFee.Lt(st.feeCap) {
+			feeDiff.Sub(st.feeCap, st.evm.Context.BaseFee)
+		}
+		price = cmath.Min256(st.tip, &feeDiff)
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), price))
 
