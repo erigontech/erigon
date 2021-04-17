@@ -583,30 +583,30 @@ func TestChainTxReorgs(t *testing.T) {
 	// Create two transactions shared between the chains:
 	//  - postponed: transaction included at a later block in the forked chain
 	//  - swapped: transaction included at the same block number in the forked chain
-	postponed, _ := types.SignTx(types.NewTransaction(0, addr1, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key1)
-	swapped, _ := types.SignTx(types.NewTransaction(1, addr1, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key1)
+	postponed, _ := types.SignTx(types.NewTransaction(0, addr1, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key1)
+	swapped, _ := types.SignTx(types.NewTransaction(1, addr1, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key1)
 
 	// Create two transactions that will be dropped by the forked chain:
 	//  - pastDrop: transaction dropped retroactively from a past block
 	//  - freshDrop: transaction dropped exactly at the block where the reorg is detected
-	var pastDrop, freshDrop *types.Transaction
+	var pastDrop, freshDrop types.Transaction
 
 	// Create three transactions that will be added in the forked chain:
 	//  - pastAdd:   transaction added before the reorganization is detected
 	//  - freshAdd:  transaction added at the exact block the reorg is detected
 	//  - futureAdd: transaction added after the reorg has already finished
-	var pastAdd, freshAdd, futureAdd *types.Transaction
+	var pastAdd, freshAdd, futureAdd types.Transaction
 
 	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 3, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
-			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key2)
+			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key2)
 
 			gen.AddTx(pastDrop)  // This transaction will be dropped in the fork from below the split point
 			gen.AddTx(postponed) // This transaction will be postponed till block #3 in the fork
 
 		case 2:
-			freshDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key2)
+			freshDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key2)
 
 			gen.AddTx(freshDrop) // This transaction will be dropped in the fork from exactly at the split point
 			gen.AddTx(swapped)   // This transaction will be swapped out at the exact height
@@ -626,18 +626,18 @@ func TestChainTxReorgs(t *testing.T) {
 	chain, _, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db2, 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
-			pastAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key3)
+			pastAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key3)
 			gen.AddTx(pastAdd) // This transaction needs to be injected during reorg
 
 		case 2:
 			gen.AddTx(postponed) // This transaction was postponed from block #1 in the original chain
 			gen.AddTx(swapped)   // This transaction was swapped from the exact current spot in the original chain
 
-			freshAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key3)
+			freshAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key3)
 			gen.AddTx(freshAdd) // This transaction will be added exactly at reorg time
 
 		case 3:
-			futureAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key3)
+			futureAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key3)
 			gen.AddTx(futureAdd) // This transaction will be added after a full reorg
 		}
 	}, false /* intemediateHashes */)
@@ -708,7 +708,7 @@ func TestLogReorgs(t *testing.T) {
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	chain, _, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 2, func(i int, gen *core.BlockGen) {
 		if i == 1 {
-			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), code), signer, key1)
+			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), code), *signer, key1)
 			if err != nil {
 				t.Fatalf("failed to create tx: %v", err)
 			}
@@ -780,7 +780,7 @@ func TestLogRebirth(t *testing.T) {
 	// This chain contains a single log.
 	chain, _, chainErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
 		if i == 1 {
-			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), *signer, key1)
 			if err != nil {
 				t.Fatalf("failed to create tx: %v", err)
 			}
@@ -794,7 +794,7 @@ func TestLogRebirth(t *testing.T) {
 	// chain removes one log and adds one.
 	forkChain, _, forkChainErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 2, func(i int, gen *core.BlockGen) {
 		if i == 1 {
-			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), *signer, key1)
 			if err != nil {
 				t.Fatalf("failed to create tx: %v", err)
 			}
@@ -810,7 +810,7 @@ func TestLogRebirth(t *testing.T) {
 	// the log event for the old chain, as well as a RemovedLogsEvent for forkChain.
 	newBlocks, _, newBlocksErr := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 3, func(i int, gen *core.BlockGen) {
 		if i == 1 {
-			tx, err1 := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			tx, err1 := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), *signer, key1)
 			if err1 != nil {
 				t.Fatalf("failed to create tx: %v", err1)
 			}
@@ -872,7 +872,7 @@ func TestSideLogRebirth(t *testing.T) {
 	// Generate side chain with lower difficulty
 	sideChain, _, sideChainErr := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 3, func(i int, gen *core.BlockGen) {
 		if i == 1 {
-			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), signer, key1)
+			tx, err := types.SignTx(types.NewContractCreation(gen.TxNonce(addr1), new(uint256.Int), 1000000, new(uint256.Int), logCode), *signer, key1)
 			if err != nil {
 				t.Fatalf("failed to create tx: %v", err)
 			}
@@ -981,39 +981,39 @@ func TestEIP155Transition(t *testing.T) {
 
 	blocks, _, chainErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
 		var (
-			tx      *types.Transaction
+			tx      types.Transaction
 			err     error
-			basicTx = func(signer types.Signer) (*types.Transaction, error) {
+			basicTx = func(signer types.Signer) (types.Transaction, error) {
 				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		switch i {
 		case 0:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(types.LatestSigner(gspec.Config))
+			tx, err = basicTx(*types.LatestSigner(gspec.Config))
 			if err != nil {
 				t.Fatal(err)
 			}
 			block.AddTx(tx)
 		case 3:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(types.LatestSigner(gspec.Config))
+			tx, err = basicTx(*types.LatestSigner(gspec.Config))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1047,12 +1047,12 @@ func TestEIP155Transition(t *testing.T) {
 	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
 	blocks, _, chainErr = core.GenerateChain(config, blocks[len(blocks)-1], ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
 		var (
-			basicTx = func(signer types.Signer) (*types.Transaction, error) {
+			basicTx = func(signer types.Signer) (types.Transaction, error) {
 				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		if i == 0 {
-			tx, txErr := basicTx(types.LatestSigner(config))
+			tx, txErr := basicTx(*types.LatestSigner(config))
 			if txErr != nil {
 				t.Fatal(txErr)
 			}
@@ -1108,39 +1108,39 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
 		var (
-			tx      *types.Transaction
+			tx      types.Transaction
 			err     error
-			basicTx = func(signer types.Signer) (*types.Transaction, error) {
+			basicTx = func(signer types.Signer) (types.Transaction, error) {
 				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
 			}
 		)
 		switch i {
 		case 0:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(types.NewEIP155Signer(gspec.Config.ChainID))
+			tx, err = basicTx(*types.LatestSignerForChainID(gspec.Config.ChainID))
 			if err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 3:
-			tx, err = basicTx(types.HomesteadSigner{})
+			tx, err = basicTx(*types.LatestSignerForChainID(nil))
 			if err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(types.NewEIP155Signer(gspec.Config.ChainID))
+			tx, err = basicTx(*types.LatestSignerForChainID(gspec.Config.ChainID))
 			if err != nil {
 				panic(err)
 			}
@@ -1252,17 +1252,17 @@ func TestEIP161AccountRemoval(t *testing.T) {
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 3, func(i int, block *core.BlockGen) {
 		var (
-			tx     *types.Transaction
+			tx     types.Transaction
 			err    error
 			signer = types.LatestSigner(gspec.Config)
 		)
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -1301,7 +1301,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		signer      = types.HomesteadSigner{}
+		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
 		bankFunds   = big.NewInt(1e9)
@@ -1325,21 +1325,21 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), signer, bankKey)
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			theAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), signer, bankKey)
+			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), signer, bankKey)
+			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 
 			// sending kill messsage to an already suicided account
-			tx, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), signer, bankKey)
+			tx, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -1768,11 +1768,11 @@ func TestDeleteCreateRevert(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BBBB
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -1881,11 +1881,11 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -1965,11 +1965,11 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to AA, to recreate it (but without storage
 		tx, _ = types.SignTx(types.NewTransaction(1, aa,
-			u256.Num1, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num1, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -2097,9 +2097,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		values:   map[int]int{1: 1, 2: 2},
 	}
 	var expectations []*expectation
-	var newDestruct = func(e *expectation) *types.Transaction {
+	var newDestruct = func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa,
-			u256.Num0, 50000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
 		if e.exist {
 			e.exist = false
@@ -2108,9 +2108,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
-	var newResurrect = func(e *expectation) *types.Transaction {
+	var newResurrect = func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
 		if !e.exist {
 			e.exist = true
@@ -2278,7 +2278,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
-			u256.Num0, 100000, u256.Num1, nil), types.HomesteadSigner{}, key)
+			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		nonce++
 	}, false /* intemediateHashes */)
@@ -2357,12 +2357,16 @@ func TestEIP2718Transition(t *testing.T) {
 
 		// One transaction to 0xAAAA
 		signer := types.LatestSigner(gspec.Config)
-		tx, _ := types.SignNewTx(key, signer, &types.AccessListTx{
-			ChainID:  chainID,
-			Nonce:    0,
-			To:       &aa,
-			Gas:      30000,
-			GasPrice: gasPrice,
+		tx, _ := types.SignNewTx(key, *signer, &types.AccessListTx{
+			ChainID: chainID,
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce: 0,
+					To:    &aa,
+					Gas:   30000,
+				},
+				GasPrice: gasPrice,
+			},
 			AccessList: types.AccessList{{
 				Address:     aa,
 				StorageKeys: []common.Hash{{0}},
@@ -2415,12 +2419,12 @@ func TestEIP1559Transition(t *testing.T) {
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(big.Int).Mul(common.Big1, big.NewInt(params.Ether))
+		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
 		gspec   = &core.Genesis{
 			Config: params.AleutChainConfig,
 			Alloc: core.GenesisAlloc{
-				addr1: {Balance: funds},
-				addr2: {Balance: funds},
+				addr1: {Balance: funds.ToBig()},
+				addr2: {Balance: funds.ToBig()},
 				// The address 0xAAAA sloads 0x00 and 0x01
 				aa: {
 					Code: []byte{
@@ -2438,7 +2442,7 @@ func TestEIP1559Transition(t *testing.T) {
 		signer  = types.LatestSigner(gspec.Config)
 	)
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, db, 1, func(i int, b *BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 
 		// One transaction to 0xAAAA
@@ -2447,31 +2451,37 @@ func TestEIP1559Transition(t *testing.T) {
 			StorageKeys: []common.Hash{{0}},
 		}}
 
-		txdata := &types.DynamicFeeTransaction{
-			ChainID:    gspec.Config.ChainID,
-			Nonce:      0,
-			To:         &aa,
-			Gas:        30000,
-			FeeCap:     new(big.Int).Mul(big.NewInt(5), big.NewInt(params.GWei)),
-			Tip:        big.NewInt(2),
+		var chainID uint256.Int
+		chainID.SetFromBig(gspec.Config.ChainID)
+		var tx types.Transaction = &types.DynamicFeeTransaction{
+			ChainID: &chainID,
+			CommonTx: types.CommonTx{
+				Nonce: 0,
+				To:    &aa,
+				Gas:   30000,
+				Data:  []byte{},
+			},
+			FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
+			Tip:        u256.Num2,
 			AccessList: accesses,
-			Data:       []byte{},
 		}
-		tx := types.NewTx(txdata)
-		tx, _ = types.SignTx(tx, signer, key1)
+		tx, _ = types.SignTx(tx, *signer, key1)
 
 		b.AddTx(tx)
-	})
+	}, false /* intermediate hashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
 	// Import the canonical chain
 	diskdb := ethdb.NewMemoryDatabase()
 	gspec.MustCommit(diskdb)
 
-	chain, err := NewBlockChain(diskdb, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	chain, err := core.NewBlockChain(diskdb, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
-	if n, err := chain.InsertChain(blocks); err != nil {
-		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	block := chain.GetBlockByNumber(1)
@@ -2482,12 +2492,12 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	state, _ := chain.State()
+	statedb := state.New(state.NewPlainStateReader(diskdb))
 
 	// 3: Ensure that miner received only the tx's tip.
-	actual := state.GetBalance(block.Coinbase())
-	expected := new(big.Int).Add(
-		new(big.Int).SetUint64(block.GasUsed()*block.Transactions()[0].Tip().Uint64()),
+	actual := statedb.GetBalance(block.Coinbase())
+	expected := new(uint256.Int).Add(
+		new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64()),
 		ethash.ConstantinopleBlockReward,
 	)
 	if actual.Cmp(expected) != 0 {
@@ -2495,33 +2505,36 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
-	actual = new(big.Int).Sub(funds, state.GetBalance(addr1))
-	expected = new(big.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].Tip().Uint64() + block.BaseFee().Uint64()))
+	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
+	expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64() + block.BaseFee().Uint64()))
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 	}
 
-	blocks, _ = core.GenerateChain(gspec.Config, block, engine, db, 1, func(i int, b *BlockGen) {
+	blocks, _, err = core.GenerateChain(gspec.Config, block, engine, db, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
-		tx := types.NewTransaction(0, aa, big.NewInt(0), 30000, new(big.Int).Mul(big.NewInt(5), big.NewInt(params.GWei)), nil)
-		tx, _ = types.SignTx(tx, signer, key2)
+		var tx types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
+		tx, _ = types.SignTx(tx, *signer, key2)
 
 		b.AddTx(tx)
-	})
+	}, false /* intermediate hashes */)
+	if err != nil {
+		t.Fatalf("generate chain: %v", err)
+	}
 
-	if n, err := chain.InsertChain(blocks); err != nil {
-		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	block = chain.GetBlockByNumber(2)
-	state, _ = chain.State()
-	effectiveTip := block.Transactions()[0].Tip().Uint64() - block.BaseFee().Uint64()
+	statedb = state.New(state.NewPlainStateReader(diskdb))
+	effectiveTip := block.Transactions()[0].(*types.DynamicFeeTransaction).Tip.Uint64() - block.BaseFee().Uint64()
 
 	// 6+5: Ensure that miner received only the tx's effective tip.
-	actual = state.GetBalance(block.Coinbase())
-	expected = new(big.Int).Add(
-		new(big.Int).SetUint64(block.GasUsed()*effectiveTip),
+	actual = statedb.GetBalance(block.Coinbase())
+	expected = new(uint256.Int).Add(
+		new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
 		ethash.ConstantinopleBlockReward,
 	)
 	if actual.Cmp(expected) != 0 {
@@ -2529,8 +2542,8 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
-	actual = new(big.Int).Sub(funds, state.GetBalance(addr2))
-	expected = new(big.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
+	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
+	expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 	}
