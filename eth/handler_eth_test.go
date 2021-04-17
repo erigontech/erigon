@@ -283,10 +283,10 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
-	tx := types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
-	tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
+	var tx types.Transaction = types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
+	tx, _ = types.SignTx(tx, *types.LatestSignerForChainID(nil), testKey)
 
-	if err := src.SendTransactions([]*types.Transaction{tx}); err != nil {
+	if err := src.SendTransactions([]types.Transaction{tx}); err != nil {
 		t.Fatalf("failed to send transaction: %v", err)
 	}
 	select {
@@ -309,10 +309,10 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	handler := newTestHandler()
 	defer handler.close()
 
-	insert := make([]*types.Transaction, 100)
+	insert := make([]types.Transaction, 100)
 	for nonce := range insert {
-		tx := types.NewTransaction(uint64(nonce), common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), make([]byte, txsyncPackSize/10))
-		tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
+		var tx types.Transaction = types.NewTransaction(uint64(nonce), common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), make([]byte, txsyncPackSize/10))
+		tx, _ = types.SignTx(tx, *types.LatestSignerForChainID(nil), testKey)
 
 		insert[nonce] = tx
 	}

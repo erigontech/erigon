@@ -35,7 +35,10 @@ var ErrInvalidChainId = errors.New("invalid chain id for signer")
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	var signer Signer
-	chainId, _ := uint256.FromBig(config.ChainID)
+	var chainId uint256.Int
+	if config.ChainID != nil {
+		chainId.SetFromBig(config.ChainID)
+	}
 	signer.unprotected = true
 	switch {
 	case config.IsAleut(blockNumber):
@@ -43,17 +46,17 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 		signer.protected = true
 		signer.accesslist = true
 		signer.dynamicfee = true
-		signer.chainID.Set(chainId)
-		signer.chainIDMul.Mul(chainId, u256.Num2)
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsBerlin(blockNumber):
 		signer.protected = true
 		signer.accesslist = true
-		signer.chainID.Set(chainId)
-		signer.chainIDMul.Mul(chainId, u256.Num2)
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsEIP155(blockNumber):
 		signer.protected = true
-		signer.chainID.Set(chainId)
-		signer.chainIDMul.Mul(chainId, u256.Num2)
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsHomestead(blockNumber):
 	default:
 		// Only allow malleable transactions in Frontier
