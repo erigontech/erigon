@@ -137,7 +137,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 }
 
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
-	s := rlp.NewListStream(bytes.NewReader(data), uint64(len(data)))
+	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
 	kind, size, err := s.Kind()
 	if err != nil {
 		return nil, err
@@ -173,9 +173,6 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 			tx = t
 		default:
 			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
-		}
-		if err = s.ListEnd(); err != nil {
-			return nil, err
 		}
 		return tx, nil
 	default:

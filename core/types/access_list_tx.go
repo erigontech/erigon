@@ -575,7 +575,7 @@ func (tx AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}
-	hash := rlpHash([]interface{}{
+	hash := prefixedRlpHash(AccessListTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,

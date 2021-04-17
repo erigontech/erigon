@@ -219,7 +219,11 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		if !sg.accesslist {
 			return common.Address{}, fmt.Errorf("accesslist tx is not supported by signer %s", sg)
 		}
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return common.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
 			return common.Address{}, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
@@ -230,7 +234,11 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		if !sg.dynamicfee {
 			return common.Address{}, fmt.Errorf("dynamicfee tx is not supported by signer %s", sg)
 		}
-		if !t.ChainID.Eq(&sg.chainID) {
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return common.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
 			return common.Address{}, ErrInvalidChainId
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery

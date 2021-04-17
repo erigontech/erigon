@@ -455,7 +455,7 @@ func (tx DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}
-	hash := rlpHash([]interface{}{
+	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
 		tx.Tip,

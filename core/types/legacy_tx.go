@@ -460,7 +460,6 @@ func (tx LegacyTx) Hash() common.Hash {
 }
 
 func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
-	fmt.Printf("Signing hash for chainID %d\n", chainID)
 	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
