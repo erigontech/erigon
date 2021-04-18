@@ -20,7 +20,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -76,10 +75,10 @@ var (
 	//blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
 	//blockPrefetchInterruptMeter = metrics.NewRegisteredMeter("chain/prefetch/interrupts", nil)
 
-	errInsertionInterrupted = errors.New("insertion is interrupted")
+	//errInsertionInterrupted = errors.New("insertion is interrupted")
 
 	// ErrNotFound is returned when sought data isn't found.
-	ErrNotFound = errors.New("data not found")
+	//ErrNotFound = errors.New("data not found")
 )
 
 const (
@@ -561,18 +560,6 @@ func (bc *BlockChain) insertStopped() bool {
 // WriteStatus status of write
 type WriteStatus byte
 
-const (
-	NonStatTy WriteStatus = iota
-	CanonStatTy
-	SideStatTy
-)
-
-// numberHash is just a container for a number and a hash, to represent a block
-type numberHash struct {
-	number uint64
-	hash   common.Hash
-}
-
 // SetTxLookupLimit is responsible for updating the txlookup limit to the
 // original one stored in db if the new mismatches with the old one.
 func (bc *BlockChain) SetTxLookupLimit(limit uint64) {
@@ -769,22 +756,6 @@ func (bc *BlockChain) NoHistory() bool {
 type Pruner interface {
 	Start() error
 	Stop()
-}
-
-// addJob should be called only for public methods
-func (bc *BlockChain) addJob() error {
-	bc.quitMu.RLock()
-	defer bc.quitMu.RUnlock()
-	if bc.insertStopped() {
-		return errors.New("blockchain is stopped")
-	}
-	bc.wg.Add(1)
-
-	return nil
-}
-
-func (bc *BlockChain) doneJob() {
-	bc.wg.Done()
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
