@@ -340,18 +340,14 @@ func (h *handler) Start(maxPeers int) {
 	go h.txBroadcastLoop()
 
 	if h.MiningCfg != nil && h.MiningCfg.Enabled {
-		fmt.Printf("starting tx pool\n")
-		hh := rawdb.ReadCurrentHeader(h.database)
-		execution, _ := stages.GetStageProgress(h.database, stages.Execution)
-		if err := h.txpool.(*core.TxPool).Start(hh.GasLimit, execution); err != nil {
-			panic(err)
+		if h.chainConfig.ChainID.Uint64() != 1 {
+			fmt.Printf("starting tx pool\n")
+			hh := rawdb.ReadCurrentHeader(h.database)
+			execution, _ := stages.GetStageProgress(h.database, stages.Execution)
+			if err := h.txpool.(*core.TxPool).Start(hh.GasLimit, execution); err != nil {
+				panic(err)
+			}
 		}
-		//events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
-		//	defer func() {
-		//		if !events.Closed() {
-		//			events.Unsubscribe()
-		//		}
-		//	}()
 		h.txsChMining = make(chan core.NewTxsEvent, txChanSize)
 		h.txsSubMining = h.txpool.SubscribeNewTxsEvent(h.txsChMining)
 		h.wg.Add(1)
@@ -368,14 +364,18 @@ func (h *handler) miningLoop() {
 	defer h.wg.Done()
 	var haveNewTxs bool
 	var works bool
-	stepResult := make(chan error)
+	errc := make(chan error)
+	resultCh := make(chan *types.Block, 1)
 
 	for {
 		select {
 		case <-h.txsChMining:
-			fmt.Printf("got new tx!\n")
 			haveNewTxs = true
-		case err := <-stepResult:
+		case minedBlock := <-resultCh:
+			works = false
+			// TODO: send mined block to sentry
+			_ = minedBlock
+		case err := <-errc:
 			works = false
 			if err != nil {
 				log.Warn("mining", "err", err)
@@ -386,19 +386,19 @@ func (h *handler) miningLoop() {
 		if !works && haveNewTxs {
 			haveNewTxs = false
 			works = true
-			go func() { stepResult <- h.miningStep() }()
+
+			go func() { errc <- h.miningStep(resultCh) }()
 		}
 	}
 }
 
-func (h *handler) miningStep() error {
+func (h *handler) miningStep(resultCh chan *types.Block) error {
 	tx, err := h.database.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	miningResultCh := make(chan *types.Block, 1)
 	sealCancel := make(chan struct{})
 
 	miningState, err := h.mining.Prepare(
@@ -418,7 +418,7 @@ func (h *handler) miningStep() error {
 		h.txpool.(*core.TxPool),
 		nil,
 		false,
-		stagedsync.NewMiningStagesParameters(h.MiningCfg, true, miningResultCh, sealCancel),
+		stagedsync.NewMiningStagesParameters(h.MiningCfg, true, resultCh, sealCancel),
 	)
 	if err != nil {
 		return err
@@ -427,8 +427,6 @@ func (h *handler) miningStep() error {
 		return err
 	}
 	tx.Rollback()
-	// TODO: send mined block to sentry
-	<-miningResultCh
 	return nil
 }
 
