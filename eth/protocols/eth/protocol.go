@@ -252,6 +252,74 @@ type NewBlockPacket struct {
 	TD    *big.Int
 }
 
+func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Block
+	encodingSize++
+	blockLen := nbp.Block.EncodingSize()
+	if blockLen >= 56 {
+		encodingSize += (bits.Len(uint(blockLen)) + 7) / 8
+	}
+	encodingSize += blockLen
+	// size of TD
+	encodingSize++
+	var tdLen int
+	if nbp.TD.BitLen() >= 8 {
+		tdLen = (nbp.TD.BitLen() + 7) / 8
+	}
+	encodingSize += tdLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Block
+	if err := nbp.Block.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode TD
+	if nbp.TD != nil && nbp.TD.BitLen() > 0 && nbp.TD.BitLen() < 8 {
+		b[0] = byte(nbp.TD.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(tdLen)
+		if nbp.TD != nil {
+			nbp.TD.FillBytes(b[1 : 1+tdLen])
+		}
+		if _, err := w.Write(b[:1+tdLen]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Block
+	nbp.Block = &types.Block{}
+	if err = nbp.Block.DecodeRLP(s); err != nil {
+		return err
+	}
+	// decode TD
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read TD: %w", err)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for TD: %d", len(b))
+	}
+	nbp.TD = new(big.Int).SetBytes(b)
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // sanityCheck verifies that the values are reasonable, as a DoS protection
 func (request *NewBlockPacket) sanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {

@@ -605,11 +605,14 @@ func (b *Body) SendersFromTxs() []common.Address {
 	return senders
 }
 
-func (bb Body) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
+func (bb Body) EncodingSize() int {
+	payloadSize, _, _ := bb.payloadSize()
+	return payloadSize
+}
+
+func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen int) {
 	// size of Transactions
-	encodingSize++
-	var txsLen int
+	payloadSize++
 	for _, tx := range bb.Transactions {
 		txsLen++
 		var txLen int
@@ -627,12 +630,11 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
 	}
-	encodingSize += txsLen
+	payloadSize += txsLen
 	// size of Uncles
-	encodingSize++
-	var unclesLen int
+	payloadSize++
 	for _, uncle := range bb.Uncles {
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
@@ -642,12 +644,17 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
 	}
-	encodingSize += unclesLen
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (bb Body) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -842,19 +849,16 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb Block) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
+func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen int) {
 	// size of Header
-	encodingSize++
+	payloadSize++
 	headerLen := bb.header.EncodingSize()
 	if headerLen >= 56 {
-		encodingSize += (bits.Len(uint(headerLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(headerLen)) + 7) / 8
 	}
-	encodingSize += headerLen
+	payloadSize += headerLen
 	// size of Transactions
-	encodingSize++
-	var txsLen int
+	payloadSize++
 	for _, tx := range bb.transactions {
 		txsLen++
 		var txLen int
@@ -872,12 +876,11 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
 	}
-	encodingSize += txsLen
+	payloadSize += txsLen
 	// size of Uncles
-	encodingSize++
-	var unclesLen int
+	payloadSize++
 	for _, uncle := range bb.uncles {
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
@@ -887,12 +890,23 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
 	}
-	encodingSize += unclesLen
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (bb Block) EncodingSize() int {
+	payloadSize, _, _ := bb.payloadSize()
+	return payloadSize
+}
+
+// EncodeRLP serializes b into the Ethereum RLP block format.
+func (bb Block) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Header
