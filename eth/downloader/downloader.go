@@ -167,7 +167,6 @@ type Downloader struct {
 
 	stagedSyncState *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
-	mining          *stagedsync.StagedSync
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -199,11 +198,6 @@ func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *
 // SetStagedSync sets the staged sync instance (by protocol manager)
 func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	d.stagedSync = stagedSync
-}
-
-// SetStagedSync sets the staged sync instance (by protocol manager)
-func (d *Downloader) SetMining(mining *stagedsync.StagedSync) {
-	d.mining = mining
 }
 
 // DataDir sets the directory where download is allowed to create temporary files

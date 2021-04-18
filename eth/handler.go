@@ -224,9 +224,6 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 
 func (h *handler) SetMining(mining *stagedsync.StagedSync) {
 	h.mining = mining
-	if h.downloader != nil {
-		h.downloader.SetMining(mining)
-	}
 }
 
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
