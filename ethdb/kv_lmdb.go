@@ -78,6 +78,11 @@ func (opts LmdbOpts) Flags(f func(uint) uint) LmdbOpts {
 	return opts
 }
 
+func (opts LmdbOpts) Readonly() LmdbOpts {
+	opts.flags = opts.flags | lmdb.Readonly
+	return opts
+}
+
 func (opts LmdbOpts) Exclusive() LmdbOpts {
 	opts.exclusive = true
 	return opts

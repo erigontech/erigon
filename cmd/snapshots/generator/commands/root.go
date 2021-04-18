@@ -73,8 +73,8 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
 }
 func withSnapshotData(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 }
 
 func withChaindata(cmd *cobra.Command) {
