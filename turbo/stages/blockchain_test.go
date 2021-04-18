@@ -20,9 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1390,17 +1388,6 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	defer diskdb.Close()
 	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
-	cacheConfig := &core.CacheConfig{
-		NoHistory: false,
-		Pruning:   false,
-	}
-	txCacher := core.NewTxSenderCacher(1)
-	chain, err := core.NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
-	defer chain.Stop()
-
 	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -1429,14 +1416,17 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
-		if chain.CurrentBlock().Hash() != chain.CurrentHeader().Hash() {
-			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, chain.CurrentBlock().Number(), chain.CurrentBlock().Hash().Bytes()[:4], chain.CurrentHeader().Number, chain.CurrentHeader().Hash().Bytes()[:4])
+
+		b, h := rawdb.ReadCurrentBlock(diskdb), rawdb.ReadCurrentHeader(diskdb)
+		if b.Hash() != h.Hash() {
+			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
 		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, forks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 		}
-		if chain.CurrentBlock().Hash() != chain.CurrentHeader().Hash() {
-			t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, chain.CurrentBlock().Number(), chain.CurrentBlock().Hash().Bytes()[:4], chain.CurrentHeader().Number, chain.CurrentHeader().Hash().Bytes()[:4])
+		b, h = rawdb.ReadCurrentBlock(diskdb), rawdb.ReadCurrentHeader(diskdb)
+		if b.Hash() != h.Hash() {
+			t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
 	}
 }
@@ -1512,6 +1502,8 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 }
 
+/*
+
 func TestBlockchainRecovery(t *testing.T) {
 	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	// Configure and generate a sample block chain
@@ -1525,7 +1517,7 @@ func TestBlockchainRecovery(t *testing.T) {
 		genesis = gspec.MustCommit(gendb)
 	)
 	height := uint64(1024)
-	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil, false /* intermediateHashes */)
+	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil, false)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1594,7 +1586,7 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 		genesis = gspec.MustCommit(gendb)
 	)
 	height := uint64(1024)
-	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil, false /* intermediateHashes */)
+	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), gendb, int(height), nil, false)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1641,6 +1633,7 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 		t.Fatalf("failed to insert ancient recept chain after rollback")
 	}
 }
+*/
 
 // Tests that importing a very large side fork, which is larger than the canon chain,
 // but where the difficulty per block is kept low: this means that it will not
@@ -1683,12 +1676,6 @@ func TestLowDiffLongChain(t *testing.T) {
 	new(core.Genesis).MustCommit(diskDB)
 	defer diskDB.Close()
 
-	txCacher := core.NewTxSenderCacher(1)
-	chain, err := core.NewBlockChain(diskDB, nil, params.TestChainConfig, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
-	defer chain.Stop()
 	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
@@ -1697,17 +1684,19 @@ func TestLowDiffLongChain(t *testing.T) {
 	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, fork, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	head := chain.CurrentBlock()
+
+	head := rawdb.ReadCurrentBlock(diskDB)
 	if got := fork[len(fork)-1].Hash(); got != head.Hash() {
 		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 	}
 	// Sanity check that all the canonical numbers are present
-	header := chain.CurrentHeader()
+	header := rawdb.ReadCurrentHeader(diskDB)
 	for number := head.NumberU64(); number > 0; number-- {
-		if hash := chain.GetHeaderByNumber(number).Hash(); hash != header.Hash() {
+		if hash := rawdb.ReadHeaderByNumber(diskDB, number).Hash(); hash != header.Hash() {
 			t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
 		}
-		header = chain.GetHeader(header.ParentHash, number-1)
+
+		header = rawdb.ReadHeader(diskDB, header.ParentHash, number-1)
 	}
 }
 
@@ -1720,7 +1709,6 @@ func TestLowDiffLongChain(t *testing.T) {
 // each transaction, so this works ok. The rework accumulated writes in memory
 // first, but the journal wiped the entire state object on create-revert.
 func TestDeleteCreateRevert(t *testing.T) {
-	t.Skip("fixme")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
@@ -2379,15 +2367,11 @@ func TestEIP2718Transition(t *testing.T) {
 	diskdb := ethdb.NewMemDatabase()
 	gspec.MustCommit(diskdb)
 
-	chain, err := core.NewBlockChain(diskdb, nil, gspec.Config, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
 	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block := chain.GetBlockByNumber(1)
+	block, _ := rawdb.ReadBlockByNumber(diskdb, 1)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
 	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + vm.WarmStorageReadCostEIP2929 + vm.ColdSloadCostEIP2929
