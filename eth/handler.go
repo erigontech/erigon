@@ -340,6 +340,12 @@ func (h *handler) Start(maxPeers int) {
 	go h.txBroadcastLoop()
 
 	if h.MiningCfg != nil && h.MiningCfg.Enabled {
+		fmt.Printf("starting tx pool\n")
+		hh := rawdb.ReadCurrentHeader(h.database)
+		execution, _ := stages.GetStageProgress(h.database, stages.Execution)
+		if err := h.txpool.(*core.TxPool).Start(hh.GasLimit, execution); err != nil {
+			panic(err)
+		}
 		//events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
 		//	defer func() {
 		//		if !events.Closed() {
