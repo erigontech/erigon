@@ -32,6 +32,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var cmdStageBodies = &cobra.Command{
+	Use:   "stage_bodies",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageBodies(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
@@ -230,6 +246,12 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
+	withChaindata(cmdStageBodies)
+	withUnwind(cmdStageBodies)
+	withDatadir(cmdStageBodies)
+
+	rootCmd.AddCommand(cmdStageBodies)
+
 	withChaindata(cmdStageExec)
 	withLmdbFlags(cmdStageExec)
 	withReset(cmdStageExec)
@@ -309,6 +331,28 @@ func init() {
 	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+}
+
+func stageBodies(db ethdb.Database, ctx context.Context) error {
+	if unwind > 0 {
+		progress, err := stages.GetStageProgress(db, stages.Bodies)
+		if err != nil {
+			return fmt.Errorf("read Bodies progress: %w", err)
+		}
+		if unwind > progress {
+			return fmt.Errorf("cannot unwind past 0")
+		}
+		if err = stages.SaveStageProgress(db, stages.Bodies, progress-unwind); err != nil {
+			return fmt.Errorf("saving Bodies progress failed: %w", err)
+		}
+		progress, err = stages.GetStageProgress(db, stages.Bodies)
+		if err != nil {
+			return fmt.Errorf("re-read Bodies progress: %w", err)
+		}
+		log.Info("Progress", "bodies", progress)
+	}
+	log.Info("This command only works with --unwind option")
+	return nil
 }
 
 func stageSenders(db ethdb.Database, ctx context.Context) error {
