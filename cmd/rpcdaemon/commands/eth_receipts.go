@@ -279,7 +279,7 @@ func marshalReceipt(receipt *types.Receipt, txn *types.Transaction) map[string]i
 		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
 		"to":                txn.To(),
-		"type":              txn.Type(),
+		"type":              hexutil.Uint(txn.Type()),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
