@@ -166,7 +166,6 @@ type Downloader struct {
 	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSyncState *stagedsync.State
-	miningState     *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
 	mining          *stagedsync.StagedSync
 }

@@ -388,23 +388,6 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func miningTransactions(nextBlock *types.Block) types.TransactionsGroupedBySender {
-	idx := map[common.Address]int{}
-	groups := types.TransactionsGroupedBySender{}
-	senders := nextBlock.Body().SendersFromTxs()
-	for txId, txn := range nextBlock.Transactions() {
-		from := senders[txId]
-		i, ok := idx[from]
-		if ok {
-			groups[i] = append(groups[i], txn)
-		} else {
-			idx[from] = len(groups)
-			groups = append(groups, types.Transactions{txn})
-		}
-	}
-	return groups
-}
-
 func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 	h1 := b1.Header()
 	h2 := b2.Header()
