@@ -340,14 +340,12 @@ func (h *handler) Start(maxPeers int) {
 	go h.txBroadcastLoop()
 
 	if h.MiningCfg != nil && h.MiningCfg.Enabled {
-		if h.chainConfig.ChainID.Uint64() != 1 {
-			fmt.Printf("starting tx pool\n")
-			hh := rawdb.ReadCurrentHeader(h.database)
-			execution, _ := stages.GetStageProgress(h.database, stages.Execution)
-			if err := h.txpool.(*core.TxPool).Start(hh.GasLimit, execution); err != nil {
-				panic(err)
-			}
+		hh := rawdb.ReadCurrentHeader(h.database)
+		execution, _ := stages.GetStageProgress(h.database, stages.Execution)
+		if err := h.txpool.(*core.TxPool).Start(hh.GasLimit, execution); err != nil {
+			panic(err)
 		}
+
 		h.txsChMining = make(chan core.NewTxsEvent, txChanSize)
 		h.txsSubMining = h.txpool.SubscribeNewTxsEvent(h.txsChMining)
 		h.wg.Add(1)
