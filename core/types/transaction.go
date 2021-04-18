@@ -225,13 +225,7 @@ func (s Transactions) Len() int { return len(s) }
 // because we assume that *Transaction will only ever contain valid txs that were either
 // constructed by decoding or via public API in this package.
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
-	tx := s[i]
-	if tx.Type() != LegacyTxType {
-		if err := w.WriteByte(tx.Type()); err != nil {
-			panic(err)
-		}
-	}
-	if err := rlp.Encode(w, tx); err != nil {
+	if err := s[i].MarshalBinary(w); err != nil {
 		panic(err)
 	}
 }
