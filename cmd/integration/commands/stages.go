@@ -350,6 +350,7 @@ func stageBodies(db ethdb.Database, ctx context.Context) error {
 			return fmt.Errorf("re-read Bodies progress: %w", err)
 		}
 		log.Info("Progress", "bodies", progress)
+		return nil
 	}
 	log.Info("This command only works with --unwind option")
 	return nil
