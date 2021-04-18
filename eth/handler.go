@@ -362,15 +362,14 @@ func (h *handler) Start(maxPeers int) {
 
 func (h *handler) miningLoop() {
 	defer h.wg.Done()
-	var haveNewTxs bool
 	var works bool
-	errc := make(chan error)
+	errc := make(chan error, 1)
 	resultCh := make(chan *types.Block, 1)
 
 	for {
 		select {
 		case <-h.txsChMining:
-			haveNewTxs = true
+			// nothing to do, just do miningStep if need
 		case minedBlock := <-resultCh:
 			works = false
 			// TODO: send mined block to sentry
@@ -383,10 +382,9 @@ func (h *handler) miningLoop() {
 		case <-h.txsSubMining.Err():
 			return
 		}
-		if !works && haveNewTxs {
-			haveNewTxs = false
-			works = true
 
+		if !works {
+			works = true
 			go func() { errc <- h.miningStep(resultCh) }()
 		}
 	}
