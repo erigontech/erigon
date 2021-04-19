@@ -50,13 +50,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
-	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -85,22 +83,21 @@ type Ethereum struct {
 	snapDialCandidates enode.Iterator
 
 	// DB interfaces
-	chainDb    ethdb.Database // Block chain database
-	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
-	APIBackend *EthAPIBackend
+	//APIBackend *EthAPIBackend
 
 	gasPrice  *uint256.Int
 	etherbase common.Address
 	signer    *ecdsa.PrivateKey
 
-	networkID     uint64
-	netRPCService *ethapi.PublicNetAPI
+	networkID uint64
+	//netRPCService *ethapi.PublicNetAPI
 
 	p2pServer *p2p.Server
 
@@ -273,7 +270,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth := &Ethereum{
 		config:        config,
-		chainDb:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:     config.NetworkID,
@@ -439,12 +435,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.handler.SetStagedSync(stagedSync)
 	eth.handler.SetMining(mining)
 
-	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
+	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
 	}
-	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
@@ -498,6 +494,11 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheCo
 // 	return extra
 // }
 
+func (s *Ethereum) APIs() []rpc.API {
+	return []rpc.API{}
+}
+
+/*
 // APIs return the collection of RPC services the ethereum package offers.
 // NOTE, some of these services probably need to be moved to somewhere else.
 func (s *Ethereum) APIs() []rpc.API {
@@ -564,6 +565,7 @@ func (s *Ethereum) APIs() []rpc.API {
 		},
 	}...)
 }
+*/
 
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
@@ -684,7 +686,6 @@ func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
 func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
-func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) ChainKV() ethdb.RwKV                { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
@@ -698,7 +699,11 @@ func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
-	headHeight, _ := stages.GetStageProgress(s.chainDb, stages.Finish)
+	var headHeight uint64
+	_ = s.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+		headHeight, _ = stages.GetStageProgress(tx, stages.Finish)
+		return nil
+	})
 	protos := eth.MakeProtocols((*ethHandler)(s.handler), s.networkID, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	return protos
 }
