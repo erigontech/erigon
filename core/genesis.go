@@ -504,6 +504,18 @@ func DefaultTurboMineGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultAleutGenesisBlock() *Genesis {
+	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
+	return &Genesis{
+		Config:     params.AleutChainConfig,
+		Timestamp:  0,
+		ExtraData:  hexutil.MustDecode("0x000000000000000000000000000000000000000000000000000000000000000036267c845cc42b57ccb869d655e5d5fb620cc69a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x1312D00,
+		Difficulty: big.NewInt(0x400),
+		Alloc:      readPrealloc("allocs/aleut.json"),
+	}
+}
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	// Override the default period to the user requested one

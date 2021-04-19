@@ -33,6 +33,7 @@ const (
 	YoloV3ChainName  = "yolov3"
 	DevChainName     = "dev"
 	TurboMineName    = "turbomine"
+	AleutChainName   = "aleut"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -43,6 +44,7 @@ var (
 	GoerliGenesisHash    = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	YoloV3GenesisHash    = common.HexToHash("0x374f07cc7fa7c251fc5f36849f574b43db43600526410349efdca2bcea14101a")
 	TurboMineGenesisHash = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
+	AleutGenesisHash     = common.HexToHash("0x10796525313298922a66fafbb2a7f4f426fcf97143ac32d30285b2fdfed105e6")
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -270,7 +272,7 @@ var (
 
 	// AleutChainConfig contains the chain parameters to run a node on the Aleut test network.
 	AleutChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(133519467574834),
+		ChainID:             big.NewInt(7822),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -284,7 +286,7 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
 		YoloV3Block:         big.NewInt(0),
-		AleutBlock:          big.NewInt(0),
+		AleutBlock:          big.NewInt(10),
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
