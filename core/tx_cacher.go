@@ -73,7 +73,7 @@ func (cacher *TxSenderCacher) cache() {
 		}
 
 		for i := 0; i < len(task.txs); i += task.inc {
-			types.Sender(task.signer, task.txs[i])
+			task.txs[i].Sender(task.signer)
 		}
 	}
 }

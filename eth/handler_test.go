@@ -97,7 +97,7 @@ func (p *testTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 
 	batches := make(map[common.Address]types.Transactions)
 	for _, tx := range p.pool {
-		from, _ := types.Sender(*types.LatestSignerForChainID(nil), tx)
+		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
 		batches[from] = append(batches[from], tx)
 	}
 	groups := types.TransactionsGroupedBySender{}

@@ -217,7 +217,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		if len(txs) == 0 {
 			continue
 		}
-		from, _ := types.Sender(*signer, txs[0])
+		from, _ := txs[0].Sender(*signer)
 		isLocal := false
 		for _, local := range txPoolLocals {
 			if local == from {

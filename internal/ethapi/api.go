@@ -860,7 +860,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.Accesses = &t.AccessList
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
-	result.From, _ = types.Sender(*signer, tx)
+	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
@@ -1057,7 +1057,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 	// Derive the sender.
 	signer := types.MakeSigner(s.b.ChainConfig(), blockNumber)
-	from, _ := types.Sender(*signer, tx)
+	from, _ := tx.Sender(*signer)
 
 	fields := map[string]interface{}{
 		"blockHash":         blockHash,
@@ -1254,7 +1254,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (co
 	}
 	// Print a log with full tx details for manual investigations and interventions
 	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64())
-	from, err := types.Sender(*signer, tx)
+	from, err := tx.Sender(*signer)
 	if err != nil {
 		return common.Hash{}, err
 	}

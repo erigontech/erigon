@@ -590,7 +590,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, tx := range b.Transactions {
-		tx.From().Store(senders[i])
+		tx.SetSender(senders[i])
 	}
 }
 
@@ -598,8 +598,8 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, tx := range b.Transactions {
-		if sc := tx.From().Load(); sc != nil {
-			senders[i] = sc.(common.Address)
+		if sender, ok := tx.GetSender(); ok {
+			senders[i] = sender
 		}
 	}
 	return senders

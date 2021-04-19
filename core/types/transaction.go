@@ -56,7 +56,6 @@ type Transaction interface {
 	GetGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
-	From() *atomic.Value
 	GetTo() *common.Address
 	AsMessage(s Signer) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
@@ -68,6 +67,16 @@ type Transaction interface {
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	MarshalBinary(w io.Writer) error
+	// Sender returns the address derived from the signature (V, R, S) using secp256k1
+	// elliptic curve and an error if it failed deriving or upon an incorrect
+	// signature.
+	//
+	// Sender may cache the address, allowing it to be used regardless of
+	// signing method. The cache is invalidated if the cached signer does
+	// not match the signer used in the current call.
+	Sender(Signer) (common.Address, error)
+	GetSender() (common.Address, bool)
+	SetSender(common.Address)
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -315,7 +324,7 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs TransactionsGroupedBySend
 	heads := make(TxByPriceAndTime, 0, len(txs))
 	idx := make(map[common.Address]int, len(txs))
 	for i, accTxs := range txs {
-		from, _ := Sender(signer, accTxs[0])
+		from, _ := accTxs[0].Sender(signer)
 
 		// Ensure the sender address is from the signer
 		//if  acc != from {
@@ -353,7 +362,7 @@ func (t *TransactionsByPriceAndNonce) Peek() Transaction {
 
 // Shift replaces the current best head with the next one from the same account.
 func (t *TransactionsByPriceAndNonce) Shift() {
-	acc, _ := Sender(t.signer, t.heads[0])
+	acc, _ := t.heads[0].Sender(t.signer)
 	idx, ok := t.idx[acc]
 	if !ok {
 		heap.Pop(&t.heads)

@@ -179,7 +179,7 @@ func TestEIP2930Signer(t *testing.T) {
 		if sigHash != test.wantSignerHash {
 			t.Errorf("test %d: wrong sig hash: got %x, want %x", i, sigHash, test.wantSignerHash)
 		}
-		sender, err := Sender(*test.signer, test.tx)
+		sender, err := test.tx.Sender(*test.signer)
 		if !errors.Is(err, test.wantSenderErr) {
 			t.Errorf("test %d: wrong Sender error %q", i, err)
 		}
@@ -241,7 +241,7 @@ func TestRecipientEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	from, err := Sender(*LatestSignerForChainID(nil), tx)
+	from, err := tx.Sender(*LatestSignerForChainID(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestRecipientNormal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	from, err := Sender(*LatestSignerForChainID(nil), tx)
+	from, err := tx.Sender(*LatestSignerForChainID(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,11 +307,11 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 		t.Errorf("expected %d transactions, found %d", 25*25, len(txs))
 	}
 	for i, txi := range txs {
-		fromi, _ := Sender(*signer, txi)
+		fromi, _ := txi.Sender(*signer)
 
 		// Make sure the nonce order is valid
 		for j, txj := range txs[i+1:] {
-			fromj, _ := Sender(*signer, txj)
+			fromj, _ := txj.Sender(*signer)
 			if fromi == fromj && txi.GetNonce() > txj.GetNonce() {
 				t.Errorf("invalid nonce ordering: tx #%d (A=%x N=%v) < tx #%d (A=%x N=%v)", i, fromi[:4], txi.GetNonce(), i+j, fromj[:4], txj.GetNonce())
 			}
@@ -319,7 +319,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 		// If the next tx has different from account, the price must be lower than the current one
 		if i+1 < len(txs) {
 			next := txs[i+1]
-			fromNext, _ := Sender(*signer, next)
+			fromNext, _ := next.Sender(*signer)
 			if fromi != fromNext && txi.GetPrice().Cmp(next.GetPrice()) < 0 {
 				t.Errorf("invalid gasprice ordering: tx #%d (A=%x P=%v) < tx #%d (A=%x P=%v)", i, fromi[:4], txi.GetPrice(), i+1, fromNext[:4], next.GetPrice())
 			}
@@ -365,10 +365,10 @@ func TestTransactionTimeSort(t *testing.T) {
 		t.Errorf("expected %d transactions, found %d", len(keys), len(txs))
 	}
 	for i, txi := range txs {
-		fromi, _ := Sender(*signer, txi)
+		fromi, _ := txi.Sender(*signer)
 		if i+1 < len(txs) {
 			next := txs[i+1]
-			fromNext, _ := Sender(*signer, next)
+			fromNext, _ := next.Sender(*signer)
 
 			if txi.GetPrice().Cmp(next.GetPrice()) < 0 {
 				t.Errorf("invalid gasprice ordering: tx #%d (A=%x P=%v) < tx #%d (A=%x P=%v)", i, fromi[:4], txi.GetPrice(), i+1, fromNext[:4], next.GetPrice())

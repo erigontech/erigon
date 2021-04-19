@@ -425,7 +425,7 @@ func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
 	}
 
 	var err error
-	msg.from, err = Sender(s, &tx)
+	msg.from, err = tx.Sender(s)
 	return msg, err
 }
 
@@ -489,4 +489,27 @@ func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.In
 
 func (tx LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
+}
+
+func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), nil
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	tx.from.Store(addr)
+	return addr, nil
+}
+
+func (tx LegacyTx) GetSender() (common.Address, bool) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), true
+	}
+	return common.Address{}, false
+}
+
+func (tx *LegacyTx) SetSender(addr common.Address) {
+	tx.from.Store(addr)
 }

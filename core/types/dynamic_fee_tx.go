@@ -446,7 +446,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
 	}
 
 	var err error
-	msg.from, err = Sender(s, &tx)
+	msg.from, err = tx.Sender(s)
 	return msg, err
 }
 
@@ -496,4 +496,27 @@ func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int
 
 func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
+}
+
+func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), nil
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	tx.from.Store(addr)
+	return addr, nil
+}
+
+func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), true
+	}
+	return common.Address{}, false
+}
+
+func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
+	tx.from.Store(addr)
 }

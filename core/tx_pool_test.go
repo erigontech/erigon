@@ -144,7 +144,7 @@ func validateEvents(events chan NewTxsEvent, count int) error {
 }
 
 func deriveSender(tx types.Transaction) (common.Address, error) {
-	return types.Sender(*types.LatestSignerForChainID(nil), tx)
+	return tx.Sender(*types.LatestSignerForChainID(nil))
 }
 
 // This test simulates a scenario where a new block is imported during a

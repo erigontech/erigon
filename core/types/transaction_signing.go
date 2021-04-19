@@ -150,25 +150,6 @@ func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) Transaction 
 	return tx1
 }
 
-// Sender returns the address derived from the signature (V, R, S) using secp256k1
-// elliptic curve and an error if it failed deriving or upon an incorrect
-// signature.
-//
-// Sender may cache the address, allowing it to be used regardless of
-// signing method. The cache is invalidated if the cached signer does
-// not match the signer used in the current call.
-func Sender(signer Signer, tx Transaction) (common.Address, error) {
-	if sc := tx.From().Load(); sc != nil {
-		return sc.(common.Address), nil
-	}
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return common.Address{}, err
-	}
-	tx.From().Store(addr)
-	return addr, nil
-}
-
 // Signer encapsulates transaction signature handling. The name of this type is slightly
 // misleading because Signers don't actually sign, they're just for validating and
 // processing of signatures.

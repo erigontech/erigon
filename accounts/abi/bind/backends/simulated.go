@@ -634,7 +634,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 
 	// Check transaction validity.
 	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
-	sender, senderErr := types.Sender(*signer, tx)
+	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}

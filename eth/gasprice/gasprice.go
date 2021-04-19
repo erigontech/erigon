@@ -199,7 +199,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, signer *types.Signer, blo
 
 	var prices []*big.Int
 	for _, tx := range txs {
-		sender, err := types.Sender(*signer, tx)
+		sender, err := tx.Sender(*signer)
 		if err == nil && sender != block.Coinbase() {
 			prices = append(prices, tx.GetPrice().ToBig())
 			if len(prices) >= limit {

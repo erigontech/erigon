@@ -219,7 +219,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.Accesses = &t.AccessList
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
-	result.From, _ = types.Sender(*signer, tx)
+	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))

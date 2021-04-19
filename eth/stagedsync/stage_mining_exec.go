@@ -176,7 +176,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		// during transaction acceptance is the transaction pool.
 		//
 		// We use the eip155 signer regardless of the env hf.
-		from, _ := types.Sender(*signer, txn)
+		from, _ := txn.Sender(*signer)
 		// Check whether the txn is replay protected. If we're not in the EIP155 hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !chainConfig.IsEIP155(header.Number.Uint64()) {

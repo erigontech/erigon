@@ -51,7 +51,7 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		if err != nil {
 			return nil, nil, err
 		}
-		sender, err := types.Sender(signer, tx)
+		sender, err := tx.Sender(signer)
 		if err != nil {
 			return nil, nil, err
 		}

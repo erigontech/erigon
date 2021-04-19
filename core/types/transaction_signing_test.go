@@ -38,7 +38,7 @@ func TestEIP155Signing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	from, err := Sender(*signer, tx)
+	from, err := tx.Sender(*signer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 			continue
 		}
 
-		from, err := Sender(*signer, tx)
+		from, err := tx.Sender(*signer)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -128,12 +128,12 @@ func TestChainId(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = Sender(*LatestSignerForChainID(big.NewInt(2)), tx)
+	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(2)))
 	if err != ErrInvalidChainId {
 		t.Error("expected error:", ErrInvalidChainId)
 	}
 
-	_, err = Sender(*LatestSignerForChainID(big.NewInt(1)), tx)
+	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(1)))
 	if err != nil {
 		t.Error("expected no error")
 	}

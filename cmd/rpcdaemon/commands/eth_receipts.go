@@ -279,7 +279,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 		chainId = t.ChainID
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
-	from, _ := types.Sender(*signer, txn)
+	from, _ := txn.Sender(*signer)
 
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
