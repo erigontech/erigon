@@ -196,7 +196,17 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
-	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, controlServer.genesisHash, natSetting, port, staticPeers, discovery, netRestrict)
+
+	var readNodeInfo = func() *eth.NodeInfo {
+		var res *eth.NodeInfo
+		_ = db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+			res = eth.ReadNodeInfo(db, controlServer.chainConfig, controlServer.genesisHash, controlServer.networkId)
+			return nil
+		})
+		return res
+	}
+
+	sentryServer.p2pServer, err = p2pServer(ctx, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
 	if err != nil {
 		return err
 	}
