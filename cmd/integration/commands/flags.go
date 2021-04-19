@@ -90,12 +90,6 @@ func withDatadir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
-
-	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
-	must(cmd.MarkFlagDirname("chaindata"))
-	must(cmd.MarkFlagRequired("chaindata"))
-	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
 }
 
 func withDatadir(cmd *cobra.Command) {

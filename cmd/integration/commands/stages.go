@@ -37,7 +37,7 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
@@ -53,7 +53,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
@@ -69,7 +69,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageExec(db, ctx); err != nil {
@@ -85,7 +85,7 @@ var cmdStageTrie = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
@@ -101,7 +101,7 @@ var cmdStageHashState = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
@@ -117,7 +117,7 @@ var cmdStageHistory = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
@@ -133,7 +133,7 @@ var cmdLogIndex = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
@@ -149,7 +149,7 @@ var cmdCallTraces = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
@@ -165,7 +165,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
@@ -180,7 +180,7 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
+		db := openDatabase(chaindata, false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -196,7 +196,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
+		db := openDatabase(chaindata, false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -211,7 +211,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
+		db := openDatabase(chaindata, false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -225,7 +225,7 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
+		db := openDatabase(chaindata, true)
 		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil

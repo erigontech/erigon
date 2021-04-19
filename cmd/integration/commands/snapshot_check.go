@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	withChaindata(cmdSnapshotCheck)
+	withDatadir(cmdSnapshotCheck)
 	withBlock(cmdSnapshotCheck)
 	withBatchSize(cmdSnapshotCheck)
 	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")

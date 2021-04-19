@@ -55,7 +55,7 @@ Examples:
 		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := &params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, miningConfig)
-		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
+		db := openDatabase2(chaindata, true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -123,13 +123,13 @@ func init() {
 
 	rootCmd.AddCommand(stateStags)
 
-	withChaindata(loopIhCmd)
+	withDatadir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
-	withChaindata(loopExecCmd)
+	withDatadir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 
