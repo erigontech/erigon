@@ -42,8 +42,8 @@ func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 	must(cmd.MarkFlagRequired("chaindata"))
-	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 

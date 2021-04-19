@@ -67,6 +67,11 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) Readonly() MdbxOpts {
+	opts.flags = opts.flags | mdbx.Readonly
+	return opts
+}
+
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
