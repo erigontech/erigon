@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	withChaindata(checkIndexCMD)
+	withDatadir(checkIndexCMD)
 	withIndexBucket(checkIndexCMD)
 	withCSBucket(checkIndexCMD)
 	rootCmd.AddCommand(checkIndexCMD)

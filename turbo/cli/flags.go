@@ -84,11 +84,6 @@ var (
 		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
 		Value: ethdb.LMDBDefaultMapSize.String(),
 	}
-	LMDBMaxFreelistReuseFlag = cli.UintFlag{
-		Name:  "lmdb.maxFreelistReuse",
-		Usage: "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.",
-		Value: ethdb.LMDBDefaultMaxFreelistReuse,
-	}
 
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
@@ -230,15 +225,6 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		}
 	}
 
-	if cfg.LMDB {
-		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
-		if cfg.LMDBMaxFreelistReuse < 16 {
-			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
-				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
-				"err", "the value should be at least 16",
-			)
-		}
-	}
 }
 
 // setPrivateApi populates configuration fields related to the remote

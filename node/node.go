@@ -580,9 +580,9 @@ func (n *Node) OpenDatabaseWithFreezer(name string, tmpdir string) (*ethdb.Objec
 				return ethdb.NewObjectDatabase(kv), nil
 			}
 		} else {
-			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
+			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
 			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse)
+				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize)
 				if exclusive {
 					opts = opts.Exclusive()
 				}

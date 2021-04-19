@@ -53,11 +53,11 @@ var cmdClearUnwindStack = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdResetState)
+	withDatadir(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 
-	withChaindata(cmdClearUnwindStack)
+	withDatadir(cmdClearUnwindStack)
 
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }

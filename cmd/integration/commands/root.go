@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"path"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -18,6 +20,12 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			panic(err)
+		}
+		if chaindata == "" {
+			chaindata = path.Join(datadir, "tg", "chaindata")
+		}
+		if snapshotDir == "" {
+			snapshotDir = path.Join(datadir, "tg", "snapshot")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -74,9 +82,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 			opts = opts.MapSize(mapSize)
 		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
 		return opts.MustOpen()
 	}
 
@@ -88,9 +93,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		opts = opts.MapSize(mapSize)
-	}
-	if freelistReuse > 0 {
-		opts = opts.MaxFreelistReuse(uint(freelistReuse))
 	}
 	kv := opts.MustOpen()
 	metrics.AddCallback(kv.CollectMetrics)
