@@ -480,11 +480,11 @@ func DefaultUnwindOrder() UnwindOrder {
 		0, 1, 2,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		12,
+		13,
 		3, 4,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 5,
-		7, 8, 9, 10, 11,
+		7, 8, 9, 10, 11, 12,
 	}
 }
 
