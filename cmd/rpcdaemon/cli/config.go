@@ -87,6 +87,9 @@ func RootCommand() (*cobra.Command, *Flags) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := utils.SetupCobra(cmd); err != nil {
+			return err
+		}
 		cfg.SingleNodeMode = cfg.Datadir != "" || cfg.Chaindata != ""
 		if cfg.SingleNodeMode {
 			if cfg.Datadir == "" {
