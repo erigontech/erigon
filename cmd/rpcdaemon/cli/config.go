@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -19,6 +20,8 @@ import (
 
 type Flags struct {
 	PrivateApiAddr       string
+	SingleNodeMode       bool // TG's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with TG process.
+	Datadir              string
 	Chaindata            string
 	SnapshotDir          string
 	SnapshotMode         string
@@ -40,16 +43,6 @@ type Flags struct {
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := utils.SetupCobra(cmd); err != nil {
-			return err
-		}
-		return nil
-	},
-	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-		utils.StopDebug()
-		return nil
-	},
 }
 
 func RootCommand() (*cobra.Command, *Flags) {
@@ -57,9 +50,10 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to turbo-geth working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshotDir", "", "path to snapshot dir(only for chaindata mode)")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot-mode", "", `Configures the storage mode of the app(only for chaindata mode):
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
 * h - use headers snapshot
 * b - use bodies snapshot
 * s - use state snapshot
@@ -82,6 +76,35 @@ func RootCommand() (*cobra.Command, *Flags) {
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
 	}
+	if err := rootCmd.MarkPersistentFlagDirname("datadir"); err != nil {
+		panic(err)
+	}
+	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
+		panic(err)
+	}
+	if err := rootCmd.MarkPersistentFlagDirname("snapshot.dir"); err != nil {
+		panic(err)
+	}
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		cfg.SingleNodeMode = cfg.Datadir != "" || cfg.Chaindata != ""
+		if cfg.SingleNodeMode {
+			if cfg.Datadir == "" {
+				cfg.Datadir = node.DefaultDataDir()
+			}
+			if cfg.Chaindata == "" {
+				cfg.Chaindata = path.Join(cfg.Datadir, "tg", "chaindata")
+			}
+			//if cfg.SnapshotDir == "" {
+			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "tg", "snapshot")
+			//}
+		}
+		return nil
+	}
+	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
+		utils.StopDebug()
+		return nil
+	}
 
 	return rootCmd, cfg
 }
@@ -92,24 +115,22 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 	var err error
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
-	if cfg.Chaindata != "" {
+	if cfg.SingleNodeMode {
 		if database, errOpen := ethdb.Open(cfg.Chaindata, true); errOpen == nil {
 			db = database.RwKV()
 		} else {
 			err = errOpen
 			_ = err
 		}
-		if cfg.SnapshotMode != "" {
-			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
-			if innerErr != nil {
-				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
-			}
-			kv, innerErr := snapshotsync.WrapBySnapshotsFromDir(db, cfg.SnapshotDir, mode)
-			if innerErr != nil {
-				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
-			}
-			db = kv
+		mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
+		if innerErr != nil {
+			return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 		}
+		kv, innerErr := snapshotsync.WrapBySnapshotsFromDir(db, cfg.SnapshotDir, mode)
+		if innerErr != nil {
+			return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+		}
+		db = kv
 	}
 	if cfg.PrivateApiAddr != "" {
 		var remoteKv ethdb.RwKV

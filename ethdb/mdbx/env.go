@@ -439,34 +439,6 @@ func (env *Env) Path() (string, error) {
 	return C.GoString(cpath), nil
 }
 
-// SetMaxFreelistReuse sets the size of the environment memory map.
-//
-// Find a big enough contiguous page range for large values in freelist is hard
-//        just allocate new pages and even don't try to search if value is bigger than this limit.
-//        measured in pages
-//func (env *Env) SetMaxFreelistReuse(pagesLimit uint) error {
-//	ret := C.mdbx_env_set_maxfree_reuse(env._env, C.uint(pagesLimit))
-//	return operrno("mdbx_env_set_maxfree_reuse", ret)
-//}
-
-// MaxFreelistReuse
-//func (env *Env) MaxFreelistReuse() (uint, error) {
-//	var pages C.uint
-//	ret := C.mdbx_env_get_maxfree_reuse(env._env, &pages)
-//	return uint(pages), operrno("mdbx_env_get_maxreaders", ret)
-//}
-
-// SetMapSize sets the size of the environment memory map.
-//
-// See mdbx_env_set_mapsize.
-//func (env *Env) SetMapSize(size int64) error {
-//	if size < 0 {
-//		return errNegSize
-//	}
-//	ret := C.mdbx_env_set_mapsize(env._env, C.size_t(size))
-//	return operrno("mdbx_env_set_mapsize", ret)
-//}
-
 func (env *Env) SetOption(option uint, value uint64) error {
 	ret := C.mdbx_env_set_option(env._env, C.MDBX_option_t(option), C.uint64_t(value))
 	return operrno("mdbx_env_set_option", ret)

@@ -89,6 +89,11 @@ type Backend interface {
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {
+	return []rpc.API{}
+}
+
+/*
+func GetAPIs(apiBackend Backend) []rpc.API {
 	nonceLock := new(AddrLocker)
 	return []rpc.API{
 		{
@@ -123,3 +128,4 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 		},
 	}
 }
+*/

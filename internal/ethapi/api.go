@@ -17,32 +17,25 @@
 package ethapi
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
+/*
 // PublicEthereumAPI provides an API to access Ethereum related information.
 // It offers only methods that operate on public data that is freely available to anyone.
 type PublicEthereumAPI struct {
@@ -328,6 +321,7 @@ func (s *PublicBlockChainAPI) GetStorageAt(ctx context.Context, address common.A
 	state.GetState(address, &keyHash, &res)
 	return res.Bytes(), state.Error()
 }
+*/
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
@@ -469,7 +463,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 
 	// Execute the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
-	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := core.ApplyMessage(evm, msg, gp, true, false)
 	if err := vmError(); err != nil {
 		return nil, err
 	}
@@ -514,6 +508,7 @@ func (e *RevertError) ErrorData() interface{} {
 	return e.reason
 }
 
+/*
 // Call executes the given transaction on the state for the given block number.
 //
 // Additionally, the caller can specify a batch of contract for fields overriding.
@@ -654,6 +649,7 @@ func (s *PublicBlockChainAPI) EstimateGas(ctx context.Context, args CallArgs, bl
 	}
 	return DoEstimateGas(ctx, s.b, args, bNrOrHash, s.b.RPCGasCap())
 }
+*/
 
 // ExecutionResult groups all structured logs emitted by the EVM
 // while replaying a transaction in debug mode as well as transaction
@@ -775,6 +771,8 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]i
 	return fields, nil
 }
 
+/*
+
 // rpcMarshalHeader uses the generalized output filler, then adds the total difficulty field, which requires
 // a `PublicBlockchainAPI`.
 func (s *PublicBlockChainAPI) rpcMarshalHeader(ctx context.Context, header *types.Header) map[string]interface{} {
@@ -795,6 +793,7 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 	}
 	return fields, err
 }
+*/
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
@@ -869,10 +868,12 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	return result
 }
 
+/*
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
 	return newRPCTransaction(tx, common.Hash{}, 0, 0)
 }
+*/
 
 // newRPCTransactionFromBlockIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransaction {
@@ -883,6 +884,7 @@ func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransacti
 	return newRPCTransaction(txs[index], b.Hash(), b.NumberU64(), index)
 }
 
+/*
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
 func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.Bytes {
 	txs := b.Transactions()
@@ -900,6 +902,7 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 	}
 	return blob.Bytes()
 }
+*/
 
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransaction {
@@ -911,6 +914,7 @@ func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransa
 	return nil
 }
 
+/*
 // PublicTransactionPoolAPI exposes methods for the RPC interface
 type PublicTransactionPoolAPI struct {
 	b         Backend
@@ -1417,3 +1421,4 @@ func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
 	}
 	return nil
 }
+*/

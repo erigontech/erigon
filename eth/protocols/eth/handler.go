@@ -17,13 +17,15 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
@@ -57,11 +59,12 @@ const (
 // exchanges have passed.
 type Handler func(peer *Peer) error
 
-// Backend defines the data retrieval methods to serve remote requests and the
+// Backend defines the data retrieval methods t,o serve remote requests and the
 // callback methods to invoke on remote deliveries.
 type Backend interface {
-	// Chain retrieves the blockchain object to serve data.
-	Chain() *core.BlockChain
+	DB() ethdb.RwKV
+	ChainConfig() *params.ChainConfig
+	GenesisHash() common.Hash
 
 	// TxPool retrieves the transaction pool object to serve data.
 	TxPool() TxPool
@@ -110,7 +113,9 @@ func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator, chai
 				})
 			},
 			NodeInfo: func() interface{} {
-				return nodeInfo(backend.Chain(), network)
+				tx, _ := backend.DB().BeginRo(context.Background())
+				defer tx.Rollback()
+				return nodeInfo(tx, backend.ChainConfig(), backend.GenesisHash(), network)
 			},
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
@@ -133,13 +138,14 @@ type NodeInfo struct {
 }
 
 // nodeInfo retrieves some `eth` protocol metadata about the running host node.
-func nodeInfo(chain *core.BlockChain, network uint64) *NodeInfo {
-	head := chain.CurrentBlock()
+func nodeInfo(getter ethdb.KVGetter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
+	head := rawdb.ReadCurrentHeader(getter)
+	td, _ := rawdb.ReadTd(getter, head.Hash(), head.Number.Uint64())
 	return &NodeInfo{
 		Network:    network,
-		Difficulty: chain.GetTd(head.Hash(), head.NumberU64()),
-		Genesis:    chain.Genesis().Hash(),
-		Config:     chain.Config(),
+		Difficulty: td,
+		Genesis:    genesisHash,
+		Config:     config,
 		Head:       head.Hash(),
 	}
 }

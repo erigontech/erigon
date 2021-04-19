@@ -26,8 +26,7 @@ func init() {
 	downloadCmd.Flags().BoolVar(&discovery, "discovery", true, "discovery mode")
 	downloadCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
 
-	withChaindata(downloadCmd)
-	withLmdbFlags(downloadCmd)
+	withDatadir(downloadCmd)
 	rootCmd.AddCommand(downloadCmd)
 }
 

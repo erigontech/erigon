@@ -32,7 +32,6 @@ type MdbxOpts struct {
 	bucketsCfg        BucketConfigsFunc
 	mapSize           datasize.ByteSize
 	dirtyListMaxPages uint64
-	maxFreelistReuse  uint
 }
 
 func NewMDBX() MdbxOpts {
@@ -67,13 +66,13 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
-	opts.mapSize = sz
+func (opts MdbxOpts) Readonly() MdbxOpts {
+	opts.flags = opts.flags | mdbx.Readonly
 	return opts
 }
 
-func (opts MdbxOpts) MaxFreelistReuse(pages uint) MdbxOpts {
-	opts.maxFreelistReuse = pages
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
+	opts.mapSize = sz
 	return opts
 }
 
@@ -121,10 +120,6 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync // it's ok for tests
 		opts.dirtyListMaxPages = 8 * 1024
-	}
-
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
 	}
 
 	if opts.flags&mdbx.Accede == 0 {

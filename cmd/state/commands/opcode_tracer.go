@@ -36,7 +36,7 @@ var (
 
 func init() {
 	withBlock(opcodeTracerCmd)
-	withChaindata(opcodeTracerCmd)
+	withDatadir(opcodeTracerCmd)
 	opcodeTracerCmd.Flags().Uint64Var(&numBlocks, "numBlocks", 1, "number of blocks to run the operation on")
 	opcodeTracerCmd.Flags().BoolVar(&saveOpcodes, "saveOpcodes", false, "set to save the opcodes")
 	opcodeTracerCmd.Flags().BoolVar(&saveBBlocks, "saveBBlocks", false, "set to save the basic blocks")

@@ -67,7 +67,6 @@ Examples:
 				log.Error(err.Error())
 				return nil
 			}
-
 		}
 		return nil
 	},
@@ -123,13 +122,13 @@ func init() {
 
 	rootCmd.AddCommand(stateStags)
 
-	withChaindata(loopIhCmd)
+	withDatadir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
-	withChaindata(loopExecCmd)
+	withDatadir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 
