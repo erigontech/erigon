@@ -124,6 +124,7 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getTransactionByBlockHashAndIndex   | Yes     |                                            |
 | eth_getTransactionByBlockNumberAndIndex | Yes     |                                            |
 | eth_getTransactionReceipt               | Yes     |                                            |
+| eth_getBlockReceipts                    | Yes     |                                            |
 |                                         |         |                                            |
 | eth_estimateGas                         | Yes     |                                            |
 | eth_getBalance                          | Yes     |                                            |
