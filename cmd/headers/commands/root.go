@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 
 	"github.com/c2h5oh/datasize"
@@ -12,16 +13,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
 )
 
 var (
-	sentryAddr    string   // Address of the sentry <host>:<port>
-	sentryAddrs   []string // Address of the sentry <host>:<port>
-	chaindata     string   // Path to chaindata
-	database      string   // Type of database (lmdb or mdbx)
-	mapSizeStr    string   // Map size for LMDB
-	freelistReuse int
+	sentryAddr   string   // Address of the sentry <host>:<port>
+	sentryAddrs  []string // Address of the sentry <host>:<port>
+	chaindata    string   // Path to chaindata
+	snapshotDir  string
+	snapshotMode string
+	datadir      string // Path to td working dir
+	database     string // Type of database (lmdb or mdbx)
+	mapSizeStr   string // Map size for LMDB
 )
 
 func init() {
@@ -53,6 +57,12 @@ var rootCmd = &cobra.Command{
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
+		if chaindata == "" {
+			chaindata = path.Join(datadir, "tg", "chaindata")
+		}
+		if snapshotDir == "" {
+			snapshotDir = path.Join(datadir, "tg", "snapshot")
+		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
@@ -72,15 +82,19 @@ func must(err error) {
 	}
 }
 
-func withChaindata(cmd *cobra.Command) {
+func withDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+	must(cmd.MarkFlagDirname("datadir"))
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
-	must(cmd.MarkFlagRequired("chaindata"))
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
-}
 
-func withLmdbFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
+	must(cmd.MarkFlagDirname("snapshot.dir"))
+
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func openDatabase(path string) *ethdb.ObjectDatabase {

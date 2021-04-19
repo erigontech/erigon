@@ -24,6 +24,9 @@ var rootCmd = &cobra.Command{
 		if chaindata == "" {
 			chaindata = path.Join(datadir, "tg", "chaindata")
 		}
+		if snapshotDir == "" {
+			snapshotDir = path.Join(datadir, "tg", "snapshot")
+		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		defer utils.StopDebug()
