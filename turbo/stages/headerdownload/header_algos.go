@@ -1,9 +1,13 @@
 package headerdownload
 
 import (
+	"bytes"
+	"compress/gzip"
 	"container/heap"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"strings"
@@ -813,4 +817,46 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headerReader = headerReader
+}
+
+func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
+	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+
+	var buf bytes.Buffer
+
+	for i, encoding := range encodings {
+		b, err := base64.RawStdEncoding.DecodeString(encoding)
+		if err != nil {
+			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
+		}
+
+		if _, err = buf.Write(b); err != nil {
+			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
+		}
+
+		zr, err := gzip.NewReader(&buf)
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader on %d: %w %q", i, err, encoding)
+		}
+
+		res, err := io.ReadAll(zr)
+		if err != nil {
+			return nil, fmt.Errorf("gzip copy on %d: %w %q", i, err, encoding)
+		}
+
+		if err := zr.Close(); err != nil {
+			return nil, fmt.Errorf("gzip close on %d: %w", i, err)
+		}
+
+		var h types.Header
+		if err := rlp.DecodeBytes(res, &h); err != nil {
+			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
+		}
+
+		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+
+		buf.Reset()
+	}
+
+	return hardTips, nil
 }

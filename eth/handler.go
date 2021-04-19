@@ -179,8 +179,8 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		return 0, err
 	}
 
-	GetBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
-	h.blockFetcher = fetcher.NewBlockFetcher(nil, GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+	getBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
+	h.blockFetcher = fetcher.NewBlockFetcher(nil, getBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)

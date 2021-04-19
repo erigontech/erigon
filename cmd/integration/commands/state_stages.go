@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -32,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
-	"github.com/spf13/cobra"
 )
 
 var stateStags = &cobra.Command{

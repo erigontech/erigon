@@ -2,7 +2,7 @@ package commands
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ func withBlock(cmd *cobra.Command) {
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")

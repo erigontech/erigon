@@ -74,6 +74,7 @@ var migrations = []Migration{
 	splitIHBucket,
 	deleteExtensionHashesFromTrieBucket,
 	headerPrefixToSeparateBuckets,
+	removeCliqueBucket,
 }
 
 type Migration struct {
@@ -83,7 +84,7 @@ type Migration struct {
 
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migraion commit function was not called")
+	ErrMigrationCommitNotCalled = fmt.Errorf("migration commit function was not called")
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 

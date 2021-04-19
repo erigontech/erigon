@@ -279,10 +279,10 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 	if chainConfig, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
-	engine := ethconfig.CreateConsensusEngine(chainConfig, ethashConfig, nil, false, db)
+	engine := ethconfig.CreateConsensusEngine(chainConfig, ethashConfig, nil, false)
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
-		1024*1024, /* tipLimit */
+		1024*1024, /* linkLimit */
 		engine,
 	)
 	if err = hd.RecoverFromDb(db); err != nil {

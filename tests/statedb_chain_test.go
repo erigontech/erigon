@@ -69,6 +69,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 
 	var contractAddress common.Address

@@ -81,6 +81,8 @@ func TestHeaderVerification(t *testing.T) {
 		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
+
+		engine.Close()
 	}
 }
 

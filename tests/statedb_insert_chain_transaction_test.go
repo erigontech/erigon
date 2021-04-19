@@ -695,6 +695,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (consensus.Engine, *ethdb.Ob
 	genesisDb := db.MemCopy()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 
 	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, len(txs), func(i int, block *core.BlockGen) {
 		var tx *types.Transaction

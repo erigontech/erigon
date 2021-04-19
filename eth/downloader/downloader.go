@@ -1033,7 +1033,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 				filled, proced, err := d.fillHeaderSkeleton(from, headers)
 				if err != nil {
 					p.log.Debug("Skeleton chain invalid", "err", err)
-					return fmt.Errorf("%w: %v", errInvalidChain, err)
+					return fmt.Errorf("fillHeaderSkeleton failed %w: %v", errInvalidChain, err)
 				}
 				headers = filled[proced:]
 				from += uint64(proced)
@@ -1512,7 +1512,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
+		return 0, fmt.Errorf("importBlockResults failed %w: %v", errInvalidChain, err)
 	}
 	if index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
