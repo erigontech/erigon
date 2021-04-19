@@ -16,6 +16,7 @@
 
 package eth
 
+/*
 import (
 	"time"
 )
@@ -33,3 +34,4 @@ const (
 	// to accumulate request an entire batch (avoiding hysteresis).
 	bloomRetrievalWait = time.Duration(0)
 )
+*/

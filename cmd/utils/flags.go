@@ -823,25 +823,32 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
+func DataDirForNetwork(datadir string, network string) string {
+	if datadir != paths.DefaultDataDir() {
+		return datadir
+	}
+
+	switch network {
+	case params.DevChainName:
+		return "" // unless explicitly requested, use memory databases
+	case params.RinkebyChainName:
+		return filepath.Join(datadir, "rinkeby")
+	case params.GoerliChainName:
+		filepath.Join(datadir, "goerli")
+	case params.YoloV3ChainName:
+		return filepath.Join(datadir, "yolo-v3")
+	default:
+		return datadir
+	}
+
+	return datadir
+}
+
 func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	if ctx.GlobalIsSet(DataDirFlag.Name) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
-		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case params.RinkebyChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "rinkeby")
-			}
-		case params.GoerliChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "goerli")
-			}
-		case params.YoloV3ChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "yolo-v3")
-			}
-		}
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 }
 
@@ -854,22 +861,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	if dirname != "" {
 		cfg.DataDir = dirname
 	} else if chain != nil {
-		switch *chain {
-		case params.DevChainName:
-			cfg.DataDir = "" // unless explicitly requested, use memory databases
-		case params.RinkebyChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "rinkeby")
-			}
-		case params.GoerliChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "goerli")
-			}
-		case params.YoloV3ChainName:
-			if cfg.DataDir == paths.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(paths.DefaultDataDir(), "yolo-v3")
-			}
-		}
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, *chain)
 	}
 }
 

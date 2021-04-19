@@ -33,13 +33,12 @@ var (
 
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
 type LmdbOpts struct {
-	inMem            bool
-	flags            uint
-	path             string
-	exclusive        bool
-	bucketsCfg       BucketConfigsFunc
-	mapSize          datasize.ByteSize
-	maxFreelistReuse uint
+	inMem      bool
+	flags      uint
+	path       string
+	exclusive  bool
+	bucketsCfg BucketConfigsFunc
+	mapSize    datasize.ByteSize
 }
 
 func NewLMDB() LmdbOpts {
@@ -68,13 +67,13 @@ func (opts LmdbOpts) MapSize(sz datasize.ByteSize) LmdbOpts {
 	return opts
 }
 
-func (opts LmdbOpts) MaxFreelistReuse(pages uint) LmdbOpts {
-	opts.maxFreelistReuse = pages
+func (opts LmdbOpts) Flags(f func(uint) uint) LmdbOpts {
+	opts.flags = f(opts.flags)
 	return opts
 }
 
-func (opts LmdbOpts) Flags(f func(uint) uint) LmdbOpts {
-	opts.flags = f(opts.flags)
+func (opts LmdbOpts) Readonly() LmdbOpts {
+	opts.flags = opts.flags | lmdb.Readonly
 	return opts
 }
 
@@ -128,10 +127,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 		return nil, err
 	}
 
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-	}
-	if err = env.SetMaxFreelistReuse(opts.maxFreelistReuse); err != nil {
+	if err = env.SetMaxFreelistReuse(LMDBDefaultMaxFreelistReuse); err != nil {
 		return nil, err
 	}
 

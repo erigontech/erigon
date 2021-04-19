@@ -5,6 +5,9 @@ GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GOBUILD = env GO111MODULE=on go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
 
+GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
+GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
+
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
@@ -17,6 +20,12 @@ endif
 
 all: tg hack rpctest state pics rpcdaemon integration db-tools
 
+go-version:
+	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
+		echo "minimum required Golang version is 1.16"; \
+		exit 1 ;\
+	fi
+
 docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
 
@@ -28,7 +37,7 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
-tg: mdbx
+tg: go-version mdbx
 	@echo "Building tg"
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."

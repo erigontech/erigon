@@ -32,7 +32,6 @@ var DefaultFlags = []cli.Flag{
 	PrivateApiAddr,
 	EtlBufferSizeFlag,
 	LMDBMapSizeFlag,
-	LMDBMaxFreelistReuseFlag,
 	TLSFlag,
 	TLSCertFlag,
 	TLSKeyFlag,

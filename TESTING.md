@@ -156,7 +156,7 @@ The way to perform this check is almost the same as the Incremental Sync, but st
 Having up-to-date database, and having shut down the turbo-geth node (it will work without shutting down, but it will lead to bloating of the database file),
 this command can be executed:
 ```
-./build/bin/state checkChangeSets --chaindata ~/mainnet/tg/chaindata --block 11000000
+./build/bin/state checkChangeSets --datadir <path to datadir> --block 11000000
 ```
 Please note the difference in notation when referring to the database. Turbo-geth command uses `--datadir` which points to `~mainnet`, and it looks for the
 actual database directory under `tg/chaindata`, but `checkChangeSets` need to be given slightly different path, pointing directly to the database directory.

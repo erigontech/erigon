@@ -12,7 +12,7 @@ combined). Ethereum mainnet configuration is currently hard-coded.
 ## Running with an external p2p sentry
 
 ```
-./buid/bin/headers download --chaindata <path_to_database>
+./buid/bin/headers download --datadir <path_to_database>
 ```
 
 The command above specifies `--datadir` option - directory where the database files will be written. These two options
@@ -21,7 +21,7 @@ p2p sentry running on the same computer listening to the port `9091`. In order t
 computer, or a different port (or both), the option `--sentry.api.addr` can be used. For example:
 
 ```
-./buid/bin/headers download  --chaindata <path_to_database> --sentry.api.addr localhost:9999
+./buid/bin/headers download  --datadir <path_to_database> --sentry.api.addr localhost:9999
 ```
 
 The command above will expect the p2p sentry running on the same computer, but on the port `9999`
@@ -29,7 +29,7 @@ The command above will expect the p2p sentry running on the same computer, but o
 ## Running with an internal p2p sentry
 
 ```
-./buid/bin/headers download --chaindata <path_to_database> --combined
+./buid/bin/headers download --datadir <path_to_database> --combined
 ```
 
 The command above will run p2p sentry and the header downloader in the same proccess. In this mode, p2p sentry can be
