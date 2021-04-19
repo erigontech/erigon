@@ -96,9 +96,11 @@ func (b *testBackend) close() {
 	b.chain.Stop()
 }
 
-func (b *testBackend) Chain() *core.BlockChain { return b.chain }
-func (b *testBackend) TxPool() TxPool          { return b.txpool }
-
+func (b *testBackend) Chain() *core.BlockChain          { return b.chain }
+func (b *testBackend) DB() ethdb.RwKV                   { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
+func (b *testBackend) TxPool() TxPool                   { return b.txpool }
+func (b *testBackend) ChainConfig() *params.ChainConfig { return b.chain.Config() }
+func (b *testBackend) GenesisHash() common.Hash         { return b.chain.Genesis().Hash() }
 func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
 	// is omitted and we will just give control back to the handler.

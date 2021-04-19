@@ -522,12 +522,13 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	response := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket)
+	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
 		RequestId:            query.RequestId,
 		BlockBodiesRLPPacket: response,
@@ -583,7 +584,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -592,6 +593,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	if err != nil {
 		return err
 	}
+	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         query.RequestId,
 		ReceiptsRLPPacket: receipts,
