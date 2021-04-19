@@ -125,15 +125,17 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 			err = errOpen
 			_ = err
 		}
-		mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
-		if innerErr != nil {
-			return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+		if cfg.SnapshotMode != "" {
+			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+			}
+			kv, innerErr := snapshotsync.WrapBySnapshotsFromDir(db, cfg.SnapshotDir, mode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+			}
+			db = kv
 		}
-		kv, innerErr := snapshotsync.WrapBySnapshotsFromDir(db, cfg.SnapshotDir, mode)
-		if innerErr != nil {
-			return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
-		}
-		db = kv
 	}
 	if cfg.PrivateApiAddr != "" {
 		var remoteKv ethdb.RwKV
