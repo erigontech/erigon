@@ -50,6 +50,11 @@ var (
 		Value: 500,
 	}
 
+	DownloaderV2Flag = cli.BoolFlag{
+		Name:  "downloader.v2",
+		Usage: "enable experimental downloader v2",
+	}
+
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -113,6 +118,7 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.EnableDownloaderV2 = ctx.GlobalBool(DownloaderV2Flag.Name)
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
