@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	withChaindata(generateStateSnapshotCmd)
+	withDatadir(generateStateSnapshotCmd)
 	withSnapshotFile(generateStateSnapshotCmd)
 	withSnapshotData(generateStateSnapshotCmd)
 	withBlock(generateStateSnapshotCmd)
@@ -26,11 +26,11 @@ func init() {
 
 }
 
-//go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ &> /media/b00ris/nvme/copy.log
+//go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state --datadir /media/b00ris/nvme/backup/snapshotsync &> /media/b00ris/nvme/copy.log
 var generateStateSnapshotCmd = &cobra.Command{
 	Use:     "state",
 	Short:   "Generate state snapshot",
-	Example: "go run ./cmd/state/main.go stateSnapshot --block 11000000 --chaindata /media/b00ris/nvme/tgstaged/tg/chaindata/ --snapshot /media/b00ris/nvme/snapshots/state",
+	Example: "go run ./cmd/state/main.go stateSnapshot --block 11000000 --datadir /media/b00ris/nvme/tgstaged/ --snapshot /media/b00ris/nvme/snapshots/state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return GenerateStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},

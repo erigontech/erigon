@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -54,6 +55,9 @@ var rootCmd = &cobra.Command{
 		genesis = core.DefaultGenesisBlock()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
+		}
+		if chaindata == "" {
+			chaindata = path.Join(datadir, "tg", "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
