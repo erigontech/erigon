@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -93,7 +94,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 		cfg.SingleNodeMode = cfg.Datadir != "" || cfg.Chaindata != ""
 		if cfg.SingleNodeMode {
 			if cfg.Datadir == "" {
-				cfg.Datadir = node.DefaultDataDir()
+				cfg.Datadir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = path.Join(cfg.Datadir, "tg", "chaindata")

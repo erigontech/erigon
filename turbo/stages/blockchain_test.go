@@ -2426,32 +2426,37 @@ func TestEIP1559Transition(t *testing.T) {
 		signer  = types.LatestSigner(gspec.Config)
 	)
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-
-		// One transaction to 0xAAAA
-		accesses := types.AccessList{types.AccessTuple{
-			Address:     aa,
-			StorageKeys: []common.Hash{{0}},
-		}}
-
-		var chainID uint256.Int
-		chainID.SetFromBig(gspec.Config.ChainID)
-		var tx types.Transaction = &types.DynamicFeeTransaction{
-			ChainID: &chainID,
-			CommonTx: types.CommonTx{
-				Nonce: 0,
-				To:    &aa,
-				Gas:   30000,
-				Data:  []byte{},
-			},
-			FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
-			Tip:        u256.Num2,
-			AccessList: accesses,
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 11, func(i int, b *core.BlockGen) {
+		if i == 10 {
+			b.SetCoinbase(common.Address{1})
+		} else {
+			b.SetCoinbase(common.Address{0})
 		}
-		tx, _ = types.SignTx(tx, *signer, key1)
+		if i == 10 {
+			// One transaction to 0xAAAA
+			accesses := types.AccessList{types.AccessTuple{
+				Address:     aa,
+				StorageKeys: []common.Hash{{0}},
+			}}
 
-		b.AddTx(tx)
+			var chainID uint256.Int
+			chainID.SetFromBig(gspec.Config.ChainID)
+			var tx types.Transaction = &types.DynamicFeeTransaction{
+				ChainID: &chainID,
+				CommonTx: types.CommonTx{
+					Nonce: 0,
+					To:    &aa,
+					Gas:   30000,
+					Data:  []byte{},
+				},
+				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
+				Tip:        u256.Num2,
+				AccessList: accesses,
+			}
+			tx, _ = types.SignTx(tx, *signer, key1)
+
+			b.AddTx(tx)
+		}
 	}, false /* intermediate hashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -2464,7 +2469,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block := blocks[0]
+	block := blocks[10]
 
 	// 1+2: Ensure EIP-1559 access lists are accounted for via gas usage.
 	expectedGas := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + vm.WarmStorageReadCostEIP2929 + vm.ColdSloadCostEIP2929

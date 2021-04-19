@@ -305,7 +305,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
 		{0, []common.Hash{backend.chain.Genesis().Hash()}, []bool{true}, 1},      // The genesis block should be retrievable
 		{0, []common.Hash{backend.chain.CurrentBlock().Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
-		{0, []common.Hash{{}}, []bool{false}, 0},                                 // A non existent block should not be returned
+		{0, []common.Hash{{}}, []bool{false}, 0},                                    // A non existent block should not be returned
 
 		// Existing and non-existing blocks interleaved should not cause problems
 		{0, []common.Hash{

@@ -30,12 +30,14 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -46,14 +48,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
 )
 
 func init() {
@@ -96,7 +97,7 @@ var (
 	DataDirFlag = DirectoryFlag{
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
-		Value: DirectoryString(node.DefaultDataDir()),
+		Value: DirectoryString(paths.DefaultDataDir()),
 	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
@@ -563,6 +564,27 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
+
+	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
+		Name:  "clique.checkpoint",
+		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Value: 10,
+	}
+	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
+		Name:  "clique.snapshots",
+		Usage: "number of recent vote snapshots to keep in memory",
+		Value: 1024,
+	}
+	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
+		Name:  "clique.signatures",
+		Usage: "number of recent block signatures to keep in memory",
+		Value: 16384,
+	}
+	CliqueDataDirFlag = DirectoryFlag{
+		Name:  "clique.datadir",
+		Usage: "a path to clique db folder",
+		Value: "",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -806,7 +828,7 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 }
 
 func DataDirForNetwork(datadir string, network string) string {
-	if datadir != node.DefaultDataDir() {
+	if datadir != paths.DefaultDataDir() {
 		return datadir
 	}
 
@@ -990,6 +1012,18 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdbx bool) {
+	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
+	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
+	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
+	if ctx.GlobalIsSet(CliqueDataDirFlag.Name) {
+		cfg.DBPath = path.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique/db")
+	} else {
+		cfg.DBPath = path.Join(datadir, "clique/db")
+	}
+	cfg.MDBX = mdbx
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1091,6 +1125,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
+	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 

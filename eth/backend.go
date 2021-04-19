@@ -271,7 +271,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:        config,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
-		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
 		etherbase:     config.Miner.Etherbase,
 		bloomRequests: make(chan chan *bloombits.Retrieval),
@@ -281,6 +281,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		genesisHash:   genesisHash,
 	}
 	eth.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
+
+	var consensusConfig interface{}
+
+	if chainConfig.Clique != nil {
+		consensusConfig = &config.Clique
+	} else {
+		consensusConfig = &config.Ethash
+	}
+
+	eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 

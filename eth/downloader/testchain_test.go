@@ -157,8 +157,6 @@ func (tc *testChain) copy(newlen int) *testChain {
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
-	// start := time.Now()
-	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 

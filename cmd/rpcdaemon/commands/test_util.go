@@ -54,6 +54,8 @@ func createTestDb() (ethdb.Database, error) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainId)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainId)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)

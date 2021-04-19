@@ -211,7 +211,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
-	chainreader := &FakeChainReader{Cfg: config}
+	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
 	if errBegin != nil {
 		return nil, nil, errBegin
@@ -375,7 +375,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 }
 
 type FakeChainReader struct {
-	Cfg *params.ChainConfig
+	Cfg     *params.ChainConfig
+	current *types.Block
 }
 
 // Config returns the chain configuration.
@@ -383,7 +384,7 @@ func (cr *FakeChainReader) Config() *params.ChainConfig {
 	return cr.Cfg
 }
 
-func (cr *FakeChainReader) CurrentHeader() *types.Header                            { return nil }
+func (cr *FakeChainReader) CurrentHeader() *types.Header                            { return cr.current.Header() }
 func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
 func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }

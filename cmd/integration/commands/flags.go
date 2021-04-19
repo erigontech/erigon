@@ -1,10 +1,11 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 )
 
 var (
@@ -86,14 +87,14 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDatadir2(cmd *cobra.Command) {
-	cmd.Flags().String(utils.DataDirFlag.Name, node.DefaultDataDir(), utils.DataDirFlag.Usage)
+	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
 

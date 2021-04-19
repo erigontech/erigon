@@ -56,48 +56,54 @@ var waitDeployedTests = map[string]struct {
 
 func TestWaitDeployed(t *testing.T) {
 	for name, test := range waitDeployedTests {
-		backend := backends.NewSimulatedBackend(
-			core.GenesisAlloc{
-				crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
-			},
-			10000000,
-		)
-		defer backend.Close()
+		name := name
+		test := test
 
-		// Create the transaction.
-		var tx types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
-		signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-		tx, _ = types.SignTx(tx, *signer, testKey)
+		t.Run(name, func(t *testing.T) {
+			backend := backends.NewSimulatedBackend(
+				core.GenesisAlloc{
+					crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
+				},
+				10000000,
+			)
+			defer backend.Close()
 
-		// Wait for it to get mined in the background.
-		var (
-			err     error
-			address common.Address
-			mined   = make(chan struct{})
-			ctx     = context.Background()
-		)
-		go func() {
-			address, err = bind.WaitDeployed(ctx, backend, tx)
-			close(mined)
-		}()
+			// Create the transaction.
+			// Create the transaction.
+			var tx types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
+			signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+			tx, _ = types.SignTx(tx, *signer, testKey)
 
-		// Send and mine the transaction.
-		if err = backend.SendTransaction(ctx, tx); err != nil {
-			t.Fatalf("test %q: failed to set tx: %v", name, err)
-		}
-		backend.Commit()
+			// Wait for it to get mined in the background.
+			var (
+				err     error
+				address common.Address
+				mined   = make(chan struct{})
+				ctx     = context.Background()
+			)
+			go func() {
+				address, err = bind.WaitDeployed(ctx, backend, tx)
+				close(mined)
+			}()
 
-		select {
-		case <-mined:
-			if !errors.Is(err, test.wantErr) {
-				t.Errorf("test %q: error mismatch: want %q, got %q", name, test.wantErr, err)
+			// Send and mine the transaction.
+			if err = backend.SendTransaction(ctx, tx); err != nil {
+				t.Fatalf("test %q: failed to set tx: %v", name, err)
 			}
-			if address != test.wantAddress {
-				t.Errorf("test %q: unexpected contract address %s", name, address.Hex())
+			backend.Commit()
+
+			select {
+			case <-mined:
+				if !errors.Is(err, test.wantErr) {
+					t.Errorf("test %q: error mismatch: want %q, got %q", name, test.wantErr, err)
+				}
+				if address != test.wantAddress {
+					t.Errorf("test %q: unexpected contract address %s", name, address.Hex())
+				}
+			case <-time.After(2 * time.Second):
+				t.Errorf("test %q: timeout", name)
 			}
-		case <-time.After(2 * time.Second):
-			t.Errorf("test %q: timeout", name)
-		}
+		})
 	}
 }
 

@@ -83,7 +83,10 @@ func TestVerifyHeadersClique(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	engine := clique.New(params.RinkebyChainConfig.Clique, db)
+	cliqueDB := ethdb.NewMemDatabase()
+	defer cliqueDB.Close()
+
+	engine := clique.New(params.RinkebyChainConfig, params.CliqueSnapshot, cliqueDB)
 
 	config, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {

@@ -2,15 +2,28 @@ package dbutils
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
+const NumberLength = 8
+
 // EncodeBlockNumber encodes a block number as big endian uint64
 func EncodeBlockNumber(number uint64) []byte {
-	enc := make([]byte, 8)
+	enc := make([]byte, NumberLength)
 	binary.BigEndian.PutUint64(enc, number)
 	return enc
+}
+
+var ErrInvalidSize = errors.New("bit endian number has an invalid size")
+
+func DecodeBlockNumber(number []byte) (uint64, error) {
+	if len(number) != NumberLength {
+		return 0, fmt.Errorf("%w: %d", ErrInvalidSize, len(number))
+	}
+	return binary.BigEndian.Uint64(number), nil
 }
 
 // headerKey = headerPrefix + num (uint64 big endian) + hash
@@ -103,7 +116,7 @@ func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, stor
 
 // address hash + incarnation prefix
 func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
-	prefix := make([]byte, common.HashLength+8)
+	prefix := make([]byte, common.HashLength+NumberLength)
 	copy(prefix, addressHash)
 	binary.BigEndian.PutUint64(prefix[common.HashLength:], incarnation)
 	return prefix
@@ -111,7 +124,7 @@ func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 
 // address hash + incarnation prefix (for plain state)
 func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
-	prefix := make([]byte, common.AddressLength+8)
+	prefix := make([]byte, common.AddressLength+NumberLength)
 	copy(prefix, address)
 	binary.BigEndian.PutUint64(prefix[common.AddressLength:], incarnation)
 	return prefix

@@ -169,6 +169,7 @@ func TestSimulatedBackend_AdjustTime(t *testing.T) {
 func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 	sim := simTestBackend(testAddr)
+	defer sim.Close()
 	// Create tx and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
