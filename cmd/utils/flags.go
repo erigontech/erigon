@@ -801,32 +801,6 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
-func setDataDir(ctx *cli.Context, cfg *node.Config) {
-	if ctx.GlobalIsSet(DataDirFlag.Name) {
-		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
-	} else {
-		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case params.RinkebyChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
-			}
-		case params.GoerliChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
-			}
-		case params.YoloV3ChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
-			}
-		case params.TurboMineName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "turbomine")
-			}
-		}
-	}
-}
-
 func DataDirForNetwork(datadir string, network string) string {
 	if datadir != node.DefaultDataDir() {
 		return datadir
@@ -841,13 +815,19 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.YoloV3ChainName:
 		return filepath.Join(datadir, "yolo-v3")
-	case params.TurboMineName:
-		return filepath.Join(datadir, "turbomine")
 	default:
 		return datadir
 	}
 
 	return datadir
+}
+
+func setDataDir(ctx *cli.Context, cfg *node.Config) {
+	if ctx.GlobalIsSet(DataDirFlag.Name) {
+		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
+	} else {
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
+	}
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
@@ -859,7 +839,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	if dirname != "" {
 		cfg.DataDir = dirname
 	} else if chain != nil {
-		cfg.DataDir = DataDirForNetwork(node.DefaultDataDir(), *chain)
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, *chain)
 	}
 }
 
