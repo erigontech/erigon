@@ -142,10 +142,9 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use LMDB.
-	LMDB                 bool
-	LMDBMapSize          datasize.ByteSize
-	LMDBMaxFreelistReuse uint
-	MDBX                 bool
+	LMDB        bool
+	LMDBMapSize datasize.ByteSize
+	MDBX        bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener

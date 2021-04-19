@@ -81,7 +81,6 @@ func withChaindata(cmd *cobra.Command) {
 
 func withLmdbFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
-	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
 }
 
 func openDatabase(path string) *ethdb.ObjectDatabase {
@@ -100,9 +99,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 			opts = opts.MapSize(mapSize)
 		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
 		return opts.MustOpen()
 	}
 
@@ -114,9 +110,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		opts = opts.MapSize(mapSize)
-	}
-	if freelistReuse > 0 {
-		opts = opts.MaxFreelistReuse(uint(freelistReuse))
 	}
 	return opts.MustOpen()
 }

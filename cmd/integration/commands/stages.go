@@ -37,7 +37,7 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
@@ -53,7 +53,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
@@ -69,7 +69,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageExec(db, ctx); err != nil {
@@ -85,7 +85,7 @@ var cmdStageTrie = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
@@ -101,7 +101,7 @@ var cmdStageHashState = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
@@ -117,7 +117,7 @@ var cmdStageHistory = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
@@ -133,7 +133,7 @@ var cmdLogIndex = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
@@ -149,7 +149,7 @@ var cmdCallTraces = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
@@ -165,7 +165,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
@@ -180,7 +180,7 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -196,7 +196,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -211,7 +211,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -225,7 +225,7 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
@@ -233,12 +233,10 @@ var cmdRunMigrations = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdPrintStages)
-	withLmdbFlags(cmdPrintStages)
+	withDatadir(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
-	withChaindata(cmdStageSenders)
-	withLmdbFlags(cmdStageSenders)
+	//withChaindata(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -246,14 +244,12 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
-	withChaindata(cmdStageBodies)
-	withUnwind(cmdStageBodies)
 	withDatadir(cmdStageBodies)
+	withUnwind(cmdStageBodies)
 
 	rootCmd.AddCommand(cmdStageBodies)
 
-	withChaindata(cmdStageExec)
-	withLmdbFlags(cmdStageExec)
+	withDatadir(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -263,55 +259,43 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageExec)
 
-	withChaindata(cmdStageHashState)
-	withLmdbFlags(cmdStageHashState)
+	withDatadir(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
 	withBatchSize(cmdStageHashState)
-	withDatadir(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
 
-	withChaindata(cmdStageTrie)
-	withLmdbFlags(cmdStageTrie)
+	withDatadir(cmdStageTrie)
 	withReset(cmdStageTrie)
 	withBlock(cmdStageTrie)
 	withUnwind(cmdStageTrie)
-	withDatadir(cmdStageTrie)
 	withIntegrityChecks(cmdStageTrie)
 
 	rootCmd.AddCommand(cmdStageTrie)
 
-	withChaindata(cmdStageHistory)
-	withLmdbFlags(cmdStageHistory)
+	withDatadir(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
-	withDatadir(cmdStageHistory)
 
 	rootCmd.AddCommand(cmdStageHistory)
 
-	withChaindata(cmdLogIndex)
-	withLmdbFlags(cmdLogIndex)
+	withDatadir(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
-	withDatadir(cmdLogIndex)
 
 	rootCmd.AddCommand(cmdLogIndex)
 
-	withChaindata(cmdCallTraces)
-	withLmdbFlags(cmdCallTraces)
+	withDatadir(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
-	withDatadir(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
-	withChaindata(cmdStageTxLookup)
-	withLmdbFlags(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
@@ -319,16 +303,13 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageTxLookup)
 
-	withChaindata(cmdPrintMigrations)
+	withDatadir(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
 
-	withChaindata(cmdRemoveMigration)
-	withLmdbFlags(cmdRemoveMigration)
+	withDatadir(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
-	withChaindata(cmdRunMigrations)
-	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 }

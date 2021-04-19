@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"text/tabwriter"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -21,7 +22,7 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		err := resetState(db, ctx)
@@ -39,7 +40,7 @@ var cmdClearUnwindStack = &cobra.Command{
 	Short: "Clear unwind stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(path.Join(datadir, "tg", "chaindata"), true)
 		defer db.Close()
 
 		err := clearUnwindStack(db, ctx)
@@ -53,11 +54,11 @@ var cmdClearUnwindStack = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdResetState)
+	withDatadir(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 
-	withChaindata(cmdClearUnwindStack)
+	withDatadir(cmdClearUnwindStack)
 
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
