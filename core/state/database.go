@@ -224,7 +224,6 @@ type TrieDbState struct {
 	noHistory         bool
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	loader            *trie.SubTrieLoader
@@ -234,7 +233,6 @@ type TrieDbState struct {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -242,15 +240,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		db:                db,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		tp:                tp,
 		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
 	}
-
-	tp.SetBlockNumber(blockNr)
-
-	t.AddObserver(tp)
 
 	return tds
 }
@@ -277,21 +270,16 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewEviction()
-	tp.SetBlockNumber(n)
 
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		db:             tds.db,
 		blockNr:        n,
-		tp:             tp,
 		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Address]uint64),
 	}
-
-	cpy.t.AddObserver(tp)
 
 	return &cpy
 }
@@ -340,7 +328,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		tp:                tds.tp,
 		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
@@ -809,7 +796,6 @@ func (tds *TrieDbState) clearUpdates() {
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.setBlockNr(blockNr)
-	tds.tp.SetBlockNumber(blockNr)
 }
 
 func (tds *TrieDbState) GetBlockNr() uint64 {
