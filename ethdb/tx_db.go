@@ -3,12 +3,10 @@ package ethdb
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // Implements ethdb.Getter for Tx
@@ -68,6 +66,10 @@ func (m *roTxDb) Rollback() {
 
 func (m *roTxDb) Tx() Tx {
 	return m.tx
+}
+
+func NewRwTxDb(tx Tx) *TxDb {
+	return &TxDb{tx: tx, cursors: map[string]Cursor{}}
 }
 
 // TxDb - provides Database interface around ethdb.Tx
@@ -292,10 +294,6 @@ func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 }
 
 func (m *TxDb) Commit() error {
-	if metrics.Enabled {
-		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-	}
-
 	if m.tx == nil {
 		return fmt.Errorf("second call .Commit() on same transaction")
 	}

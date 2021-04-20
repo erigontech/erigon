@@ -59,7 +59,7 @@ type StageParameters struct {
 
 type MiningStagesParameters struct {
 	// configs
-	*params.MiningConfig
+	params.MiningConfig
 
 	// noempty is the flag used to control whether the feature of pre-seal empty
 	// block is enabled. The default value is false(pre-seal is enabled by default).
@@ -75,7 +75,7 @@ type MiningStagesParameters struct {
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
+func NewMiningStagesParameters(cfg params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
 	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
 
 }

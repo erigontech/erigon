@@ -17,10 +17,12 @@
 package eth
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -75,24 +77,28 @@ func (p *Peer) broadcastTransactions() {
 		if done == nil && len(queue) > 0 {
 			// Pile transaction until we reach our allowed network limit
 			var (
+				count  int
 				hashes []common.Hash
-				txs    []types.Transaction
+				txs    []rlp.RawValue
 				size   common.StorageSize
 			)
-			for i := 0; i < len(queue) && size < maxTxPacketSize; i++ {
-				if tx := p.txpool.Get(queue[i]); tx != nil {
-					txs = append(txs, tx)
-					size += tx.Size()
+			reply, _ := p.txpool.GetSerializedTransactions(context.Background(), queue)
+			for count = 0; count < len(reply) && size < maxTxPacketSize; count++ {
+				if reply[count] == nil {
+					continue
 				}
-				hashes = append(hashes, queue[i])
+				size += common.StorageSize(len(reply[count]))
+				hashes = append(hashes, queue[count])
+				txs = append(txs, reply[count])
 			}
-			queue = queue[:copy(queue, queue[len(hashes):])]
+			// Shift and trim queue
+			queue = queue[:copy(queue, queue[count:])]
 
 			// If there's anything available to transfer, fire up an async writer
 			if len(txs) > 0 {
 				done = make(chan struct{})
 				go func() {
-					if err := p.SendTransactions(txs); err != nil {
+					if err := p.SendTransactions(txs, hashes); err != nil {
 						fail <- err
 						return
 					}
@@ -146,8 +152,9 @@ func (p *Peer) announceTransactions() {
 				pending []common.Hash
 				size    common.StorageSize
 			)
-			for count = 0; count < len(queue) && size < maxTxPacketSize; count++ {
-				if p.txpool.Get(queue[count]) != nil {
+			reply, _ := p.txpool.GetSerializedTransactions(context.Background(), queue)
+			for count = 0; count < len(reply) && size < maxTxPacketSize; count++ {
+				if reply[count] != nil {
 					pending = append(pending, queue[count])
 					size += common.HashLength
 				}

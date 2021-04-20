@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"

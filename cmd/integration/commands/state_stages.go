@@ -54,8 +54,8 @@ Examples:
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
-		miningConfig := &params.MiningConfig{}
-		utils.SetupMinerCobra(cmd, miningConfig)
+		miningConfig := params.MiningConfig{}
+		utils.SetupMinerCobra(cmd, &miningConfig)
 		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
@@ -136,7 +136,7 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx context.Context) error {
+func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx context.Context) error {
 	tmpDir := path.Join(datadir, etl.TmpDirName)
 	must(clearUnwindStack(db, ctx))
 	quit := ctx.Done()

@@ -57,7 +57,6 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
 	}, nil, false)
-	engine.SetThreads(-1)
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()

@@ -38,7 +38,7 @@ type MutationItem struct {
 
 func NewBatch(tx RwTx) StatelessRwTx {
 	return &mutation{
-		db:   &TxDb{tx: tx},
+		db:   &TxDb{tx: tx, cursors: map[string]Cursor{}},
 		puts: btree.New(32),
 	}
 }

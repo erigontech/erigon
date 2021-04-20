@@ -117,11 +117,13 @@ else()
   enable_language(CXX)
 endif()
 
+# Set default build type to Release. This is to ease a User's life.
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING
+  set(CMAKE_BUILD_TYPE Release CACHE STRING
     "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
     FORCE)
 endif()
+string(TOUPPER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_UPPERCASE)
 
 if(NOT_SUBPROJECT AND (CMAKE_CROSSCOMPILING OR IOS))
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
@@ -164,14 +166,6 @@ if(CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND MSVC_VERSION LESS 1900)
   message(SEND_ERROR "MSVC compiler ${MSVC_VERSION} is too old for building MDBX."
     " At least 'Microsoft Visual Studio 2015' is required.")
 endif()
-
-# Set default build type to Release. This is to ease a User's life.
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING
-    "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
-    FORCE)
-endif()
-string(TOUPPER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_UPPERCASE)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -466,7 +460,12 @@ option(MDBX_FORCE_ASSERTIONS "Force enable assertion checking" OFF)
 option(MDBX_DISABLE_PAGECHECKS "Disable some checks to reduce an overhead and detection probability of database corruption to a values closer to the LMDB" OFF)
 
 if(NOT MDBX_AMALGAMATED_SOURCE)
-  add_mdbx_option(MDBX_ALLOY_BUILD "Build MDBX library through single/alloyed object file" ON)
+  if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE_UPPERCASE STREQUAL "DEBUG")
+    set(MDBX_ALLOY_BUILD_DEFAULT OFF)
+  else()
+    set(MDBX_ALLOY_BUILD_DEFAULT ON)
+  endif()
+  add_mdbx_option(MDBX_ALLOY_BUILD "Build MDBX library through single/alloyed object file" ${MDBX_ALLOY_BUILD_DEFAULT})
 endif()
 
 if((MDBX_BUILD_TOOLS OR MDBX_ENABLE_TESTS) AND MDBX_BUILD_SHARED_LIBRARY)

@@ -114,10 +114,9 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
-	engine       consensus.Engine
-	vmConfig     *vm.Config
-	chainConfig  *params.ChainConfig
-	miningConfig *params.MiningConfig
+	engine      consensus.Engine
+	vmConfig    *vm.Config
+	chainConfig *params.ChainConfig
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -170,7 +169,7 @@ type Downloader struct {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	dl := &Downloader{
 		stateDB:       stateDB,
 		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
@@ -178,7 +177,6 @@ func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *
 		rttEstimate:   uint64(rttMaxEstimate),
 		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
-		miningConfig:  miningConfig,
 		engine:        engine,
 		vmConfig:      vmConfig,
 		dropPeer:      dropPeer,

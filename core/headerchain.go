@@ -218,20 +218,23 @@ type (
 	DeleteBlockContentCallback func(ethdb.Database, common.Hash, uint64)
 )
 
-// SetHead rewinds the local chain to a new head. Everything above the new head
-// will be deleted and the new one set.
-func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
+func SetHeaderHead(db ethdb.Database, head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
 	var (
 		parentHash common.Hash
-		batch      = hc.chainDb.NewBatch()
+		batch      = db.NewBatch()
 	)
-	for hdr := hc.CurrentHeader(); hdr != nil && hdr.Number.Uint64() > head; hdr = hc.CurrentHeader() {
+	for hdr := rawdb.ReadCurrentHeader(db); hdr != nil && hdr.Number.Uint64() > head; hdr = rawdb.ReadCurrentHeader(db) {
 		num := hdr.Number.Uint64()
 
 		// Rewind block chain to new head.
-		parent := hc.GetHeader(hdr.ParentHash, num-1)
+		parent := rawdb.ReadHeader(db, hdr.ParentHash, num-1)
 		if parent == nil {
-			parent = hc.genesisHeader
+			genesisHeader := rawdb.ReadHeaderByNumber(db, 0)
+			if genesisHeader == nil {
+				log.Crit("rewind header chain", "error", ErrNoGenesis)
+			}
+
+			parent = genesisHeader
 		}
 		parentHash = hdr.ParentHash
 
@@ -242,7 +245,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		// first then remove the relative data from the database.
 		//
 		// Update head first(head fast block, head full block) before deleting the data.
-		markerBatch := hc.chainDb.NewBatch()
+		markerBatch := db.NewBatch()
 		if updateFn != nil {
 			newHead, force := updateFn(markerBatch, parent)
 			if force && newHead < head {
@@ -255,9 +258,6 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		if err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to update chain markers", "error", err)
 		}
-		hc.currentHeader.Store(parent)
-		hc.currentHeaderHash = parentHash
-		//headHeaderGauge.Update(parent.Number.Int64())
 
 		// Remove the related data from the database on all sidechains
 		// Gather all the side fork hashes
@@ -277,6 +277,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 	if err := batch.Commit(); err != nil {
 		panic(err)
 	}
+
 }
 
 // Config retrieves the header chain's chain configuration.

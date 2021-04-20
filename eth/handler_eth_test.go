@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"github.com/holiman/uint256"
 )
@@ -234,7 +235,8 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	var tx types.Transaction = types.NewTransaction(0, common.Address{}, uint256.NewInt(), 100000, uint256.NewInt(), nil)
 	tx, _ = types.SignTx(tx, *types.LatestSignerForChainID(nil), testKey)
 
-	if err := src.SendTransactions([]types.Transaction{tx}); err != nil {
+	b, _ := rlp.EncodeToBytes(tx)
+	if err := src.SendTransactions([]rlp.RawValue{b}, common.Hashes{tx.Hash()}); err != nil {
 		t.Fatalf("failed to send transaction: %v", err)
 	}
 	select {

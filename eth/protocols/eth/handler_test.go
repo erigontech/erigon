@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"math/rand"
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 )
 
 var (
@@ -96,11 +98,10 @@ func (b *testBackend) close() {
 	b.chain.Stop()
 }
 
-func (b *testBackend) Chain() *core.BlockChain          { return b.chain }
-func (b *testBackend) DB() ethdb.RwKV                   { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
-func (b *testBackend) TxPool() TxPool                   { return b.txpool }
-func (b *testBackend) ChainConfig() *params.ChainConfig { return b.chain.Config() }
-func (b *testBackend) GenesisHash() common.Hash         { return b.chain.Genesis().Hash() }
+func (b *testBackend) DB() ethdb.RwKV { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
+func (b *testBackend) TxPool() TxPool {
+	return txpool.NewClientDirect(txpool.NewServer(context.Background(), b.txpool))
+}
 func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
 	// is omitted and we will just give control back to the handler.
@@ -305,7 +306,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
 		{0, []common.Hash{backend.chain.Genesis().Hash()}, []bool{true}, 1},      // The genesis block should be retrievable
 		{0, []common.Hash{backend.chain.CurrentBlock().Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
-		{0, []common.Hash{{}}, []bool{false}, 0},                                    // A non existent block should not be returned
+		{0, []common.Hash{{}}, []bool{false}, 0},                                 // A non existent block should not be returned
 
 		// Existing and non-existing blocks interleaved should not cause problems
 		{0, []common.Hash{
