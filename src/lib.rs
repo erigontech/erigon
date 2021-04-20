@@ -113,6 +113,10 @@ pub mod types {
     U!(H512, ethereum_types::H512, ethereum_types::U512);
 }
 
+pub mod version {
+    tonic::include_proto!("version");
+}
+
 #[cfg(feature = "consensus")]
 pub mod consensus {
     tonic::include_proto!("consensus");

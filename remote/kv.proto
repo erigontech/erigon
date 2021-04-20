@@ -1,11 +1,26 @@
 syntax = "proto3";
 
+import "google/protobuf/empty.proto";
+import "version/version.proto";
+
+// This is the Application Interface Version: change these numbers according to semver rules
+// anytime the application-level protocol changes (e.g. string or bytes format)
+option (version.interface_major_version) = 1;
+option (version.interface_minor_version) = 0;
+option (version.interface_patch_version) = 0;
+
 package remote;
 
 option go_package = "./remote;remote";
 
 // Provides methods to access key-value data
-service KV { rpc Tx(stream Cursor) returns (stream Pair); }
+service KV {
+  // GetInterfaceVersion returns the service-side interface version number
+  rpc GetInterfaceVersion(google.protobuf.Empty) returns (version.InterfaceVersionReply);
+
+  // Tx exposes read-only transactions for the key-value store
+  rpc Tx(stream Cursor) returns (stream Pair);
+}
 
 enum Op {
   FIRST = 0;
