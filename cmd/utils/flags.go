@@ -486,6 +486,11 @@ var (
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
 		Value: "",
 	}
+	StaticPeersFlag = cli.StringFlag{
+		Name:  "staticpeers",
+		Usage: "Comma separated enode URLs to connect to",
+		Value: "",
+	}
 	NodeKeyFileFlag = cli.StringFlag{
 		Name:  "nodekey",
 		Usage: "P2P node key file",
@@ -706,6 +711,23 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	}
 }
 
+func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
+	if !ctx.GlobalIsSet(StaticPeersFlag.Name) {
+		return
+	}
+	urls := SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	for _, url := range urls {
+		if url != "" {
+			node, err := enode.Parse(enode.ValidSchemes, url)
+			if err != nil {
+				log.Error("Static peer URL invalid", "enode", url, "err", err)
+				continue
+			}
+			cfg.StaticNodes = append(cfg.StaticNodes, node)
+		}
+	}
+}
+
 // setListenAddress creates a TCP listening address string from set command
 // line flags.
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
@@ -778,6 +800,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
+	setStaticPeers(ctx, cfg)
 
 	ethPeers := cfg.MaxPeers
 	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
