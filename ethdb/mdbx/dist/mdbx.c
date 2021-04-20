@@ -20,7 +20,7 @@
 #define LIBMDBX_INTERNALS
 #ifdef MDBX_TOOLS
 #define MDBX_DEPRECATED
-#endif /* MDBX_TOOLS */S
+#endif /* MDBX_TOOLS */
 
 /* *INDENT-OFF* */
 /* clang-format off */
