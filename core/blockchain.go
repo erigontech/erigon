@@ -147,11 +147,10 @@ type BlockChain struct {
 	receiptsCache *lru.Cache // Cache for the most recent receipts per block
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
-	quit          chan struct{}  // blockchain quit channel
-	wg            sync.WaitGroup // chain processing wait group for shutting down
-	running       int32          // 0 if chain is running, 1 when stopped (must be called atomically)
-	procInterrupt int32          // interrupt signaler for block processing
-	quitMu        sync.RWMutex
+	quit    chan struct{}  // blockchain quit channel
+	wg      sync.WaitGroup // chain processing wait group for shutting down
+	running int32          // 0 if chain is running, 1 when stopped (must be called atomically)
+	quitMu  sync.RWMutex
 
 	engine     consensus.Engine
 	prefetcher Prefetcher // Block state prefetcher interface
@@ -200,7 +199,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +425,6 @@ func (bc *BlockChain) Stop() {
 	close(bc.quit)
 
 	bc.quitMu.Lock()
-	bc.StopInsert()
 	bc.wg.Wait()
 	bc.quitMu.Unlock()
 
@@ -438,21 +436,6 @@ func (bc *BlockChain) Stop() {
 	}
 	log.Info("Blockchain stopped")
 }
-
-// StopInsert interrupts all insertion methods, causing them to return
-// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
-// calling this method.
-func (bc *BlockChain) StopInsert() {
-	atomic.StoreInt32(&bc.procInterrupt, 1)
-}
-
-// insertStopped returns true after StopInsert has been called.
-func (bc *BlockChain) insertStopped() bool {
-	return atomic.LoadInt32(&bc.procInterrupt) == 1
-}
-
-// WriteStatus status of write
-type WriteStatus byte
 
 // SetTxLookupLimit is responsible for updating the txlookup limit to the
 // original one stored in db if the new mismatches with the old one.
