@@ -305,7 +305,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningTransactions(nextBlock), nil, miningResultCh, quit)
+			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningResultCh, quit)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -323,8 +323,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig *params.MiningConfig, ctx 
 					miningWorld.GasFloor,
 					miningWorld.GasCeil,
 					miningWorld.Etherbase,
-					miningWorld.TxPoolLocals,
-					miningWorld.PendingTxs,
+					txPool,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
@@ -388,23 +387,6 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 		}
 	}
 	return nil
-}
-
-func miningTransactions(nextBlock *types.Block) types.TransactionsGroupedBySender {
-	idx := map[common.Address]int{}
-	groups := types.TransactionsGroupedBySender{}
-	senders := nextBlock.Body().SendersFromTxs()
-	for txId, txn := range nextBlock.Transactions() {
-		from := senders[txId]
-		i, ok := idx[from]
-		if ok {
-			groups[i] = append(groups[i], txn)
-		} else {
-			idx[from] = len(groups)
-			groups = append(groups, types.Transactions{txn})
-		}
-	}
-	return groups
 }
 
 func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {

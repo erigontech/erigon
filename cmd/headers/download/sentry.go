@@ -71,12 +71,13 @@ func nodeKey() *ecdsa.PrivateKey {
 
 func makeP2PServer(
 	ctx context.Context,
+	readNodeInfo func() *eth.NodeInfo,
 	natSetting string,
 	port int,
+	peers *sync.Map,
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
-	protocols []string,
 	ss *SentryServerImpl,
 	genesisHash common.Hash,
 ) (*p2p.Server, error) {
@@ -124,8 +125,22 @@ func makeP2PServer(
 			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
 		}
 	}
-	pMap := map[string]p2p.Protocol{
-		eth.ProtocolName: {
+
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, ss)
+	return &p2p.Server{Config: p2pConfig}, nil
+}
+
+func MakeProtocols(ctx context.Context,
+	readNodeInfo func() *eth.NodeInfo,
+	dialCandidates enode.Iterator,
+	peers *sync.Map,
+	peerHeightMap *sync.Map,
+	peerTimeMap *sync.Map,
+	peerRwMap *sync.Map,
+	ss *SentryServerImpl,
+) []p2p.Protocol {
+	return []p2p.Protocol{
+		{
 			Name:           eth.ProtocolName,
 			Version:        eth.ProtocolVersions[0],
 			Length:         17,
@@ -133,6 +148,7 @@ func makeP2PServer(
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.ID().String()
 				log.Info(fmt.Sprintf("[%s] Start with peer", peerID))
+				peers.Store(peerID, rw)
 				peerRwMap.Store(peerID, rw)
 				if err := runPeer(
 					ctx,
@@ -146,18 +162,25 @@ func makeP2PServer(
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
+				peers.Delete(peerID)
 				peerHeightMap.Delete(peerID)
 				peerTimeMap.Delete(peerID)
 				peerRwMap.Delete(peerID)
 				return nil
 			},
+			NodeInfo: func() interface{} {
+				return readNodeInfo()
+			},
+			PeerInfo: func(id enode.ID) interface{} {
+				p, ok := peers.Load(id.String())
+				if !ok {
+					return nil
+				}
+				return p.(*p2p.Peer).Info()
+			},
+			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
 		},
 	}
-
-	for _, protocolName := range protocols {
-		p2pConfig.Protocols = append(p2pConfig.Protocols, pMap[protocolName])
-	}
-	return &p2p.Server{Config: p2pConfig}, nil
 }
 
 func handShake(
@@ -447,18 +470,20 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 }
 
 func p2pServer(ctx context.Context,
+	readNodeInfo func() *eth.NodeInfo,
 	sentryServer *SentryServerImpl,
-	genesisHash common.Hash,
 	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
+	genesisHash common.Hash,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
+		readNodeInfo,
 		natSetting,
 		port,
+		&sentryServer.peers,
 		&sentryServer.peerHeightMap,
 		&sentryServer.peerTimeMap,
 		&sentryServer.peerRwMap,
-		[]string{eth.ProtocolName},
 		sentryServer,
 		genesisHash,
 	)
@@ -514,6 +539,7 @@ type SentryServerImpl struct {
 	staticPeers     []string
 	discovery       bool
 	netRestrict     string
+	peers           sync.Map
 	peerHeightMap   sync.Map
 	peerRwMap       sync.Map
 	peerTimeMap     sync.Map
@@ -716,7 +742,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
+		ss.p2pServer, err = p2pServer(ss.ctx, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}

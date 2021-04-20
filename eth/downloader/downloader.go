@@ -166,9 +166,7 @@ type Downloader struct {
 	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSyncState *stagedsync.State
-	miningState     *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
-	mining          *stagedsync.StagedSync
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -200,11 +198,6 @@ func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *
 // SetStagedSync sets the staged sync instance (by protocol manager)
 func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	d.stagedSync = stagedSync
-}
-
-// SetStagedSync sets the staged sync instance (by protocol manager)
-func (d *Downloader) SetMining(mining *stagedsync.StagedSync) {
-	d.mining = mining
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
@@ -431,7 +424,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 
 	canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
-	syncCycleStart := time.Now()
+	//syncCycleStart := time.Now()
 
 	var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -529,55 +522,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
-
-	// heuristic - run mining only if we are on top of chain
-	canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
-
-	if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
-		return nil
-	}
-	if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Fill the block with all available pending transactions.
-	pending, err := txPool.Pending()
-	if err != nil {
-		return fmt.Errorf("failed to fetch pending transactions: %w", err)
-	}
-
-	miningResultCh := make(chan *types.Block, 1)
-	sealCancel := make(chan struct{})
-
-	if d.miningState, err = d.mining.Prepare(
-		d,
-		d.chainConfig,
-		d.engine,
-		d.vmConfig,
-		nil,
-		tx,
-		p.id,
-		d.storageMode,
-		d.tmpdir,
-		cache,
-		d.batchSize,
-		d.quitCh,
-		fetchers,
-		txPool,
-		poolStart,
-		false,
-		stagedsync.NewMiningStagesParameters(d.miningConfig, true, pending, txPool.Locals(), miningResultCh, sealCancel),
-	); err != nil {
-		return err
-	}
-	if err = d.miningState.Run(tx, tx); err != nil {
-		return err
-	}
-	tx.Rollback()
-
-	// TODO: send mined block to sentry
-	<-miningResultCh
 	return nil
 }
 

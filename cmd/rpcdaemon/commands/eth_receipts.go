@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
@@ -35,7 +36,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, cc.Engine(), tx, hash, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, cc.Engine(), tx, hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +48,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
 		header := rawdb.ReadHeader(tx, hash, number)
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, cc.Engine(), nil, gp, ibs, dbstate, header, txn, usedGas, vm.Config{})
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, cc.Engine(), nil, gp, ibs, state.NewNoopWriter(), header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
