@@ -25,7 +25,6 @@ import (
 	"io"
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -269,13 +268,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
 	tds.tMu.Unlock()
 
-	n := tds.getBlockNr()
-
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		db:             tds.db,
-		blockNr:        n,
 		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Address]uint64),
@@ -320,7 +316,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		t:                 tds.t,
 		tMu:               tds.tMu,
 		db:                tds.db,
-		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
@@ -496,9 +491,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedLoadCode(address, codeHash, true /*bytecode*/); need {
 			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
+				tds.loader = trie.NewSubTrieLoader()
 			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
+				tds.loader.Reset()
 			}
 			firstRequest = false
 			tds.loader.AddCodeRequest(req)
@@ -508,9 +503,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedLoadCode(address, codeHash, false /*bytecode*/); need {
 			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
+				tds.loader = trie.NewSubTrieLoader()
 			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
+				tds.loader.Reset()
 			}
 			firstRequest = false
 			tds.loader.AddCodeRequest(req)
@@ -559,7 +554,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	dbPrefixes, fixedbits, hooks := tds.t.FindSubTriesToLoad(rl)
 	// FindSubTriesToLoad would have gone through the entire rs, so we need to rewind to the beginning
 	rl.Rewind()
-	loader := trie.NewSubTrieLoader(tds.blockNr)
+	loader := trie.NewSubTrieLoader()
 	subTries, err := loadFunc(loader, rl, dbPrefixes, fixedbits)
 	if err != nil {
 		return err
@@ -792,14 +787,6 @@ func (tds *TrieDbState) clearUpdates() {
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
-}
-
-func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
-	tds.setBlockNr(blockNr)
-}
-
-func (tds *TrieDbState) GetBlockNr() uint64 {
-	return tds.getBlockNr()
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
@@ -1089,12 +1076,4 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	return nil
-}
-
-func (tds *TrieDbState) getBlockNr() uint64 {
-	return atomic.LoadUint64(&tds.blockNr)
-}
-
-func (tds *TrieDbState) setBlockNr(n uint64) {
-	atomic.StoreUint64(&tds.blockNr, n)
 }
