@@ -73,8 +73,7 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database    ethdb.Database   // Database for direct sync insertions
-	Chain       *core.BlockChain // Blockchain to serve data from
+	Database    ethdb.Database // Database for direct sync insertions
 	ChainConfig *params.ChainConfig
 	vmConfig    *vm.Config
 	genesis     *types.Block
@@ -96,7 +95,6 @@ type handler struct {
 	database    ethdb.Database
 	txpool      txPool
 	txpool2     eth.TxPool
-	chain       *core.BlockChain
 	chainConfig *params.ChainConfig
 	vmConfig    *vm.Config
 	genesis     *types.Block
@@ -135,7 +133,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		database:    config.Database,
 		txpool:      config.TxPool,
 		txpool2:     config.TxPool2,
-		chain:       config.Chain,
 		chainConfig: config.ChainConfig,
 		vmConfig:    config.vmConfig,
 		genesis:     config.genesis,

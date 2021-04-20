@@ -76,7 +76,6 @@ type Ethereum struct {
 	txPoolServer       proto_txpool.TxpoolServer
 	txPoolClient       proto_txpool.TxpoolClient
 	txPool             *core.TxPool
-	blockchain         *core.BlockChain
 	handler            *handler
 	ethDialCandidates  enode.Iterator
 	snapDialCandidates enode.Iterator
@@ -128,7 +127,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
-
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -320,20 +318,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	vmConfig, cacheConfig := BlockchainRuntimeConfig(config)
+	vmConfig, _ := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, txCacher)
-	if err != nil {
-		return nil, err
-	}
-
-	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
-	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
 
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
-		eth.blockchain.SetHead(compat.RewindTo)
+		core.SetHead(chainDb, compat.RewindTo)
 		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
 		if err != nil {
 			return nil, err
@@ -424,13 +415,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if eth.config.EnableDownloaderV2 {
 
 	} else {
+		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
+		if genesisBlock == nil {
+			return nil, core.ErrNoGenesis
+		}
+
 		if eth.handler, err = newHandler(&handlerConfig{
 			Database:    chainDb,
-			Chain:       eth.blockchain,
-			ChainConfig: eth.blockchain.Config(),
-			genesis:     eth.blockchain.Genesis(),
-			vmConfig:    eth.blockchain.GetVMConfig(),
-			engine:      eth.blockchain.Engine(),
+			ChainConfig: chainConfig,
+			genesis:     genesisBlock,
+			vmConfig:    &vmConfig,
+			engine:      eth.engine,
 			TxPool:      eth.txPool,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
@@ -638,26 +633,28 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) error {
 	if s.config.Miner.Enabled {
-		if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() { // For main
-			tx, err := s.ChainKV().BeginRo(context.Background())
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			hh := rawdb.ReadCurrentHeader(tx)
-			execution, _ := stages.GetStageProgress(tx, stages.Execution)
-			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-				return err
-			}
-		}
-		txsChMining := make(chan core.NewTxsEvent, txChanSize)
-		txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
-		go func() {
-			defer txsSubMining.Unsubscribe()
-			defer close(txsChMining)
-			s.miningLoop(txsChMining, txsSubMining, mining, tmpdir)
-		}()
+		return nil
 	}
+
+	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() { // For main
+		tx, err := s.ChainKV().BeginRo(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		hh := rawdb.ReadCurrentHeader(tx)
+		execution, _ := stages.GetStageProgress(tx, stages.Execution)
+		if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+			return err
+		}
+	}
+	txsChMining := make(chan core.NewTxsEvent, txChanSize)
+	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
+	go func() {
+		defer txsSubMining.Unsubscribe()
+		defer close(txsChMining)
+		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir)
+	}()
 
 	/*
 		// If the miner was not running, initialize it
@@ -834,7 +831,6 @@ func (s *Ethereum) Stop() error {
 	}
 
 	//s.miner.Stop()
-	s.blockchain.Stop()
 	s.engine.Close()
 	if s.txPool != nil {
 		s.txPool.Stop()
