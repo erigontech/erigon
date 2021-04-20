@@ -18,7 +18,7 @@
 #endif
 
 #define LIBMDBX_INTERNALS
-#ifdefw MDBX_TOOLS
+#ifdef MDBX_TOOLS
 #define MDBX_DEPRECATED
 #endif /* MDBX_TOOLS */S
 
