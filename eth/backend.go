@@ -74,7 +74,7 @@ type Ethereum struct {
 
 	// Handlers
 	txPoolServer       proto_txpool.TxpoolServer
-	txPoolClient       proto_txpool.TxpoolClient
+	txPoolClient       *txpool.ClientDirect
 	txPool             *core.TxPool
 	handler            *handler
 	ethDialCandidates  enode.Iterator
@@ -427,6 +427,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			vmConfig:    &vmConfig,
 			engine:      eth.engine,
 			TxPool:      eth.txPool,
+			TxPool2:     eth.txPoolClient,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
 
