@@ -80,7 +80,7 @@ func (p *testTxPool) Get(hash common.Hash) *types.Transaction {
 	return p.pool[hash]
 }
 
-func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes common.Hashes, responseSizeLimit uint64) ([]rlp.RawValue, error) {
+func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error) {
 	reply := []rlp.RawValue{}
 	var size uint64
 	buf := bytes.NewBuffer(nil)
@@ -97,9 +97,6 @@ func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes commo
 		}
 		reply = append(reply, common.CopyBytes(buf.Bytes()))
 		size += uint64(buf.Len())
-		if size >= responseSizeLimit {
-			break
-		}
 	}
 
 	return reply, nil
