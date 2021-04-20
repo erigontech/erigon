@@ -714,7 +714,16 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		headHeight, _ = stages.GetStageProgress(tx, stages.Finish)
 		return nil
 	})
-	protos := eth.MakeProtocols((*ethHandler)(s.handler), s.networkID, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
+	var readNodeInfo = func() *eth.NodeInfo {
+		var res *eth.NodeInfo
+		_ = s.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+			res = eth.ReadNodeInfo(tx, s.chainConfig, s.genesisHash, s.networkID)
+			return nil
+		})
+
+		return res
+	}
+	protos := eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	return protos
 }
 
