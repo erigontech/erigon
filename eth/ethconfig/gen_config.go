@@ -18,7 +18,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NetworkID               uint64
 		EthDiscoveryURLs        []string
 		Pruning                 bool
-		TxLookupLimit           uint64                 `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		StorageMode             string
 		OnlyAnnounce            bool
@@ -39,7 +38,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Pruning = c.Pruning
-	enc.TxLookupLimit = c.TxLookupLimit
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
 	enc.Preimages = c.Preimages
@@ -63,7 +61,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NetworkID               *uint64
 		EthDiscoveryURLs        []string
 		Pruning                 *bool
-		TxLookupLimit           *uint64                `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		Mode                    *string
 		OnlyAnnounce            *bool
@@ -97,9 +94,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Pruning != nil {
 		c.Pruning = *dec.Pruning
-	}
-	if dec.TxLookupLimit != nil {
-		c.TxLookupLimit = *dec.TxLookupLimit
 	}
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist

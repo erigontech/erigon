@@ -168,11 +168,6 @@ var (
 		Usage: `Time of tick`,
 		Value: time.Second * 2,
 	}
-	TxLookupLimitFlag = cli.Uint64Flag{
-		Name:  "txlookuplimit",
-		Usage: "Number of recent blocks to maintain transactions index for (default = about one year, 0 = entire chain)",
-		Value: ethconfig.Defaults.TxLookupLimit,
-	}
 	LightServFlag = cli.IntFlag{
 		Name:  "lightserv",
 		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",

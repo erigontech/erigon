@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
-	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -126,9 +125,7 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            ethdb.Database // Low level persistent database to store final content in
-	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
-	txLookupLimit uint64
+	db ethdb.Database // Low level persistent database to store final content in
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -183,7 +180,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		chainConfig:         chainConfig,
 		cacheConfig:         cacheConfig,
 		db:                  db,
-		triegc:              prque.New(nil),
 		quit:                make(chan struct{}),
 		shouldPreserve:      shouldPreserve,
 		receiptsCache:       receiptsCache,
@@ -435,18 +431,6 @@ func (bc *BlockChain) Stop() {
 		bc.senderCacher.Close()
 	}
 	log.Info("Blockchain stopped")
-}
-
-// SetTxLookupLimit is responsible for updating the txlookup limit to the
-// original one stored in db if the new mismatches with the old one.
-func (bc *BlockChain) SetTxLookupLimit(limit uint64) {
-	bc.txLookupLimit = limit
-}
-
-// TxLookupLimit retrieves the txlookup limit used by blockchain to prune
-// stale transaction indices.
-func (bc *BlockChain) TxLookupLimit() uint64 {
-	return bc.txLookupLimit
 }
 
 // statsReportLimit is the time limit during import and export after which we

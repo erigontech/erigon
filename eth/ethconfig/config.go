@@ -65,9 +65,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:     1,
-	TxLookupLimit: 2350000,
-	StorageMode:   ethdb.DefaultStorageMode,
+	NetworkID:   1,
+	StorageMode: ethdb.DefaultStorageMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -119,8 +118,7 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	Pruning       bool   // Whether to disable pruning and flush everything to disk
-	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
+	Pruning bool // Whether to disable pruning and flush everything to disk
 
 	EnableDownloaderV2 bool
 
