@@ -418,7 +418,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	//log.Info("HeadersMsg processed")
 	return nil
 }
 

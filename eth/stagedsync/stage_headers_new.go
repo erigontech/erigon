@@ -95,7 +95,7 @@ func HeadersForward(
 			peer = headerReqSend(ctx, req)
 			if peer != nil {
 				hd.SentRequest(req, currentTime, 5 /* timeout */)
-				//log.Info("Sent request", "height", req.Number)
+				log.Debug("Sent request", "height", req.Number)
 			}
 		}
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
@@ -105,7 +105,7 @@ func HeadersForward(
 				peer = headerReqSend(ctx, req)
 				if peer != nil {
 					hd.SentRequest(req, currentTime, 5 /*timeout */)
-					//log.Info("Sent request", "height", req.Number)
+					log.Debug("Sent request", "height", req.Number)
 				}
 			}
 			maxRequests--
@@ -114,6 +114,9 @@ func HeadersForward(
 		req = hd.RequestSkeleton()
 		if req != nil {
 			peer = headerReqSend(ctx, req)
+			if peer != nil {
+				log.Debug("Sent skeleton request", "height", req.Number)
+			}
 		}
 		// Load headers into the database
 		if err = hd.InsertHeaders(headerInserter.FeedHeader, blockPropagator); err != nil {
