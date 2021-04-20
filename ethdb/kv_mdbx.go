@@ -637,6 +637,9 @@ func (tx *MdbxTx) Commit() error {
 		slowTx = debug.SlowCommit()
 	}
 
+	commitTimer := time.Now()
+	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+
 	//tx.printDebugInfo()
 
 	latency, err := tx.tx.Commit()
