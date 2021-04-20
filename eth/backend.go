@@ -30,22 +30,18 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -91,15 +87,10 @@ type Ethereum struct {
 
 	engine consensus.Engine
 
-	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
-
-	//APIBackend *EthAPIBackend
-
 	gasPrice  *uint256.Int
 	etherbase common.Address
 
 	networkID uint64
-	//netRPCService *ethapi.PublicNetAPI
 
 	p2pServer *p2p.Server
 
@@ -276,7 +267,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
 		etherbase:     config.Miner.Etherbase,
-		bloomRequests: make(chan chan *bloombits.Retrieval),
 		p2pServer:     stack.Server(),
 		torrentClient: torrentClient,
 		chainConfig:   chainConfig,
@@ -376,7 +366,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
-	if casted, ok := eth.Engine().(*ethash.Ethash); ok {
+	if casted, ok := eth.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	if stack.Config().PrivateApiAddr != "" {
@@ -777,18 +767,9 @@ func (s *Ethereum) StopMining() {
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
-func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
-func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
-func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
-func (s *Ethereum) ChainKV() ethdb.RwKV                { return s.chainKV }
-func (s *Ethereum) IsListening() bool                  { return true } // Always listening
-func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
-func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }
-func (s *Ethereum) SyncProgress() ethereum.SyncProgress {
-	return s.handler.downloader.Progress()
-}
-func (s *Ethereum) Synced() bool      { return atomic.LoadUint32(&s.handler.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
+func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
+func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
+func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -807,8 +788,11 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 		return res
 	}
-	protos := eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
-	return protos
+	if s.config.EnableDownloaderV2 {
+		return nil // downloader.MakeProtocols()
+	} else {
+		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
+	}
 }
 
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
@@ -818,8 +802,12 @@ func (s *Ethereum) Start() error {
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	// Start the networking layer and the light server if requested
-	s.handler.Start(maxPeers)
+	if s.config.EnableDownloaderV2 {
+
+	} else {
+		// Start the networking layer and the light server if requested
+		s.handler.Start(maxPeers)
+	}
 	return nil
 }
 
@@ -827,7 +815,11 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	s.handler.Stop()
+	if s.config.EnableDownloaderV2 {
+
+	} else {
+		s.handler.Stop()
+	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
