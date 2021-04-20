@@ -218,7 +218,6 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noverify)
-			engine.SetThreads(-1) // Disable CPU mining
 			eng = engine
 		}
 	case *params.SnapshotConfig:

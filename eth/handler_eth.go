@@ -24,25 +24,20 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // ethHandler implements the eth.Backend interface to handle the various network
 // packets that are sent as replies or broadcasts.
 type ethHandler handler
 
-func (h *ethHandler) Chain() *core.BlockChain          { return h.chain }
-func (h *ethHandler) DB() ethdb.RwKV                   { return h.database.(ethdb.HasRwKV).RwKV() }
-func (h *ethHandler) ChainConfig() *params.ChainConfig { return h.chainConfig }
-func (h *ethHandler) GenesisHash() common.Hash         { return h.genesis.Hash() }
-func (h *ethHandler) TxPool() eth.TxPool               { return h.txpool }
+func (h *ethHandler) DB() ethdb.RwKV     { return h.database.(ethdb.HasRwKV).RwKV() }
+func (h *ethHandler) TxPool() eth.TxPool { return h.txpool2 }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {

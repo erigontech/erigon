@@ -51,7 +51,7 @@ var (
 
 	// sharedEthash is a full instance that can be shared between multiple users.
 	sharedEthashOnce sync.Once
-	sharedEthash *Ethash
+	sharedEthash     *Ethash
 
 	// algorithmRevision is the data structure version used for file naming.
 	algorithmRevision = 23
@@ -443,8 +443,6 @@ type Ethash struct {
 
 	// Mining related fields
 	rand     *rand.Rand    // Properly seeded random source for nonces
-	threads  int           // Number of threads to mine on if mining
-	update   chan struct{} // Notification channel to update mining parameters
 	hashrate metrics.Meter // Meter tracking the average hashrate
 	remote   *remoteSealer
 
@@ -473,7 +471,6 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 		config:   config,
 		caches:   newlru("cache", config.CachesInMem, newCache),
 		datasets: newlru("dataset", config.DatasetsInMem, newDataset),
-		update:   make(chan struct{}),
 		hashrate: metrics.NewMeterForced(),
 	}
 	if config.PowMode == ModeShared {
@@ -559,37 +556,6 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 		}
 	}
 	return current
-}
-
-// Threads returns the number of mining threads currently enabled. This doesn't
-// necessarily mean that mining is running!
-func (ethash *Ethash) Threads() int {
-	ethash.lock.Lock()
-	defer ethash.lock.Unlock()
-
-	return ethash.threads
-}
-
-// SetThreads updates the number of mining threads currently enabled. Calling
-// this method does not start mining, only sets the thread count. If zero is
-// specified, the miner will use all cores of the machine. Setting a thread
-// count below zero is allowed and will cause the miner to idle, without any
-// work being done.
-func (ethash *Ethash) SetThreads(threads int) {
-	ethash.lock.Lock()
-	defer ethash.lock.Unlock()
-
-	// If we're running a shared PoW, set the thread count on that instead
-	if ethash.shared != nil {
-		ethash.shared.SetThreads(threads)
-		return
-	}
-	// Update the threads and ping any running seal to pull in any changes
-	ethash.threads = threads
-	select {
-	case ethash.update <- struct{}{}:
-	default:
-	}
 }
 
 // Hashrate implements PoW, returning the measured rate of the search invocations
