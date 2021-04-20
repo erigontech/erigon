@@ -1246,7 +1246,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
 	case params.AleutChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 133519467574834 // aleut
+			cfg.NetworkID = 7822 // aleut
 		}
 		cfg.Genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
