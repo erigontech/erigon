@@ -202,8 +202,6 @@ const (
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	HeadFastBlockKey = "LastFast"
 
 	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
 	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
@@ -270,7 +268,6 @@ var Buckets = []string{
 	PlainStorageChangeSetBucket,
 	Senders,
 	HeadBlockKey,
-	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
 	LogTopicIndex,

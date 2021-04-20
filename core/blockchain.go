@@ -168,8 +168,7 @@ type BlockChain struct {
 
 	Chainmu sync.RWMutex // blockchain insertion lock
 
-	currentBlock     atomic.Value // Current head of the block chain
-	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
+	currentBlock atomic.Value // Current head of the block chain
 
 	receiptsCache *lru.Cache // Cache for the most recent receipts per block
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
@@ -241,7 +240,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 
 	var nilBlock *types.Block
 	bc.currentBlock.Store(nilBlock)
-	bc.currentFastBlock.Store(nilBlock)
 
 	if err := bc.loadLastState(); err != nil {
 		log.Error("loadLoadState", "err", err)
@@ -297,17 +295,6 @@ func (bc *BlockChain) loadLastState() error {
 		}
 	}
 	bc.hc.SetCurrentHeader(bc.db, currentHeader)
-
-	// Restore the last known head fast block
-	bc.currentFastBlock.Store(currentBlock)
-	//headFastBlockGauge.Update(int64(currentBlock.NumberU64()))
-
-	if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
-		if block := bc.GetBlockByHash(head); block != nil {
-			bc.currentFastBlock.Store(block)
-			//headFastBlockGauge.Update(int64(block.NumberU64()))
-		}
-	}
 	// Issue a status log for the user
 
 	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
@@ -362,11 +349,6 @@ func SetHead(db ethdb.Database, head uint64) error {
 	return nil
 }
 
-// GasLimit returns the gas limit of the current HEAD block.
-func (bc *BlockChain) GasLimit() uint64 {
-	return bc.CurrentBlock().GasLimit()
-}
-
 // CurrentBlock retrieves the current head block of the canonical chain. The
 // block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentBlock() *types.Block {
@@ -375,34 +357,9 @@ func (bc *BlockChain) CurrentBlock() *types.Block {
 	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
 }
 
-// CurrentFastBlock retrieves the current fast-sync head block of the canonical
-// chain. The block is retrieved from the blockchain's internal cache.
-func (bc *BlockChain) CurrentFastBlock() *types.Block {
-	return bc.currentFastBlock.Load().(*types.Block)
-}
-
 // Genesis retrieves the chain's genesis block.
 func (bc *BlockChain) Genesis() *types.Block {
 	return bc.genesisBlock
-}
-
-// GetBody retrieves a block body (transactions and uncles) from the database by
-// hash, caching it if found.
-func (bc *BlockChain) GetBody(hash common.Hash) *types.Body {
-	number := bc.hc.GetBlockNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	body := rawdb.ReadBody(bc.db, hash, *number)
-	if body == nil {
-		return nil
-	}
-	return body
-}
-
-// HasBlock checks if a block is fully present in the database or not.
-func (bc *BlockChain) HasBlock(hash common.Hash, number uint64) bool {
-	return rawdb.HasBody(bc.db, hash, number)
 }
 
 // GetBlock retrieves a block from the database by hash and number,

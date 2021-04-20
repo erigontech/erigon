@@ -73,12 +73,11 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPoolServer       proto_txpool.TxpoolServer
-	txPoolClient       proto_txpool.TxpoolClient
-	txPool             *core.TxPool
-	handler            *handler
-	ethDialCandidates  enode.Iterator
-	snapDialCandidates enode.Iterator
+	txPoolServer      proto_txpool.TxpoolServer
+	txPoolClient      proto_txpool.TxpoolClient
+	txPool            *core.TxPool
+	handler           *handler
+	ethDialCandidates enode.Iterator
 
 	// DB interfaces
 	chainKV    ethdb.RwKV // Same as chainDb, but different interface
@@ -404,7 +403,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 	}
-	eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 
 	checkpoint := config.Checkpoint
 	eth.txPoolServer = txpool.NewServer(context.Background(), eth.txPool)
