@@ -149,10 +149,8 @@ type BlockChain struct {
 	running int32          // 0 if chain is running, 1 when stopped (must be called atomically)
 	quitMu  sync.RWMutex
 
-	engine     consensus.Engine
-	prefetcher Prefetcher // Block state prefetcher interface
-	processor  Processor  // Block transaction processor interface
-	vmConfig   vm.Config
+	engine   consensus.Engine
+	vmConfig vm.Config
 
 	shouldPreserve      func(*types.Block) bool        // Function used to determine whether should preserve the given block.
 	TerminateInsert     func(common.Hash, uint64) bool // Testing hook used to terminate ancient receipt chain insertion.
@@ -191,8 +189,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		enablePreimages:     true,
 		senderCacher:        senderCacher,
 	}
-	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine)
