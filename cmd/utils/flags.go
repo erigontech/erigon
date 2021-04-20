@@ -36,7 +36,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -276,12 +275,6 @@ var (
 		Name:  "txpool.lifetime",
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
-	}
-	// Performance tuning settings
-	ArchiveSyncInterval = cli.IntFlag{
-		Name:  "archive-sync-interval",
-		Usage: "When to switch from full to archive sync",
-		Value: 1024,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -759,20 +752,6 @@ func SplitAndTrim(input string) (ret []string) {
 	return ret
 }
 
-// makeDatabaseHandles raises out the number of allowed file handles per process
-// for Geth and returns half of the allowance to assign to the database.
-func makeDatabaseHandles() int {
-	limit, err := fdlimit.Maximum()
-	if err != nil {
-		Fatalf("Failed to retrieve file descriptor allowance: %v", err)
-	}
-	raised, err := fdlimit.Raise(uint64(limit))
-	if err != nil {
-		Fatalf("Failed to raise file descriptor allowance: %v", err)
-	}
-	return int(raised / 2) // Leave half for networking and other stuff
-}
-
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
 func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1149,10 +1128,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-	cfg.DatabaseHandles = makeDatabaseHandles()
-	//if ctx.GlobalIsSet(AncientFlag.Name) {
-	//	cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
-	//}
 
 	// todo uncomment after fix pruning
 	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
@@ -1167,7 +1142,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 	log.Info("Enabling recording of key preimages since archive mode is used")
 
-	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
 	}

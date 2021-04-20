@@ -137,18 +137,12 @@ type Config struct {
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
 	DownloadOnly        bool
-	ArchiveSyncInterval int
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
 	PruningTimeout      time.Duration
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
-
-	// Database options
-	SkipBcVersionCheck bool `toml:"-"`
-	DatabaseHandles    int  `toml:"-"`
-	DatabaseFreezer    string
 
 	Preimages bool
 

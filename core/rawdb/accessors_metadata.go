@@ -30,33 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-// ReadDatabaseVersion retrieves the version number of the database.
-func ReadDatabaseVersion(db ethdb.DatabaseReader) *uint64 {
-	var version uint64
-
-	enc, _ := db.Get(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey))
-	if len(enc) == 0 {
-		return nil
-	}
-	if err := rlp.DecodeBytes(enc, &version); err != nil {
-		return nil
-	}
-
-	return &version
-}
-
-// WriteDatabaseVersion stores the version number of the database
-func WriteDatabaseVersion(db ethdb.Putter, version uint64) error {
-	enc, err := rlp.EncodeToBytes(version)
-	if err != nil {
-		return fmt.Errorf("failed to encode database version: %w", err)
-	}
-	if err = db.Put(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey), enc); err != nil {
-		return fmt.Errorf("failed to store the database version: %w", err)
-	}
-	return nil
-}
-
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db ethdb.KVGetter, hash common.Hash) (*params.ChainConfig, error) {
 	data, err := db.GetOne(dbutils.ConfigPrefix, hash[:])

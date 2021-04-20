@@ -85,31 +85,6 @@ const (
 	receiptsCacheLimit = 32
 	maxFutureBlocks    = 256
 	TriesInMemory      = 128
-
-	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
-	//
-	// Changelog:
-	//
-	// - Version 4
-	//   The following incompatible database changes were added:
-	//   * the `BlockNumber`, `TxHash`, `TxIndex`, `BlockHash` and `Index` fields of log are deleted
-	//   * the `Bloom` field of receipt is deleted
-	//   * the `BlockIndex` and `TxIndex` fields of txlookup are deleted
-	// - Version 5
-	//  The following incompatible database changes were added:
-	//    * the `TxHash`, `GasCost`, and `ContractAddress` fields are no longer stored for a receipt
-	//    * the `TxHash`, `GasCost`, and `ContractAddress` fields are computed by looking up the
-	//      receipts' corresponding block
-	// - Version 6
-	//  The following incompatible database changes were added:
-	//    * Transaction lookup information stores the corresponding block number instead of block hash
-	// - Version 7
-	//  The following incompatible database changes were added:
-	//    * Use freezer as the ancient database to maintain all ancient data
-	// - Version 8
-	//  The following incompatible database changes were added:
-	//    * New scheme for contract code in order to separate the codes and trie nodes
-	BlockChainVersion uint64 = 8
 )
 
 // CacheConfig contains the configuration values for the trie caching/pruning
@@ -120,7 +95,6 @@ type CacheConfig struct {
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
 	PruneTimeout        time.Duration
-	ArchiveSyncInterval uint64
 	DownloadOnly        bool
 	NoHistory           bool
 }
@@ -201,9 +175,6 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
-	}
-	if cacheConfig.ArchiveSyncInterval == 0 {
-		cacheConfig.ArchiveSyncInterval = 1024
 	}
 
 	receiptsCache, _ := lru.New(receiptsCacheLimit)

@@ -21,11 +21,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TxLookupLimit           uint64                 `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		StorageMode             string
-		ArchiveSyncInterval     int
 		OnlyAnnounce            bool
-		SkipBcVersionCheck      bool `toml:"-"`
-		DatabaseHandles         int  `toml:"-"`
-		DatabaseFreezer         string
 		Preimages               bool
 		Miner                   params.MiningConfig
 		Ethash                  ethash.Config
@@ -46,10 +42,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TxLookupLimit = c.TxLookupLimit
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
-	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
-	enc.SkipBcVersionCheck = c.SkipBcVersionCheck
-	enc.DatabaseHandles = c.DatabaseHandles
-	enc.DatabaseFreezer = c.DatabaseFreezer
 	enc.Preimages = c.Preimages
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
@@ -74,7 +66,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TxLookupLimit           *uint64                `toml:",omitempty"`
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		Mode                    *string
-		ArchiveSyncInterval     *int
 		OnlyAnnounce            *bool
 		SkipBcVersionCheck      *bool `toml:"-"`
 		DatabaseHandles         *int  `toml:"-"`
@@ -119,18 +110,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 			return err
 		}
 		c.StorageMode = mode
-	}
-	if dec.ArchiveSyncInterval != nil {
-		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval
-	}
-	if dec.SkipBcVersionCheck != nil {
-		c.SkipBcVersionCheck = *dec.SkipBcVersionCheck
-	}
-	if dec.DatabaseHandles != nil {
-		c.DatabaseHandles = *dec.DatabaseHandles
-	}
-	if dec.DatabaseFreezer != nil {
-		c.DatabaseFreezer = *dec.DatabaseFreezer
 	}
 	if dec.Preimages != nil {
 		c.Preimages = *dec.Preimages
