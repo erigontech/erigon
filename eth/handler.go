@@ -111,9 +111,6 @@ type handler struct {
 	txsCh  chan core.NewTxsEvent
 	txsSub event.Subscription
 
-	txsChMining  chan core.NewTxsEvent
-	txsSubMining event.Subscription
-
 	whitelist map[uint64]common.Hash
 
 	// channels for fetcher, syncer, txsyncLoop
@@ -333,9 +330,6 @@ func (h *handler) Start(maxPeers int) {
 }
 func (h *handler) Stop() {
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop
-	if h.txsSubMining != nil {
-		h.txsSubMining.Unsubscribe()
-	}
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.

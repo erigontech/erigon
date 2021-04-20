@@ -19,7 +19,6 @@ package eth
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -98,7 +97,6 @@ type Ethereum struct {
 
 	gasPrice  *uint256.Int
 	etherbase common.Address
-	signer    *ecdsa.PrivateKey
 
 	networkID uint64
 	//netRPCService *ethapi.PublicNetAPI
