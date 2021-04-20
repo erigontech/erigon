@@ -319,50 +319,21 @@ func (bc *BlockChain) loadLastState() error {
 	return nil
 }
 
-// SetHead rewinds the local chain to a new head. Depending on whether the node
-// was fast synced or full synced and in which state, the method will try to
-// delete minimal data from disk whilst retaining chain consistency.
-func (bc *BlockChain) SetHead(head uint64) error {
+func SetHead(db ethdb.Database, head uint64) error {
 	log.Warn("Rewinding blockchain", "target", head)
-
-	bc.Chainmu.Lock()
-	defer bc.Chainmu.Unlock()
 
 	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
-		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
-			if newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64()); newHeadBlock == nil {
+		if currentBlock := rawdb.ReadCurrentBlock(db); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
+			newHeadBlock := rawdb.ReadBlock(db, header.Hash(), header.Number.Uint64())
+			if newHeadBlock == nil {
 				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
 			} else {
 				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
-
-				// Degrade the chain markers if they are explicitly reverted.
-				// In theory we should update all in-memory markers in the
-				// last step, however the direction of SetHead is from high
-				// to low, so it's safe the update in-memory markers directly.
-				bc.currentBlock.Store(newHeadBlock)
-				//headBlockGauge.Update(int64(newHeadBlock.NumberU64()))
 			}
 		}
 
-		// Rewind the fast block in a simpleton way to the target head
-		if currentFastBlock := bc.CurrentFastBlock(); currentFastBlock != nil && header.Number.Uint64() < currentFastBlock.NumberU64() {
-			newHeadFastBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
-			// If either blocks reached nil, reset to the genesis state
-			if newHeadFastBlock == nil {
-				newHeadFastBlock = bc.genesisBlock
-			}
-			rawdb.WriteHeadFastBlockHash(db, newHeadFastBlock.Hash())
-
-			// Degrade the chain markers if they are explicitly reverted.
-			// In theory we should update all in-memory markers in the
-			// last step, however the direction of SetHead is from high
-			// to low, so it's safe the update in-memory markers directly.
-			bc.currentFastBlock.Store(newHeadFastBlock)
-			//headFastBlockGauge.Update(int64(newHeadFastBlock.NumberU64()))
-		}
-
-		return bc.CurrentBlock().NumberU64(), false /* we have nothing to wipe in turbo-geth */
+		return rawdb.ReadCurrentBlock(db).NumberU64(), false /* we have nothing to wipe in turbo-geth */
 	}
 
 	// Rewind the header chain, deleting all block bodies until then
@@ -378,22 +349,17 @@ func (bc *BlockChain) SetHead(head uint64) error {
 
 	// If SetHead was only called as a chain reparation method, try to skip
 	// touching the header chain altogether, unless the freezer is broken
-	if block := bc.CurrentBlock(); block.NumberU64() == head {
-		if target, force := updateFn(bc.db, block.Header()); force {
-			bc.hc.SetHead(target, updateFn, delFn)
+	if block := rawdb.ReadCurrentBlock(db); block.NumberU64() == head {
+		if target, force := updateFn(db, block.Header()); force {
+			SetHeaderHead(db, target, updateFn, delFn)
 		}
 	} else {
 		// Rewind the chain to the requested head and keep going backwards until a
 		// block with a state is found or fast sync pivot is passed
 		log.Warn("Rewinding blockchain", "target", head)
-		bc.hc.SetHead(head, updateFn, delFn)
+		SetHeaderHead(db, head, updateFn, delFn)
 	}
-
-	// Clear out any stale content from the caches
-	bc.receiptsCache.Purge()
-	bc.futureBlocks.Purge()
-
-	return bc.loadLastState()
+	return nil
 }
 
 // GasLimit returns the gas limit of the current HEAD block.

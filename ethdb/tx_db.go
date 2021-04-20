@@ -68,6 +68,10 @@ func (m *roTxDb) Tx() Tx {
 	return m.tx
 }
 
+func NewRwTxDb(tx Tx) *TxDb {
+	return &TxDb{tx: tx, cursors: map[string]Cursor{}}
+}
+
 // TxDb - provides Database interface around ethdb.Tx
 // It's not thread-safe!
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
