@@ -34,7 +34,12 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs types.TransactionsGroupedBySender, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+	txPoolLocals := txPool.Locals()
+	pendingTxs, err := txPool.Pending()
+	if err != nil {
+		return err
+	}
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.

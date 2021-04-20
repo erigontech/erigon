@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -665,6 +666,9 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensu
 	chainConfig := params.MainnetChainConfig
 	events := remotedbserver.NewEvents()
 
+	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, tx, txCacher)
+
 	var cacheSize datasize.ByteSize
 	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	var batchSize datasize.ByteSize
@@ -683,7 +687,7 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensu
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc(), Notifier: events},
 	)
-	return sm, ethash.NewFaker(), chainConfig, vmConfig, nil, st, stMining, cache
+	return sm, ethash.NewFaker(), chainConfig, vmConfig, txPool, st, stMining, cache
 }
 
 func progress(tx ethdb.Getter, stage stages.SyncStage) uint64 {

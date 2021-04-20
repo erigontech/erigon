@@ -7,7 +7,6 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -67,9 +66,7 @@ type MiningStagesParameters struct {
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
 	// in this case this feature will add all empty blocks into canonical chain
 	// non-stop and no real transaction will be included.
-	noempty      bool
-	PendingTxs   types.TransactionsGroupedBySender
-	TxPoolLocals []common.Address
+	noempty bool
 
 	resultCh     chan<- *types.Block
 	miningCancel <-chan struct{}
@@ -78,8 +75,8 @@ type MiningStagesParameters struct {
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, pendingTxs types.TransactionsGroupedBySender, txPoolLocals []common.Address, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, PendingTxs: pendingTxs, TxPoolLocals: txPoolLocals, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
+func NewMiningStagesParameters(cfg *params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
+	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
 
 }
 
@@ -425,8 +422,7 @@ func MiningStages() StageBuilders {
 							world.mining.GasFloor,
 							world.mining.GasCeil,
 							world.mining.Etherbase,
-							world.mining.TxPoolLocals,
-							world.mining.PendingTxs,
+							world.txPool,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
