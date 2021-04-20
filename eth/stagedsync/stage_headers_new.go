@@ -156,7 +156,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.AnythingDone() {
-		if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
+		if err := s.Update(batch, headerInserter.GetHighest()); err != nil {
 			return err
 		}
 	}
