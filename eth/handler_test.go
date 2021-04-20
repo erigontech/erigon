@@ -92,7 +92,7 @@ func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes commo
 			continue
 		}
 		buf.Reset()
-		if err := txn.EncodeRLP(buf); err != nil {
+		if err := rlp.Encode(buf, txn); err != nil {
 			return nil, err
 		}
 		reply = append(reply, common.CopyBytes(buf.Bytes()))
