@@ -49,8 +49,6 @@ type Trie struct {
 
 	newHasherFunc func() *hasher
 
-	Version uint8
-
 	binary bool
 
 	hashMap map[common.Hash]node
