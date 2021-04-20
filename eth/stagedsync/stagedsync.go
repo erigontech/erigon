@@ -112,6 +112,7 @@ func (stagedSync *StagedSync) Prepare(
 			mining:                miningConfig,
 			snapshotsDir: stagedSync.params.SnapshotDir,
 			btClient: stagedSync.params.TorrnetClient,
+			SnapshotBuilder: stagedSync.params.SnapshotMigrator,
 		},
 	)
 	state := NewState(stages)
@@ -134,10 +135,5 @@ func (stagedSync *StagedSync) Prepare(
 func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string) {
 	stagedSync.params.TorrnetClient=client
 	stagedSync.params.SnapshotDir = snapshotsDir
-	stagedSync.params.SnapshotMigrator = &migrator.SnapshotMigrator2{
-		HeadersCurrentSnapshot:     0,
-		HeadersNewSnapshot:         0,
-		HeadersNewSnapshotInfohash: nil,
-		Stage:                      0,
-	}
+	stagedSync.params.SnapshotMigrator = migrator.New(snapshotsDir)
 }

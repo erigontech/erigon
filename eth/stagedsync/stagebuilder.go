@@ -398,7 +398,15 @@ func DefaultStages() StageBuilders {
 							return err
 						}
 
-						err = world.SnapshotBuilder.Migrate(world.DB, world.TX, executionAt, world.btClient)
+						fmt.Println("world.SnapshotBuilder", "bn", s.BlockNumber,"exAt", executionAt)
+						headersBlock, err := stages.GetStageProgress(world.TX, stages.Headers)
+						if err!=nil {
+							return err
+						}
+
+						snBlock:=headersBlock - (headersBlock+ 70000)%50//Epoch
+
+						err = world.SnapshotBuilder.Migrate(world.DB, world.TX, snBlock, world.btClient)
 						if err!=nil {
 							return err
 						}
@@ -536,18 +544,39 @@ func DefaultUnwindOrder() UnwindOrder {
 }
 
 func WithSnapshotsStages() StageBuilders {
-	defaulStages:=DefaultStages()
+	defaultStages :=DefaultStages()
+	final:= defaultStages[len(defaultStages)-1]
+	defaultStages = defaultStages[:1]
+	//defaultStages = append(defaultStages, StageBuilder{
+	//	ID: stages.CreateHeadersSnapshot,
+	//	Build: func(world StageParameters) *Stage {
+	//		return &Stage{
+	//			ID:          stages.CreateHeadersSnapshot,
+	//			Description: "Create headers snapshot",
+	//			ExecFunc: func(s *StageState, u Unwinder) error {
+	//				return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
+	//			},
+	//			UnwindFunc: func(u *UnwindState, s *StageState) error {
+	//				return u.Done(world.DB)
+	//			},
+	//		}
+	//	},
+	//})
+	defaultStages = append(defaultStages, final)
+	fmt.Println(defaultStages)
+	return defaultStages
+
 	blockHashesStageIndex:=-1
 	sendersStageIndex:=-1
 	hashedStateStageIndex:=-1
-	for i:=range defaulStages {
-		if bytes.Equal(defaulStages[i].ID,stages.Bodies) {
+	for i:=range defaultStages {
+		if bytes.Equal(defaultStages[i].ID,stages.Bodies) {
 			blockHashesStageIndex = i
 		}
-		if bytes.Equal(defaulStages[i].ID,stages.Senders) {
+		if bytes.Equal(defaultStages[i].ID,stages.Senders) {
 			sendersStageIndex = i
 		}
-		if bytes.Equal(defaulStages[i].ID,stages.HashState) {
+		if bytes.Equal(defaultStages[i].ID,stages.HashState) {
 			hashedStateStageIndex = i
 		}
 	}
@@ -556,8 +585,8 @@ func WithSnapshotsStages() StageBuilders {
 		return DefaultStages()
 	}
 
-	stagesWithSnapshots:=make(StageBuilders, 0, len(defaulStages)+1)
-	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[:blockHashesStageIndex]...)
+	stagesWithSnapshots:=make(StageBuilders, 0, len(defaultStages)+1)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[:blockHashesStageIndex]...)
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
 		ID: stages.CreateHeadersSnapshot,
 		Build: func(world StageParameters) *Stage {
@@ -573,7 +602,7 @@ func WithSnapshotsStages() StageBuilders {
 			}
 		},
 	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[blockHashesStageIndex:sendersStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[blockHashesStageIndex:sendersStageIndex]...)
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
 		ID: stages.CreateBodiesSnapshot,
 		Build: func(world StageParameters) *Stage {
@@ -590,7 +619,7 @@ func WithSnapshotsStages() StageBuilders {
 		},
 
 	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[sendersStageIndex:hashedStateStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[sendersStageIndex:hashedStateStageIndex]...)
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
 		ID: stages.CreateStateSnapshot,
 		Build: func(world StageParameters) *Stage {
@@ -607,7 +636,7 @@ func WithSnapshotsStages() StageBuilders {
 		},
 
 	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaulStages[hashedStateStageIndex:]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[hashedStateStageIndex:]...)
 	return stagesWithSnapshots
 }
 
@@ -626,6 +655,9 @@ func WithSnapshotsStages() StageBuilders {
 //}
 
 func UnwindOrderWithSnapshots() UnwindOrder {
+	return []int{
+		0, 1,
+	}
 	//todo fix unwind order
 	return []int{
 		0, 1, 2, 3,

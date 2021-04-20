@@ -353,9 +353,9 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 Проход для каждого снепшота последовательный
 */
 
-func New(snapshotDir string, currentSnapshotBlock uint64, ) *SnapshotMigrator2 {
+func New(snapshotDir string) *SnapshotMigrator2 {
 	return &SnapshotMigrator2{
-
+		snapshotsDir: snapshotDir,
 	}
 }
 
@@ -388,14 +388,20 @@ const (
 	StagePruneDB  = 6
 	StageFinish  = 7
 )
+/*
+todo save snapshot block before delete old snapshot
+ */
 func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlock uint64,  bittorrent *bittorrent.Client) error  {
+	fmt.Println("Migrate",sm.Stage, sm.HeadersNewSnapshot, sm.HeadersCurrentSnapshot, toBlock)
 	switch atomic.LoadUint64(&sm.Stage) {
 	case StageStart:
+		log.Info("Snapshot generation block", "skip",atomic.LoadUint64(&sm.HeadersNewSnapshot)>= toBlock)
 		sm.mtx.Lock()
 		if atomic.LoadUint64(&sm.HeadersNewSnapshot)>= toBlock {
 			sm.mtx.Unlock()
 			return nil
 		}
+
 		atomic.StoreUint64(&sm.HeadersNewSnapshot, toBlock)
 		atomic.StoreUint64(&sm.Stage, StageGenerate)
 		ctx, cancel:=context.WithCancel(context.Background())
@@ -412,17 +418,25 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				sm.mtx.Unlock()
 			}()
 			snapshotPath:=SnapshotName(sm.snapshotsDir, "headers", toBlock)
+			tt:=time.Now()
+			log.Info("Create snapshot", "type", "headers")
 			err=CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath)
 			if err!=nil {
 				fmt.Println("-----------------------Create Error!", err)
 				return
 			}
+			log.Info("Snapshot created","t", time.Since(tt))
+
 			atomic.StoreUint64(&sm.Stage, StageReplace)
+			log.Info("Replace snapshot", "type", "headers")
+			tt = time.Now()
 			err = sm.ReplaceHeadersSnapshot(db, snapshotPath)
 			if err!=nil {
 				fmt.Println("-----------------------Replace Error!", err)
 				return
 			}
+			log.Info("Replaced snapshot", "type", "headers", "t", time.Since(tt))
+
 
 			atomic.StoreUint64(&sm.Stage, StageStopSeeding)
 			//todo headers infohash
@@ -434,37 +448,41 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			if len(infohash)==20 {
 				var hash metainfo.Hash
 				copy(hash[:], infohash)
-				fmt.Println("--------------------------------------------------------------")
-				fmt.Println("stop seeding", common.Bytes2Hex(infohash))
-				fmt.Println("--------------------------------------------------------------")
-
+				log.Info("Stop seeding snapshot", "type", "headers", "infohash", hash.String())
+				tt = time.Now()
 				err = bittorrent.StopSeeding(hash)
 				if err!=nil {
 					fmt.Println("-----------------------stop seeding!", err)
 					return
 				}
+				log.Info("Stopped seeding snapshot", "type", "headers", "infohash", hash.String(), "t", time.Since(tt))
 				atomic.StoreUint64(&sm.Stage, StageStartSeedingNew)
 			} else {
-				fmt.Println("not correct infohash", len(infohash))
+				log.Warn("Hasn't stopped snapshot", "infohash",common.Bytes2Hex(infohash))
 			}
 
+			log.Info("Start seeding snapshot", "type", "headers")
+			tt = time.Now()
 			seedingInfoHash, err := bittorrent.SeedSnapshot("headers", snapshotPath)
 			if err!=nil {
+				log.Error("Seed error", "err",err)
 				fmt.Println("-------seed snaopshot err", err)
 			}
 			sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
-			fmt.Println("--------------------------------------------------------------")
-			fmt.Println("start seeding", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash))
-			fmt.Println("--------------------------------------------------------------")
+			log.Info("Started seeding snapshot", "type", "headers", "t", time.Since(tt), "infohash", seedingInfoHash.String())
 			atomic.StoreUint64(&sm.Stage, StageRemoveOldSnapshot)
 			sm.mtx.RLock()
 			defer sm.mtx.RUnlock()
-			if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot {
+			if sm.HeadersCurrentSnapshot < sm.HeadersNewSnapshot && sm.HeadersCurrentSnapshot!=0 {
 				oldSnapshotPath:= SnapshotName(sm.snapshotsDir,"headers", sm.HeadersCurrentSnapshot)
+				log.Info("Removing old snapshot",  "path", oldSnapshotPath)
+				tt=time.Now()
 				err = os.RemoveAll(oldSnapshotPath)
 				if err!=nil {
 					fmt.Println("snapshot hasn't removed")
+					log.Error("Remove snapshot", "err", err)
 				}
+				log.Info("Removed old snapshot",  "path", oldSnapshotPath,"t", time.Since(tt))
 			}
 			atomic.StoreUint64(&sm.Stage, StagePruneDB)
 		}()
@@ -473,6 +491,8 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 		var wtx ethdb.RwTx
 		var useExternalTx bool
 		var err error
+		tt:=time.Now()
+		log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", sm.HeadersNewSnapshot)
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 			wtx = tx.(ethdb.HasTx).Tx().(ethdb.DBTX).DBTX()
 			useExternalTx = true
@@ -482,7 +502,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				return err
 			}
 		}
-		fmt.Println("External tx", useExternalTx)
+
 		err = sm.RemoveHeadersData(db, wtx)
 		if err!=nil {
 			fmt.Println("RemoveHeadersData err", err)
@@ -509,10 +529,13 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 				return err
 			}
 		}
+		log.Info("Prune db succes", "t", time.Since(tt))
 		atomic.StoreUint64(&sm.Stage, StageFinish)
 
 	case StageFinish:
 		fmt.Println("+Finish")
+		tt:=time.Now()
+		log.Info("Finish",)
 		v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 		fmt.Println("+Finish")
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -526,6 +549,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 
 		if len(v)!=8 {
 			fmt.Println("incorrect length", len(v), v)
+			log.Error("Incorrect length", "ln", len(v))
 			return nil
 		}
 		if binary.BigEndian.Uint64(v) == sm.HeadersNewSnapshot {
@@ -534,6 +558,7 @@ func (sm *SnapshotMigrator2) Migrate(db ethdb.Database, tx ethdb.Database, toBlo
 			atomic.StoreUint64(&sm.HeadersCurrentSnapshot,sm.HeadersNewSnapshot)
 			sm.mtx.Unlock()
 		}
+		log.Info("Finish success", "t", time.Since(tt))
 
 	default:
 		return nil

@@ -427,7 +427,7 @@ func (s *snTX) Comparator(bucket string) dbutils.CmpFunc {
 }
 
 func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	panic("implement me")
+	return s.dbTX.(RwTx).IncrementSequence(bucket, amount)
 }
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {

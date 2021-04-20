@@ -22,9 +22,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -147,12 +149,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
-
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
-		return nil, genesisErr
-	}
-	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	btEnabled:=config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64()
 	var torrentClient *bittorrent.Client
@@ -254,8 +250,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, innerErr
 			}
 		} else {
-
-
 			err = torrentClient.Load(chainDb)
 			if err != nil {
 				return nil, err
@@ -292,10 +286,30 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 	} else  {
+		snapshotBlock,err:=chainDb.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, err
+		}
+		snKVOpts:=ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV())
+		if len(snapshotBlock)==8 {
+			snKV, err:=migrator.OpenHeadersSnapshot(migrator.SnapshotName(snapshotsDir, "headers", binary.BigEndian.Uint64(snapshotBlock)))
+			if err!=nil {
+				return nil, err
+			}
+			snKVOpts = snKVOpts.SnapshotDB([]string{dbutils.HeadersBucket}, snKV)
+		}
 		//manually wrap current db for snapshot generation
-		chainDb.(ethdb.HasRwKV).SetRwKV(ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV()).Open())
+		chainDb.(ethdb.HasRwKV).SetRwKV(snKVOpts.Open())
 	}
 	btEnabled=true
+
+	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
+
+	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+		return nil, genesisErr
+	}
+	log.Info("Initialised chain configuration", "config", chainConfig)
+
 
 	eth := &Ethereum{
 		config:        config,
