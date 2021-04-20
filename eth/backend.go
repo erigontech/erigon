@@ -633,7 +633,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) error {
-	if s.config.Miner.Enabled {
+	if !s.config.Miner.Enabled {
 		return nil
 	}
 
