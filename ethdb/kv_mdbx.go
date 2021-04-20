@@ -617,6 +617,9 @@ func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 }
 
 func (tx *MdbxTx) Commit() error {
+	commitTimer := time.Now()
+	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}

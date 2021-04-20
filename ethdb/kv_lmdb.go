@@ -609,6 +609,9 @@ func (tx *lmdbTx) ExistsBucket(bucket string) bool {
 }
 
 func (tx *lmdbTx) Commit() error {
+	commitTimer := time.Now()
+	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -624,7 +627,6 @@ func (tx *lmdbTx) Commit() error {
 	}()
 	tx.closeCursors()
 
-	commitTimer := time.Now()
 	if err := tx.tx.Commit(); err != nil {
 		return err
 	}
