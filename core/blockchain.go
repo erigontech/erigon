@@ -639,9 +639,7 @@ func ExecuteBlockEphemerally(
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		if !vmConfig.NoReceipts {
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
-		}
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
