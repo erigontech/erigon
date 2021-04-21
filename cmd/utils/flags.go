@@ -1135,7 +1135,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-	log.Info("Enabling recording of key preimages since archive mode is used")
 
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
