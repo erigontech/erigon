@@ -48,7 +48,8 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
-	statedb, reader := state2.ComputeIntraBlockState(dbtx, parent)
+	reader := state2.NewStateReader(dbtx, parent.NumberU64())
+	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, vm.BlockContext{}, vm.TxContext{}, statedb, reader, nil

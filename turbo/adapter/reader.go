@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -144,14 +143,4 @@ type storageItem struct {
 func (a *storageItem) Less(b llrb.Item) bool {
 	bi := b.(*storageItem)
 	return bytes.Compare(a.key[:], bi.key[:]) < 0
-}
-
-// computeIntraBlockState retrieves the state database associated with a certain block.
-// If no state is locally available for the given block, a number of blocks are
-// attempted to be reexecuted to generate the desired state.
-func ComputeIntraBlockState(tx ethdb.Tx, block *types.Block) (*state.IntraBlockState, *StateReader) {
-	// If we have the state fully available, use that
-	reader := NewStateReader(tx, block.NumberU64())
-	statedb := state.New(reader)
-	return statedb, reader
 }
