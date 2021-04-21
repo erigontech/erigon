@@ -241,7 +241,7 @@ func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
 	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
 	for _, stage := range stages.AllStages {
-		v, err := db.GetOne(dbutils.SyncStageProgress, stage)
+		v, err := db.GetOne(dbutils.SyncStageProgress, []byte(stage))
 		if err != nil {
 			return nil, err
 		}
@@ -249,7 +249,7 @@ func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
 			s[string(stage)] = common.CopyBytes(v)
 		}
 
-		v, err = db.GetOne(dbutils.SyncStageUnwind, stage)
+		v, err = db.GetOne(dbutils.SyncStageUnwind, []byte(stage))
 		if err != nil {
 			return nil, err
 		}

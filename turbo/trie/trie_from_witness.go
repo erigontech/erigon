@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
-func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
+func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 	hb := NewHashBuilder(false)
 	for _, operator := range witness.Operators {
 		switch op := operator.(type) {
@@ -86,18 +86,10 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 		fmt.Printf("\n")
 	}
 	if !hb.hasRoot() {
-		if isBinary {
-			return NewBinary(EmptyRoot), nil
-		}
 		return New(EmptyRoot), nil
 	}
 	r := hb.root()
-	var tr *Trie
-	if isBinary {
-		tr = NewBinary(hb.rootHash())
-	} else {
-		tr = New(hb.rootHash())
-	}
+	tr := New(hb.rootHash())
 	tr.root = r
 	return tr, nil
 }

@@ -54,15 +54,12 @@ type HeaderChain struct {
 	currentHeader     atomic.Value // Current head of the header chain (may be above the block chain!)
 	currentHeaderHash common.Hash  // Hash of the current head of the header chain (prevent recomputing all the time)
 
-	procInterrupt func() bool
-
 	rand   *mrand.Rand
 	engine consensus.Engine
 }
 
-// NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
-// to the parent's interrupt semaphore.
-func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool) (*HeaderChain, error) {
+// NewHeaderChain creates a new HeaderChain structure.
+func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine) (*HeaderChain, error) {
 
 	// Seed a fast but crypto originating random generator
 	seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
@@ -71,11 +68,10 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	}
 
 	hc := &HeaderChain{
-		config:        config,
-		chainDb:       chainDb,
-		procInterrupt: procInterrupt,
-		rand:          mrand.New(mrand.NewSource(seed.Int64())),
-		engine:        engine,
+		config:  config,
+		chainDb: chainDb,
+		rand:    mrand.New(mrand.NewSource(seed.Int64())),
+		engine:  engine,
 	}
 
 	hc.genesisHeader = hc.GetHeaderByNumber(0)

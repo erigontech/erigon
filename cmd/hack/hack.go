@@ -1063,7 +1063,7 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, "", expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, "", expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil

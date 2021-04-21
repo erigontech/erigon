@@ -65,9 +65,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:     1,
-	TxLookupLimit: 2350000,
-	StorageMode:   ethdb.DefaultStorageMode,
+	NetworkID:   1,
+	StorageMode: ethdb.DefaultStorageMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -117,16 +116,13 @@ type Config struct {
 
 	// This can be set to list of enrtree:// URLs which will be queried for
 	// for nodes to connect to.
-	EthDiscoveryURLs  []string
-	SnapDiscoveryURLs []string
+	EthDiscoveryURLs []string
 
-	Pruning       bool   // Whether to disable pruning and flush everything to disk
-	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
+	Pruning bool // Whether to disable pruning and flush everything to disk
 
 	EnableDownloaderV2 bool
 
 	StorageMode     ethdb.StorageMode
-	CacheSize       datasize.ByteSize // Cache size for execution stage
 	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool
@@ -138,18 +134,12 @@ type Config struct {
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
 	DownloadOnly        bool
-	ArchiveSyncInterval int
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
 	PruningTimeout      time.Duration
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
-
-	// Database options
-	SkipBcVersionCheck bool `toml:"-"`
-	DatabaseHandles    int  `toml:"-"`
-	DatabaseFreezer    string
 
 	Preimages bool
 

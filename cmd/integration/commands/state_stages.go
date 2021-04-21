@@ -165,7 +165,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	sm, engine, chainConfig, vmConfig, txPool, st, mining, cache := newSync2(db, tx)
+	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync2(db, tx)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
@@ -176,7 +176,6 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
-					Cache:         cache,
 					BatchSize:     batchSize,
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
@@ -268,7 +267,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 			}
 		}
 
-		stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
+		stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
 		if err2 != nil {
 			panic(err2)
 		}
@@ -309,7 +308,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, cache, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
+			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
 			if err != nil {
 				panic(err)
 			}
@@ -409,7 +408,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, _, _, st, _, cache, progress := newSync(ch, db, tx, nil)
+	_, _, _, st, _, progress := newSync(ch, db, tx, nil)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)
@@ -426,12 +425,12 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	to := execStage.BlockNumber - unwind
 	_ = st.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = st.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = clearUnwindStack(tx, context.Background())
@@ -473,7 +472,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	engine, chainConfig, vmConfig, st, _, cache, progress := newSync(ch, db, tx, nil)
+	engine, chainConfig, vmConfig, st, _, progress := newSync(ch, db, tx, nil)
 
 	var err error
 	tx, err = tx.Begin(ctx, ethdb.RW)
@@ -500,7 +499,6 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 				ToBlock:       to, // limit execution to the specified block
 				WriteReceipts: true,
 				BatchSize:     batchSize,
-				Cache:         cache,
 				ChangeSetHook: nil,
 			}); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)

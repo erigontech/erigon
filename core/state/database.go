@@ -25,7 +25,6 @@ import (
 	"io"
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -224,7 +223,6 @@ type TrieDbState struct {
 	noHistory         bool
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	loader            *trie.SubTrieLoader
@@ -234,7 +232,6 @@ type TrieDbState struct {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -242,15 +239,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		db:                db,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		tp:                tp,
 		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
 	}
-
-	tp.SetBlockNumber(blockNr)
-
-	t.AddObserver(tp)
 
 	return tds
 }
@@ -276,22 +268,14 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
 	tds.tMu.Unlock()
 
-	n := tds.getBlockNr()
-	tp := trie.NewEviction()
-	tp.SetBlockNumber(n)
-
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		db:             tds.db,
-		blockNr:        n,
-		tp:             tp,
 		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[common.Address]uint64),
 	}
-
-	cpy.t.AddObserver(tp)
 
 	return &cpy
 }
@@ -332,7 +316,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		t:                 tds.t,
 		tMu:               tds.tMu,
 		db:                tds.db,
-		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
@@ -340,7 +323,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		tp:                tds.tp,
 		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Address]uint64),
@@ -360,7 +342,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 }
 
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+	if err := tds.ResolveStateTrie(); err != nil {
 		return nil, err
 	}
 	return tds.UpdateStateTrie()
@@ -509,9 +491,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 		delete(codeSizeTouches, codeHash)
 		if need, req := tds.t.NeedLoadCode(address, codeHash, true /*bytecode*/); need {
 			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
+				tds.loader = trie.NewSubTrieLoader()
 			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
+				tds.loader.Reset()
 			}
 			firstRequest = false
 			tds.loader.AddCodeRequest(req)
@@ -521,9 +503,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 	for address, codeHash := range codeSizeTouches {
 		if need, req := tds.t.NeedLoadCode(address, codeHash, false /*bytecode*/); need {
 			if tds.loader == nil {
-				tds.loader = trie.NewSubTrieLoader(tds.blockNr)
+				tds.loader = trie.NewSubTrieLoader()
 			} else if firstRequest {
-				tds.loader.Reset(tds.blockNr)
+				tds.loader.Reset()
 			}
 			firstRequest = false
 			tds.loader.AddCodeRequest(req)
@@ -572,7 +554,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	dbPrefixes, fixedbits, hooks := tds.t.FindSubTriesToLoad(rl)
 	// FindSubTriesToLoad would have gone through the entire rs, so we need to rewind to the beginning
 	rl.Rewind()
-	loader := trie.NewSubTrieLoader(tds.blockNr)
+	loader := trie.NewSubTrieLoader()
 	subTries, err := loadFunc(loader, rl, dbPrefixes, fixedbits)
 	if err != nil {
 		return err
@@ -651,31 +633,19 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(loadFunc trie.LoadFunc) error {
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
-	var witnesses []*trie.Witness
-
+func (tds *TrieDbState) ResolveStateTrie() error {
 	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int) (trie.SubTries, error) {
 		if loader == nil {
 			return trie.SubTries{}, nil
 		}
-		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, trace)
+		subTries, err := loader.LoadSubTries(tds.db, tds.blockNr, rl, nil /* hashCollector */, dbPrefixes, fixedbits, false)
 		if err != nil {
 			return subTries, err
 		}
 
-		if !extractWitnesses {
-			return subTries, nil
-		}
-
-		rl.Rewind()
-		witnesses, err = trie.ExtractWitnesses(subTries, trace, rl)
-		return subTries, err
+		return subTries, nil
 	}
-	if err := tds.resolveStateTrieWithFunc(loadFunc); err != nil {
-		return nil, err
-	}
-
-	return witnesses, nil
+	return tds.resolveStateTrieWithFunc(loadFunc)
 }
 
 // CalcTrieRoots calculates trie roots without modifying the state trie
@@ -805,15 +775,6 @@ func (tds *TrieDbState) clearUpdates() {
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
-}
-
-func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
-	tds.setBlockNr(blockNr)
-	tds.tp.SetBlockNumber(blockNr)
-}
-
-func (tds *TrieDbState) GetBlockNr() uint64 {
-	return tds.getBlockNr()
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
@@ -1103,12 +1064,4 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	return nil
-}
-
-func (tds *TrieDbState) getBlockNr() uint64 {
-	return atomic.LoadUint64(&tds.blockNr)
-}
-
-func (tds *TrieDbState) setBlockNr(n uint64) {
-	atomic.StoreUint64(&tds.blockNr, n)
 }

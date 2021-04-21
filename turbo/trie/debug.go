@@ -55,7 +55,7 @@ func Load(r io.Reader) (*Trie, error) {
 	if err != nil {
 		return nil, err
 	}
-	return BuildTrieFromWitness(witness, false, false)
+	return BuildTrieFromWitness(witness, false)
 }
 
 func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {

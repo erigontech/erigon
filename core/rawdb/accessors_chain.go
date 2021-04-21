@@ -132,25 +132,6 @@ func WriteHeadBlockHash(db ethdb.Putter, hash common.Hash) {
 	}
 }
 
-// ReadHeadFastBlockHash retrieves the hash of the current fast-sync head block.
-func ReadHeadFastBlockHash(db ethdb.KVGetter) common.Hash {
-	data, err := db.GetOne(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey))
-	if err != nil {
-		log.Error("ReadHeadFastBlockHash failed", "err", err)
-	}
-	if len(data) == 0 {
-		return common.Hash{}
-	}
-	return common.BytesToHash(data)
-}
-
-// WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
-func WriteHeadFastBlockHash(db ethdb.Putter, hash common.Hash) {
-	if err := db.Put(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey), hash.Bytes()); err != nil {
-		log.Crit("Failed to store last fast block's hash", "err", err)
-	}
-}
-
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash))

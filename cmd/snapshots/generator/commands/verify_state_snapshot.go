@@ -93,7 +93,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, os.TempDir(), expectedRootHash, ctx.Done())
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, os.TempDir(), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}
