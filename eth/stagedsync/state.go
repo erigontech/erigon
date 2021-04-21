@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"time"
@@ -39,11 +38,11 @@ func (s *State) IsBefore(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, stage1) {
+		if stage.ID == stage1 {
 			idx1 = i
 		}
 
-		if bytes.Equal(stage.ID, stage2) {
+		if stage.ID == stage2 {
 			idx2 = i
 		}
 	}
@@ -56,11 +55,11 @@ func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, stage1) {
+		if stage.ID == stage1 {
 			idx1 = i
 		}
 
-		if bytes.Equal(stage.ID, stage2) {
+		if stage.ID == stage2 {
 			idx2 = i
 		}
 	}
@@ -103,7 +102,7 @@ func (s *State) LogPrefix() string {
 
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, id) {
+		if stage.ID == id {
 			s.currentStage = uint(i)
 			return nil
 		}
@@ -113,7 +112,7 @@ func (s *State) SetCurrentStage(id stages.SyncStage) error {
 
 func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 	for _, stage := range s.stages {
-		if bytes.Equal(stage.ID, id) {
+		if stage.ID == id {
 			return stage, nil
 		}
 	}
@@ -280,7 +279,7 @@ func (s *State) DisableAllStages() {
 func (s *State) DisableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
-			if !bytes.Equal(s.stages[i].ID, id) {
+			if s.stages[i].ID != id {
 				continue
 			}
 			s.stages[i].Disabled = true
@@ -291,7 +290,7 @@ func (s *State) DisableStages(ids ...stages.SyncStage) {
 func (s *State) EnableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
-			if !bytes.Equal(s.stages[i].ID, id) {
+			if s.stages[i].ID != id {
 				continue
 			}
 			s.stages[i].Disabled = false
@@ -301,7 +300,7 @@ func (s *State) EnableStages(ids ...stages.SyncStage) {
 
 func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
-		if bytes.Equal(s.stages[i].ID, id) {
+		if s.stages[i].ID == id {
 			s.stages[i].ExecFunc = f
 		}
 	}
