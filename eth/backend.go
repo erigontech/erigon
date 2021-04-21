@@ -673,7 +673,6 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 			hasWork = true
 		case minedBlock := <-resultCh:
 			works = false
-			fmt.Printf("mined block\n")
 			// TODO: send mined block to sentry
 			_ = minedBlock
 		case err := <-errc:
@@ -700,7 +699,7 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	}
 	defer tx.Rollback()
 	txdb := ethdb.NewRwTxDb(tx)
-
+	defer func(t time.Time) { fmt.Printf("backend.go:702: %s\n", time.Since(t)) }(time.Now())
 	sealCancel := make(chan struct{})
 	miningState, err := mining.Prepare(
 		nil,
