@@ -117,14 +117,13 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 
 	var flags = opts.flags
 	if opts.inMem {
-		flags ^= mdbx.Durable
-		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync // it's ok for tests
+		flags = mdbx.Durable | mdbx.Exclusive // it's ok for tests
 		opts.dirtyListMaxPages = 8 * 1024
 	}
 
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
-			if err = env.SetGeometry(int(1*datasize.MB), int(1*datasize.MB), int(64*datasize.MB), int(1*datasize.MB), 0, 4*1024); err != nil {
+			if err = env.SetGeometry(-1, -1, int(64*datasize.MB), int(2*datasize.MB), 0, 4*1024); err != nil {
 				return nil, err
 			}
 		} else {
@@ -380,7 +379,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, 0)
+	tx, err := db.env.BeginTxn(nil, mdbx.TxNoMetaSync|mdbx.TxNoSync)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err

@@ -137,7 +137,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			tx.Rollback()
 			tx, errBegin = s.kv.BeginRo(stream.Context())
 			if errBegin != nil {
-				return fmt.Errorf("server-side error: %w", errBegin)
+				return fmt.Errorf("server-side error, BeginRo: %w", errBegin)
 			}
 
 			for _, c := range cursors { // restore all cursors position
