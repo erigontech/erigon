@@ -100,6 +100,7 @@ type Ethereum struct {
 	events      *remotedbserver.Events
 	chainConfig *params.ChainConfig
 	genesisHash common.Hash
+	quitMining  chan struct{}
 }
 
 // New creates a new Ethereum object (including the
@@ -612,9 +613,10 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 		return nil
 	}
 
-	s.lock.RLock()
+	s.lock.Lock()
 	price := s.gasPrice
-	s.lock.RUnlock()
+	s.quitMining = make(chan struct{})
+	s.lock.Unlock()
 	s.txPool.SetGasPrice(price)
 
 	// Configure the local mining address
@@ -652,16 +654,17 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
 	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
+	s.quitMining = make(chan struct{})
 	go func() {
 		defer txsSubMining.Unsubscribe()
 		defer close(txsChMining)
-		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir)
+		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir, s.quitMining)
 	}()
 
 	return nil
 }
 
-func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string) {
+func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) {
 	var works bool
 	var hasWork bool
 	errc := make(chan error, 1)
@@ -682,6 +685,8 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 				log.Warn("mining", "err", err)
 			}
 		case <-sub.Err():
+			return
+		case <-quitCh:
 			return
 		}
 
@@ -790,6 +795,10 @@ func (s *Ethereum) Stop() error {
 	} else {
 		s.handler.Stop()
 	}
+	if s.quitMining != nil {
+		close(s.quitMining)
+	}
+
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
