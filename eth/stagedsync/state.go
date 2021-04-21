@@ -131,6 +131,7 @@ func NewState(stagesList []*Stage) *State {
 
 func (s *State) LoadUnwindInfo(db ethdb.KVGetter) error {
 	for _, stage := range s.unwindOrder {
+		fmt.Printf("LoadUnwindInfo: %s\n", stage.ID)
 		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
 		}
