@@ -19,6 +19,7 @@ package eth
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -30,6 +31,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -42,6 +44,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -87,6 +90,7 @@ type Ethereum struct {
 
 	gasPrice  *uint256.Int
 	etherbase common.Address
+	signer    *ecdsa.PrivateKey
 
 	networkID uint64
 
@@ -616,6 +620,30 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	if !s.config.Miner.Enabled {
 		return nil
 	}
+	s.lock.RLock()
+	price := s.gasPrice
+	s.lock.RUnlock()
+	s.txPool.SetGasPrice(price)
+
+	// Configure the local mining address
+	eb, err := s.Etherbase()
+	if err != nil {
+		log.Error("Cannot start mining without etherbase", "err", err)
+		return fmt.Errorf("etherbase missing: %v", err)
+	}
+	if clique, ok := s.engine.(*clique.Clique); ok {
+		if s.signer == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
+		}
+
+		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			return crypto.Sign(message, s.signer)
+		})
+	}
+	// If mining is started, we can disable the transaction rejection mechanism
+	// introduced to speed sync times.
+	atomic.StoreUint32(&s.handler.acceptTxs, 1)
 
 	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() { // For main
 		tx, err := s.ChainKV().BeginRo(context.Background())
