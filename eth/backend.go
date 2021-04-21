@@ -699,7 +699,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	}
 	defer tx.Rollback()
 	txdb := ethdb.NewRwTxDb(tx)
-	defer func(t time.Time) { fmt.Printf("backend.go:702: %s\n", time.Since(t)) }(time.Now())
 	sealCancel := make(chan struct{})
 	miningState, err := mining.Prepare(
 		nil,
