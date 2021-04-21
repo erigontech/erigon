@@ -62,13 +62,8 @@ func (rlb *RetainListBuilder) CreateCode(codeHash common.Hash) {
 	}
 }
 
-func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
-	var rl *RetainList
-	if isBinary {
-		rl = NewBinaryRetainList(0)
-	} else {
-		rl = NewRetainList(0)
-	}
+func (rlb *RetainListBuilder) Build() *RetainList {
+	rl := NewRetainList(0)
 
 	touches, storageTouches := rlb.ExtractTouches()
 	codeTouches := rlb.extractCodeTouches()

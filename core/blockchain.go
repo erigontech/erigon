@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
-	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -85,31 +84,6 @@ const (
 	receiptsCacheLimit = 32
 	maxFutureBlocks    = 256
 	TriesInMemory      = 128
-
-	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
-	//
-	// Changelog:
-	//
-	// - Version 4
-	//   The following incompatible database changes were added:
-	//   * the `BlockNumber`, `TxHash`, `TxIndex`, `BlockHash` and `Index` fields of log are deleted
-	//   * the `Bloom` field of receipt is deleted
-	//   * the `BlockIndex` and `TxIndex` fields of txlookup are deleted
-	// - Version 5
-	//  The following incompatible database changes were added:
-	//    * the `TxHash`, `GasCost`, and `ContractAddress` fields are no longer stored for a receipt
-	//    * the `TxHash`, `GasCost`, and `ContractAddress` fields are computed by looking up the
-	//      receipts' corresponding block
-	// - Version 6
-	//  The following incompatible database changes were added:
-	//    * Transaction lookup information stores the corresponding block number instead of block hash
-	// - Version 7
-	//  The following incompatible database changes were added:
-	//    * Use freezer as the ancient database to maintain all ancient data
-	// - Version 8
-	//  The following incompatible database changes were added:
-	//    * New scheme for contract code in order to separate the codes and trie nodes
-	BlockChainVersion uint64 = 8
 )
 
 // CacheConfig contains the configuration values for the trie caching/pruning
@@ -120,7 +94,6 @@ type CacheConfig struct {
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64
 	PruneTimeout        time.Duration
-	ArchiveSyncInterval uint64
 	DownloadOnly        bool
 	NoHistory           bool
 }
@@ -152,9 +125,7 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            ethdb.Database // Low level persistent database to store final content in
-	triegc        *prque.Prque   // Priority queue mapping block numbers to tries to gc
-	txLookupLimit uint64
+	db ethdb.Database // Low level persistent database to store final content in
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -168,22 +139,18 @@ type BlockChain struct {
 
 	Chainmu sync.RWMutex // blockchain insertion lock
 
-	currentBlock     atomic.Value // Current head of the block chain
-	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
+	currentBlock atomic.Value // Current head of the block chain
 
 	receiptsCache *lru.Cache // Cache for the most recent receipts per block
 	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
-	quit          chan struct{}  // blockchain quit channel
-	wg            sync.WaitGroup // chain processing wait group for shutting down
-	running       int32          // 0 if chain is running, 1 when stopped (must be called atomically)
-	procInterrupt int32          // interrupt signaler for block processing
-	quitMu        sync.RWMutex
+	quit    chan struct{}  // blockchain quit channel
+	wg      sync.WaitGroup // chain processing wait group for shutting down
+	running int32          // 0 if chain is running, 1 when stopped (must be called atomically)
+	quitMu  sync.RWMutex
 
-	engine     consensus.Engine
-	prefetcher Prefetcher // Block state prefetcher interface
-	processor  Processor  // Block transaction processor interface
-	vmConfig   vm.Config
+	engine   consensus.Engine
+	vmConfig vm.Config
 
 	shouldPreserve      func(*types.Block) bool        // Function used to determine whether should preserve the given block.
 	TerminateInsert     func(common.Hash, uint64) bool // Testing hook used to terminate ancient receipt chain insertion.
@@ -203,9 +170,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
 	}
-	if cacheConfig.ArchiveSyncInterval == 0 {
-		cacheConfig.ArchiveSyncInterval = 1024
-	}
 
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
@@ -214,7 +178,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		chainConfig:         chainConfig,
 		cacheConfig:         cacheConfig,
 		db:                  db,
-		triegc:              prque.New(nil),
 		quit:                make(chan struct{}),
 		shouldPreserve:      shouldPreserve,
 		receiptsCache:       receiptsCache,
@@ -226,11 +189,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		enablePreimages:     true,
 		senderCacher:        senderCacher,
 	}
-	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +202,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 
 	var nilBlock *types.Block
 	bc.currentBlock.Store(nilBlock)
-	bc.currentFastBlock.Store(nilBlock)
 
 	if err := bc.loadLastState(); err != nil {
 		log.Error("loadLoadState", "err", err)
@@ -297,17 +257,6 @@ func (bc *BlockChain) loadLastState() error {
 		}
 	}
 	bc.hc.SetCurrentHeader(bc.db, currentHeader)
-
-	// Restore the last known head fast block
-	bc.currentFastBlock.Store(currentBlock)
-	//headFastBlockGauge.Update(int64(currentBlock.NumberU64()))
-
-	if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
-		if block := bc.GetBlockByHash(head); block != nil {
-			bc.currentFastBlock.Store(block)
-			//headFastBlockGauge.Update(int64(block.NumberU64()))
-		}
-	}
 	// Issue a status log for the user
 
 	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
@@ -319,50 +268,21 @@ func (bc *BlockChain) loadLastState() error {
 	return nil
 }
 
-// SetHead rewinds the local chain to a new head. Depending on whether the node
-// was fast synced or full synced and in which state, the method will try to
-// delete minimal data from disk whilst retaining chain consistency.
-func (bc *BlockChain) SetHead(head uint64) error {
+func SetHead(db ethdb.Database, head uint64) error {
 	log.Warn("Rewinding blockchain", "target", head)
-
-	bc.Chainmu.Lock()
-	defer bc.Chainmu.Unlock()
 
 	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
-		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
-			if newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64()); newHeadBlock == nil {
+		if currentBlock := rawdb.ReadCurrentBlock(db); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
+			newHeadBlock := rawdb.ReadBlock(db, header.Hash(), header.Number.Uint64())
+			if newHeadBlock == nil {
 				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
 			} else {
 				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
-
-				// Degrade the chain markers if they are explicitly reverted.
-				// In theory we should update all in-memory markers in the
-				// last step, however the direction of SetHead is from high
-				// to low, so it's safe the update in-memory markers directly.
-				bc.currentBlock.Store(newHeadBlock)
-				//headBlockGauge.Update(int64(newHeadBlock.NumberU64()))
 			}
 		}
 
-		// Rewind the fast block in a simpleton way to the target head
-		if currentFastBlock := bc.CurrentFastBlock(); currentFastBlock != nil && header.Number.Uint64() < currentFastBlock.NumberU64() {
-			newHeadFastBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
-			// If either blocks reached nil, reset to the genesis state
-			if newHeadFastBlock == nil {
-				newHeadFastBlock = bc.genesisBlock
-			}
-			rawdb.WriteHeadFastBlockHash(db, newHeadFastBlock.Hash())
-
-			// Degrade the chain markers if they are explicitly reverted.
-			// In theory we should update all in-memory markers in the
-			// last step, however the direction of SetHead is from high
-			// to low, so it's safe the update in-memory markers directly.
-			bc.currentFastBlock.Store(newHeadFastBlock)
-			//headFastBlockGauge.Update(int64(newHeadFastBlock.NumberU64()))
-		}
-
-		return bc.CurrentBlock().NumberU64(), false /* we have nothing to wipe in turbo-geth */
+		return rawdb.ReadCurrentBlock(db).NumberU64(), false /* we have nothing to wipe in turbo-geth */
 	}
 
 	// Rewind the header chain, deleting all block bodies until then
@@ -378,27 +298,17 @@ func (bc *BlockChain) SetHead(head uint64) error {
 
 	// If SetHead was only called as a chain reparation method, try to skip
 	// touching the header chain altogether, unless the freezer is broken
-	if block := bc.CurrentBlock(); block.NumberU64() == head {
-		if target, force := updateFn(bc.db, block.Header()); force {
-			bc.hc.SetHead(target, updateFn, delFn)
+	if block := rawdb.ReadCurrentBlock(db); block.NumberU64() == head {
+		if target, force := updateFn(db, block.Header()); force {
+			SetHeaderHead(db, target, updateFn, delFn)
 		}
 	} else {
 		// Rewind the chain to the requested head and keep going backwards until a
 		// block with a state is found or fast sync pivot is passed
 		log.Warn("Rewinding blockchain", "target", head)
-		bc.hc.SetHead(head, updateFn, delFn)
+		SetHeaderHead(db, head, updateFn, delFn)
 	}
-
-	// Clear out any stale content from the caches
-	bc.receiptsCache.Purge()
-	bc.futureBlocks.Purge()
-
-	return bc.loadLastState()
-}
-
-// GasLimit returns the gas limit of the current HEAD block.
-func (bc *BlockChain) GasLimit() uint64 {
-	return bc.CurrentBlock().GasLimit()
+	return nil
 }
 
 // CurrentBlock retrieves the current head block of the canonical chain. The
@@ -409,34 +319,9 @@ func (bc *BlockChain) CurrentBlock() *types.Block {
 	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
 }
 
-// CurrentFastBlock retrieves the current fast-sync head block of the canonical
-// chain. The block is retrieved from the blockchain's internal cache.
-func (bc *BlockChain) CurrentFastBlock() *types.Block {
-	return bc.currentFastBlock.Load().(*types.Block)
-}
-
 // Genesis retrieves the chain's genesis block.
 func (bc *BlockChain) Genesis() *types.Block {
 	return bc.genesisBlock
-}
-
-// GetBody retrieves a block body (transactions and uncles) from the database by
-// hash, caching it if found.
-func (bc *BlockChain) GetBody(hash common.Hash) *types.Body {
-	number := bc.hc.GetBlockNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	body := rawdb.ReadBody(bc.db, hash, *number)
-	if body == nil {
-		return nil
-	}
-	return body
-}
-
-// HasBlock checks if a block is fully present in the database or not.
-func (bc *BlockChain) HasBlock(hash common.Hash, number uint64) bool {
-	return rawdb.HasBody(bc.db, hash, number)
 }
 
 // GetBlock retrieves a block from the database by hash and number,
@@ -532,7 +417,6 @@ func (bc *BlockChain) Stop() {
 	close(bc.quit)
 
 	bc.quitMu.Lock()
-	bc.StopInsert()
 	bc.wg.Wait()
 	bc.quitMu.Unlock()
 
@@ -543,33 +427,6 @@ func (bc *BlockChain) Stop() {
 		bc.senderCacher.Close()
 	}
 	log.Info("Blockchain stopped")
-}
-
-// StopInsert interrupts all insertion methods, causing them to return
-// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
-// calling this method.
-func (bc *BlockChain) StopInsert() {
-	atomic.StoreInt32(&bc.procInterrupt, 1)
-}
-
-// insertStopped returns true after StopInsert has been called.
-func (bc *BlockChain) insertStopped() bool {
-	return atomic.LoadInt32(&bc.procInterrupt) == 1
-}
-
-// WriteStatus status of write
-type WriteStatus byte
-
-// SetTxLookupLimit is responsible for updating the txlookup limit to the
-// original one stored in db if the new mismatches with the old one.
-func (bc *BlockChain) SetTxLookupLimit(limit uint64) {
-	bc.txLookupLimit = limit
-}
-
-// TxLookupLimit retrieves the txlookup limit used by blockchain to prune
-// stale transaction indices.
-func (bc *BlockChain) TxLookupLimit() uint64 {
-	return bc.txLookupLimit
 }
 
 // statsReportLimit is the time limit during import and export after which we

@@ -17,6 +17,14 @@ func ConvertH256ToHash(h256 *types.H256) common.Hash {
 	return hash
 }
 
+func ConvertHashesToH256(hashes common.Hashes) []*types.H256 {
+	res := make([]*types.H256, len(hashes))
+	for i := range hashes {
+		res[i] = ConvertHashToH256(hashes[i])
+	}
+	return res
+}
+
 func ConvertHashToH256(hash common.Hash) *types.H256 {
 	return &types.H256{
 		Lo: &types.H128{Lo: binary.BigEndian.Uint64(hash[24:]), Hi: binary.BigEndian.Uint64(hash[16:])},

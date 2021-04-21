@@ -41,7 +41,6 @@ type RetainDeciderWithMarker interface {
 // DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
 type RetainList struct {
 	inited      bool // Whether keys are sorted and "LTE" and "GT" indices set
-	binary      bool // if true, use binary encoding instead of Hex
 	minLength   int  // Mininum length of prefixes for which `HashOnly` function can return `true`
 	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 	hexes       [][]byte
@@ -52,10 +51,6 @@ type RetainList struct {
 // NewRetainList creates new RetainList
 func NewRetainList(minLength int) *RetainList {
 	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{})}
-}
-
-func NewBinaryRetainList(minLength int) *RetainList {
-	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{}), binary: true}
 }
 
 func (rl *RetainList) Len() int {
@@ -86,11 +81,7 @@ func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) {
 
 // AddHex adds a new key (in HEX encoding) to the list
 func (rl *RetainList) AddHex(hex []byte) {
-	if rl.binary {
-		rl.hexes = append(rl.hexes, keyHexToBin(hex))
-	} else {
-		rl.hexes = append(rl.hexes, hex)
-	}
+	rl.hexes = append(rl.hexes, hex)
 }
 
 // AddCodeTouch adds a new code touch into the resolve set

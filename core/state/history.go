@@ -21,21 +21,22 @@ const MaxChangesetsSearch = 256
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	v, err := FindByHistory(tx, storage, key, timestamp)
-	if err == nil {
-		dat = make([]byte, len(v))
-		copy(dat, v)
-		return dat, nil
-	}
-	if !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return nil, err
-	}
-	v, err = tx.GetOne(dbutils.PlainStateBucket, key)
 	if err != nil {
 		return nil, err
 	}
 	if v == nil {
-		return nil, ethdb.ErrKeyNotFound
+		v, err = tx.GetOne(dbutils.PlainStateBucket, key)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			return nil, nil
+		}
+		dat = make([]byte, len(v))
+		copy(dat, v)
+		return dat, nil
 	}
+
 	dat = make([]byte, len(v))
 	copy(dat, v)
 	return dat, nil
@@ -60,16 +61,16 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	}
 
 	if k == nil {
-		return nil, ethdb.ErrKeyNotFound
+		return nil, nil
 	}
 	if storage {
 		if !bytes.Equal(k[:common.AddressLength], key[:common.AddressLength]) ||
 			!bytes.Equal(k[common.AddressLength:common.AddressLength+common.HashLength], key[common.AddressLength+common.IncarnationLength:]) {
-			return nil, ethdb.ErrKeyNotFound
+			return nil, nil
 		}
 	} else {
 		if !bytes.HasPrefix(k, key) {
-			return nil, ethdb.ErrKeyNotFound
+			return nil, nil
 		}
 	}
 	index := roaring64.New()
@@ -96,10 +97,10 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 			if !errors.Is(err, changeset.ErrNotFound) {
 				return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
 			}
-			return nil, ethdb.ErrKeyNotFound
+			return nil, nil
 		}
 	} else {
-		return nil, ethdb.ErrKeyNotFound
+		return nil, nil
 	}
 
 	//restore codehash

@@ -44,9 +44,8 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
 		panic(err)
 	}
-	tester.downloader = New(tester.db, params.TestChainConfig, nil, ethash.NewFaker(), &vm.Config{}, tester.dropPeer, ethdb.DefaultStorageMode)
-	//tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
-	tester.downloader.SetBatchSize(0 /* cacheSize */, 16*1024 /* batchSize */)
+	tester.downloader = New(tester.db, params.TestChainConfig, ethash.NewFaker(), &vm.Config{}, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader.SetBatchSize(16 * 1024)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),

@@ -87,10 +87,9 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	_, err = db.Get(dbutils.AccountsHistoryBucket, addr[0].Bytes())
-	if err != ethdb.ErrKeyNotFound {
-		t.Fatal("account must be deleted")
-	}
+	found, err := tx.GetOne(dbutils.AccountsHistoryBucket, addr[0].Bytes())
+	require.NoError(t, err)
+	require.Nil(t, found, "account must be deleted")
 }
 
 func TestMutationCommitThinHistory(t *testing.T) {
@@ -157,6 +156,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			res, err := GetAsOf(tx, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if res == nil {
+				t.Fatalf("account not found for %x", addr.String())
 			}
 
 			result := uint256.NewInt().SetBytes(res)

@@ -22,11 +22,6 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
 		Value: "lmdb",
 	}
-	CacheSizeFlag = cli.StringFlag{
-		Name:  "cacheSize",
-		Usage: "Cache size for the execution stage",
-		Value: "0",
-	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
@@ -131,20 +126,11 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 
-	if ctx.GlobalString(CacheSizeFlag.Name) != "" {
-		err := cfg.CacheSize.UnmarshalText([]byte(ctx.GlobalString(CacheSizeFlag.Name)))
-		if err != nil {
-			utils.Fatalf("Invalid cacheSize provided: %v", err)
-		}
-	}
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
-		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 
 	if ctx.GlobalString(EtlBufferSizeFlag.Name) != "" {
@@ -177,20 +163,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.Bool(SeedSnapshotsFlag.Name, false, SeedSnapshotsFlag.Usage); v != nil {
 		cfg.SnapshotSeeding = *v
 	}
-	if v := f.String(CacheSizeFlag.Name, CacheSizeFlag.Value, CacheSizeFlag.Usage); v != nil {
-		err := cfg.CacheSize.UnmarshalText([]byte(*v))
-		if err != nil {
-			utils.Fatalf("Invalid cacheSize provided: %v", err)
-		}
-	}
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
-		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
