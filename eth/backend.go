@@ -617,41 +617,39 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	s.lock.RUnlock()
 	s.txPool.SetGasPrice(price)
 
-	/*
-		// Configure the local mining address
-		eb, err := s.Etherbase()
-		if err != nil {
-			log.Error("Cannot start mining without etherbase", "err", err)
-			return fmt.Errorf("etherbase missing: %v", err)
-		}
-		if clique, ok := s.engine.(*clique.Clique); ok {
-			if s.config.Miner.SigKey == nil {
-				log.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %v", err)
-			}
-
-			clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(message, s.config.Miner.SigKey)
-			})
-		}
-	*/
-
-	//if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
-	// If mining is started, we can disable the transaction rejection mechanism
-	// introduced to speed sync times.
-	atomic.StoreUint32(&s.handler.acceptTxs, 1)
-
-	tx, err := s.ChainKV().BeginRo(context.Background())
+	// Configure the local mining address
+	eb, err := s.Etherbase()
 	if err != nil {
-		return err
+		log.Error("Cannot start mining without etherbase", "err", err)
+		return fmt.Errorf("etherbase missing: %v", err)
 	}
-	defer tx.Rollback()
-	hh := rawdb.ReadCurrentHeader(tx)
-	execution, _ := stages.GetStageProgress(tx, stages.Execution)
-	if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-		return err
+	if clique, ok := s.engine.(*clique.Clique); ok {
+		if s.config.Miner.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
+		}
+
+		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			return crypto.Sign(message, s.config.Miner.SigKey)
+		})
 	}
-	//}
+
+	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
+		// If mining is started, we can disable the transaction rejection mechanism
+		// introduced to speed sync times.
+		atomic.StoreUint32(&s.handler.acceptTxs, 1)
+
+		tx, err := s.ChainKV().BeginRo(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		hh := rawdb.ReadCurrentHeader(tx)
+		execution, _ := stages.GetStageProgress(tx, stages.Execution)
+		if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+			return err
+		}
+	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
 	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
 	go func() {
@@ -686,7 +684,6 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 		case <-sub.Err():
 			return
 		}
-		fmt.Printf("%t, %t\n", works, hasWork)
 
 		if !works && hasWork {
 			works = true
