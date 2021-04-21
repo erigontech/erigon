@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
@@ -340,7 +339,7 @@ func stageBodies(db ethdb.Database, ctx context.Context) error {
 
 func stageSenders(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		if err := db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetSenders(tx) }); err != nil {
@@ -393,7 +392,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		panic(err)
 	}
 
-	engine, chainConfig, vmConfig, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	engine, chainConfig, vmConfig, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) })
@@ -416,7 +415,6 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 			stagedsync.ExecuteBlockStageParams{
 				ToBlock:               block, // limit execution to the specified block
 				WriteReceipts:         sm.Receipts,
-				Cache:                 cache,
 				BatchSize:             batchSize,
 				SilkwormExecutionFunc: silkwormExecutionFunc(),
 			})
@@ -427,7 +425,6 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:               block, // limit execution to the specified block
 			WriteReceipts:         sm.Receipts,
-			Cache:                 cache,
 			BatchSize:             batchSize,
 			SilkwormExecutionFunc: silkwormExecutionFunc(),
 		})
@@ -439,7 +436,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, _, _, _, _, cache, progress := newSync(ctx.Done(), db, tx, nil)
+	_, _, _, _, _, progress := newSync(ctx.Done(), db, tx, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetIH(tx) })
@@ -458,11 +455,11 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, cache, tmpdir, ch); err != nil {
+		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, tmpdir, ch); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, cache, tmpdir, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, tmpdir, ch); err != nil {
 			return err
 		}
 	}
@@ -476,7 +473,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 func stageHashState(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, _, _, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	_, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetHashState(tx) })
@@ -490,9 +487,9 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindHashStateStage(u, stage6, db, cache, tmpdir, ch)
+		return stagedsync.UnwindHashStateStage(u, stage6, db, tmpdir, ch)
 	}
-	return stagedsync.SpawnHashStateStage(stage6, db, cache, tmpdir, ch)
+	return stagedsync.SpawnHashStateStage(stage6, db, tmpdir, ch)
 }
 
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
@@ -501,7 +498,7 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	var tx = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	_, _, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetLogIndex(tx) })
@@ -532,7 +529,7 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	engine, chainConfig, _, _, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	engine, chainConfig, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetCallTraces(tx) })
@@ -555,7 +552,6 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 		return stagedsync.UnwindCallTraces(u, s, db, chainConfig, engine, ch,
 			stagedsync.CallTracesStageParams{
 				ToBlock:   block,
-				Cache:     cache,
 				BatchSize: batchSize,
 			})
 	}
@@ -563,7 +559,6 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	if err := stagedsync.SpawnCallTraces(s, db, chainConfig, engine, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
 			ToBlock:   block,
-			Cache:     cache,
 			BatchSize: batchSize,
 		}); err != nil {
 		return err
@@ -574,7 +569,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 func stageHistory(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, _, _, _, st, _, _ := newSync(ctx.Done(), db, db, nil)
+	_, _, _, _, st, _ := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetHistory(tx) })
@@ -609,7 +604,7 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 
 func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, _, _, _, _, progress := newSync(ctx.Done(), db, db, nil)
 
 	if reset {
 		return db.(ethdb.HasRwKV).RwKV().Update(ctx, func(tx ethdb.RwTx) error { return resetTxLookup(tx) })
@@ -656,7 +651,7 @@ func removeMigration(db ethdb.Deleter, _ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync, *shards.StateCache) {
+func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -669,14 +664,6 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensu
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, tx, txCacher)
 
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
-	}
 	st := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
@@ -687,7 +674,7 @@ func newSync2(db ethdb.Database, tx ethdb.Database) (ethdb.StorageMode, consensu
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc(), Notifier: events},
 	)
-	return sm, ethash.NewFaker(), chainConfig, vmConfig, txPool, st, stMining, cache
+	return sm, ethash.NewFaker(), chainConfig, vmConfig, txPool, st, stMining
 }
 
 func progress(tx ethdb.Getter, stage stages.SyncStage) uint64 {
@@ -707,7 +694,7 @@ func stage(st *stagedsync.State, db ethdb.Getter, stage stages.SyncStage) *stage
 }
 
 //nolint:unparam
-func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.State, *stagedsync.State, *shards.StateCache, progressFunc) {
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.State, *stagedsync.State, progressFunc) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -716,19 +703,13 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 	chainConfig := params.MainnetChainConfig
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
 	engine := ethash.NewFaker()
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
-	}
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, false, nil)
+	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -737,7 +718,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.MiningStages(),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, false, miningParams)
+	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, miningParams)
 	if err != nil {
 		panic(err)
 	}
@@ -756,7 +737,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		}
 		return s
 	}
-	return engine, chainConfig, vmConfig, st, stMining, cache, progress
+	return engine, chainConfig, vmConfig, st, stMining, progress
 }
 
 func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.SnapshotMode) error {

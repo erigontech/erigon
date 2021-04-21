@@ -173,7 +173,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, nil, tmpDir, expectedRootHash, ctx.Done())
+		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), true, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
 			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 		}
@@ -186,7 +186,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	engine, chainConfig, vmConfig, st, _, cache, progress := newSync(ctx.Done(), db, db, nil)
+	engine, chainConfig, vmConfig, st, _, progress := newSync(ctx.Done(), db, db, nil)
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,
 		stages.Bodies,
@@ -252,7 +252,6 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 				ToBlock:       blockNumber, // limit execution to the specified block
 				WriteReceipts: false,
 				BatchSize:     batchSize,
-				Cache:         cache,
 			})
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
@@ -261,7 +260,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage5 := progress(stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
-		err = stagedsync.SpawnHashStateStage(stage5, tx, nil, tmpDir, ch)
+		err = stagedsync.SpawnHashStateStage(stage5, tx, tmpDir, ch)
 		if err != nil {
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
@@ -269,7 +268,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, nil, tmpDir, ch); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

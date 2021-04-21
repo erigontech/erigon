@@ -123,7 +123,6 @@ type Config struct {
 	EnableDownloaderV2 bool
 
 	StorageMode     ethdb.StorageMode
-	CacheSize       datasize.ByteSize // Cache size for execution stage
 	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool

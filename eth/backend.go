@@ -418,7 +418,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 
 		eth.handler.SetTmpDir(tmpdir)
-		eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
+		eth.handler.SetBatchSize(config.BatchSize)
 		eth.handler.SetStagedSync(stagedSync)
 	}
 
@@ -718,7 +718,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		"",
 		ethdb.DefaultStorageMode,
 		tmpdir,
-		nil,
 		0,
 		nil, //todo: pass quitch
 		nil,

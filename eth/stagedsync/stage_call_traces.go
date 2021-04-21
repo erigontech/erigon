@@ -25,13 +25,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 type CallTracesStageParams struct {
 	ToBlock   uint64 // not setting this params means no limit
 	BatchSize datasize.ByteSize
-	Cache     *shards.StateCache
 }
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
@@ -90,8 +88,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
-	var cache = params.Cache
-
 	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -115,7 +111,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			prev = blockNum
 
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
-				"blk/second", speed, "cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
+				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
@@ -148,11 +144,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			break
 		}
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-		reader := state.NewPlainDBState(tx, blockNum-1)
-		stateReader = state.NewCachedReader(reader, cache)
-		stateWriter = state.NewCachedWriter(state.NewNoopWriter(), cache)
+		stateReader := state.NewPlainDBState(tx, blockNum-1)
+		stateWriter := state.NewNoopWriter()
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -176,14 +169,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				tos[string(a[:])] = m
 			}
 			m.Add(uint32(blockNum))
-		}
-		if cache.WriteSize() >= int(params.BatchSize) {
-			start := time.Now()
-			writes := cache.PrepareWrites()
-			log.Info("PrepareWrites", "in", time.Since(start))
-			start = time.Now()
-			cache.TurnWritesToReads(writes)
-			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 
@@ -279,7 +264,6 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
-	var cache = params.Cache
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
@@ -297,19 +281,11 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 			break
 		}
 
-		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)
-		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)
+		stateReader := state.NewPlainDBState(db, blockNum-1)
+		stateWriter := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
-		}
-		if cache.WriteSize() >= int(params.BatchSize) {
-			start := time.Now()
-			writes := cache.PrepareWrites()
-			log.Info("PrepareWrites", "in", time.Since(start))
-			start = time.Now()
-			cache.TurnWritesToReads(writes)
-			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 	for addr := range tracer.froms {

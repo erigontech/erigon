@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 var (
@@ -155,7 +154,6 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
-	cacheSize   datasize.ByteSize
 	batchSize   datasize.ByteSize
 
 	headersState    *stagedsync.StageState
@@ -203,8 +201,7 @@ func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
-	d.cacheSize = cacheSize
+func (d *Downloader) SetBatchSize(batchSize datasize.ByteSize) {
 	d.batchSize = batchSize
 }
 
@@ -438,11 +435,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		writeDB = d.stateDB
 	}
 
-	var cache *shards.StateCache
-	if d.cacheSize > 0 {
-		cache = shards.NewStateCache(32, d.cacheSize)
-	}
-
 	d.stagedSyncState, err = d.stagedSync.Prepare(
 		d,
 		d.chainConfig,
@@ -453,7 +445,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		p.id,
 		d.storageMode,
 		d.tmpdir,
-		cache,
 		d.batchSize,
 		d.quitCh,
 		fetchers,
