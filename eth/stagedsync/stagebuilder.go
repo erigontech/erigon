@@ -349,6 +349,10 @@ func DefaultStages() StageBuilders {
 						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
 							return err
 						}
+						if executionAt == s.BlockNumber {
+							s.Done()
+							return nil
+						}
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 

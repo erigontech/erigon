@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -132,7 +131,6 @@ func NewState(stagesList []*Stage) *State {
 
 func (s *State) LoadUnwindInfo(db ethdb.KVGetter) error {
 	for _, stage := range s.unwindOrder {
-		fmt.Printf("LoadUnwindInfo: %s\n", stage.ID)
 		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
 		}
@@ -151,11 +149,8 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	var timings []interface{}
 	for !s.IsDone() {
-		fmt.Printf("Run: is empty: %t\n", s.unwindStack.Empty())
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
-				fmt.Printf("Run unwind: %s\n", unwind.Stage)
-
 				if err := s.SetCurrentStage(unwind.Stage); err != nil {
 					return err
 				}
@@ -175,17 +170,12 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				}
 				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
 			}
-			fmt.Printf("Run set: %s\n", s.stages[0].ID)
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
-		} else {
-			fmt.Printf("Run: is empt2y: %s\n", debug.Callers(7))
-
 		}
 
 		_, stage := s.CurrentStage()
-		fmt.Printf("Run run: %s\n", stage.ID)
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
 				return err
