@@ -73,11 +73,11 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPoolServer      proto_txpool.TxpoolServer
-	txPoolClient      proto_txpool.TxpoolClient
-	txPool            *core.TxPool
-	handler           *handler
-	ethDialCandidates enode.Iterator
+	txPoolServer       proto_txpool.TxpoolServer
+	txPoolClient       *txpool.ClientDirect
+	txPool             *core.TxPool
+	handler            *handler
+	ethDialCandidates  enode.Iterator
 
 	// DB interfaces
 	chainKV    ethdb.RwKV // Same as chainDb, but different interface
@@ -408,6 +408,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			vmConfig:    &vmConfig,
 			engine:      eth.engine,
 			TxPool:      eth.txPool,
+			TxPool2:     eth.txPoolClient,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
 
@@ -612,7 +613,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) error {
-	if s.config.Miner.Enabled {
+	if !s.config.Miner.Enabled {
 		return nil
 	}
 

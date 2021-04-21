@@ -31,7 +31,7 @@ func (s *Server) ImportTransactions(ctx context.Context, in *proto_txpool.Import
 
 func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransactionsRequest) (*proto_txpool.GetTransactionsReply, error) {
 	buf := bytes.NewBuffer(nil)
-	reply := &proto_txpool.GetTransactionsReply{Txs: make([][]byte, 0, len(in.GetHashes()))}
+	reply := &proto_txpool.GetTransactionsReply{Txs: make([][]byte, len(in.Hashes))}
 	for i := range in.Hashes {
 		txn := s.txPool.Get(gointerfaces.ConvertH256ToHash(in.Hashes[i]))
 		if txn == nil {
