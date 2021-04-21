@@ -60,7 +60,7 @@ func StageLoop(
 			return err1
 		}
 
-		canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
+		canRunCycleInOneTransaction := !initialCycle && height-origin < 1024 && height-hashStateStageProgress < 1024
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
