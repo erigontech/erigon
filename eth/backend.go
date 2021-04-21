@@ -684,6 +684,7 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 		case <-sub.Err():
 			return
 		}
+		fmt.Printf("%t, %t\n", works, hasWork)
 
 		if !works && hasWork {
 			works = true
