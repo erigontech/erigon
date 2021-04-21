@@ -692,12 +692,12 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 
 		if !works && hasWork {
 			works = true
-			go func() { errc <- s.miningStep(resultCh, mining, tmpdir) }()
+			go func() { errc <- s.miningStep(resultCh, mining, tmpdir, quitCh) }()
 		}
 	}
 }
 
-func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string) error {
+func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	tx, err := s.chainKV.BeginRw(context.Background())
 	if err != nil {
 		return err
@@ -717,7 +717,7 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		tmpdir,
 		nil,
 		0,
-		nil, //todo: pass quitch
+		quitCh,
 		nil,
 		s.txPool,
 		nil,
@@ -732,12 +732,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	}
 	tx.Rollback()
 	return nil
-}
-
-// StopMining terminates the miner, both at the consensus engine level as well as
-// at the block creation level.
-func (s *Ethereum) StopMining() {
-	//todo
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
