@@ -73,11 +73,11 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPoolServer       proto_txpool.TxpoolServer
-	txPoolClient       *txpool.ClientDirect
-	txPool             *core.TxPool
-	handler            *handler
-	ethDialCandidates  enode.Iterator
+	txPoolServer      proto_txpool.TxpoolServer
+	txPoolClient      *txpool.ClientDirect
+	txPool            *core.TxPool
+	handler           *handler
+	ethDialCandidates enode.Iterator
 
 	// DB interfaces
 	chainKV    ethdb.RwKV // Same as chainDb, but different interface
@@ -672,19 +672,21 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 
 func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string) {
 	var works bool
+	var hasWork bool
 	errc := make(chan error, 1)
 	resultCh := make(chan *types.Block, 1)
 
 	for {
 		select {
 		case <-newTransactions:
-			// nothing to do, just do miningStep if need
+			hasWork = true
 		case minedBlock := <-resultCh:
 			works = false
 			// TODO: send mined block to sentry
 			_ = minedBlock
 		case err := <-errc:
 			works = false
+			hasWork = false
 			if err != nil {
 				log.Warn("mining", "err", err)
 			}
@@ -692,7 +694,7 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 			return
 		}
 
-		if !works {
+		if !works && hasWork {
 			works = true
 			go func() { errc <- s.miningStep(resultCh, mining, tmpdir) }()
 		}
