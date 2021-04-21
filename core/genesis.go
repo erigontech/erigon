@@ -266,7 +266,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, error) {
 	tmpDB := ethdb.NewMemDatabase()
 	defer tmpDB.Close()
-	r, w := state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
+	tx, err := tmpDB.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 	statedb := state.New(r)
 	for addr, account := range g.Alloc {
 		balance, _ := uint256.FromBig(account.Balance)
@@ -286,7 +291,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if err := statedb.FinalizeTx(context.Background(), w); err != nil {
 		return nil, nil, err
 	}
-	root, err := trie.CalcRoot("genesis", tmpDB)
+	root, err := trie.CalcRoot("genesis", tx)
 	if err != nil {
 		return nil, nil, err
 	}
