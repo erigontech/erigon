@@ -257,7 +257,6 @@ func (m *TxDb) BatchSize() int {
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
-	m.panicOnEmptyDB()
 	// get cursor out of pool, then calls txDb.Put/Get/Delete on same bucket inside Walk callback - will not affect state of Walk
 	c, ok := m.cursors[bucket]
 	if ok {
@@ -322,12 +321,6 @@ func (m *TxDb) Tx() Tx {
 
 func (m *TxDb) Keys() ([][]byte, error) {
 	panic("don't use me")
-}
-
-func (m *TxDb) panicOnEmptyDB() {
-	if m.db == nil {
-		panic("Not implemented")
-	}
 }
 
 func (m *TxDb) BucketExists(name string) (bool, error) {
