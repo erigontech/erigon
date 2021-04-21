@@ -247,7 +247,6 @@ func handShake(
 		if err1 = forkFilter(reply.ForkID); err1 != nil {
 			return fmt.Errorf("%v", err1)
 		}
-		//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 		return nil
 	}
 	go func() {
@@ -260,7 +259,7 @@ func handShake(
 		select {
 		case err := <-errc:
 			if err != nil {
-				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+				return err
 			}
 		case <-timeout.C:
 			return p2p.DiscReadTimeout
@@ -291,6 +290,7 @@ func runPeer(
 	if err := handShake(ctx, ss.getStatus(), peerID, rw, version, minVersion); err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
+	log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
 		var err error

@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -518,6 +517,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
+	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	if len(hd.anchors) > 16 {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
@@ -532,7 +532,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, blockPropagator adapter.BlockPropagator) error {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for len(hd.insertList) > 0 {
@@ -551,7 +551,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
-			go blockPropagator.PropagateNewBlockHashes(context.Background(), link.header.Hash(), link.header.Number.Uint64())
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err

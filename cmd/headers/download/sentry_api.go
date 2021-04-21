@@ -36,7 +36,11 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 	var bytes []byte
 	var err error
-	bytes, err = rlp.EncodeToBytes(req.Hashes)
+	reqData := &eth.GetBlockBodiesPacket66{
+		RequestId:            rand.Uint64(),
+		GetBlockBodiesPacket: req.Hashes,
+	}
+	bytes, err = rlp.EncodeToBytes(reqData)
 	if err != nil {
 		log.Error("Could not encode block bodies request", "err", err)
 		return nil
@@ -66,11 +70,14 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-	reqData := &eth.GetBlockHeadersPacket{
-		Amount:  req.Length,
-		Reverse: req.Reverse,
-		Skip:    req.Skip,
-		Origin:  eth.HashOrNumber{Hash: req.Hash},
+	reqData := &eth.GetBlockHeadersPacket66{
+		RequestId: rand.Uint64(),
+		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+			Amount:  req.Length,
+			Reverse: req.Reverse,
+			Skip:    req.Skip,
+			Origin:  eth.HashOrNumber{Hash: req.Hash},
+		},
 	}
 	if req.Hash == (common.Hash{}) {
 		reqData.Origin.Number = req.Number
