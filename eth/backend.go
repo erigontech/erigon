@@ -19,7 +19,6 @@ package eth
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -90,7 +89,6 @@ type Ethereum struct {
 
 	gasPrice  *uint256.Int
 	etherbase common.Address
-	signer    *ecdsa.PrivateKey
 
 	networkID uint64
 
@@ -606,13 +604,6 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 	return s.isLocalBlock(block)
 }
 
-// SetEtherbase sets the mining reward address.
-func (s *Ethereum) SetEtherbase(etherbase common.Address) {
-	s.lock.Lock()
-	s.etherbase = etherbase
-	s.lock.Unlock()
-}
-
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
@@ -620,6 +611,7 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	if !s.config.Miner.Enabled {
 		return nil
 	}
+
 	s.lock.RLock()
 	price := s.gasPrice
 	s.lock.RUnlock()
@@ -632,20 +624,21 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 		return fmt.Errorf("etherbase missing: %v", err)
 	}
 	if clique, ok := s.engine.(*clique.Clique); ok {
-		if s.signer == nil {
+		if s.config.Miner.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %v", err)
 		}
 
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(message, s.signer)
+			return crypto.Sign(message, s.config.Miner.SigKey)
 		})
 	}
-	// If mining is started, we can disable the transaction rejection mechanism
-	// introduced to speed sync times.
-	atomic.StoreUint32(&s.handler.acceptTxs, 1)
 
-	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() { // For main
+	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
+		// If mining is started, we can disable the transaction rejection mechanism
+		// introduced to speed sync times.
+		atomic.StoreUint32(&s.handler.acceptTxs, 1)
+
 		tx, err := s.ChainKV().BeginRo(context.Background())
 		if err != nil {
 			return err
@@ -665,36 +658,6 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir)
 	}()
 
-	/*
-		// If the miner was not running, initialize it
-		if !s.IsMining() {
-			// Propagate the initial price point to the transaction pool
-			s.lock.RLock()
-			price := s.gasPrice
-			s.lock.RUnlock()
-			s.txPool.SetGasPrice(price)
-
-			// Configure the local mining address
-			eb, err := s.Etherbase()
-			if err != nil {
-				log.Error("Cannot start mining without etherbase", "err", err)
-				return fmt.Errorf("etherbase missing: %v", err)
-			}
-			if clique, ok := s.engine.(*clique.Clique); ok {
-				if s.signer == nil {
-					log.Error("Etherbase account unavailable locally", "err", err)
-					return fmt.Errorf("signer missing: %v", err)
-				}
-
-				clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-					return crypto.Sign(message, s.signer)
-				})
-			}
-			// If mining is started, we can disable the transaction rejection mechanism
-			// introduced to speed sync times.
-			atomic.StoreUint32(&s.handler.acceptTxs, 1)
-		}
-	*/
 	return nil
 }
 
