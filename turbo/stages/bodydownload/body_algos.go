@@ -181,7 +181,8 @@ func (bd *BodyDownload) DeliverBodies(txs [][]*types.Transaction, uncles [][]*ty
 		// Also, block numbers can be added to bd.delivered for empty blocks, above
 		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
 			bd.delivered.Add(blockNum)
-			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			bd.deliveries[blockNum-bd.requestedLow] = block
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
