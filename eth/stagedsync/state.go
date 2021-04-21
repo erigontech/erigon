@@ -150,8 +150,11 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	var timings []interface{}
 	for !s.IsDone() {
+		fmt.Printf("Run: is empty: %t\n", s.unwindStack.Empty())
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
+				fmt.Printf("Run unwind: %s\n", unwind.Stage)
+
 				if err := s.SetCurrentStage(unwind.Stage); err != nil {
 					return err
 				}
@@ -175,7 +178,9 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				return err
 			}
 		}
+
 		_, stage := s.CurrentStage()
+		fmt.Printf("Run run: %s\n", stage.ID)
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
 				return err
