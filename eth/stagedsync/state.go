@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -178,6 +179,9 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
+		} else {
+			fmt.Printf("Run: is empt2y: %s\n", debug.Callers(7))
+
 		}
 
 		_, stage := s.CurrentStage()
