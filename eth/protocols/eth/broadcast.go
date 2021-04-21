@@ -22,6 +22,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -149,15 +151,23 @@ func (p *Peer) announceTransactions() {
 			// Pile transaction hashes until we reach our allowed network limit
 			var (
 				count   int
+				j       int
 				pending []common.Hash
 				size    common.StorageSize
 			)
-			reply, _ := p.txpool.GetSerializedTransactions(context.Background(), queue)
-			for count = 0; count < len(reply) && size < maxTxPacketSize; count++ {
-				if reply[count] != nil {
-					pending = append(pending, queue[count])
-					size += common.HashLength
+			reply, err := p.txpool.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(queue)})
+			if err != nil {
+				p.Log().Warn("Failed to send transaction announcements", "err", err)
+				continue
+			}
+			unknown := gointerfaces.ConvertH256ToHashes(reply.Hashes)
+			for count = 0; count < len(queue) && size < maxTxPacketSize; count++ {
+				if unknown[j] == queue[count] {
+					j++
+					continue
 				}
+				pending = append(pending, queue[count])
+				size += common.HashLength
 			}
 			// Shift and trim queue
 			queue = queue[:copy(queue, queue[count:])]

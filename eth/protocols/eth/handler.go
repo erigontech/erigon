@@ -25,11 +25,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -88,7 +90,7 @@ type Backend interface {
 
 // TxPool defines the methods needed by the protocol handler to serve transactions.
 type TxPool interface {
-	// GetSerializedTransactions retrieves the the transaction from the local txpool with the given hash.
+	FindUnknownTransactions(ctx context.Context, in *proto_txpool.TxHashes, opts ...grpc.CallOption) (*proto_txpool.TxHashes, error)
 	GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error)
 }
 

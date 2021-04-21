@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -40,6 +41,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
+	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -54,10 +57,6 @@ const (
 // txPool defines the methods needed from a transaction pool implementation to
 // support all the operations needed by the Ethereum chain protocols.
 type txPool interface {
-	// Has returns an indicator whether txpool has a transaction
-	// cached with the given hash.
-	Has(hash common.Hash) bool
-
 	// AddRemotes should add the given transactions to the pool.
 	AddRemotes([]types.Transaction) []error
 
@@ -182,7 +181,13 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return p.RequestTxs(hashes)
 	}
-	h.txFetcher = fetcher.NewTxFetcher(h.txpool.Has, h.txpool.AddRemotes, fetchTx)
+	h.txFetcher = fetcher.NewTxFetcher(func(hashes common.Hashes) (common.Hashes, error) {
+		reply, err2 := h.txpool2.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
+		if err2 != nil {
+			return nil, err2
+		}
+		return gointerfaces.ConvertH256ToHashes(reply.Hashes), nil
+	}, h.txpool.AddRemotes, fetchTx)
 	h.chainSync = newChainSyncer(h)
 	return h, nil
 }

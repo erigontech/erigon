@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	//"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -68,9 +69,10 @@ var (
 )
 
 var (
-//txAnnounceInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/in", nil)
-//txAnnounceKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/known", nil)
-//txAnnounceUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/underpriced", nil)
+	txAnnounceInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/in", nil)
+	txAnnounceKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/known", nil)
+	txAnnounceUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/underpriced", nil)
+
 //txAnnounceDOSMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/dos", nil)
 
 //txBroadcastInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/in", nil)
@@ -168,9 +170,9 @@ type TxFetcher struct {
 	alternates map[common.Hash]map[string]struct{} // In-flight transaction alternate origins if retrieval fails
 
 	// Callbacks
-	hasTx    func(common.Hash) bool            // Retrieves a tx from the local txpool
-	addTxs   func([]types.Transaction) []error // Insert a batch of transactions into local txpool
-	fetchTxs func(string, []common.Hash) error // Retrieves a set of txs from a remote peer
+	findUnkownTransactions func(common.Hashes) (common.Hashes, error) // Retrieves a tx from the local txpool
+	addTxs                 func([]types.Transaction) []error         // Insert a batch of transactions into local txpool
+	fetchTxs               func(string, []common.Hash) error          // Retrieves a set of txs from a remote peer
 
 	step  chan struct{} // Notification channel when the fetcher loop iterates
 	clock mclock.Clock  // Time wrapper to simulate in tests
@@ -179,66 +181,54 @@ type TxFetcher struct {
 
 // NewTxFetcher creates a transaction fetcher to retrieve transaction
 // based on hash announcements.
-func NewTxFetcher(hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error) *TxFetcher {
-	return NewTxFetcherForTests(hasTx, addTxs, fetchTxs, mclock.System{}, nil)
+func NewTxFetcher(findUnknown func(common.Hashes) (common.Hashes, error), addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error) *TxFetcher {
+	return NewTxFetcherForTests(findUnknown, addTxs, fetchTxs, mclock.System{}, nil)
 }
 
 // NewTxFetcherForTests is a testing method to mock out the realtime clock with
 // a simulated version and the internal randomness with a deterministic one.
 func NewTxFetcherForTests(
-	hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error,
+	findUnknown func(common.Hashes) (common.Hashes, error), addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error,
 	clock mclock.Clock, rand *mrand.Rand) *TxFetcher {
 	return &TxFetcher{
-		notify:      make(chan *txAnnounce),
-		cleanup:     make(chan *txDelivery),
-		drop:        make(chan *txDrop),
-		quit:        make(chan struct{}),
-		waitlist:    make(map[common.Hash]map[string]struct{}),
-		waittime:    make(map[common.Hash]mclock.AbsTime),
-		waitslots:   make(map[string]map[common.Hash]struct{}),
-		announces:   make(map[string]map[common.Hash]struct{}),
-		announced:   make(map[common.Hash]map[string]struct{}),
-		fetching:    make(map[common.Hash]string),
-		requests:    make(map[string]*txRequest),
-		alternates:  make(map[common.Hash]map[string]struct{}),
-		underpriced: mapset.NewSet(),
-		hasTx:       hasTx,
-		addTxs:      addTxs,
-		fetchTxs:    fetchTxs,
-		clock:       clock,
-		rand:        rand,
+		notify:                 make(chan *txAnnounce),
+		cleanup:                make(chan *txDelivery),
+		drop:                   make(chan *txDrop),
+		quit:                   make(chan struct{}),
+		waitlist:               make(map[common.Hash]map[string]struct{}),
+		waittime:               make(map[common.Hash]mclock.AbsTime),
+		waitslots:              make(map[string]map[common.Hash]struct{}),
+		announces:              make(map[string]map[common.Hash]struct{}),
+		announced:              make(map[common.Hash]map[string]struct{}),
+		fetching:               make(map[common.Hash]string),
+		requests:               make(map[string]*txRequest),
+		alternates:             make(map[common.Hash]map[string]struct{}),
+		underpriced:            mapset.NewSet(),
+		findUnkownTransactions: findUnknown,
+		addTxs:                 addTxs,
+		fetchTxs:               fetchTxs,
+		clock:                  clock,
+		rand:                   rand,
 	}
 }
 
 // Notify announces the fetcher of the potential availability of a new batch of
 // transactions in the network.
 func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
-	// Keep track of all the announced transactions
-	//txAnnounceInMeter.Mark(int64(len(hashes)))
-
-	// Skip any transaction announcements that we already know of, or that we've
-	// previously marked as cheap and discarded. This check is of course racey,
-	// because multiple concurrent notifies will still manage to pass it, but it's
-	// still valuable to check here because it runs concurrent  to the internal
-	// loop, so anything caught here is time saved internally.
-	var (
-		unknowns               = make([]common.Hash, 0, len(hashes))
-		duplicate, underpriced int64
-	)
-	for _, hash := range hashes {
-		switch {
-		case f.hasTx(hash):
-			duplicate++
-
-		case f.underpriced.Contains(hash):
+	unknowns, err := f.findUnkownTransactions(hashes)
+	if err != nil {
+		return fmt.Errorf("txFetcher notify: %w\n", err)
+	}
+	var underpriced int
+	for i := range hashes {
+		if f.underpriced.Contains(hashes[i]) {
 			underpriced++
-
-		default:
-			unknowns = append(unknowns, hash)
 		}
 	}
-	//txAnnounceKnownMeter.Mark(duplicate)
-	//txAnnounceUnderpricedMeter.Mark(underpriced)
+
+	txAnnounceInMeter.Mark(int64(len(hashes)))
+	txAnnounceKnownMeter.Mark(int64(len(hashes) - len(unknowns)))
+	txAnnounceUnderpricedMeter.Mark(int64(underpriced))
 
 	// If anything's left to announce, push it into the internal loop
 	if len(unknowns) == 0 {
