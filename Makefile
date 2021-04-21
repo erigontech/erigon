@@ -105,7 +105,7 @@ mdbx:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: mdbx
-	$(GOTEST) --timeout 15m
+	TEST_DB=mdbx $(GOTEST) --timeout 15m
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
