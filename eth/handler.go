@@ -120,7 +120,6 @@ type handler struct {
 	peerWG    sync.WaitGroup
 
 	tmpdir        string
-	cacheSize     datasize.ByteSize
 	batchSize     datasize.ByteSize
 	stagedSync    *stagedsync.StagedSync
 	currentHeight uint64 // Atomic variable to contain chain height
@@ -160,7 +159,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	}
 	h.downloader = downloader.New(config.Database, config.ChainConfig, config.engine, config.vmConfig, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
-	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
+	h.downloader.SetBatchSize(h.batchSize)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
@@ -195,11 +194,10 @@ func (h *handler) SetTmpDir(tmpdir string) {
 	}
 }
 
-func (h *handler) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
-	h.cacheSize = cacheSize
+func (h *handler) SetBatchSize(batchSize datasize.ByteSize) {
 	h.batchSize = batchSize
 	if h.downloader != nil {
-		h.downloader.SetBatchSize(cacheSize, batchSize)
+		h.downloader.SetBatchSize(batchSize)
 	}
 }
 
