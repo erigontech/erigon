@@ -673,6 +673,7 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 			hasWork = true
 		case minedBlock := <-resultCh:
 			works = false
+			fmt.Printf("mined block\n")
 			// TODO: send mined block to sentry
 			_ = minedBlock
 		case err := <-errc:
