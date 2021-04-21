@@ -158,6 +158,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if res == nil {
+				t.Fatalf("account not found for %x", addr.String())
+			}
 
 			result := uint256.NewInt().SetBytes(res)
 			if !v.Eq(result) {
