@@ -378,26 +378,26 @@ func DefaultStages() StageBuilders {
 					ExecFunc: func(s *StageState, _ Unwinder) error {
 						var executionAt uint64
 						var err error
-						if executionAt, err = s.ExecutionAt(world.TX); err != nil {
+						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
 							return err
 						}
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.DB)
 						if err != nil {
 							return err
 						}
 
-						return s.DoneAndUpdate(world.TX, executionAt)
+						return s.DoneAndUpdate(world.DB, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						var executionAt uint64
 						var err error
-						if executionAt, err = s.ExecutionAt(world.TX); err != nil {
+						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
 							return err
 						}
-						return s.DoneAndUpdate(world.TX, executionAt)
+						return s.DoneAndUpdate(world.DB, executionAt)
 					},
 				}
 			},
