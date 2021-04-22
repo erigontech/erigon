@@ -80,7 +80,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
 	cc := &core.TinyChainContext{}
-	cc.SetDB(chainDb)
+	//cc.SetDB(chainDb)
 	cc.SetEngine(engine)
 
 	noOpWriter := state.NewNoopWriter()
@@ -92,11 +92,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	}
 	defer rwtx.Rollback()
 
-	execAt, err1 := stages.GetStageProgress(chainDb, stages.Execution)
+	execAt, err1 := stages.GetStageProgress(rwtx, stages.Execution)
 	if err1 != nil {
 		return err1
 	}
-	historyAt, err1 := stages.GetStageProgress(chainDb, stages.StorageHistoryIndex)
+	historyAt, err1 := stages.GetStageProgress(rwtx, stages.StorageHistoryIndex)
 	if err1 != nil {
 		return err1
 	}
@@ -113,11 +113,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(chainDb, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(rwtx, blockNum)
 		if err != nil {
 			return err
 		}
-		block := rawdb.ReadBlock(chainDb, blockHash, blockNum)
+		block := rawdb.ReadBlock(ethdb.NewRoTxDb(rwtx), blockHash, blockNum)
 		if block == nil {
 			break
 		}
@@ -132,7 +132,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, block, vmConfig)
 		if err1 != nil {
 			return err1
