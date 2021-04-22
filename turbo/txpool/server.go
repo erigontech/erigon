@@ -149,6 +149,11 @@ func (s *Server) ImportTransactions(ctx context.Context, in *proto_txpool.Import
 	return reply, nil
 }
 
+// UnderpricedAmount - method mostly needed for tests - to check size of underpriced set
+func (s *Server) UnderpricedAmount() int {
+	return s.underpriced.Cardinality()
+}
+
 func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransactionsRequest) (*proto_txpool.GetTransactionsReply, error) {
 	buf := bytes.NewBuffer(nil)
 	reply := &proto_txpool.GetTransactionsReply{Txs: make([][]byte, len(in.Hashes))}

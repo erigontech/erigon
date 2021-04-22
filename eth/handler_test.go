@@ -77,7 +77,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		}
 		headBlock = bs[len(bs)-1]
 	}
-	txpool2, txpool := txpool.NewTestTxPool()
+	txpool2, _, txpool := txpool.NewTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
 		Database:    db,

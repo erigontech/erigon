@@ -17,16 +17,18 @@ import (
 type TestTxPool struct {
 	pool map[common.Hash]*types.Transaction // Hash map of collected transactions
 
-	txFeed event.Feed   // Notification feed to allow waiting for inclusion
-	lock   sync.RWMutex // Protects the transaction pool
+	txFeed         event.Feed   // Notification feed to allow waiting for inclusion
+	lock           sync.RWMutex // Protects the transaction pool
+	FailAddRemotes func(txs []*types.Transaction) []error
 }
 
 // NewTestTxPool creates a mock transaction pool.
-func NewTestTxPool() (*ClientDirect, *TestTxPool) {
+func NewTestTxPool() (*ClientDirect, *Server, *TestTxPool) {
 	deprecated := &TestTxPool{
 		pool: make(map[common.Hash]*types.Transaction),
 	}
-	return NewClientDirect(NewServer(context.Background(), deprecated)), deprecated
+	server := NewServer(context.Background(), deprecated)
+	return NewClientDirect(server), server, deprecated
 }
 
 // Has returns an indicator whether txpool has a transaction
@@ -52,6 +54,20 @@ func (p *TestTxPool) Get(hash common.Hash) *types.Transaction {
 func (p *TestTxPool) AddRemotes(txs []*types.Transaction) []error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	if p.FailAddRemotes != nil {
+		errs := p.FailAddRemotes(txs)
+		anounce := types.Transactions{}
+		for i := range errs {
+			if errs[i] == nil {
+				anounce = append(anounce, txs[i])
+			}
+		}
+		if len(anounce) > 0 {
+			p.txFeed.Send(core.NewTxsEvent{Txs: txs})
+		}
+		return errs
+	}
 
 	for _, tx := range txs {
 		p.pool[tx.Hash()] = tx
