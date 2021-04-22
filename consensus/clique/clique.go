@@ -281,7 +281,7 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		}
 	*/
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
 
 	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
@@ -291,7 +291,7 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	return c.verifyHeaderBySnapshot(chain, header, snap)
 }
 
-func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
+func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader, upTo uint64) {
 	lastSnap, err := lastSnapshot(c.db)
 	if errors.Is(err, ErrNotFound) {
 		lastSnap = 0
@@ -302,9 +302,7 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 		return
 	}
 
-	current := chain.CurrentHeader()
-	currentBlock := current.Number.Uint64()
-	total := int(currentBlock) - int(lastSnap)
+	total := int(upTo) - int(lastSnap)
 
 	if total < 1024 {
 		return
@@ -332,8 +330,8 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 	var percent int
 	var prevPercent int
 
-	for n := lastSnap + 1; n <= currentBlock; n++ {
-		current = chain.GetHeaderByNumber(n)
+	for n := lastSnap + 1; n <= upTo; n++ {
+		current := chain.GetHeaderByNumber(n)
 		if current == nil {
 			log.Error("can't regenerate snapshot. block does not exist", "block", n)
 			return
@@ -361,7 +359,7 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader) {
 // retrieve the async verifications (the order is that of the input slice).
 func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, headers[0].Number.Uint64()-1)
 	})
 
 	abort := make(chan struct{})
@@ -481,7 +479,7 @@ func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error
 // in the header satisfies the consensus protocol requirements.
 func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
 
 	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
@@ -495,7 +493,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
@@ -594,7 +592,7 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 // the local signing credentials.
 func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, block.NumberU64()-1)
 	})
 
 	header := block.Header()
@@ -672,7 +670,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain)
+		c.regenerateSnapshots(chain, parentNumber.Uint64())
 	})
 
 	snap, err := c.snapshot(chain, parentNumber, parentHash, common.Hash{})
