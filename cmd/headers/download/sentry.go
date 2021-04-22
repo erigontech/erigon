@@ -79,8 +79,10 @@ func makeP2PServer(
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
-	ss *SentryServerImpl,
 	genesisHash common.Hash,
+	statusFn func() *proto_sentry.StatusData,
+	receiveCh chan<- StreamMsg,
+	receiveUploadCh chan<- StreamMsg,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -127,7 +129,7 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, ss.getStatus, ss.receiveCh, ss.receiveUploadCh)
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh)
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
@@ -463,6 +465,8 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 		ctx:             ctx,
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
+		stopCh:          make(chan struct{}),
+		uploadStopCh:    make(chan struct{}),
 	}
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
@@ -491,8 +495,10 @@ func p2pServer(ctx context.Context,
 		&sentryServer.peerHeightMap,
 		&sentryServer.peerTimeMap,
 		&sentryServer.peerRwMap,
-		sentryServer,
 		genesisHash,
+		sentryServer.getStatus,
+		sentryServer.receiveCh,
+		sentryServer.receiveUploadCh,
 	)
 	if err != nil {
 		return nil, err
