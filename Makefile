@@ -163,6 +163,7 @@ grpc:
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
+		--go_opt=Mversion/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/version \
 		types/types.proto \
 		p2psentry/sentry.proto \
 		version/version.proto \
