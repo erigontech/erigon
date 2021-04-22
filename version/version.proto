@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package version;
 
+option go_package = "./version;version";
+
 import "google/protobuf/descriptor.proto";
 
 /* Application-level versioning shall use a 3-part version number (M.m.p) following semver rules */
