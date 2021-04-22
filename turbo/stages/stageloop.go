@@ -60,7 +60,7 @@ func StageLoop(
 			return err1
 		}
 
-		canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
+		canRunCycleInOneTransaction := !initialCycle && height-origin < 1024 && height-hashStateStageProgress < 1024
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -125,7 +125,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, blockPropagator, world.InitialCycle, wakeUpChan, world.BatchSize)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan, world.BatchSize)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)

@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
@@ -27,7 +26,6 @@ func HeadersForward(
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
-	blockPropagator adapter.BlockPropagator,
 	initialCycle bool,
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
@@ -95,7 +93,7 @@ func HeadersForward(
 			peer = headerReqSend(ctx, req)
 			if peer != nil {
 				hd.SentRequest(req, currentTime, 5 /* timeout */)
-				//log.Info("Sent request", "height", req.Number)
+				log.Debug("Sent request", "height", req.Number)
 			}
 		}
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
@@ -105,7 +103,7 @@ func HeadersForward(
 				peer = headerReqSend(ctx, req)
 				if peer != nil {
 					hd.SentRequest(req, currentTime, 5 /*timeout */)
-					//log.Info("Sent request", "height", req.Number)
+					log.Debug("Sent request", "height", req.Number)
 				}
 			}
 			maxRequests--
@@ -114,9 +112,12 @@ func HeadersForward(
 		req = hd.RequestSkeleton()
 		if req != nil {
 			peer = headerReqSend(ctx, req)
+			if peer != nil {
+				log.Debug("Sent skeleton request", "height", req.Number)
+			}
 		}
 		// Load headers into the database
-		if err = hd.InsertHeaders(headerInserter.FeedHeader, blockPropagator); err != nil {
+		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(batchSize) {
@@ -153,7 +154,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.AnythingDone() {
-		if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
+		if err := s.Update(batch, headerInserter.GetHighest()); err != nil {
 			return err
 		}
 	}

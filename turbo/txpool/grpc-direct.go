@@ -38,5 +38,8 @@ func (c *ClientDirect) GetSerializedTransactions(ctx context.Context, hashes com
 		return nil, err
 	}
 	result := make([]rlp.RawValue, len(reply.Txs))
+	for i := range reply.Txs {
+		result[i] = reply.Txs[i]
+	}
 	return result, err
 }
