@@ -212,6 +212,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	if err != nil {
 		return fmt.Errorf("txFetcher notify: %w\n", err)
 	}
+	fmt.Printf("unknowns: %x\n", unknowns)
 	// If anything's left to announce, push it into the internal loop
 	if len(unknowns) == 0 {
 		return nil
