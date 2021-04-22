@@ -46,6 +46,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -181,13 +182,21 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return p.RequestTxs(hashes)
 	}
-	h.txFetcher = fetcher.NewTxFetcher(func(hashes common.Hashes) (common.Hashes, error) {
+	findUnknownTxs := func(hashes common.Hashes) (common.Hashes, error) {
 		reply, err2 := h.txpool2.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
 		if err2 != nil {
 			return nil, err2
 		}
 		return gointerfaces.ConvertH256ToHashes(reply.Hashes), nil
-	}, h.txpool.AddRemotes, fetchTx)
+	}
+	importTxs := func(txs []rlp.RawValue) (common.Hashes, error) {
+		reply, err2 := h.txpool2.ImportTransactions(context.Background(), &proto_txpool.ImportRequest{Txs: [][]byte(txs)})
+		if err2 != nil {
+			return nil, err2
+		}
+		return gointerfaces.ConvertH256ToHashes(reply.Hashes), nil
+	}
+	h.txFetcher = fetcher.NewTxFetcher(findUnknownTxs, h.txpool.AddRemotes, fetchTx)
 	h.chainSync = newChainSyncer(h)
 	return h, nil
 }

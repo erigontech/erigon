@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -90,7 +89,7 @@ type Backend interface {
 
 // TxPool defines the methods needed by the protocol handler to serve transactions.
 type TxPool interface {
-	FindUnknownTransactions(ctx context.Context, in *proto_txpool.TxHashes, opts ...grpc.CallOption) (*proto_txpool.TxHashes, error)
+	proto_txpool.TxpoolClient
 	GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error)
 }
 
