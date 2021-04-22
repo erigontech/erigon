@@ -183,14 +183,14 @@ func (c *Clique) verifyCascadingFieldsBySnapshot(chain consensus.ChainHeaderRead
 	}
 
 	// All basic checks passed, verify the seal and return
-	err := c.verifySeal(chain, header, snap)
-	if err == nil {
-		if err = c.applyAndStoreSnapshot(snap, true, header); err != nil {
-			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.Hash().String(), "err", err)
-		}
+	if err := c.verifySeal(chain, header, snap); err != nil {
+		return err
 	}
-
-	return err
+	if err := c.applyAndStoreSnapshot(snap, true, header); err != nil {
+		log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.Hash().String(), "err", err)
+		return err
+	}
+	return nil
 }
 
 func (c *Clique) snapshot(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
@@ -296,6 +296,7 @@ func (c *Clique) snapshotByHeader(num uint64, hash common.Hash) *Snapshot {
 			return s
 		}
 	}
+	fmt.Printf("snapshotByHeader %d (epoch %d, checkpoint interval %d) %x returns nil\n", num, c.config.Epoch, c.snapshotConfig.CheckpointInterval, hash)
 
 	return nil
 }
@@ -361,7 +362,10 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 func (c *Clique) getHeaderSnapshot(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) (*Snapshot, error) {
 	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
 	if ancestorsNum == 0 {
-		return c.snapshotByHeader(num, hash), nil
+		snap := c.snapshotByHeader(num, hash)
+		if snap != nil {
+			return snap, nil
+		}
 	}
 
 	ancestors := make([]*types.Header, 0, ancestorsNum)
