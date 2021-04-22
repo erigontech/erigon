@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
@@ -79,9 +80,9 @@ func Fuzz(input []byte) int {
 	rand := rand.New(rand.NewSource(0x3a29)) // Same used in package tests!!!
 
 	f := fetcher.NewTxFetcherForTests(
-		func(common.Hash) bool { return false },
-		func(txs []types.Transaction) []error {
-			return make([]error, len(txs))
+		func(hashes common.Hashes) (common.Hashes, error) { return common.Hashes{}, nil },
+		func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
+			return make([]proto_txpool.ImportResult, len(txs)), nil
 		},
 		func(string, []common.Hash) error { return nil },
 		clock, rand,

@@ -28,8 +28,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 	//"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -73,29 +75,29 @@ var (
 	txAnnounceKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/known", nil)
 	txAnnounceUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/underpriced", nil)
 
-//txAnnounceDOSMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/dos", nil)
+	//txAnnounceDOSMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/dos", nil)
 
-//txBroadcastInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/in", nil)
-//txBroadcastKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/known", nil)
-//txBroadcastUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/underpriced", nil)
-//txBroadcastOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/otherreject", nil)
+	//txBroadcastInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/in", nil)
+	//txBroadcastKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/known", nil)
+	//txBroadcastUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/underpriced", nil)
+	//txBroadcastOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/otherreject", nil)
 
-//txRequestOutMeter     = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/out", nil)
-//txRequestFailMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/fail", nil)
-//txRequestDoneMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/done", nil)
-//txRequestTimeoutMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/timeout", nil)
+	//txRequestOutMeter     = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/out", nil)
+	//txRequestFailMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/fail", nil)
+	//txRequestDoneMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/done", nil)
+	//txRequestTimeoutMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/timeout", nil)
 
-//txReplyInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/in", nil)
-//txReplyKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/known", nil)
-//txReplyUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/underpriced", nil)
-//txReplyOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/otherreject", nil)
+	//txReplyInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/in", nil)
+	//txReplyKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/known", nil)
+	//txReplyUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/underpriced", nil)
+	//txReplyOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/otherreject", nil)
 
-//txFetcherWaitingPeers   = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/peers", nil)
-//txFetcherWaitingHashes  = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/hashes", nil)
-//txFetcherQueueingPeers  = metrics.NewRegisteredGauge("eth/fetcher/transaction/queueing/peers", nil)
-//txFetcherQueueingHashes = metrics.NewRegisteredGauge("eth/fetcher/transaction/queueing/hashes", nil)
-//txFetcherFetchingPeers  = metrics.NewRegisteredGauge("eth/fetcher/transaction/fetching/peers", nil)
-//txFetcherFetchingHashes = metrics.NewRegisteredGauge("eth/fetcher/transaction/fetching/hashes", nil)
+	//txFetcherWaitingPeers   = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/peers", nil)
+	//txFetcherWaitingHashes  = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/hashes", nil)
+	//txFetcherQueueingPeers  = metrics.NewRegisteredGauge("eth/fetcher/transaction/queueing/peers", nil)
+	//txFetcherQueueingHashes = metrics.NewRegisteredGauge("eth/fetcher/transaction/queueing/hashes", nil)
+	//txFetcherFetchingPeers  = metrics.NewRegisteredGauge("eth/fetcher/transaction/fetching/peers", nil)
+	//txFetcherFetchingHashes = metrics.NewRegisteredGauge("eth/fetcher/transaction/fetching/hashes", nil)
 )
 
 // txAnnounce is the notification of the availability of a batch
@@ -170,9 +172,9 @@ type TxFetcher struct {
 	alternates map[common.Hash]map[string]struct{} // In-flight transaction alternate origins if retrieval fails
 
 	// Callbacks
-	findUnkownTransactions func(common.Hashes) (common.Hashes, error) // Retrieves a tx from the local txpool
-	addTxs                 func([]types.Transaction) []error         // Insert a batch of transactions into local txpool
-	fetchTxs               func(string, []common.Hash) error          // Retrieves a set of txs from a remote peer
+	findUnkownTransactions func(common.Hashes) (common.Hashes, error)          // Retrieves a tx from the local txpool
+	addTxs                 func([][]byte) ([]proto_txpool.ImportResult, error) // Insert a batch of transactions into local txpool
+	fetchTxs               func(string, []common.Hash) error                   // Retrieves a set of txs from a remote peer
 
 	step  chan struct{} // Notification channel when the fetcher loop iterates
 	clock mclock.Clock  // Time wrapper to simulate in tests
@@ -181,14 +183,19 @@ type TxFetcher struct {
 
 // NewTxFetcher creates a transaction fetcher to retrieve transaction
 // based on hash announcements.
-func NewTxFetcher(findUnknown func(common.Hashes) (common.Hashes, error), addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error) *TxFetcher {
+func NewTxFetcher(
+	findUnknown func(common.Hashes) (common.Hashes, error),
+	addTxs func(txs [][]byte) ([]proto_txpool.ImportResult, error),
+	fetchTxs func(string, []common.Hash) error) *TxFetcher {
 	return NewTxFetcherForTests(findUnknown, addTxs, fetchTxs, mclock.System{}, nil)
 }
 
 // NewTxFetcherForTests is a testing method to mock out the realtime clock with
 // a simulated version and the internal randomness with a deterministic one.
 func NewTxFetcherForTests(
-	findUnknown func(common.Hashes) (common.Hashes, error), addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error,
+	findUnknown func(common.Hashes) (common.Hashes, error),
+	addTxs func(txs [][]byte) ([]proto_txpool.ImportResult, error),
+	fetchTxs func(string, []common.Hash) error,
 	clock mclock.Clock, rand *mrand.Rand) *TxFetcher {
 	return &TxFetcher{
 		notify:                 make(chan *txAnnounce),
@@ -265,32 +272,38 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 		underpriced int64
 		otherreject int64
 	)
-	errs := f.addTxs(txs)
-	for i, err := range errs {
-		if err != nil {
-			// Track the transaction hash if the price is too low for us.
-			// Avoid re-request this transaction when we receive another
-			// announcement.
-			if err == core.ErrUnderpriced || err == core.ErrReplaceUnderpriced {
-				for f.underpriced.Cardinality() >= maxTxUnderpricedSetSize {
-					f.underpriced.Pop()
-				}
-				f.underpriced.Add(txs[i].Hash())
-			}
-			// Track a few interesting failure types
-			switch err {
-			case nil: // Noop, but need to handle to not count these
-
-			case core.ErrAlreadyKnown:
-				duplicate++
-
-			case core.ErrUnderpriced, core.ErrReplaceUnderpriced:
-				underpriced++
-
-			default:
-				otherreject++
-			}
+	serialized, err := txpool.MarshalTxs(txs)
+	if err != nil {
+		return err
+	}
+	results, err := f.addTxs(serialized)
+	if err != nil {
+		return err
+	}
+	for i := range results {
+		switch results[i] {
+		case proto_txpool.ImportResult_SUCCESS:
+			continue
+		case proto_txpool.ImportResult_FEE_TOO_LOW:
+			underpriced++
+		case proto_txpool.ImportResult_ALREADY_EXISTS:
+			duplicate++
+		case proto_txpool.ImportResult_INVALID:
+			otherreject++
+		default:
+			return fmt.Errorf("unknown return type: %s", results[i])
 		}
+
+		// Track the transaction hash if the price is too low for us.
+		// Avoid re-request this transaction when we receive another
+		// announcement.
+		if err == core.ErrUnderpriced || err == core.ErrReplaceUnderpriced {
+			for f.underpriced.Cardinality() >= maxTxUnderpricedSetSize {
+				f.underpriced.Pop()
+			}
+			f.underpriced.Add(txs[i].Hash())
+		}
+
 		added = append(added, txs[i].Hash())
 	}
 	//if direct {

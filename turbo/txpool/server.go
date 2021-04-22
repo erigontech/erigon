@@ -105,3 +105,26 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 
 	return reply, nil
 }
+
+func MarshalTxs(txs types.Transactions) ([][]byte, error) {
+	buf := bytes.NewBuffer(nil)
+	result := make([][]byte, len(txs))
+	for i := range txs {
+		buf.Reset()
+		if err := txs[i].EncodeRLP(buf); err != nil {
+			return nil, err
+		}
+		result[i] = common.CopyBytes(buf.Bytes())
+	}
+	return result, nil
+}
+
+func UnmarshalTxs(txs [][]byte) (types.Transactions, error) {
+	result := make(types.Transactions, len(txs))
+	for i := range txs {
+		if err := rlp.DecodeBytes(txs[i], result[i]); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
