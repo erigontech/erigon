@@ -12,7 +12,7 @@ fn make_protos(protos: &[&str]) {
 }
 
 fn main() {
-    let mut protos = vec!["types/types.proto", "version/version.proto"];
+    let mut protos = vec!["types/types.proto"];
 
     if cfg!(feature = "consensus") {
         protos.push("consensus_engine/consensus.proto");
