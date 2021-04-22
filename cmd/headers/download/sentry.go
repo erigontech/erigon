@@ -159,7 +159,10 @@ func MakeProtocols(ctx context.Context,
 					peer,
 					eth.ProtocolVersions[0], // version == eth66
 					eth.ProtocolVersions[0], // minVersion == eth66
-					ss,
+					ss.getStatus(),
+					ss.lock,
+					ss.receiveCh,
+					ss.receiveUploadCh,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
@@ -278,7 +281,10 @@ func runPeer(
 	peer *p2p.Peer,
 	version uint,
 	minVersion uint,
-	ss *SentryServerImpl,
+	status *proto_sentry.StatusData,
+	channelLock sync.RWMutex,
+	receiveCh chan<- StreamMsg,
+	receiveUploadCh chan<- StreamMsg,
 ) error {
 	peerID := peer.ID().String()
 	rwRaw, ok := peerRwMap.Load(peerID)
@@ -287,7 +293,7 @@ func runPeer(
 	}
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 
-	if err := handShake(ctx, ss.getStatus(), peerID, rw, version, minVersion); err != nil {
+	if err := handShake(ctx, status, peerID, rw, version, minVersion); err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
 	log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
@@ -319,7 +325,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receiveUpload(&StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders})
+			safeSend(channelLock, receiveUploadCh, &StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders})
 		case eth.BlockHeadersMsg:
 			// Peer responded or sent message - reset the "back off" timer
 			peerTimeMap.Store(peerID, time.Now().Unix())
@@ -327,13 +333,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receive(&StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BlockHeaders})
+			safeSend(channelLock, receiveCh, &StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BlockHeaders})
 		case eth.GetBlockBodiesMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receiveUpload(&StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies})
+			safeSend(channelLock, receiveUploadCh, &StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies})
 		case eth.BlockBodiesMsg:
 			// Peer responded or sent message - reset the "back off" timer
 			peerTimeMap.Store(peerID, time.Now().Unix())
@@ -341,7 +347,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receive(&StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BlockBodies})
+			safeSend(channelLock, receiveCh, &StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BlockBodies})
 		case eth.GetNodeDataMsg:
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -353,13 +359,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receive(&StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes})
+			safeSend(channelLock, receiveCh, &StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes})
 		case eth.NewBlockMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			ss.receive(&StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
+			safeSend(channelLock, receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
 			if err := msg.Decode(&hashes); err != nil {
@@ -764,16 +770,6 @@ func (ss *SentryServerImpl) getStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *SentryServerImpl) receive(msg *StreamMsg) {
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
-	select {
-	case ss.receiveCh <- *msg:
-	default:
-		// TODO make a warning about dropped messages
-	}
-}
-
 func (ss *SentryServerImpl) recreateReceive() {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
@@ -800,11 +796,11 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	return nil
 }
 
-func (ss *SentryServerImpl) receiveUpload(msg *StreamMsg) {
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
+func safeSend(lock sync.RWMutex, receiveUploadCh chan<- StreamMsg, msg *StreamMsg) {
+	lock.RLock()
+	defer lock.RUnlock()
 	select {
-	case ss.receiveUploadCh <- *msg:
+	case receiveUploadCh <- *msg:
 	default:
 		// TODO make a warning about dropped messages
 	}
