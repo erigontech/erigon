@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/version"
 )
+
+// DBSchemaVersion
+var DBSchemaVersion = version.InterfaceVersionReply{CurrentMajorNumber: 1, CurrentMinorNumber: 0, CurrentPatchNumber: 0}
 
 // Buckets
 
