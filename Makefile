@@ -165,6 +165,7 @@ grpc:
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
 		types/types.proto \
 		p2psentry/sentry.proto \
+		version/version.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
 		txpool/txpool.proto txpool/txpool_control.proto

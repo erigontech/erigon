@@ -18,8 +18,11 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TxpoolClient interface {
+	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknownTransactions(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
+	// preserves incoming order and amount
 	ImportTransactions(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error)
+	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	GetTransactions(ctx context.Context, in *GetTransactionsRequest, opts ...grpc.CallOption) (*GetTransactionsReply, error)
 }
 
@@ -62,8 +65,11 @@ func (c *txpoolClient) GetTransactions(ctx context.Context, in *GetTransactionsR
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility
 type TxpoolServer interface {
+	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknownTransactions(context.Context, *TxHashes) (*TxHashes, error)
+	// preserves incoming order and amount
 	ImportTransactions(context.Context, *ImportRequest) (*ImportReply, error)
+	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	GetTransactions(context.Context, *GetTransactionsRequest) (*GetTransactionsReply, error)
 	mustEmbedUnimplementedTxpoolServer()
 }

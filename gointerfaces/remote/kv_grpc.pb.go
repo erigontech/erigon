@@ -3,10 +3,12 @@
 package remote
 
 import (
+	version "./version"
 	context "context"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -18,6 +20,9 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type KVClient interface {
+	// GetInterfaceVersion returns the service-side interface version number
+	GetInterfaceVersion(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*version.InterfaceVersionReply, error)
+	// Tx exposes read-only transactions for the key-value store
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
 }
 
@@ -27,6 +32,15 @@ type kVClient struct {
 
 func NewKVClient(cc grpc.ClientConnInterface) KVClient {
 	return &kVClient{cc}
+}
+
+func (c *kVClient) GetInterfaceVersion(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*version.InterfaceVersionReply, error) {
+	out := new(version.InterfaceVersionReply)
+	err := c.cc.Invoke(ctx, "/remote.KV/GetInterfaceVersion", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *kVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
@@ -64,6 +78,9 @@ func (x *kVTxClient) Recv() (*Pair, error) {
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility
 type KVServer interface {
+	// GetInterfaceVersion returns the service-side interface version number
+	GetInterfaceVersion(context.Context, *emptypb.Empty) (*version.InterfaceVersionReply, error)
+	// Tx exposes read-only transactions for the key-value store
 	Tx(KV_TxServer) error
 	mustEmbedUnimplementedKVServer()
 }
@@ -72,6 +89,9 @@ type KVServer interface {
 type UnimplementedKVServer struct {
 }
 
+func (UnimplementedKVServer) GetInterfaceVersion(context.Context, *emptypb.Empty) (*version.InterfaceVersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetInterfaceVersion not implemented")
+}
 func (UnimplementedKVServer) Tx(KV_TxServer) error {
 	return status.Errorf(codes.Unimplemented, "method Tx not implemented")
 }
@@ -86,6 +106,24 @@ type UnsafeKVServer interface {
 
 func RegisterKVServer(s grpc.ServiceRegistrar, srv KVServer) {
 	s.RegisterService(&KV_ServiceDesc, srv)
+}
+
+func _KV_GetInterfaceVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).GetInterfaceVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.KV/GetInterfaceVersion",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).GetInterfaceVersion(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _KV_Tx_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -120,7 +158,12 @@ func (x *kVTxServer) Recv() (*Cursor, error) {
 var KV_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.KV",
 	HandlerType: (*KVServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetInterfaceVersion",
+			Handler:    _KV_GetInterfaceVersion_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Tx",
