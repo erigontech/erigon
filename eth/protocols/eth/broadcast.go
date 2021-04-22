@@ -162,7 +162,7 @@ func (p *Peer) announceTransactions() {
 			}
 			unknown := gointerfaces.ConvertH256ToHashes(reply.Hashes)
 			for count = 0; count < len(queue) && size < maxTxPacketSize; count++ {
-				if unknown[j] == queue[count] {
+				if j < len(unknown) && unknown[j] == queue[count] {
 					j++
 					continue
 				}
