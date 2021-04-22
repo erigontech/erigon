@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package version;
+
+import "google/protobuf/descriptor.proto";
+
+/* Application-level versioning shall use a 3-part version number (M.m.p) following semver rules */
+/* 1. MAJOR version (M): increment when you make incompatible changes                            */
+/* 2. MINOR version (m): increment when you add functionality in backward compatible manner      */
+/* 3. PATCH version (p): increment when you make backward compatible bug fixes                   */
+
+// Extensions of file-level options for interface version: should *not* be modified
+extend google.protobuf.FileOptions {
+  uint32 interface_major_version = 50001;
+  uint32 interface_minor_version = 50002;
+  uint32 interface_patch_version = 50003;
+}
+
+// Reply message containing the current interface version on the service side
+message InterfaceVersionReply {
+  uint32 current_major_number = 1;
+  uint32 current_minor_number = 2;
+  uint32 current_patch_number = 3;
+}

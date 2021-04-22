@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package sentry;
+
+option go_package = "./sentry;sentry";
+
+enum MessageId {
+  // eth64 announcement messages (no id)
+  NewBlockHashes = 0;
+  NewBlock = 1;
+  Transactions = 2;
+
+  // eth65 announcement messages (no id)
+  NewPooledTransactionHashes = 3;
+
+  // eth66 messages with request-id
+  GetBlockHeaders = 4;
+  GetBlockBodies = 5;
+  GetNodeData = 6;
+  GetReceipts = 7;
+  GetPooledTransactions = 8;
+  BlockHeaders = 9;
+  BlockBodies = 10;
+  NodeData = 11;
+  Receipts = 12;
+  PooledTransactions = 13;
+
+}
+
+message OutboundMessageData {
+  MessageId id = 1;
+  bytes data = 2;
+}
+
+message SendMessageByMinBlockRequest {
+  OutboundMessageData data = 1;
+  uint64 min_block = 2;
+}
+
+message SendMessageByIdRequest {
+  OutboundMessageData data = 1;
+  types.H512 peer_id = 2;
+}
+
+message SendMessageToRandomPeersRequest {
+  OutboundMessageData data = 1;
+  uint64 max_peers = 2;
+}
+
+message SentPeers { repeated types.H512 peers = 1; }
+
+enum PenaltyKind { Kick = 0; }
+
+message PenalizePeerRequest {
+  types.H512 peer_id = 1;
+  PenaltyKind penalty = 2;
+}
+
+message PeerMinBlockRequest {
+  types.H512 peer_id = 1;
+  uint64 min_block = 2;
+}
+
+message InboundMessage {
+  MessageId id = 1;
+  bytes data = 2;
+  types.H512 peer_id = 3;
+}
+
+message Forks {
+  types.H256 genesis = 1;
+  repeated uint64 forks = 2;
+}
+
+message StatusData {
+  uint64 network_id = 1;
+  types.H256 total_difficulty = 2;
+  types.H256 best_hash = 3;
+  Forks fork_data = 4;
+  uint64 max_block = 5;
+}
+
+service Sentry {
+  rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
+  rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
+  rpc SendMessageByMinBlock(SendMessageByMinBlockRequest) returns (SentPeers);
+  rpc SendMessageById(SendMessageByIdRequest) returns (SentPeers);
+  rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
+      returns (SentPeers);
+  rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
+  rpc SetStatus(StatusData) returns (google.protobuf.Empty);
+  rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc ReceiveUploadMessages(google.protobuf.Empty)
+      returns (stream InboundMessage);
+  rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
+}
