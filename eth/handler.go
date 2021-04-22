@@ -59,7 +59,7 @@ type txPool interface {
 	Has(hash common.Hash) bool
 
 	// AddRemotes should add the given transactions to the pool.
-	AddRemotes([]*types.Transaction) []error
+	AddRemotes([]types.Transaction) []error
 
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.

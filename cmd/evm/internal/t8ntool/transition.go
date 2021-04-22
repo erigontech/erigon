@@ -204,9 +204,9 @@ func Main(ctx *cli.Context) error {
 		txsWithKeys = inputData.Txs
 	}
 	// We may have to sign the transactions.
-	signer := types.MakeSigner(chainConfig, big.NewInt(int64(prestate.Env.Number)))
+	signer := types.MakeSigner(chainConfig, prestate.Env.Number)
 
-	if txs, err = signUnsignedTransactions(txsWithKeys, signer); err != nil {
+	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
 	}
 
@@ -230,7 +230,7 @@ func Main(ctx *cli.Context) error {
 // a `secretKey`-field, for input
 type txWithKey struct {
 	key *ecdsa.PrivateKey
-	tx  *types.Transaction
+	tx  types.Transaction
 }
 
 func (t *txWithKey) UnmarshalJSON(input []byte) error {
@@ -255,7 +255,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &tx); err != nil {
 		return err
 	}
-	t.tx = &tx
+	t.tx = tx
 	return nil
 }
 
@@ -271,7 +271,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 // To manage this, we read the transactions twice, first trying to read the secretKeys,
 // and secondly to read them with the standard tx json format
 func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Transactions, error) {
-	var signedTxs []*types.Transaction
+	var signedTxs []types.Transaction
 	for i, txWithKey := range txs {
 		tx := txWithKey.tx
 		key := txWithKey.key

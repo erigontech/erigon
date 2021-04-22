@@ -27,64 +27,84 @@ func TestSenders(t *testing.T) {
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	mustSign := func(tx *types.Transaction, s types.Signer) *types.Transaction {
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
 		r, err := types.SignTx(tx, s, testKey)
 		require.NoError(err)
 		return r
 	}
 
 	// prepare tx so it works with our test
-	signer1 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock)
+	signer1 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock.Uint64())
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("01"), 1, &types.Body{
-		Transactions: []*types.Transaction{
-			mustSign(types.NewTx(&types.AccessListTx{
-				Nonce:    1,
-				To:       &testAddr,
-				Value:    u256.Num1,
-				Gas:      1,
-				GasPrice: u256.Num1,
-			}), signer1),
-			mustSign(types.NewTx(&types.AccessListTx{
-				Nonce:    2,
-				To:       &testAddr,
-				Value:    u256.Num1,
-				Gas:      2,
-				GasPrice: u256.Num1,
-			}), signer1),
+		Transactions: []types.Transaction{
+			mustSign(&types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: 1,
+						To:    &testAddr,
+						Value: u256.Num1,
+						Gas:   1,
+					},
+					GasPrice: u256.Num1,
+				},
+			}, *signer1),
+			mustSign(&types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: 2,
+						To:    &testAddr,
+						Value: u256.Num1,
+						Gas:   2,
+					},
+					GasPrice: u256.Num1,
+				},
+			}, *signer1),
 		},
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("01"), 1))
 
-	signer2 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock)
+	signer2 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock.Uint64())
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("02"), 2, &types.Body{
-		Transactions: []*types.Transaction{
-			mustSign(types.NewTx(&types.AccessListTx{
-				Nonce:    3,
-				To:       &testAddr,
-				Value:    u256.Num1,
-				Gas:      3,
-				GasPrice: u256.Num1,
-			}), signer2),
-			mustSign(types.NewTx(&types.AccessListTx{
-				Nonce:    4,
-				To:       &testAddr,
-				Value:    u256.Num1,
-				Gas:      4,
-				GasPrice: u256.Num1,
-			}), signer2),
-			mustSign(types.NewTx(&types.AccessListTx{
-				Nonce:    5,
-				To:       &testAddr,
-				Value:    u256.Num1,
-				Gas:      5,
-				GasPrice: u256.Num1,
-			}), signer2),
+		Transactions: []types.Transaction{
+			mustSign(&types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: 3,
+						To:    &testAddr,
+						Value: u256.Num1,
+						Gas:   3,
+					},
+					GasPrice: u256.Num1,
+				},
+			}, *signer2),
+			mustSign(&types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: 4,
+						To:    &testAddr,
+						Value: u256.Num1,
+						Gas:   4,
+					},
+					GasPrice: u256.Num1,
+				},
+			}, *signer2),
+			mustSign(&types.AccessListTx{
+				LegacyTx: types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: 5,
+						To:    &testAddr,
+						Value: u256.Num1,
+						Gas:   5,
+					},
+					GasPrice: u256.Num1,
+				},
+			}, *signer2),
 		},
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("02"), 2))
 
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("03"), 3, &types.Body{
-		Transactions: []*types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
+		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("03"), 3))
 

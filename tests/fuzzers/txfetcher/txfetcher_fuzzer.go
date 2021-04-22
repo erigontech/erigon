@@ -32,7 +32,7 @@ import (
 
 var (
 	peers []string
-	txs   []*types.Transaction
+	txs   []types.Transaction
 )
 
 func init() {
@@ -43,7 +43,7 @@ func init() {
 	for i := 0; i < len(peers); i++ {
 		peers[i] = fmt.Sprintf("Peer #%d", i)
 	}
-	txs = make([]*types.Transaction, 65536) // We need to bump enough to hit all the limits
+	txs = make([]types.Transaction, 65536) // We need to bump enough to hit all the limits
 	for i := 0; i < len(txs); i++ {
 		txs[i] = types.NewTransaction(rand.Uint64(), common.Address{byte(rand.Intn(256))}, new(uint256.Int), 0, new(uint256.Int), nil)
 	}
@@ -80,7 +80,7 @@ func Fuzz(input []byte) int {
 
 	f := fetcher.NewTxFetcherForTests(
 		func(common.Hash) bool { return false },
-		func(txs []*types.Transaction) []error {
+		func(txs []types.Transaction) []error {
 			return make([]error, len(txs))
 		},
 		func(string, []common.Hash) error { return nil },
@@ -152,7 +152,7 @@ func Fuzz(input []byte) int {
 
 			var (
 				deliverIdxs = make([]int, deliver)
-				deliveries  = make([]*types.Transaction, deliver)
+				deliveries  = make([]types.Transaction, deliver)
 			)
 			for i := 0; i < len(deliveries); i++ {
 				deliverBuf := make([]byte, 2)

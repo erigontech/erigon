@@ -639,6 +639,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -679,6 +681,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -834,6 +838,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.YoloV3ChainName:
 		return filepath.Join(datadir, "yolo-v3")
+	case params.AleutChainName:
+		return filepath.Join(datadir, "aleut")
 	default:
 		return datadir
 	}
@@ -1206,6 +1212,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
 		}
 		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 7822 // aleut
+		}
+		cfg.Genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1304,6 +1315,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

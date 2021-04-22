@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,14 +31,12 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	signedTx := new(types.Transaction)
 	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-
-	if err := rlp.DecodeBytes(in.Signedtx, signedTx); err != nil {
-		return out, err
+	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
+	if err != nil {
+		return nil, err
 	}
-
-	if err := s.eth.TxPool().AddLocal(signedTx); err != nil {
+	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
 		return out, err
 	}
 

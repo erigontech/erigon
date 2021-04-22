@@ -49,7 +49,7 @@ var (
 // Its goal is to get around setting up a valid statedb for the balance and nonce
 // checks.
 type testTxPool struct {
-	pool map[common.Hash]*types.Transaction // Hash map of collected transactions
+	pool map[common.Hash]types.Transaction // Hash map of collected transactions
 
 	txFeed event.Feed   // Notification feed to allow waiting for inclusion
 	lock   sync.RWMutex // Protects the transaction pool
@@ -58,7 +58,7 @@ type testTxPool struct {
 // newTestTxPool creates a mock transaction pool.
 func newTestTxPool() *testTxPool {
 	return &testTxPool{
-		pool: make(map[common.Hash]*types.Transaction),
+		pool: make(map[common.Hash]types.Transaction),
 	}
 }
 
@@ -73,7 +73,7 @@ func (p *testTxPool) Has(hash common.Hash) bool {
 
 // Get retrieves the transaction from local txpool with given
 // tx hash.
-func (p *testTxPool) Get(hash common.Hash) *types.Transaction {
+func (p *testTxPool) Get(hash common.Hash) types.Transaction {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -92,7 +92,7 @@ func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes commo
 			continue
 		}
 		buf.Reset()
-		if err := txn.EncodeRLP(buf); err != nil {
+		if err := rlp.Encode(buf, txn); err != nil {
 			return nil, err
 		}
 		reply = append(reply, common.CopyBytes(buf.Bytes()))
@@ -104,7 +104,7 @@ func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes commo
 
 // AddRemotes appends a batch of transactions to the pool, and notifies any
 // listeners if the addition channel is non nil
-func (p *testTxPool) AddRemotes(txs []*types.Transaction) []error {
+func (p *testTxPool) AddRemotes(txs []types.Transaction) []error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -122,7 +122,7 @@ func (p *testTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 
 	batches := make(map[common.Address]types.Transactions)
 	for _, tx := range p.pool {
-		from, _ := types.Sender(types.HomesteadSigner{}, tx)
+		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
 		batches[from] = append(batches[from], tx)
 	}
 	groups := types.TransactionsGroupedBySender{}

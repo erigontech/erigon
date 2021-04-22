@@ -392,7 +392,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 	h1 := b1.Header()
 	h2 := b2.Header()
 	if h1.Root != h2.Root ||
-		(chainConfig.IsByzantium(b1.Number()) && h1.ReceiptHash != h2.ReceiptHash) ||
+		(chainConfig.IsByzantium(b1.NumberU64()) && h1.ReceiptHash != h2.ReceiptHash) ||
 		h1.TxHash != h2.TxHash ||
 		h1.ParentHash != h2.ParentHash ||
 		h1.UncleHash != h2.UncleHash ||

@@ -248,22 +248,23 @@ func ReadStorageBodyRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.
 	return bodyRlp
 }
 
-func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]*types.Transaction, error) {
+func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
-		return []*types.Transaction{}, nil
+		return []types.Transaction{}, nil
 	}
 	txIdKey := make([]byte, 8)
 	reader := bytes.NewReader(nil)
-	txs := make([]*types.Transaction, amount)
+	stream := rlp.NewStream(reader, 0)
+	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-	if err := db.Walk(dbutils.EthTx, txIdKey, 0, func(k, txRlp []byte) (bool, error) {
-		txs[i] = new(types.Transaction)
-		reader.Reset(txRlp)
-		if err := rlp.Decode(reader, txs[i]); err != nil {
-			return false, fmt.Errorf("broken tx rlp: %w", err)
+	if err := db.Walk(dbutils.EthTx, txIdKey, 0, func(k, txData []byte) (bool, error) {
+		var decodeErr error
+		reader.Reset(txData)
+		stream.Reset(reader, 0)
+		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+			return false, decodeErr
 		}
-
 		i++
 		return i < amount, nil
 	}); err != nil {
@@ -274,7 +275,7 @@ func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]*types
 	return txs, nil
 }
 
-func WriteTransactions(db ethdb.Database, txs []*types.Transaction, baseTxId uint64) error {
+func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {

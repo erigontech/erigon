@@ -85,7 +85,7 @@ func Fuzz(data []byte) int {
 
 var minDifficulty = big.NewInt(0x2000)
 
-type calculator func(time uint64, parentTime uint64, parentDifficulty *big.Int, parentNumber *big.Int, parentUncleHash common.Hash) *big.Int
+type calculator func(time uint64, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int
 type calculatorU256 func(time uint64, parent *types.Header) *big.Int
 
 func (f *fuzzer) fuzz() int {
@@ -122,7 +122,7 @@ func (f *fuzzer) fuzz() int {
 		time = childTime
 	}
 	// Bomb delay will never exceed uint64
-	bombDelay := new(big.Int).SetUint64(f.readUint64(1, 0xFFFFFFFFFFFFFFFe))
+	bombDelay := f.readUint64(1, 0xFFFFFFFFFFFFFFFe)
 
 	if f.exhausted {
 		return 0
@@ -136,7 +136,7 @@ func (f *fuzzer) fuzz() int {
 		{ethash.HomesteadDifficultyCalulator, ethash.CalcDifficultyHomesteadU256},
 		{ethash.DynamicDifficultyCalculator(bombDelay), ethash.MakeDifficultyCalculatorU256(bombDelay)},
 	} {
-		want := pair.bigFn(time, header.Time, header.Difficulty, header.Number, header.UncleHash)
+		want := pair.bigFn(time, header.Time, header.Difficulty, header.Number.Uint64(), header.UncleHash)
 		have := pair.u256Fn(time, header)
 		if want.Cmp(have) != 0 {
 			panic(fmt.Sprintf("pair %d: want %x have %x\nparent.Number: %x\np.Time: %x\nc.Time: %x\nBombdelay: %v\n", i, want, have,

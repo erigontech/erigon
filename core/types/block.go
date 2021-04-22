@@ -19,9 +19,11 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -83,6 +85,392 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
+	BaseFee     *big.Int       `json:"baseFee"`
+	Eip1559     bool           // to avoid relying on BaseFee != nil for that
+}
+
+func (h Header) EncodingSize() int {
+	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
+		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+	encodingSize++
+	var diffLen int
+	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
+		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	}
+	encodingSize += diffLen
+	encodingSize++
+	var numberLen int
+	if h.Number != nil && h.Number.BitLen() >= 8 {
+		numberLen = (h.Number.BitLen() + 7) / 8
+	}
+	encodingSize += numberLen
+	encodingSize++
+	var gasLimitLen int
+	if h.GasLimit >= 128 {
+		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
+	}
+	encodingSize += gasLimitLen
+	encodingSize++
+	var gasUsedLen int
+	if h.GasUsed >= 128 {
+		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
+	}
+	encodingSize += gasUsedLen
+	encodingSize++
+	var timeLen int
+	if h.Time >= 128 {
+		timeLen = (bits.Len64(h.Time) + 7) / 8
+	}
+	encodingSize += timeLen
+	// size of Extra
+	encodingSize++
+	switch len(h.Extra) {
+	case 0:
+	case 1:
+		if h.Extra[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(h.Extra) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+		}
+		encodingSize += len(h.Extra)
+	}
+	// size of BaseFee
+	var baseFeeLen int
+	if h.Eip1559 {
+		encodingSize++
+		if h.BaseFee.BitLen() >= 8 {
+			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
+		}
+		encodingSize += baseFeeLen
+	}
+	return encodingSize
+}
+
+func (h Header) EncodeRLP(w io.Writer) error {
+	// Precompute the size of the encoding
+	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
+		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+	encodingSize++
+	var diffLen int
+	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
+		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	}
+	encodingSize += diffLen
+	encodingSize++
+	var numberLen int
+	if h.Number != nil && h.Number.BitLen() >= 8 {
+		numberLen = (h.Number.BitLen() + 7) / 8
+	}
+	encodingSize += numberLen
+	encodingSize++
+	var gasLimitLen int
+	if h.GasLimit >= 128 {
+		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
+	}
+	encodingSize += gasLimitLen
+	encodingSize++
+	var gasUsedLen int
+	if h.GasUsed >= 128 {
+		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
+	}
+	encodingSize += gasUsedLen
+	encodingSize++
+	var timeLen int
+	if h.Time >= 128 {
+		timeLen = (bits.Len64(h.Time) + 7) / 8
+	}
+	encodingSize += timeLen
+	// size of Extra
+	encodingSize++
+	switch len(h.Extra) {
+	case 0:
+	case 1:
+		if h.Extra[0] >= 128 {
+			encodingSize++
+		}
+	default:
+		if len(h.Extra) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
+		}
+		encodingSize += len(h.Extra)
+	}
+	var baseFeeLen int
+	if h.Eip1559 {
+		encodingSize++
+		if h.BaseFee.BitLen() >= 8 {
+			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
+		}
+		encodingSize += baseFeeLen
+	}
+	var b [33]byte
+	// Prefix
+	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.ParentHash.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.UncleHash.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Coinbase.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Root.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.TxHash.Bytes()); err != nil {
+		return err
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.ReceiptHash.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 183 + 2
+	b[1] = 1
+	b[2] = 0
+	if _, err := w.Write(b[:3]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
+		return err
+	}
+	if h.Difficulty != nil && h.Difficulty.BitLen() > 0 && h.Difficulty.BitLen() < 8 {
+		b[0] = byte(h.Difficulty.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(diffLen)
+		if h.Difficulty != nil {
+			h.Difficulty.FillBytes(b[1 : 1+diffLen])
+		}
+		if _, err := w.Write(b[:1+diffLen]); err != nil {
+			return err
+		}
+	}
+	if h.Number != nil && h.Number.BitLen() > 0 && h.Number.BitLen() < 8 {
+		b[0] = byte(h.Number.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(numberLen)
+		if h.Number != nil {
+			h.Number.FillBytes(b[1 : 1+numberLen])
+		}
+		if _, err := w.Write(b[:1+numberLen]); err != nil {
+			return err
+		}
+	}
+	if h.GasLimit > 0 && h.GasLimit < 128 {
+		b[0] = byte(h.GasLimit)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], h.GasLimit)
+		b[8-gasLimitLen] = 128 + byte(gasLimitLen)
+		if _, err := w.Write(b[8-gasLimitLen : 9]); err != nil {
+			return err
+		}
+	}
+	if h.GasUsed > 0 && h.GasUsed < 128 {
+		b[0] = byte(h.GasUsed)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], h.GasUsed)
+		b[8-gasUsedLen] = 128 + byte(gasUsedLen)
+		if _, err := w.Write(b[8-gasUsedLen : 9]); err != nil {
+			return err
+		}
+	}
+	if h.Time > 0 && h.Time < 128 {
+		b[0] = byte(h.Time)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], h.Time)
+		b[8-timeLen] = 128 + byte(timeLen)
+		if _, err := w.Write(b[8-timeLen : 9]); err != nil {
+			return err
+		}
+	}
+	if err := EncodeString(h.Extra, w, b[:]); err != nil {
+		return err
+	}
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.MixDigest.Bytes()); err != nil {
+		return err
+	}
+	b[0] = 128 + 8
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(h.Nonce[:]); err != nil {
+		return err
+	}
+	if h.Eip1559 {
+		if h.BaseFee.BitLen() > 0 && h.BaseFee.BitLen() < 8 {
+			b[0] = byte(h.BaseFee.Uint64())
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+		} else {
+			b[0] = 128 + byte(baseFeeLen)
+			h.BaseFee.FillBytes(b[1 : 1+baseFeeLen])
+			if _, err := w.Write(b[:1+baseFeeLen]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+		//return fmt.Errorf("open header struct: %w", err)
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ParentHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for ParentHash: %d", len(b))
+	}
+	copy(h.ParentHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read UncleHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for UncleHash: %d", len(b))
+	}
+	copy(h.UncleHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Coinbase: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Coinbase: %d", len(b))
+	}
+	copy(h.Coinbase[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Root: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for Root: %d", len(b))
+	}
+	copy(h.Root[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read TxHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for TxHash: %d", len(b))
+	}
+	copy(h.TxHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ReceiptHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for ReceiptHash: %d", len(b))
+	}
+	copy(h.ReceiptHash[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Bloom: %w", err)
+	}
+	if len(b) != 256 {
+		return fmt.Errorf("wrong size for Bloom: %d", len(b))
+	}
+	copy(h.Bloom[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Difficulty: %w", err)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
+	}
+	h.Difficulty = new(big.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Number: %w", err)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for Number: %d", len(b))
+	}
+	h.Number = new(big.Int).SetBytes(b)
+	if h.GasLimit, err = s.Uint(); err != nil {
+		return fmt.Errorf("read GasLimit: %w", err)
+	}
+	if h.GasUsed, err = s.Uint(); err != nil {
+		return fmt.Errorf("read GasUsed: %w", err)
+	}
+	if h.Time, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Time: %w", err)
+	}
+	if h.Extra, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Extra: %w", err)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read MixDigest: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for MixDigest: %d", len(b))
+	}
+	copy(h.MixDigest[:], b)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Nonce: %w", err)
+	}
+	if len(b) != 8 {
+		return fmt.Errorf("wrong size for Nonce: %d", len(b))
+	}
+	copy(h.Nonce[:], b)
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.BaseFee = nil
+			h.Eip1559 = false
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no basefee): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read BaseFee: %w", err)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
+	}
+	h.Eip1559 = true
+	h.BaseFee = new(big.Int).SetBytes(b)
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close header struct: %w", err)
+	}
+	return nil
 }
 
 // field type overrides for gencodec
@@ -93,6 +481,7 @@ type headerMarshaling struct {
 	GasUsed    hexutil.Uint64
 	Time       hexutil.Uint64
 	Extra      hexutil.Bytes
+	BaseFee    *hexutil.Big
 	Hash       common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
@@ -143,7 +532,7 @@ func (h *Header) EmptyReceipts() bool {
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
-	Transactions []*Transaction
+	Transactions []Transaction
 	Uncles       []*Header
 }
 
@@ -186,18 +575,11 @@ func (b *Block) DeprecatedTd() *big.Int {
 // would otherwise need to be recomputed.
 type StorageBlock Block
 
-// "external" block encoding. used for eth protocol, etc.
-type extblock struct {
-	Header *Header
-	Txs    []*Transaction
-	Uncles []*Header
-}
-
 // [deprecated by eth/63]
 // "storage" block encoding. used for database.
 type storageblock struct {
 	Header *Header
-	Txs    []*Transaction
+	Txs    []Transaction
 	Uncles []*Header
 	TD     *big.Int
 }
@@ -208,7 +590,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, tx := range b.Transactions {
-		tx.from.Store(senders[i])
+		tx.SetSender(senders[i])
 	}
 }
 
@@ -216,11 +598,136 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, tx := range b.Transactions {
-		if sc := tx.from.Load(); sc != nil {
-			senders[i] = sc.(common.Address)
+		if sender, ok := tx.GetSender(); ok {
+			senders[i] = sender
 		}
 	}
 	return senders
+}
+
+func (bb Body) EncodingSize() int {
+	payloadSize, _, _ := bb.payloadSize()
+	return payloadSize
+}
+
+func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen int) {
+	// size of Transactions
+	payloadSize++
+	for _, tx := range bb.Transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *LegacyTx:
+			txLen = t.EncodingSize()
+		case *AccessListTx:
+			txLen = t.EncodingSize()
+		case *DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	payloadSize += txsLen
+	// size of Uncles
+	payloadSize++
+	for _, uncle := range bb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (bb Body) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := bb.payloadSize()
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.Transactions {
+		switch t := tx.(type) {
+		case *LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (bb *Body) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx Transaction
+	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+		bb.Transactions = append(bb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Uncles = append(bb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 // NewBlock creates a new block. The input data is copied,
@@ -230,7 +737,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 // The values of TxHash, UncleHash, ReceiptHash and Bloom in header
 // are ignored and set to values derived from the given txs, uncles
 // and receipts.
-func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*Receipt) *Block {
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt) *Block {
 	b := &Block{header: CopyHeader(header), td: new(big.Int)}
 
 	// TODO: panic if len(txs) != len(receipts)
@@ -279,6 +786,10 @@ func CopyHeader(h *Header) *Header {
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
+	if h.BaseFee != nil {
+		cpy.BaseFee = new(big.Int)
+		cpy.BaseFee.Set(h.BaseFee)
+	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
@@ -287,24 +798,151 @@ func CopyHeader(h *Header) *Header {
 }
 
 // DecodeRLP decodes the Ethereum
-func (b *Block) DecodeRLP(s *rlp.Stream) error {
-	var eb extblock
-	_, size, _ := s.Kind()
-	if err := s.Decode(&eb); err != nil {
+func (bb *Block) DecodeRLP(s *rlp.Stream) error {
+	size, err := s.List()
+	if err != nil {
 		return err
 	}
-	b.header, b.uncles, b.transactions = eb.Header, eb.Uncles, eb.Txs
-	b.size.Store(common.StorageSize(rlp.ListSize(size)))
+	// decode header
+	var h Header
+	if err = h.DecodeRLP(s); err != nil {
+		return err
+	}
+	bb.header = &h
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx Transaction
+	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+		bb.transactions = append(bb.transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.uncles = append(bb.uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	bb.size.Store(common.StorageSize(rlp.ListSize(size)))
 	return nil
 }
 
+func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen int) {
+	// size of Header
+	payloadSize++
+	headerLen := bb.header.EncodingSize()
+	if headerLen >= 56 {
+		payloadSize += (bits.Len(uint(headerLen)) + 7) / 8
+	}
+	payloadSize += headerLen
+	// size of Transactions
+	payloadSize++
+	for _, tx := range bb.transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *LegacyTx:
+			txLen = t.EncodingSize()
+		case *AccessListTx:
+			txLen = t.EncodingSize()
+		case *DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	payloadSize += txsLen
+	// size of Uncles
+	payloadSize++
+	for _, uncle := range bb.uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (bb Block) EncodingSize() int {
+	payloadSize, _, _ := bb.payloadSize()
+	return payloadSize
+}
+
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (b *Block) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, extblock{
-		Header: b.header,
-		Txs:    b.transactions,
-		Uncles: b.uncles,
-	})
+func (bb Block) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := bb.payloadSize()
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Header
+	if err := bb.header.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.transactions {
+		switch t := tx.(type) {
+		case *LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // [deprecated by eth/63]
@@ -322,7 +960,7 @@ func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
-func (b *Block) Transaction(hash common.Hash) *Transaction {
+func (b *Block) Transaction(hash common.Hash) Transaction {
 	for _, transaction := range b.transactions {
 		if transaction.Hash() == hash {
 			return transaction
@@ -348,6 +986,12 @@ func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
+func (b *Block) BaseFee() *big.Int {
+	if b.header.BaseFee == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.BaseFee)
+}
 
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
@@ -403,10 +1047,10 @@ func (b *Block) WithSeal(header *Header) *Block {
 }
 
 // WithBody returns a new block with the given transaction and uncle contents.
-func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
+func (b *Block) WithBody(transactions []Transaction, uncles []*Header) *Block {
 	block := &Block{
 		header:       CopyHeader(b.header),
-		transactions: make([]*Transaction, len(transactions)),
+		transactions: make([]Transaction, len(transactions)),
 		uncles:       make([]*Header, len(uncles)),
 	}
 	copy(block.transactions, transactions)

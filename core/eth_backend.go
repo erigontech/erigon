@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -50,11 +51,11 @@ func NewEthBackend(eth EthBackend, ethashApi *ethash.API) *EthBackendImpl {
 }
 
 func (back *EthBackendImpl) AddLocal(_ context.Context, signedtx []byte) ([]byte, error) {
-	tx := new(types.Transaction)
-	if err := rlp.DecodeBytes(signedtx, tx); err != nil {
-		return common.Hash{}.Bytes(), err
+	s := rlp.NewStream(bytes.NewReader(signedtx), 0)
+	tx, err := types.DecodeTransaction(s)
+	if err != nil {
+		return nil, err
 	}
-
 	return tx.Hash().Bytes(), back.eth.TxPool().AddLocal(tx)
 }
 

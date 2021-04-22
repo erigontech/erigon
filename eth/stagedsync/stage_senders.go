@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -223,16 +222,12 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 			return
 		}
 		body := job.body
-		signer := types.MakeSigner(config, big.NewInt(int64(job.blockNumber)))
+		signer := types.MakeSigner(config, job.blockNumber)
 		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
 				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
-				break
-			}
-			if tx.Protected() && tx.ChainId().Cmp(signer.ChainID()) != 0 {
-				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainId(), signer.ChainID())
 				break
 			}
 			copy(job.senders[i*common.AddressLength:], from[:])

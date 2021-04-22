@@ -96,6 +96,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.chainRules.IsAleut:
+		jt = &aleutInstructionSet
 	case evm.chainRules.IsBerlin:
 		jt = &berlinInstructionSet
 	case evm.chainRules.IsIstanbul:

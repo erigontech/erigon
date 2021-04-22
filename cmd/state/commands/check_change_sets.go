@@ -138,7 +138,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			return err1
 		}
 		if writeReceipts {
-			if chainConfig.IsByzantium(block.Number()) {
+			if chainConfig.IsByzantium(block.Number().Uint64()) {
 				receiptSha := types.DeriveSha(receipts)
 				if receiptSha != block.Header().ReceiptHash {
 					return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())

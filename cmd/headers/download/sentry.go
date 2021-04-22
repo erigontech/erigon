@@ -22,7 +22,6 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
@@ -376,7 +375,7 @@ func runPeer(
 		case eth.GetPooledTransactionsMsg:
 			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
 		case eth.TransactionsMsg:
-			var txs []*types.Transaction
+			var txs eth.TransactionsPacket
 			if err := msg.Decode(&txs); err != nil {
 				return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
 			}

@@ -85,13 +85,13 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}
 
-	ctx := config.WithEIPsFlags(context.Background(), header.Number)
+	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Create a new context to be used in the EVM environment
 	context := NewEVMBlockContext(header, getHeader, engine, author)
 	txContext := NewEVMTxContext(msg)
@@ -132,7 +132,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.Nonce())
+			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
@@ -147,8 +147,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}

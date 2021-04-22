@@ -182,7 +182,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
-	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
+	ctx = config.WithEIPsFlags(ctx, writeBlockNr)
 
 	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	//_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
@@ -359,7 +359,7 @@ func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
 
-	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, data, accessList, true)
+	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, nil, nil, data, accessList, true)
 	return msg, nil
 }
 

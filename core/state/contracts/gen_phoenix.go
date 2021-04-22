@@ -33,7 +33,7 @@ const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":
 var PhoenixBin = "0x6080604052348015600f57600080fd5b5060c48061001e6000396000f3fe60806040526004361060295760003560e01c806335f46994146034578063d09de08a14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605e565b6000ff5b60008054600101905556fea26469706673582212208a7813270390a5ca21790c2447b46da471493e99b652d00cbd4751eb47b7e70164736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058"
 
 // DeployPhoenix deploys a new Ethereum contract, binding an instance of Phoenix to it.
-func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Phoenix, error) {
+func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Phoenix, error) {
 	parsed, err := abi.JSON(strings.NewReader(PhoenixABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Phoenix *PhoenixRaw) Call(opts *bind.CallOpts, result *[]interface{}, met
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Phoenix *PhoenixRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Phoenix *PhoenixRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Phoenix.Contract.PhoenixTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Phoenix *PhoenixRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Phoenix *PhoenixRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Phoenix.Contract.PhoenixTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,74 +179,74 @@ func (_Phoenix *PhoenixCallerRaw) Call(opts *bind.CallOpts, result *[]interface{
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Phoenix *PhoenixTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Phoenix.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Phoenix *PhoenixTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Phoenix.Contract.contract.Transact(opts, method, params...)
 }
 
 // Die is a paid mutator transaction binding the contract method 0x35f46994.
 //
 // Solidity: function die() returns()
-func (_Phoenix *PhoenixTransactor) Die(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactor) Die(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Phoenix.contract.Transact(opts, "die")
 }
 
 // Die is a paid mutator transaction binding the contract method 0x35f46994.
 //
 // Solidity: function die() returns()
-func (_Phoenix *PhoenixSession) Die() (*types.Transaction, error) {
+func (_Phoenix *PhoenixSession) Die() (types.Transaction, error) {
 	return _Phoenix.Contract.Die(&_Phoenix.TransactOpts)
 }
 
 // Die is a paid mutator transaction binding the contract method 0x35f46994.
 //
 // Solidity: function die() returns()
-func (_Phoenix *PhoenixTransactorSession) Die() (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactorSession) Die() (types.Transaction, error) {
 	return _Phoenix.Contract.Die(&_Phoenix.TransactOpts)
 }
 
 // Increment is a paid mutator transaction binding the contract method 0xd09de08a.
 //
 // Solidity: function increment() returns()
-func (_Phoenix *PhoenixTransactor) Increment(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactor) Increment(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Phoenix.contract.Transact(opts, "increment")
 }
 
 // Increment is a paid mutator transaction binding the contract method 0xd09de08a.
 //
 // Solidity: function increment() returns()
-func (_Phoenix *PhoenixSession) Increment() (*types.Transaction, error) {
+func (_Phoenix *PhoenixSession) Increment() (types.Transaction, error) {
 	return _Phoenix.Contract.Increment(&_Phoenix.TransactOpts)
 }
 
 // Increment is a paid mutator transaction binding the contract method 0xd09de08a.
 //
 // Solidity: function increment() returns()
-func (_Phoenix *PhoenixTransactorSession) Increment() (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactorSession) Increment() (types.Transaction, error) {
 	return _Phoenix.Contract.Increment(&_Phoenix.TransactOpts)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Phoenix *PhoenixTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactor) Receive(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Phoenix.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Phoenix *PhoenixSession) Receive() (*types.Transaction, error) {
+func (_Phoenix *PhoenixSession) Receive() (types.Transaction, error) {
 	return _Phoenix.Contract.Receive(&_Phoenix.TransactOpts)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Phoenix *PhoenixTransactorSession) Receive() (*types.Transaction, error) {
+func (_Phoenix *PhoenixTransactorSession) Receive() (types.Transaction, error) {
 	return _Phoenix.Contract.Receive(&_Phoenix.TransactOpts)
 }

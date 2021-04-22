@@ -146,18 +146,18 @@ func TestBodyStorage(t *testing.T) {
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	mustSign := func(tx *types.Transaction, s types.Signer) *types.Transaction {
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
 		r, err := types.SignTx(tx, s, testKey)
 		require.NoError(err)
 		return r
 	}
 
 	// prepare db so it works with our test
-	signer1 := types.MakeSigner(params.MainnetChainConfig, big.NewInt(int64(1)))
+	signer1 := types.MakeSigner(params.MainnetChainConfig, 1)
 	body := &types.Body{
-		Transactions: []*types.Transaction{
-			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), signer1),
-			mustSign(types.NewTransaction(2, testAddr, u256.Num1, 2, u256.Num1, nil), signer1),
+		Transactions: []types.Transaction{
+			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+			mustSign(types.NewTransaction(2, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
 		},
 		Uncles: []*types.Header{{Extra: []byte("test header")}},
 	}

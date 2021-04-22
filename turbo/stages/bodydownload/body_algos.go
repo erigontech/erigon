@@ -166,7 +166,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][]*types.Transaction, uncles [][]*types.Header) (int, int) {
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)

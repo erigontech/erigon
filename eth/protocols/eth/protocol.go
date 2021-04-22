@@ -17,10 +17,12 @@
 package eth
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -119,7 +121,71 @@ func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
 }
 
 // TransactionsPacket is the network packet for broadcasting new transactions.
-type TransactionsPacket []*types.Transaction
+type TransactionsPacket []types.Transaction
+
+func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range tp {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// encode Transactions
+	var b [33]byte
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range tp {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (tp *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		*tp = append(*tp, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	return s.ListEnd()
+}
 
 // GetBlockHeadersPacket represents a block header query.
 type GetBlockHeadersPacket struct {
@@ -186,6 +252,74 @@ type NewBlockPacket struct {
 	TD    *big.Int
 }
 
+func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Block
+	encodingSize++
+	blockLen := nbp.Block.EncodingSize()
+	if blockLen >= 56 {
+		encodingSize += (bits.Len(uint(blockLen)) + 7) / 8
+	}
+	encodingSize += blockLen
+	// size of TD
+	encodingSize++
+	var tdLen int
+	if nbp.TD.BitLen() >= 8 {
+		tdLen = (nbp.TD.BitLen() + 7) / 8
+	}
+	encodingSize += tdLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Block
+	if err := nbp.Block.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode TD
+	if nbp.TD != nil && nbp.TD.BitLen() > 0 && nbp.TD.BitLen() < 8 {
+		b[0] = byte(nbp.TD.Uint64())
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + byte(tdLen)
+		if nbp.TD != nil {
+			nbp.TD.FillBytes(b[1 : 1+tdLen])
+		}
+		if _, err := w.Write(b[:1+tdLen]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Block
+	nbp.Block = &types.Block{}
+	if err = nbp.Block.DecodeRLP(s); err != nil {
+		return err
+	}
+	// decode TD
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read TD: %w", err)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for TD: %d", len(b))
+	}
+	nbp.TD = new(big.Int).SetBytes(b)
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // sanityCheck verifies that the values are reasonable, as a DoS protection
 func (request *NewBlockPacket) sanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {
@@ -230,15 +364,133 @@ type BlockBodiesRLPPacket66 struct {
 
 // BlockBody represents the data content of a single block.
 type BlockBody struct {
-	Transactions []*types.Transaction // Transactions contained within a block
-	Uncles       []*types.Header      // Uncles contained within a block
+	Transactions []types.Transaction // Transactions contained within a block
+	Uncles       []*types.Header     // Uncles contained within a block
+}
+
+func (bb BlockBody) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range bb.Transactions {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range bb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	encodingSize += unclesLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range bb.Transactions {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	// encode Uncles
+	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		bb.Transactions = append(bb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle types.Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Uncles = append(bb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesPacket) Unpack() ([][]*types.Transaction, [][]*types.Header) {
+func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
 	var (
-		txset    = make([][]*types.Transaction, len(*p))
+		txset    = make([][]types.Transaction, len(*p))
 		uncleset = make([][]*types.Header, len(*p))
 	)
 	for i, body := range *p {
@@ -304,12 +556,173 @@ type GetPooledTransactionsPacket66 struct {
 }
 
 // PooledTransactionsPacket is the network packet for transaction distribution.
-type PooledTransactionsPacket []*types.Transaction
+type PooledTransactionsPacket []types.Transaction
+
+func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range ptp {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// encode Transactions
+	var b [33]byte
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range ptp {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (ptp *PooledTransactionsPacket) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		*ptp = append(*ptp, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	return s.ListEnd()
+}
 
 // PooledTransactionsPacket is the network packet for transaction distribution over eth/66.
 type PooledTransactionsPacket66 struct {
 	RequestId uint64
 	PooledTransactionsPacket
+}
+
+func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// Size of RequestID
+	encodingSize++
+	var requestIdLen int
+	if ptp66.RequestId >= 128 {
+		requestIdLen = (bits.Len64(ptp66.RequestId) + 7) / 8
+	}
+	encodingSize += requestIdLen
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range ptp66.PooledTransactionsPacket {
+		txsLen++
+		var txLen int
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			txLen = t.EncodingSize()
+		case *types.AccessListTx:
+			txLen = t.EncodingSize()
+		case *types.DynamicFeeTransaction:
+			txLen = t.EncodingSize()
+		}
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode RequestId
+	if ptp66.RequestId > 0 && ptp66.RequestId < 128 {
+		b[0] = byte(ptp66.RequestId)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], ptp66.RequestId)
+		b[8-requestIdLen] = 128 + byte(requestIdLen)
+		if _, err := w.Write(b[8-requestIdLen : 9]); err != nil {
+			return err
+		}
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range ptp66.PooledTransactionsPacket {
+		switch t := tx.(type) {
+		case *types.LegacyTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.AccessListTx:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *types.DynamicFeeTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (ptp66 *PooledTransactionsPacket66) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	if ptp66.RequestId, err = s.Uint(); err != nil {
+		return fmt.Errorf("read RequestId: %w", err)
+	}
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx types.Transaction
+	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+		(*ptp66).PooledTransactionsPacket = append((*ptp66).PooledTransactionsPacket, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 // PooledTransactionsPacket is the network packet for transaction distribution, used

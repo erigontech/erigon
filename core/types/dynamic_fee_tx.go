@@ -18,7 +18,6 @@ package types
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -29,52 +28,43 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-// go:generate gencodec -type AccessTuple -out gen_access_tuple.go
-
-// AccessList is an EIP-2930 access list.
-type AccessList []AccessTuple
-
-// AccessTuple is the element type of an access list.
-type AccessTuple struct {
-	Address     common.Address `json:"address"        gencodec:"required"`
-	StorageKeys []common.Hash  `json:"storageKeys"    gencodec:"required"`
-}
-
-// StorageKeys returns the total number of storage keys in the access list.
-func (al AccessList) StorageKeys() int {
-	sum := 0
-	for _, tuple := range al {
-		sum += len(tuple.StorageKeys)
-	}
-	return sum
-}
-
-// AccessListTx is the data of EIP-2930 access list transactions.
-type AccessListTx struct {
-	LegacyTx
+type DynamicFeeTransaction struct {
+	CommonTx
 	ChainID    *uint256.Int
-	AccessList AccessList // EIP-2930 access list
+	Tip        *uint256.Int
+	FeeCap     *uint256.Int
+	AccessList AccessList
+}
+
+func (tx DynamicFeeTransaction) GetPrice() *uint256.Int {
+	return tx.Tip
+}
+
+func (tx DynamicFeeTransaction) Cost() *uint256.Int {
+	total := new(uint256.Int).SetUint64(tx.Gas)
+	total.Mul(total, tx.Tip)
+	total.Add(total, tx.Value)
+	return total
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (tx AccessListTx) copy() *AccessListTx {
-	cpy := &AccessListTx{
-		LegacyTx: LegacyTx{
-			CommonTx: CommonTx{
-				TransactionMisc: TransactionMisc{
-					time: tx.time,
-				},
-				Nonce: tx.Nonce,
-				To:    tx.To, // TODO: copy pointed-to address
-				Data:  common.CopyBytes(tx.Data),
-				Gas:   tx.Gas,
-				// These are copied below.
-				Value: new(uint256.Int),
+func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
+	cpy := &DynamicFeeTransaction{
+		CommonTx: CommonTx{
+			TransactionMisc: TransactionMisc{
+				time: tx.time,
 			},
-			GasPrice: new(uint256.Int),
+			Nonce: tx.Nonce,
+			To:    tx.To, // TODO: copy pointed-to address
+			Data:  common.CopyBytes(tx.Data),
+			Gas:   tx.Gas,
+			// These are copied below.
+			Value: new(uint256.Int),
 		},
-		ChainID:    new(uint256.Int),
 		AccessList: make(AccessList, len(tx.AccessList)),
+		ChainID:    new(uint256.Int),
+		Tip:        new(uint256.Int),
+		FeeCap:     new(uint256.Int),
 	}
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
@@ -83,8 +73,11 @@ func (tx AccessListTx) copy() *AccessListTx {
 	if tx.ChainID != nil {
 		cpy.ChainID.Set(tx.ChainID)
 	}
-	if tx.GasPrice != nil {
-		cpy.GasPrice.Set(tx.GasPrice)
+	if tx.Tip != nil {
+		cpy.Tip.Set(tx.Tip)
+	}
+	if tx.FeeCap != nil {
+		cpy.FeeCap.Set(tx.FeeCap)
 	}
 	cpy.V.Set(&tx.V)
 	cpy.R.Set(&tx.R)
@@ -92,26 +85,24 @@ func (tx AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
-func (tx AccessListTx) GetAccessList() AccessList {
+func (tx DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
-func (tx *AccessListTx) Size() common.StorageSize {
+func (tx *DynamicFeeTransaction) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)
 	}
 	c := tx.EncodingSize()
-	c++ // TxType
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
 
-func (tx AccessListTx) Protected() bool {
+func (tx DynamicFeeTransaction) Protected() bool {
 	return true
 }
 
-// EncodingSize returns the RLP encoding size of the whole transaction envelope
-func (tx AccessListTx) EncodingSize() int {
+func (tx DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	envelopeSize := payloadSize
 	// Add envelope size and type size
@@ -122,8 +113,7 @@ func (tx AccessListTx) EncodingSize() int {
 	return envelopeSize
 }
 
-// payloadSize calculates the RLP encoidng size of transaction, without TxType and envelope
-func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	var chainIdLen int
@@ -137,13 +127,20 @@ func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessL
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
 	payloadSize += nonceLen
-	// size of GasPrice
+	// size of Tip
 	payloadSize++
-	var gasPriceLen int
-	if tx.GasPrice.BitLen() >= 8 {
-		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
+	var tipLen int
+	if tx.Tip.BitLen() >= 8 {
+		tipLen = (tx.Tip.BitLen() + 7) / 8
 	}
-	payloadSize += gasPriceLen
+	payloadSize += tipLen
+	// size of FeeCap
+	payloadSize++
+	var feeCapLen int
+	if tx.FeeCap.BitLen() >= 8 {
+		feeCapLen = (tx.FeeCap.BitLen() + 7) / 8
+	}
+	payloadSize += feeCapLen
 	// size of Gas
 	payloadSize++
 	if tx.Gas >= 128 {
@@ -207,88 +204,27 @@ func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessL
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
-func accessListSize(al AccessList) int {
-	var accessListLen int
-	for _, tuple := range al {
-		tupleLen := 21 // For the address
-		// size of StorageKeys
-		tupleLen++
-		// Each storage key takes 33 bytes
-		storageLen := 33 * len(tuple.StorageKeys)
-		if storageLen >= 56 {
-			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
-		}
-		tupleLen += storageLen
-		accessListLen++
-		if tupleLen >= 56 {
-			accessListLen += (bits.Len(uint(tupleLen)) + 7) / 8 // BE encoding of the length of the storage keys
-		}
-		accessListLen += tupleLen
+func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := tx.copy()
+	r, s, v, err := signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
 	}
-	return accessListLen
-}
-
-func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
-	for _, tuple := range al {
-		tupleLen := 21
-		tupleLen++
-		// Each storage key takes 33 bytes
-		storageLen := 33 * len(tuple.StorageKeys)
-		if storageLen >= 56 {
-			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
-		}
-		tupleLen += storageLen
-		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
-			return err
-		}
-		b[0] = 128 + 20
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
-			return err
-		}
-		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
-			return err
-		}
-		b[0] = 128 + 32
-		for _, storageKey := range tuple.StorageKeys {
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-			if _, err := w.Write(storageKey.Bytes()); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
-	if size >= 56 {
-		beSize := (bits.Len(uint(size)) + 7) / 8
-		binary.BigEndian.PutUint64(b[1:], uint64(size))
-		b[8-beSize] = byte(beSize) + 247
-		if _, err := w.Write(b[8-beSize : 9]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(size) + 192
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	}
-	return nil
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
+	cpy.ChainID = signer.ChainID()
+	return cpy, nil
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
-func (tx AccessListTx) MarshalBinary(w io.Writer) error {
+func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
 	// encode TxType
-	b[0] = AccessListTxType
+	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -298,7 +234,7 @@ func (tx AccessListTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -320,8 +256,12 @@ func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLe
 			return err
 		}
 	}
-	// encode GasPrice
-	if err := tx.GasPrice.EncodeRLP(w); err != nil {
+	// encode Tip
+	if err := tx.Tip.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode FeeCap
+	if err := tx.FeeCap.EncodeRLP(w); err != nil {
 		return err
 	}
 	// encode Gas
@@ -380,11 +320,9 @@ func (tx AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLe
 		return err
 	}
 	return nil
-
 }
 
-// EncodeRLP implements rlp.Encoder
-func (tx AccessListTx) EncodeRLP(w io.Writer) error {
+func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
@@ -398,7 +336,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TxType
-	b[0] = AccessListTxType
+	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -408,84 +346,41 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func decodeAccessList(al *AccessList, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open accessList: %w", err)
-	}
-	var b []byte
-	i := 0
-	for _, err = s.List(); err == nil; _, err = s.List() {
-		// decode tuple
-		*al = append(*al, AccessTuple{})
-		tuple := &(*al)[len(*al)-1]
-		if b, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read Address: %w", err)
-		}
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for AccessTuple address: %d", len(b))
-		}
-		copy(tuple.Address[:], b)
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open StorageKeys: %w", err)
-		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
-			}
-			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read StorageKey: %w", err)
-		}
-		// end of StorageKeys list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close StorageKeys: %w", err)
-		}
-		// end of tuple
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close AccessTuple: %w", err)
-		}
-		i++
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return fmt.Errorf("open accessTuple: %d %w", i, err)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close accessList: %w", err)
-	}
-	return nil
-}
-
-func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
+func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read ChainID: %w", err)
+		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
 	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
+		return err
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read GasPrice: %w", err)
+		return err
 	}
 	if len(b) > 32 {
-		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
+		return fmt.Errorf("wrong size for Tip: %d", len(b))
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
+	tx.Tip = new(uint256.Int).SetBytes(b)
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("wrong size for FeeCap: %d", len(b))
+	}
+	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %w", err)
+		return err
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	}
 	if len(b) > 0 && len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
@@ -495,56 +390,54 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Value: %w", err)
+		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
+		return err
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return fmt.Errorf("read AccessList: %w", err)
+		return err
 	}
 	// decode V
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read V: %w", err)
+		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read R: %w", err)
+		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R.SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read S: %w", err)
+		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close AccessListTx: %w", err)
-	}
-	return nil
+	return s.ListEnd()
+
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx AccessListTx) AsMessage(s Signer) (Message, error) {
+func (tx DynamicFeeTransaction) AsMessage(s Signer) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
-		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
+		gasPrice:   *tx.Tip,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,
@@ -557,28 +450,16 @@ func (tx AccessListTx) AsMessage(s Signer) (Message, error) {
 	return msg, err
 }
 
-func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
-		return nil, err
-	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = signer.ChainID()
-	return cpy, nil
-}
-
 // Hash computes the hash (but not for signatures!)
-func (tx AccessListTx) Hash() common.Hash {
+func (tx DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}
-	hash := prefixedRlpHash(AccessListTxType, []interface{}{
+	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
-		tx.GasPrice,
+		tx.Tip,
+		tx.FeeCap,
 		tx.Gas,
 		tx.To,
 		tx.Value,
@@ -590,13 +471,14 @@ func (tx AccessListTx) Hash() common.Hash {
 	return hash
 }
 
-func (tx AccessListTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
-		AccessListTxType,
+		DynamicFeeTxType,
 		[]interface{}{
 			chainID,
 			tx.Nonce,
-			tx.GasPrice,
+			tx.Tip,
+			tx.FeeCap,
 			tx.Gas,
 			tx.To,
 			tx.Value,
@@ -605,17 +487,18 @@ func (tx AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 		})
 }
 
-func (tx AccessListTx) Type() byte { return AccessListTxType }
+// accessors for innerTx.
+func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 
-func (tx AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx AccessListTx) GetChainID() *uint256.Int {
+func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
+func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(common.Address), nil
 	}
@@ -627,13 +510,13 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	return addr, nil
 }
 
-func (tx AccessListTx) GetSender() (common.Address, bool) {
+func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(common.Address), true
 	}
 	return common.Address{}, false
 }
 
-func (tx *AccessListTx) SetSender(addr common.Address) {
+func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
 	tx.from.Store(addr)
 }

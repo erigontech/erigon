@@ -233,7 +233,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 		senders[blockNumber-from-1] = sendersArray
 	}
 
-	var txsToInject []*types.Transaction
+	var txsToInject []types.Transaction
 	bodies, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err

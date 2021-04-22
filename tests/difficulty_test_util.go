@@ -56,7 +56,7 @@ func (test *DifficultyTest) Run(config *params.ChainConfig) error {
 		UncleHash:  test.UncleHash,
 	}
 
-	actual := ethash.CalcDifficulty(config, test.CurrentTimestamp, parent.Time, parent.Difficulty, parent.Number, parent.UncleHash)
+	actual := ethash.CalcDifficulty(config, test.CurrentTimestamp, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.UncleHash)
 	exp := test.CurrentDifficulty
 
 	if actual.Cmp(exp) != 0 {

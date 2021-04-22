@@ -132,7 +132,7 @@ func (h *ethHandler) handleHeaders(peer *eth.Peer, headers []*types.Header) erro
 
 // handleBodies is invoked from a peer's message handler when it transmits a batch
 // of block bodies for the local node to process.
-func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]*types.Transaction, uncles [][]*types.Header) error {
+func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]types.Transaction, uncles [][]*types.Header) error {
 	// Filter out any explicitly requested bodies, deliver the rest to the downloader
 	filter := len(txs) > 0 || len(uncles) > 0
 	if filter {

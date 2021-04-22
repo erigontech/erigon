@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -266,12 +267,20 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn *types.Transaction) map[string]interface{} {
-	var signer types.Signer = types.FrontierSigner{}
-	if txn.Protected() {
-		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]interface{} {
+	var chainId *uint256.Int
+	switch t := txn.(type) {
+	case *types.LegacyTx:
+		if t.Protected() {
+			chainId = types.DeriveChainId(&t.V)
+		}
+	case *types.AccessListTx:
+		chainId = t.ChainID
+	case *types.DynamicFeeTransaction:
+		chainId = t.ChainID
 	}
-	from, _ := types.Sender(signer, txn)
+	signer := types.LatestSignerForChainID(chainId.ToBig())
+	from, _ := txn.Sender(*signer)
 
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
@@ -279,7 +288,7 @@ func marshalReceipt(receipt *types.Receipt, txn *types.Transaction) map[string]i
 		"transactionHash":   txn.Hash(),
 		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
-		"to":                txn.To(),
+		"to":                txn.GetTo(),
 		"type":              hexutil.Uint(txn.Type()),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),

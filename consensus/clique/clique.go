@@ -272,6 +272,14 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
+	// Verify the header's EIP-1559 attributes.
+	/*
+		if chain.Config().IsAleut(header.Number.Uint64()) {
+			if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+				return err
+			}
+		}
+	*/
 	c.reinit.Do(func() {
 		c.regenerateSnapshots(chain)
 	})
@@ -557,14 +565,14 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header) {
+func (c *Clique) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 
@@ -662,12 +670,12 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _, parentNumber *big.Int, parentHash, _ common.Hash) *big.Int {
+func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
 	c.reinit.Do(func() {
 		c.regenerateSnapshots(chain)
 	})
 
-	snap, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, common.Hash{})
+	snap, err := c.snapshot(chain, parentNumber, parentHash, common.Hash{})
 	if err != nil {
 		return nil
 	}
@@ -726,7 +734,7 @@ func CliqueRLP(header *types.Header) []byte {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header) {
-	err := rlp.Encode(w, []interface{}{
+	enc := []interface{}{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -742,8 +750,11 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 		header.Extra[:len(header.Extra)-crypto.SignatureLength], // Yes, this will panic if extra is too short
 		header.MixDigest,
 		header.Nonce,
-	})
-	if err != nil {
+	}
+	if header.BaseFee != nil {
+		enc = append(enc, header.BaseFee)
+	}
+	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
 	}
 }

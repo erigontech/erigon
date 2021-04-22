@@ -40,7 +40,7 @@ jobs:
         uses: golangci/golangci-lint-action@v2
         with:
           version: v1.38
-          args: "--build-tags=mdbx"
+          args: "--out-format=colored-line-number --build-tags=mdbx"
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true

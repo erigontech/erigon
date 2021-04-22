@@ -47,14 +47,19 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	} else {
 		beneficiary = *author
 	}
+	var baseFee uint256.Int
+	if header.BaseFee != nil {
+		baseFee.SetFromBig(header.BaseFee)
+	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    Transfer,
 		GetHash:     GetHashFn(header, getHeader),
 		Coinbase:    beneficiary,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int).SetUint64(header.Time),
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
 		Difficulty:  new(big.Int).Set(header.Difficulty),
+		BaseFee:     &baseFee,
 		GasLimit:    header.GasLimit,
 	}
 }
@@ -73,8 +78,8 @@ func NewEVMContextByHeader(msg Message, header *types.Header, hashGetter func(n 
 		Transfer:    Transfer,
 		GetHash:     hashGetter,
 		Coinbase:    header.Coinbase,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int).SetUint64(header.Time),
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
 		Difficulty:  new(big.Int).Set(header.Difficulty),
 		GasLimit:    header.GasLimit,
 	}

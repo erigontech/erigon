@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -39,7 +40,7 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 			continue
 		}
 		buf.Reset()
-		if err := txn.EncodeRLP(buf); err != nil {
+		if err := rlp.Encode(buf, txn); err != nil {
 			return nil, err
 		}
 		reply.Txs[i] = common.CopyBytes(buf.Bytes())

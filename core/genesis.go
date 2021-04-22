@@ -314,6 +314,10 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
+	if g.Config != nil && g.Config.IsAleut(0) {
+		head.Eip1559 = true
+		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+	}
 
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
@@ -503,6 +507,18 @@ func DefaultTurboMineGenesisBlock() *Genesis {
 		GasLimit:   1000000000,
 		Difficulty: big.NewInt(1048576),
 		Alloc:      readPrealloc("allocs/turbomine.json"),
+	}
+}
+
+func DefaultAleutGenesisBlock() *Genesis {
+	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
+	return &Genesis{
+		Config:     params.AleutChainConfig,
+		Timestamp:  0,
+		ExtraData:  hexutil.MustDecode("0x000000000000000000000000000000000000000000000000000000000000000036267c845cc42b57ccb869d655e5d5fb620cc69a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x1312D00,
+		Difficulty: big.NewInt(0x400),
+		Alloc:      readPrealloc("allocs/aleut.json"),
 	}
 }
 

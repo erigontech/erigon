@@ -20,7 +20,7 @@ const (
 	WithHistoryHighest
 )
 
-func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) context.Context {
+func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum uint64) context.Context {
 	ctx = context.WithValue(ctx, IsHomesteadEnabled, c.IsHomestead(blockNum))
 	ctx = context.WithValue(ctx, IsEIP150Enabled, c.IsEIP150(blockNum))
 	ctx = context.WithValue(ctx, IsEIP155Enabled, c.IsEIP155(blockNum))

@@ -235,7 +235,7 @@ func (b *EthAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscri
 	return b.eth.BlockChain().SubscribeLogsEvent(ch)
 }
 
-func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx types.Transaction) error {
 	return b.eth.txPool.AddLocal(signedTx)
 }
 
@@ -251,11 +251,11 @@ func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	return txs, nil
 }
 
-func (b *EthAPIBackend) GetPoolTransaction(hash common.Hash) *types.Transaction {
+func (b *EthAPIBackend) GetPoolTransaction(hash common.Hash) types.Transaction {
 	return b.eth.txPool.Get(hash)
 }
 
-func (b *EthAPIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+func (b *EthAPIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(b.eth.ChainDb(), txHash)
 	return tx, blockHash, blockNumber, index, nil
 }
