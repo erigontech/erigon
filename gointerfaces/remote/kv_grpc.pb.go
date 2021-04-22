@@ -3,8 +3,8 @@
 package remote
 
 import (
-	version "./version"
 	context "context"
+	version "github.com/ledgerwatch/turbo-geth/gointerfaces/version"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
