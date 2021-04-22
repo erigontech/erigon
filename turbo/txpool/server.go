@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -20,6 +21,26 @@ const (
 	// is used to track recent transactions that have been dropped so we don't
 	// re-request them.
 	maxTxUnderpricedSetSize = 32768
+)
+
+var (
+	txAnnounceInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/in", nil)
+	txAnnounceKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/known", nil)
+	txAnnounceUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/underpriced", nil)
+
+	txBroadcastKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/known", nil)
+	txBroadcastUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/underpriced", nil)
+	txBroadcastOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/otherreject", nil)
+
+	//txRequestOutMeter     = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/out", nil)
+	//txRequestFailMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/fail", nil)
+	//txRequestDoneMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/done", nil)
+	//txRequestTimeoutMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/timeout", nil)
+
+	//txReplyKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/known", nil)
+	//txReplyUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/underpriced", nil)
+	//txReplyOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/otherreject", nil)
+
 )
 
 type Server struct {
@@ -35,12 +56,21 @@ func NewServer(ctx context.Context, txPool *core.TxPool) *Server {
 
 func (s *Server) FindUnknownTransactions(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
 	reply := &proto_txpool.TxHashes{}
+	var underpriced int
 	for i := range in.Hashes {
-		if s.txPool.Has(gointerfaces.ConvertH256ToHash(in.Hashes[i])) {
+		h := gointerfaces.ConvertH256ToHash(in.Hashes[i])
+		if s.txPool.Has(h) {
 			continue
+		}
+		if s.underpriced.Contains(h) {
+			underpriced++
 		}
 		reply.Hashes = append(reply.Hashes, in.Hashes[i])
 	}
+
+	txAnnounceInMeter.Mark(int64(len(in.Hashes)))
+	txAnnounceKnownMeter.Mark(int64(len(in.Hashes) - len(reply.Hashes)))
+	txAnnounceUnderpricedMeter.Mark(int64(underpriced))
 
 	return reply, nil
 }
@@ -54,6 +84,10 @@ func (s *Server) ImportTransactions(ctx context.Context, in *proto_txpool.Import
 			return nil, err
 		}
 	}
+
+	var duplicate int64
+	var underpriced int64
+	var otherreject int64
 	errs := s.txPool.AddRemotes(txs)
 	for i, err := range errs {
 		if err != nil {
@@ -71,19 +105,26 @@ func (s *Server) ImportTransactions(ctx context.Context, in *proto_txpool.Import
 			case nil: // Noop, but need to handle to not count these
 
 			case core.ErrAlreadyKnown:
+				duplicate++
 				reply.Imported[i] = proto_txpool.ImportResult_ALREADY_EXISTS
 
 			case core.ErrUnderpriced, core.ErrReplaceUnderpriced:
+				underpriced++
 				reply.Imported[i] = proto_txpool.ImportResult_FEE_TOO_LOW
 
 			case core.ErrInvalidSender, core.ErrGasLimit, core.ErrNegativeValue, core.ErrOversizedData:
+				otherreject++
 				reply.Imported[i] = proto_txpool.ImportResult_INVALID
 
 			default:
+				otherreject++
 				reply.Imported[i] = proto_txpool.ImportResult_INTERNAL_ERROR
 			}
 		}
 	}
+	txBroadcastKnownMeter.Mark(duplicate)
+	txBroadcastUnderpricedMeter.Mark(underpriced)
+	txBroadcastOtherRejectMeter.Mark(otherreject)
 	return reply, nil
 }
 

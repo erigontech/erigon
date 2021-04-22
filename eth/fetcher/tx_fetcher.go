@@ -26,7 +26,6 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -71,26 +70,10 @@ var (
 )
 
 var (
-	txAnnounceInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/in", nil)
-	txAnnounceKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/known", nil)
-	txAnnounceUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/underpriced", nil)
-
 	//txAnnounceDOSMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/dos", nil)
 
-	//txBroadcastInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/in", nil)
-	//txBroadcastKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/known", nil)
-	//txBroadcastUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/underpriced", nil)
-	//txBroadcastOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/otherreject", nil)
-
-	//txRequestOutMeter     = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/out", nil)
-	//txRequestFailMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/fail", nil)
-	//txRequestDoneMeter    = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/done", nil)
-	//txRequestTimeoutMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/request/timeout", nil)
-
-	//txReplyInMeter          = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/in", nil)
-	//txReplyKnownMeter       = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/known", nil)
-	//txReplyUnderpricedMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/underpriced", nil)
-	//txReplyOtherRejectMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/otherreject", nil)
+	txBroadcastInMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/in", nil)
+	txReplyInMeter     = metrics.NewRegisteredMeter("eth/fetcher/transaction/replies/in", nil)
 
 	//txFetcherWaitingPeers   = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/peers", nil)
 	//txFetcherWaitingHashes  = metrics.NewRegisteredGauge("eth/fetcher/transaction/waiting/hashes", nil)
@@ -226,17 +209,6 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	if err != nil {
 		return fmt.Errorf("txFetcher notify: %w\n", err)
 	}
-	var underpriced int
-	for i := range hashes {
-		if f.underpriced.Contains(hashes[i]) {
-			underpriced++
-		}
-	}
-
-	txAnnounceInMeter.Mark(int64(len(hashes)))
-	txAnnounceKnownMeter.Mark(int64(len(hashes) - len(unknowns)))
-	txAnnounceUnderpricedMeter.Mark(int64(underpriced))
-
 	// If anything's left to announce, push it into the internal loop
 	if len(unknowns) == 0 {
 		return nil
@@ -259,18 +231,15 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 // re-shedule missing transactions as soon as possible.
 func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) error {
 	// Keep track of all the propagated transactions
-	//if direct {
-	//	txReplyInMeter.Mark(int64(len(txs)))
-	//} else {
-	//	txBroadcastInMeter.Mark(int64(len(txs)))
-	//}
+	if direct {
+		txReplyInMeter.Mark(int64(len(txs)))
+	} else {
+		txBroadcastInMeter.Mark(int64(len(txs)))
+	}
 	// Push all the transactions into the pool, tracking underpriced ones to avoid
 	// re-requesting them and dropping the peer in case of malicious transfers.
 	var (
-		added       = make([]common.Hash, 0, len(txs))
-		duplicate   int64
-		underpriced int64
-		otherreject int64
+		added = make([]common.Hash, 0, len(txs))
 	)
 	serialized, err := txpool.MarshalTxs(txs)
 	if err != nil {
@@ -283,38 +252,9 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 	for i := range results {
 		switch results[i] {
 		case proto_txpool.ImportResult_SUCCESS:
-			continue
-		case proto_txpool.ImportResult_FEE_TOO_LOW:
-			underpriced++
-		case proto_txpool.ImportResult_ALREADY_EXISTS:
-			duplicate++
-		case proto_txpool.ImportResult_INVALID:
-			otherreject++
-		default:
-			return fmt.Errorf("unknown return type: %s", results[i])
+			added = append(added, txs[i].Hash())
 		}
-
-		// Track the transaction hash if the price is too low for us.
-		// Avoid re-request this transaction when we receive another
-		// announcement.
-		if err == core.ErrUnderpriced || err == core.ErrReplaceUnderpriced {
-			for f.underpriced.Cardinality() >= maxTxUnderpricedSetSize {
-				f.underpriced.Pop()
-			}
-			f.underpriced.Add(txs[i].Hash())
-		}
-
-		added = append(added, txs[i].Hash())
 	}
-	//if direct {
-	//	txReplyKnownMeter.Mark(duplicate)
-	//	txReplyUnderpricedMeter.Mark(underpriced)
-	//	txReplyOtherRejectMeter.Mark(otherreject)
-	//} else {
-	//	txBroadcastKnownMeter.Mark(duplicate)
-	//	txBroadcastUnderpricedMeter.Mark(underpriced)
-	//	txBroadcastOtherRejectMeter.Mark(otherreject)
-	//}
 	select {
 	case f.cleanup <- &txDelivery{origin: peer, hashes: added, direct: direct}:
 		return nil

@@ -170,7 +170,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return 0, err
 	}
-
 	getBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
 	h.blockFetcher = fetcher.NewBlockFetcher(nil, getBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
