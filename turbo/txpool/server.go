@@ -88,6 +88,7 @@ func (s *Server) FindUnknownTransactions(ctx context.Context, in *proto_txpool.T
 		}
 		if s.underpriced.Contains(h) {
 			underpriced++
+			continue
 		}
 		reply.Hashes = append(reply.Hashes, in.Hashes[i])
 	}

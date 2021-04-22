@@ -18,7 +18,6 @@ package fetcher
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -1315,8 +1314,6 @@ func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
 						t.Errorf("step %d, peer %s: hash %x missing from waitslots", i, peer, hash)
 					}
 				}
-				fmt.Printf("a: %x\n", waiting)
-				fmt.Printf("b: %x\n", hashes)
 				for hash := range waiting {
 					if !containsHash(hashes, hash) {
 						t.Errorf("step %d, peer %s: hash %x extra in waitslots", i, peer, hash)
