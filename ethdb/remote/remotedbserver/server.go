@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -14,11 +15,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/version"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const MaxTxTTL = 30 * time.Second
@@ -88,6 +91,11 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 
 func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
+}
+
+// GetInterfaceVersion returns the service-side interface version number
+func (s *KvServer) GetInterfaceVersion(context.Context, *emptypb.Empty) (*version.InterfaceVersionReply, error) {
+	return &version.InterfaceVersionReply{CurrentMajorNumber: 1, CurrentMinorNumber: 0, CurrentPatchNumber: 0}, nil
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
