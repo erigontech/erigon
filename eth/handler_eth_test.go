@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	txpool3 "github.com/ledgerwatch/turbo-geth/turbo/txpool"
 
 	"github.com/holiman/uint256"
 )
@@ -100,8 +101,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		dbNoFork  = ethdb.NewMemoryDatabase()
 		dbProFork = ethdb.NewMemoryDatabase()
 
-		txpool2, txpool = newTestTxPool()
-		ethNoFork, _    = newHandler(&handlerConfig{
+		txpool2, _, txpool = txpool3.NewTestTxPool()
+		ethNoFork, _       = newHandler(&handlerConfig{
 			Database:    dbNoFork,
 			ChainConfig: configNoFork,
 			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
