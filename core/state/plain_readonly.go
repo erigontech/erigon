@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -159,7 +160,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 		tx = dbtx.(ethdb.HasTx).Tx()
 	}
 	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+1)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -196,7 +197,7 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := GetAsOf(tx, true /* storage */, compositeKey, dbs.blockNr+1)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -245,7 +246,7 @@ func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64,
 		tx = dbtx.(ethdb.HasTx).Tx()
 	}
 	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+2)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, err
 	}
 	if len(enc) == 0 {
