@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -41,8 +40,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
-	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -177,21 +174,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return p.RequestTxs(hashes)
 	}
-	findUnknownTxs := func(hashes common.Hashes) (common.Hashes, error) {
-		reply, err2 := h.txpool2.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
-		if err2 != nil {
-			return nil, err2
-		}
-		return gointerfaces.ConvertH256ToHashes(reply.Hashes), nil
-	}
-	importTxs := func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
-		reply, err2 := h.txpool2.ImportTransactions(context.Background(), &proto_txpool.ImportRequest{Txs: txs})
-		if err2 != nil {
-			return nil, err2
-		}
-		return reply.Imported, nil
-	}
-	h.txFetcher = fetcher.NewTxFetcher(findUnknownTxs, importTxs, fetchTx)
+	h.txFetcher = fetcher.NewTxFetcher(fetcher.FindUnknownTxsF(h.txpool2), fetcher.ImportTxsF(h.txpool2), fetchTx)
 	h.chainSync = newChainSyncer(h)
 	return h, nil
 }

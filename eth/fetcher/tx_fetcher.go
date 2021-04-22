@@ -18,6 +18,7 @@ package fetcher
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	mrand "math/rand"
 	"sort"
@@ -27,6 +28,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -833,5 +836,25 @@ func rotateHashes(slice []common.Hash, n int) {
 
 	for i := 0; i < len(orig); i++ {
 		slice[i] = orig[(i+n)%len(orig)]
+	}
+}
+
+func FindUnknownTxsF(txpool eth.TxPool) func(hashes common.Hashes) (common.Hashes, error) {
+	return func(hashes common.Hashes) (common.Hashes, error) {
+
+		reply, err2 := txpool.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
+		if err2 != nil {
+			return nil, err2
+		}
+		return gointerfaces.ConvertH256ToHashes(reply.Hashes), nil
+	}
+}
+func ImportTxsF(txpool eth.TxPool) func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
+	return func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
+		reply, err2 := txpool.ImportTransactions(context.Background(), &proto_txpool.ImportRequest{Txs: txs})
+		if err2 != nil {
+			return nil, err2
+		}
+		return reply.Imported, nil
 	}
 }

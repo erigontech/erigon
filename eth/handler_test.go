@@ -17,12 +17,8 @@
 package eth
 
 import (
-	"context"
 	"math/big"
-	"sort"
-	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -31,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 )
@@ -44,79 +39,6 @@ var (
 	testAddr = crypto.PubkeyToAddress(testKey.PublicKey)
 )
 
-// testTxPool is a mock transaction pool that blindly accepts all transactions.
-// Its goal is to get around setting up a valid statedb for the balance and nonce
-// checks.
-type testTxPool struct {
-	pool map[common.Hash]types.Transaction // Hash map of collected transactions
-
-	txFeed event.Feed   // Notification feed to allow waiting for inclusion
-	lock   sync.RWMutex // Protects the transaction pool
-}
-
-// newTestTxPool creates a mock transaction pool.
-func newTestTxPool() (*txpool.ClientDirect, *testTxPool) {
-	deprecated := &testTxPool{
-		pool: make(map[common.Hash]types.Transaction),
-	}
-	return txpool.NewClientDirect(txpool.NewServer(context.Background(), deprecated)), deprecated
-}
-
-// Has returns an indicator whether txpool has a transaction
-// cached with the given hash.
-func (p *testTxPool) Has(hash common.Hash) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	return p.pool[hash] != nil
-}
-
-// Get retrieves the transaction from local txpool with given
-// tx hash.
-func (p *testTxPool) Get(hash common.Hash) types.Transaction {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	return p.pool[hash]
-}
-
-// AddRemotes appends a batch of transactions to the pool, and notifies any
-// listeners if the addition channel is non nil
-func (p *testTxPool) AddRemotes(txs []types.Transaction) []error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	for _, tx := range txs {
-		p.pool[tx.Hash()] = tx
-	}
-	p.txFeed.Send(core.NewTxsEvent{Txs: txs})
-	return make([]error, len(txs))
-}
-
-// Pending returns all the transactions known to the pool
-func (p *testTxPool) Pending() (types.TransactionsGroupedBySender, error) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	batches := make(map[common.Address]types.Transactions)
-	for _, tx := range p.pool {
-		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
-		batches[from] = append(batches[from], tx)
-	}
-	groups := types.TransactionsGroupedBySender{}
-	for _, batch := range batches {
-		sort.Sort(types.TxByNonce(batch))
-		groups = append(groups, batch)
-	}
-	return groups, nil
-}
-
-// SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
-// send events to the given channel.
-func (p *testTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
-	return p.txFeed.Subscribe(ch)
-}
-
 // testHandler is a live implementation of the Ethereum protocol handler, just
 // preinitialized with some sane testing defaults and the transaction pool mocked
 // out.
@@ -126,7 +48,7 @@ type testHandler struct {
 	vmConfig    *vm.Config
 	genesis     *types.Block
 	engine      consensus.Engine
-	txpool      *testTxPool
+	txpool      *txpool.TestTxPool
 	txpool2     *txpool.ClientDirect
 	handler     *handler
 	headBlock   *types.Block
@@ -155,7 +77,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		}
 		headBlock = bs[len(bs)-1]
 	}
-	txpool2, txpool := newTestTxPool()
+	txpool2, txpool := txpool.NewTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
 		Database:    db,

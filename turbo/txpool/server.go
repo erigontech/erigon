@@ -100,15 +100,11 @@ func (s *Server) FindUnknownTransactions(ctx context.Context, in *proto_txpool.T
 }
 
 func (s *Server) ImportTransactions(ctx context.Context, in *proto_txpool.ImportRequest) (*proto_txpool.ImportReply, error) {
-	txs := make(types.Transactions, len(in.Txs))
 	reply := &proto_txpool.ImportReply{Imported: make([]proto_txpool.ImportResult, len(in.Txs))}
-	for i := range in.Txs {
-		err := rlp.DecodeBytes(in.Txs[i], txs[i])
-		if err != nil {
-			return nil, err
-		}
+	txs, err := UnmarshalTxs(in.Txs)
+	if err != nil {
+		return nil, err
 	}
-
 	var duplicate int64
 	var underpriced int64
 	var otherreject int64
@@ -172,14 +168,17 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 }
 
 func MarshalTxs(txs types.Transactions) ([][]byte, error) {
-	buf := bytes.NewBuffer(nil)
+	var err error
 	result := make([][]byte, len(txs))
 	for i := range txs {
-		buf.Reset()
-		if err := txs[i].EncodeRLP(buf); err != nil {
+		if txs[i] == nil {
+			result[i] = nil
+			continue
+		}
+		result[i], err = rlp.EncodeToBytes(txs[i])
+		if err != nil {
 			return nil, err
 		}
-		result[i] = common.CopyBytes(buf.Bytes())
 	}
 	return result, nil
 }
@@ -187,6 +186,7 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 func UnmarshalTxs(txs [][]byte) (types.Transactions, error) {
 	result := make(types.Transactions, len(txs))
 	for i := range txs {
+		result[i] = &types.Transaction{}
 		if err := rlp.DecodeBytes(txs[i], result[i]); err != nil {
 			return nil, err
 		}
