@@ -670,7 +670,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
 	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, parentNumber.Uint64())
+		c.regenerateSnapshots(chain, parentNumber)
 	})
 
 	snap, err := c.snapshot(chain, parentNumber, parentHash, common.Hash{})
