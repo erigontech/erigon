@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"bytes"
 	"context"
 	"math/big"
 	"sort"
@@ -34,7 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 )
 
 var (
@@ -56,10 +55,11 @@ type testTxPool struct {
 }
 
 // newTestTxPool creates a mock transaction pool.
-func newTestTxPool() *testTxPool {
-	return &testTxPool{
+func newTestTxPool() (*txpool.ClientDirect, *testTxPool) {
+	deprecated := &testTxPool{
 		pool: make(map[common.Hash]types.Transaction),
 	}
+	return txpool.NewClientDirect(txpool.NewServer(context.Background(), deprecated)), deprecated
 }
 
 // Has returns an indicator whether txpool has a transaction
@@ -78,28 +78,6 @@ func (p *testTxPool) Get(hash common.Hash) types.Transaction {
 	defer p.lock.Unlock()
 
 	return p.pool[hash]
-}
-
-func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error) {
-	reply := []rlp.RawValue{}
-	var size uint64
-	buf := bytes.NewBuffer(nil)
-
-	for i := range hashes {
-		txn := p.Get(hashes[i])
-		if txn == nil {
-			reply = append(reply, nil)
-			continue
-		}
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
-			return nil, err
-		}
-		reply = append(reply, common.CopyBytes(buf.Bytes()))
-		size += uint64(buf.Len())
-	}
-
-	return reply, nil
 }
 
 // AddRemotes appends a batch of transactions to the pool, and notifies any
@@ -149,6 +127,7 @@ type testHandler struct {
 	genesis     *types.Block
 	engine      consensus.Engine
 	txpool      *testTxPool
+	txpool2     *txpool.ClientDirect
 	handler     *handler
 	headBlock   *types.Block
 }
@@ -176,7 +155,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		}
 		headBlock = bs[len(bs)-1]
 	}
-	txpool := newTestTxPool()
+	txpool2, txpool := newTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
 		Database:    db,
@@ -185,6 +164,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		vmConfig:    &vm.Config{},
 		engine:      ethash.NewFaker(),
 		TxPool:      txpool,
+		TxPool2:     txpool2,
 		Network:     1,
 		BloomCache:  1,
 	})
@@ -197,6 +177,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		vmConfig:    &vm.Config{},
 		engine:      ethash.NewFaker(),
 		txpool:      txpool,
+		txpool2:     txpool2,
 		handler:     handler,
 		headBlock:   headBlock,
 	}

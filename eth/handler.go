@@ -57,9 +57,6 @@ const (
 // txPool defines the methods needed from a transaction pool implementation to
 // support all the operations needed by the Ethereum chain protocols.
 type txPool interface {
-	// AddRemotes should add the given transactions to the pool.
-	AddRemotes([]types.Transaction) []error
-
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.
 	Pending() (types.TransactionsGroupedBySender, error)

@@ -100,13 +100,15 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		dbNoFork  = ethdb.NewMemoryDatabase()
 		dbProFork = ethdb.NewMemoryDatabase()
 
-		ethNoFork, _ = newHandler(&handlerConfig{
+		txpool2, txpool = newTestTxPool()
+		ethNoFork, _    = newHandler(&handlerConfig{
 			Database:    dbNoFork,
 			ChainConfig: configNoFork,
 			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      newTestTxPool(),
+			TxPool:      txpool,
+			TxPool2:     txpool2,
 			Network:     1,
 			BloomCache:  1,
 		})
@@ -116,7 +118,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			genesis:     (&core.Genesis{Config: configProFork}).MustCommit(dbProFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      newTestTxPool(),
+			TxPool:      txpool,
+			TxPool2:     txpool2,
 			Network:     1,
 			BloomCache:  1,
 		})
@@ -210,8 +213,8 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	defer p2pSrc.Close()
 	defer p2pSink.Close()
 
-	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, handler.txpool)
-	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, handler.txpool)
+	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, handler.txpool2)
+	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, handler.txpool2)
 	defer src.Close()
 	defer sink.Close()
 
@@ -274,8 +277,8 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	defer p2pSrc.Close()
 	defer p2pSink.Close()
 
-	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, handler.txpool)
-	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, handler.txpool)
+	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, handler.txpool2)
+	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, handler.txpool2)
 	defer src.Close()
 	defer sink.Close()
 
@@ -442,8 +445,8 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	defer p2pSrc.Close()
 	defer p2pSink.Close()
 
-	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, source.txpool)
-	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, source.txpool)
+	src := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{1}, "", nil), p2pSrc, source.txpool2)
+	sink := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{2}, "", nil), p2pSink, source.txpool2)
 	defer src.Close()
 	defer sink.Close()
 

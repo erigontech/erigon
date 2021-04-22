@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -46,11 +47,34 @@ var (
 type Server struct {
 	proto_txpool.UnimplementedTxpoolServer
 	ctx         context.Context
-	txPool      *core.TxPool
+	txPool      txPool
 	underpriced mapset.Set // Transactions discarded as too cheap (don't re-fetch)
 }
 
-func NewServer(ctx context.Context, txPool *core.TxPool) *Server {
+// txPool defines the methods needed from a transaction pool implementation to
+// support all the operations needed by the Ethereum chain protocols.
+type txPool interface {
+	// Has returns an indicator whether txpool has a transaction
+	// cached with the given hash.
+	Has(hash common.Hash) bool
+
+	// Get retrieves the transaction from local txpool with given
+	// tx hash.
+	Get(hash common.Hash) *types.Transaction
+
+	// AddRemotes should add the given transactions to the pool.
+	AddRemotes([]*types.Transaction) []error
+
+	// Pending should return pending transactions.
+	// The slice should be modifiable by the caller.
+	Pending() (types.TransactionsGroupedBySender, error)
+
+	// SubscribeNewTxsEvent should return an event subscription of
+	// NewTxsEvent and send events to the given channel.
+	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
+}
+
+func NewServer(ctx context.Context, txPool txPool) *Server {
 	return &Server{ctx: ctx, txPool: txPool, underpriced: mapset.NewSet()}
 }
 
