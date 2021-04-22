@@ -265,6 +265,8 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
 	}
+	cliqueConfig := params.NewSnapshotConfig(10, 1024, 16384, false /* inMemory */, "clique", false /* mdbx */)
+	var consensusConfig interface{}
 	var chainConfig *params.ChainConfig
 	var err error
 	var genesis *core.Genesis
@@ -275,21 +277,24 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 		networkID = 1
 		genesis = core.DefaultGenesisBlock()
 		genesisHash = params.MainnetGenesisHash
+		consensusConfig = ethashConfig
 	case "ropsten":
 		networkID = 3
 		genesis = core.DefaultRopstenGenesisBlock()
 		genesisHash = params.RopstenGenesisHash
+		consensusConfig = ethashConfig
 	case "goerli":
 		networkID = 5
 		genesis = core.DefaultGoerliGenesisBlock()
 		genesisHash = params.GoerliGenesisHash
+		consensusConfig = cliqueConfig
 	default:
 		return nil, fmt.Errorf("chain %s is not known", chain)
 	}
 	if chainConfig, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
-	engine := ethconfig.CreateConsensusEngine(chainConfig, ethashConfig, nil, false)
+	engine := ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, nil, false)
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
