@@ -25,7 +25,10 @@ message GetTransactionsRequest { repeated types.H256 hashes = 1; }
 message GetTransactionsReply { repeated bytes txs = 1; }
 
 service Txpool {
+  // preserves incoming order, unknown hashes will be omitted
   rpc FindUnknownTransactions(TxHashes) returns (TxHashes);
+  // preserves incoming order
   rpc ImportTransactions(ImportRequest) returns (ImportReply);
+  // preserves incoming order, if some transaction doesn't exists in pool - returns nil in this slot
   rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsReply);
 }
