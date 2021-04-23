@@ -347,7 +347,7 @@ func TestBroadcastBlock5Peers(t *testing.T)   { testBroadcastBlock(t, 5, 2) }
 func TestBroadcastBlock8Peers(t *testing.T)   { testBroadcastBlock(t, 9, 3) }
 func TestBroadcastBlock12Peers(t *testing.T)  { testBroadcastBlock(t, 12, 3) }
 func TestBroadcastBlock16Peers(t *testing.T)  { testBroadcastBlock(t, 16, 4) }
-func TestBroadcastBloc26Peers(t *testing.T)   { testBroadcastBlock(t, 26, 5) }
+func TestBroadcastBlock26Peers(t *testing.T)  { testBroadcastBlock(t, 26, 5) }
 func TestBroadcastBlock100Peers(t *testing.T) { testBroadcastBlock(t, 100, 10) }
 
 func testBroadcastBlock(t *testing.T, peers, bcasts int) {
@@ -400,6 +400,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		sub := sinks[i].blockBroadcasts.Subscribe(blockChs[i])
 		defer sub.Unsubscribe()
 	}
+
 	// Initiate a block propagation across the peers
 	time.Sleep(100 * time.Millisecond)
 
@@ -414,6 +415,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 			done <- struct{}{}
 		}()
 	}
+
 	var received int
 	for {
 		select {
