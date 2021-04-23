@@ -260,7 +260,6 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 			added = append(added, txs[i].Hash())
 		}
 	}
-	fmt.Printf("enq: %d,%d\n", len(txs), len(added))
 	select {
 	case f.cleanup <- &txDelivery{origin: peer, hashes: added, direct: direct}:
 		return nil
