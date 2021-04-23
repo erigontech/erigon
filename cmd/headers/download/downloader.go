@@ -193,11 +193,7 @@ func recvMessage(ctx context.Context, sentry proto_sentry.SentryClient, controlS
 func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string) error {
 	ctx := rootContext()
 
-	sentryServer := &SentryServerImpl{
-		ctx:             ctx,
-		receiveCh:       make(chan StreamMsg, 1024),
-		receiveUploadCh: make(chan StreamMsg, 1024),
-	}
+	sentryServer := NewSentryServer(ctx)
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain, nil)
