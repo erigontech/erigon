@@ -6,6 +6,10 @@ package testing;
 
 option go_package = "./testing;testing";
 
+message TestCaseNumber {
+    uint64 count = 1;
+}
+
 message TestReport {
     // End of test signal
     bool end = 1;
@@ -16,8 +20,8 @@ message TestReport {
 
 service TestDriver {
   // Returns number of available integration test caes in the test driver
-  rpc TestCaseCount(google.protobuf.Empty) returns (uint64);
+  rpc TestCaseCount(google.protobuf.Empty) returns (TestCaseNumber);
   // Ask the test driver to start the test case with given number. As test case progresses, the driver sends reports via the stream
   // Test drivier also notifies about the end of test case via the stream
-  rpc StartTestCase(uint64) returns (stream TestReport);
+  rpc StartTestCase(TestCaseNumber) returns (stream TestReport);
 }
