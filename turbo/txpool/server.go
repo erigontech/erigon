@@ -179,7 +179,7 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 			result[i] = nil
 			continue
 		}
-		result[i], err = rlp.EncodeToBytes(txs[i])
+		result[i], err = rlp.EncodeToBytes(&txs[i])
 		if err != nil {
 			return nil, err
 		}
