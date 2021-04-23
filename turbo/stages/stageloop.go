@@ -24,9 +24,11 @@ func NewStagedSync(
 	headers stagedsync.HeadersCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
+	exec stagedsync.ExecuteBlockCfg,
 ) *stagedsync.StagedSync {
+
 	return stagedsync.New(
-		ReplacementStages(ctx, headers, bodies, senders),
+		ReplacementStages(ctx, headers, bodies, senders, exec),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -108,6 +110,7 @@ func ReplacementStages(ctx context.Context,
 	headers stagedsync.HeadersCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
+	exec stagedsync.ExecuteBlockCfg,
 ) stagedsync.StageBuilders {
 	return []stagedsync.StageBuilder{
 		{
@@ -166,6 +169,21 @@ func ReplacementStages(ctx context.Context,
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.UnwindSendersStage(u, s, world.TX)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.Execution,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:          stages.Execution,
+					Description: "Execute blocks w/o hash checks",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnExecuteBlocksStage(s, world.TX, 0, world.QuitCh, exec)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindExecutionStage(u, s, world.TX, world.QuitCh, exec)
 					},
 				}
 			},

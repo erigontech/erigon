@@ -44,12 +44,12 @@ type StateReaderBuilder func(ethdb.Database) state.StateReader
 type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockCfg struct {
-	WriteReceipts         bool
-	BatchSize             datasize.ByteSize
-	ChangeSetHook         ChangeSetHook
-	ReaderBuilder         StateReaderBuilder
-	WriterBuilder         StateWriterBuilder
-	SilkwormExecutionFunc unsafe.Pointer
+	writeReceipts         bool
+	batchSize             datasize.ByteSize
+	changeSetHook         ChangeSetHook
+	readerBuilder         StateReaderBuilder
+	writerBuilder         StateWriterBuilder
+	silkwormExecutionFunc unsafe.Pointer
 	chainConfig           *params.ChainConfig
 	engine                consensus.Engine
 	vmConfig              *vm.Config
@@ -67,12 +67,12 @@ func StageExecuteBlocksCfg(
 	vmConfig *vm.Config,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		WriteReceipts:         WriteReceipts,
-		BatchSize:             BatchSize,
-		ChangeSetHook:         ChangeSetHook,
-		ReaderBuilder:         ReaderBuilder,
-		WriterBuilder:         WriterBuilder,
-		SilkwormExecutionFunc: SilkwormExecutionFunc,
+		writeReceipts:         WriteReceipts,
+		batchSize:             BatchSize,
+		changeSetHook:         ChangeSetHook,
+		readerBuilder:         ReaderBuilder,
+		writerBuilder:         WriterBuilder,
+		silkwormExecutionFunc: SilkwormExecutionFunc,
 		chainConfig:           chainConfig,
 		engine:                engine,
 		vmConfig:              vmConfig,
@@ -93,14 +93,14 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
 
-	if params.ReaderBuilder != nil {
-		stateReader = params.ReaderBuilder(batch)
+	if params.readerBuilder != nil {
+		stateReader = params.readerBuilder(batch)
 	} else {
 		stateReader = state.NewPlainStateReader(batch)
 	}
 
-	if params.WriterBuilder != nil {
-		stateWriter = params.WriterBuilder(batch, tx, blockNum)
+	if params.writerBuilder != nil {
+		stateWriter = params.writerBuilder(batch, tx, blockNum)
 	} else {
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 	}
@@ -112,15 +112,15 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 		return err
 	}
 
-	if params.WriteReceipts {
+	if params.writeReceipts {
 		if err = rawdb.AppendReceipts(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum, receipts); err != nil {
 			return err
 		}
 	}
 
-	if params.ChangeSetHook != nil {
+	if params.changeSetHook != nil {
 		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-			params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+			params.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 		}
 	}
 
@@ -157,8 +157,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		defer tx.Rollback()
 	}
 
-	useSilkworm := params.SilkwormExecutionFunc != nil
-	if useSilkworm && params.ChangeSetHook != nil {
+	useSilkworm := params.silkwormExecutionFunc != nil
+	if useSilkworm && params.changeSetHook != nil {
 		panic("ChangeSetHook is not supported with Silkworm")
 	}
 
@@ -183,7 +183,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		if useSilkworm {
 			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			if blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, params.chainConfig.ChainID, blockNum, to, int(params.BatchSize), params.WriteReceipts); err != nil {
+			if blockNum, err = silkworm.ExecuteBlocks(params.silkwormExecutionFunc, txn, params.chainConfig.ChainID, blockNum, to, int(params.batchSize), params.writeReceipts); err != nil {
 				return err
 			}
 		} else {
@@ -202,7 +202,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 
 		stageProgress = blockNum
 
-		updateProgress := !useBatch || batch.BatchSize() >= int(params.BatchSize)
+		updateProgress := !useBatch || batch.BatchSize() >= int(params.batchSize)
 		if updateProgress {
 			if err = s.Update(tx, stageProgress); err != nil {
 				return err
@@ -345,7 +345,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if params.WriteReceipts {
+	if params.writeReceipts {
 		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}

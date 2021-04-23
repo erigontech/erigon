@@ -14,9 +14,11 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -113,28 +115,17 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	}
 
 	batchSize := 512 * datasize.MB
-
-	sync := stages.NewStagedSync(
+	sync, err := newStagedSync(
 		ctx,
-		stagedsync.StageHeadersCfg(
-			controlServer.hd,
-			*controlServer.chainConfig,
-			controlServer.sendHeaderRequest,
-			controlServer.requestWakeUpBodies,
-			batchSize,
-		),
-		stagedsync.StageBodiesCfg(
-			controlServer.bd,
-			controlServer.sendBodyRequest,
-			controlServer.penalise,
-			controlServer.updateHead,
-			controlServer,
-			controlServer.requestWakeUpBodies,
-			timeout,
-			batchSize,
-		),
-		stagedsync.StageSendersCfg(controlServer.chainConfig),
+		db,
+		batchSize,
+		timeout,
+		controlServer,
 	)
+	if err != nil {
+		return err
+	}
+
 	if err := stages.StageLoop(
 		ctx,
 		db,
@@ -236,28 +227,17 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go recvUploadMessage(ctx, sentry, controlServer)
 
 	batchSize := 512 * datasize.MB
-
-	sync := stages.NewStagedSync(
+	sync, err := newStagedSync(
 		ctx,
-		stagedsync.StageHeadersCfg(
-			controlServer.hd,
-			*controlServer.chainConfig,
-			controlServer.sendHeaderRequest,
-			controlServer.requestWakeUpBodies,
-			batchSize,
-		),
-		stagedsync.StageBodiesCfg(
-			controlServer.bd,
-			controlServer.sendBodyRequest,
-			controlServer.penalise,
-			controlServer.updateHead,
-			controlServer,
-			controlServer.requestWakeUpBodies,
-			timeout,
-			batchSize,
-		),
-		stagedsync.StageSendersCfg(controlServer.chainConfig),
+		db,
+		batchSize,
+		timeout,
+		controlServer,
 	)
+	if err != nil {
+		return err
+	}
+
 	if err := stages.StageLoop(
 		ctx,
 		db,
@@ -268,6 +248,50 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
+}
+
+func newStagedSync(
+	ctx context.Context,
+	db ethdb.Database,
+	batchSize datasize.ByteSize,
+	bodyDownloadTimeout int,
+	controlServer *ControlServerImpl,
+) (*stagedsync.StagedSync, error) {
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return nil, err
+	}
+
+	return stages.NewStagedSync(ctx, stagedsync.StageHeadersCfg(
+		controlServer.hd,
+		*controlServer.chainConfig,
+		controlServer.sendHeaderRequest,
+		controlServer.requestWakeUpBodies,
+		batchSize,
+	),
+		stagedsync.StageBodiesCfg(
+			controlServer.bd,
+			controlServer.sendBodyRequest,
+			controlServer.penalise,
+			controlServer.updateHead,
+			controlServer,
+			controlServer.requestWakeUpBodies,
+			bodyDownloadTimeout,
+			batchSize,
+		),
+		stagedsync.StageSendersCfg(controlServer.chainConfig),
+		stagedsync.StageExecuteBlocksCfg(
+			sm.Receipts,
+			batchSize,
+			nil,
+			nil,
+			nil,
+			nil,
+			controlServer.chainConfig,
+			controlServer.engine,
+			&vm.Config{NoReceipts: !sm.Receipts},
+		),
+	), nil
 }
 
 type ControlServerImpl struct {
@@ -287,6 +311,7 @@ type ControlServerImpl struct {
 	networkId            uint64
 	db                   ethdb.Database
 	txPool               eth.TxPool
+	engine               consensus.Engine
 }
 
 func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string, txPool eth.TxPool) (*ControlServerImpl, error) {
@@ -348,6 +373,7 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 		requestWakeUpBodies:  make(chan struct{}, 1),
 		db:                   db,
 		txPool:               txPool,
+		engine:               engine,
 	}
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
