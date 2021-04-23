@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -10,18 +11,24 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const MaxTxTTL = 30 * time.Second
+
+// KvServiceAPIVersion - use it to track changes in API
+var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -88,6 +95,26 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 
 func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
+}
+
+// GetInterfaceVersion returns the service-side interface version number
+func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
+	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
+		return &KvServiceAPIVersion, nil
+	}
+	if dbutils.DBSchemaVersion.Major > KvServiceAPIVersion.Major {
+		return &dbutils.DBSchemaVersion, nil
+	}
+	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
+		return &KvServiceAPIVersion, nil
+	}
+	if dbutils.DBSchemaVersion.Minor > KvServiceAPIVersion.Minor {
+		return &dbutils.DBSchemaVersion, nil
+	}
+	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
+		return &KvServiceAPIVersion, nil
+	}
+	return &dbutils.DBSchemaVersion, nil
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
@@ -263,4 +290,14 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	}
 
 	return nil
+}
+
+func max(args ...uint32) uint32 {
+	var max uint32
+	for _, arg := range args {
+		if max < arg {
+			max = arg
+		}
+	}
+	return max
 }

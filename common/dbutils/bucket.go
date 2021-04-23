@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 )
+
+// DBSchemaVersion
+var DBSchemaVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 // Buckets
 
