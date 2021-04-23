@@ -9,23 +9,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // TestTxPool is a mock transaction pool that blindly accepts all transactions.
 // Its goal is to get around setting up a valid statedb for the balance and nonce
 // checks.
 type TestTxPool struct {
-	pool map[common.Hash]*types.Transaction // Hash map of collected transactions
+	pool map[common.Hash]types.Transaction // Hash map of collected transactions
 
 	txFeed         event.Feed   // Notification feed to allow waiting for inclusion
 	lock           sync.RWMutex // Protects the transaction pool
-	FailAddRemotes func(txs []*types.Transaction) []error
+	FailAddRemotes func(txs []types.Transaction) []error
 }
 
 // NewTestTxPool creates a mock transaction pool.
 func NewTestTxPool() (*ClientDirect, *Server, *TestTxPool) {
 	deprecated := &TestTxPool{
-		pool: make(map[common.Hash]*types.Transaction),
+		pool: make(map[common.Hash]types.Transaction),
 	}
 	server := NewServer(context.Background(), deprecated)
 	return NewClientDirect(server), server, deprecated
@@ -42,7 +43,7 @@ func (p *TestTxPool) Has(hash common.Hash) bool {
 
 // Get retrieves the transaction from local txpool with given
 // tx hash.
-func (p *TestTxPool) Get(hash common.Hash) *types.Transaction {
+func (p *TestTxPool) Get(hash common.Hash) types.Transaction {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -51,7 +52,7 @@ func (p *TestTxPool) Get(hash common.Hash) *types.Transaction {
 
 // AddRemotes appends a batch of transactions to the pool, and notifies any
 // listeners if the addition channel is non nil
-func (p *TestTxPool) AddRemotes(txs []*types.Transaction) []error {
+func (p *TestTxPool) AddRemotes(txs []types.Transaction) []error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -82,9 +83,13 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	defer p.lock.RUnlock()
 
 	batches := make(map[common.Address]types.Transactions)
+	signer := types.LatestSigner(params.AllEthashProtocolChanges)
 	for _, tx := range p.pool {
-		from, _ := types.Sender(types.HomesteadSigner{}, tx)
-		batches[from] = append(batches[from], tx)
+		sender, err := tx.Sender(*signer)
+		if err != nil {
+			return nil, err
+		}
+		batches[sender] = append(batches[sender], tx)
 	}
 	groups := types.TransactionsGroupedBySender{}
 	for _, batch := range batches {

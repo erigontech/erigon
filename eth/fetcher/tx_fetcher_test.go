@@ -33,7 +33,7 @@ import (
 
 var (
 	// testTxs is a set of transactions to use during testing that have meaningful hashes.
-	testTxs = []*types.Transaction{
+	testTxs = []types.Transaction{
 		types.NewTransaction(5577006791947779410, common.Address{0x0f}, new(uint256.Int), 0, new(uint256.Int), nil),
 		types.NewTransaction(15352856648520921629, common.Address{0xbb}, new(uint256.Int), 0, new(uint256.Int), nil),
 		types.NewTransaction(3916589616287113937, common.Address{0x86}, new(uint256.Int), 0, new(uint256.Int), nil),
@@ -49,7 +49,7 @@ type doTxNotify struct {
 }
 type doTxEnqueue struct {
 	peer   string
-	txs    []*types.Transaction
+	txs    []types.Transaction
 	direct bool
 }
 type doWait struct {
@@ -377,7 +377,7 @@ func TestTransactionFetcherCleanup(t *testing.T) {
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
-				//func(txs []*types.Transaction) []error {
+				//func(txs []types.Transaction) []error {
 				//	return make([]error, len(txs))
 				//},
 				func(string, []common.Hash) error { return nil },
@@ -402,7 +402,7 @@ func TestTransactionFetcherCleanup(t *testing.T) {
 				},
 			},
 			// Request should be delivered
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -439,7 +439,7 @@ func TestTransactionFetcherCleanupEmpty(t *testing.T) {
 				},
 			},
 			// Deliver an empty response and ensure the transaction is cleared, not rescheduled
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -476,7 +476,7 @@ func TestTransactionFetcherMissingRescheduling(t *testing.T) {
 			},
 			// Deliver the middle transaction requested, the one before which
 			// should be dropped and the one after re-requested.
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}, direct: true}, // This depends on the deterministic random
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true}, // This depends on the deterministic random
 			isScheduled{
 				tracking: map[string][]common.Hash{
 					"A": {testTxsHashes[2]},
@@ -520,7 +520,7 @@ func TestTransactionFetcherMissingCleanup(t *testing.T) {
 			},
 			// Deliver the middle transaction requested, the one before which
 			// should be dropped and the one after re-requested.
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[1]}, direct: true}, // This depends on the deterministic random
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[1]}, direct: true}, // This depends on the deterministic random
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -558,7 +558,7 @@ func TestTransactionFetcherBroadcasts(t *testing.T) {
 			// Broadcast all the transactions and ensure everything gets cleaned
 			// up, but the dangling request is left alone to avoid doing multiple
 			// concurrent requests.
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: false},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: false},
 			isWaiting(nil),
 			isScheduled{
 				tracking: nil,
@@ -568,7 +568,7 @@ func TestTransactionFetcherBroadcasts(t *testing.T) {
 				},
 			},
 			// Deliver the requested hashes
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -680,7 +680,7 @@ func TestTransactionFetcherTimeoutRescheduling(t *testing.T) {
 				},
 			},
 			// If the dangling request arrives a bit later, do not choke
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true},
 			isWaiting(nil),
 			isScheduled{
 				tracking: map[string][]common.Hash{
@@ -852,7 +852,7 @@ func TestTransactionFetcherDoSProtection(t *testing.T) {
 func TestTransactionFetcherUnderpricedDedup(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
 		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
-			testPool.FailAddRemotes = func(txs []*types.Transaction) []error {
+			testPool.FailAddRemotes = func(txs []types.Transaction) []error {
 				errs := make([]error, len(txs))
 				for i := 0; i < len(errs); i++ {
 					if i%2 == 0 {
@@ -873,7 +873,7 @@ func TestTransactionFetcherUnderpricedDedup(t *testing.T) {
 			// Deliver a transaction through the fetcher, but reject as underpriced
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0], testTxs[1]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1]}, direct: true},
 			isScheduled{nil, nil, nil},
 
 			// Try to announce the transaction again, ensure it's not scheduled back
@@ -895,7 +895,7 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 	txFetchTimeout = 24 * time.Hour
 
 	// Create a slew of transactions to max out the underpriced set
-	var txs []*types.Transaction
+	var txs []types.Transaction
 	for i := 0; i < maxTxUnderpricedSetSize+1; i++ {
 		txs = append(txs, types.NewTransaction(rand.Uint64(), common.Address{byte(rand.Intn(256))}, new(uint256.Int), 0, new(uint256.Int), nil))
 	}
@@ -926,7 +926,7 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 	}
 	testTransactionFetcherParallel(t, txFetcherTest{
 		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
-			testPool.FailAddRemotes = func(txs []*types.Transaction) []error {
+			testPool.FailAddRemotes = func(txs []types.Transaction) []error {
 				errs := make([]error, len(txs))
 				for i := 0; i < len(errs); i++ {
 					errs[i] = core.ErrUnderpriced
@@ -943,7 +943,7 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 			// The preparation of the test has already been done in `steps`, add the last check
 			doTxNotify{peer: "A", hashes: []common.Hash{hashes[maxTxUnderpricedSetSize]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{txs[maxTxUnderpricedSetSize]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{txs[maxTxUnderpricedSetSize]}, direct: true},
 			isUnderpriced(maxTxUnderpricedSetSize),
 		}...),
 	})
@@ -963,7 +963,7 @@ func TestTransactionFetcherOutOfBoundDeliveries(t *testing.T) {
 			// Deliver something out of the blue
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}, direct: false},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: false},
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
 
@@ -986,7 +986,7 @@ func TestTransactionFetcherOutOfBoundDeliveries(t *testing.T) {
 				},
 			},
 			// Deliver everything and more out of the blue
-			doTxEnqueue{peer: "B", txs: []*types.Transaction{testTxs[0], testTxs[1], testTxs[2], testTxs[3]}, direct: true},
+			doTxEnqueue{peer: "B", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2], testTxs[3]}, direct: true},
 			isWaiting(nil),
 			isScheduled{
 				tracking: nil,
@@ -1121,7 +1121,7 @@ func TestTransactionFetcherFuzzCrash01(t *testing.T) {
 			// Get a transaction into fetching mode and make it dangling with a broadcast
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more and crash via a timeout
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
@@ -1146,7 +1146,7 @@ func TestTransactionFetcherFuzzCrash02(t *testing.T) {
 			// Get a transaction into fetching mode and make it dangling with a broadcast
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more, re-fetch, and crash via a drop and timeout
 			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},
@@ -1173,13 +1173,13 @@ func TestTransactionFetcherFuzzCrash03(t *testing.T) {
 			// Get a transaction into fetching mode and make it dangling with a broadcast
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
 			doWait{time: txFetchTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0], testTxs[1]}},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1]}},
 
 			// Notify the dangling transaction once more, partially deliver, clash&crash with a timeout
 			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
 
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[1]}, direct: true},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[1]}, direct: true},
 			doWait{time: txFetchTimeout, step: true},
 		},
 	})
@@ -1206,7 +1206,7 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 			// Get a transaction into fetching mode and make it dangling with a broadcast
 			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []*types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more, re-fetch, and crash via an in-flight disconnect
 			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},

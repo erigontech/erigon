@@ -13,8 +13,6 @@ import (
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -60,10 +58,10 @@ type txPool interface {
 
 	// Get retrieves the transaction from local txpool with given
 	// tx hash.
-	Get(hash common.Hash) *types.Transaction
+	Get(hash common.Hash) types.Transaction
 
 	// AddRemotes should add the given transactions to the pool.
-	AddRemotes([]*types.Transaction) []error
+	AddRemotes([]types.Transaction) []error
 
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.
@@ -189,11 +187,10 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 	return result, nil
 }
 
-func UnmarshalTxs(txs [][]byte) (types.Transactions, error) {
-	result := make(types.Transactions, len(txs))
+func UnmarshalTxs(txs [][]byte) ([]types.Transaction, error) {
+	result := make([]types.Transaction, len(txs))
 	for i := range txs {
-		result[i] = &types.Transaction{}
-		if err := rlp.DecodeBytes(txs[i], result[i]); err != nil {
+		if err := rlp.DecodeBytes(txs[i], &result[i]); err != nil {
 			return nil, err
 		}
 	}
