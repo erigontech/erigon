@@ -173,17 +173,20 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 
 func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 	var err error
+	var buf bytes.Buffer
 	result := make([][]byte, len(txs))
 	for i := range txs {
 		if txs[i] == nil {
 			result[i] = nil
 			continue
 		}
-		result[i], err = rlp.EncodeToBytes(&txs[i])
+		buf.Reset()
+		err = txs[i].MarshalBinary(&buf)
 		if err != nil {
-			panic(err)
 			return nil, err
 		}
+		result[i] = common.CopyBytes(buf.Bytes())
+		result[i], err = rlp.EncodeToBytes(&txs[i])
 	}
 	return result, nil
 }
