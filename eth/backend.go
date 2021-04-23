@@ -721,7 +721,8 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		s.txPool,
 		nil,
 		false,
-		stagedsync.NewMiningStagesParameters(s.config.Miner, true, resultCh, sealCancel),
+		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
+		stagedsync.StageSendersCfg(s.chainConfig),
 	)
 	if err != nil {
 		return err

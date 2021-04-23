@@ -3,14 +3,12 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -59,19 +57,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						const batchSize = 10000
-						const blockSize = 4096
-						n := secp256k1.NumOfContexts() // we can only be as parallels as our crypto library supports
-
-						cfg := Stage3Config{
-							BatchSize:       batchSize,
-							BlockSize:       blockSize,
-							BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-							NumOfGoroutines: n,
-							ReadChLen:       4,
-							Now:             time.Now(),
-						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.ChainConfig, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(world.senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -299,6 +285,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		nil,
 		false,
 		nil,
+		StageSendersCfg(config),
 	)
 	if err1 != nil {
 		return err1
@@ -396,6 +383,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		false,
 		nil,
+		StageSendersCfg(config),
 	)
 	if err2 != nil {
 		return false, err2

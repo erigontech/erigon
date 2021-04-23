@@ -17,18 +17,38 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
+type HeadersCfg struct {
+	hd            *headerdownload.HeaderDownload
+	chainConfig   params.ChainConfig
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte
+	wakeUpChan    chan struct{}
+	batchSize     datasize.ByteSize
+}
+
+func StageHeadersCfg(
+	headerDownload *headerdownload.HeaderDownload,
+	chainConfig params.ChainConfig,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	wakeUpChan chan struct{},
+	batchSize datasize.ByteSize,
+) HeadersCfg {
+	return HeadersCfg{
+		hd:            headerDownload,
+		chainConfig:   chainConfig,
+		headerReqSend: headerReqSend,
+		wakeUpChan:    wakeUpChan,
+		batchSize:     batchSize,
+	}
+}
+
 // HeadersForward progresses Headers stage in the forward direction
 func HeadersForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
 	db ethdb.Database,
-	hd *headerdownload.HeaderDownload,
-	chainConfig *params.ChainConfig,
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	cfg HeadersCfg,
 	initialCycle bool,
-	wakeUpChan chan struct{},
-	batchSize datasize.ByteSize,
 ) error {
 	var headerProgress uint64
 	var err error
@@ -79,7 +99,7 @@ func HeadersForward(
 		return err1
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
-	hd.SetHeaderReader(&chainReader{config: chainConfig, batch: batch})
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 
 	var req *headerdownload.HeaderRequest
 	var peer []byte
@@ -88,39 +108,39 @@ func HeadersForward(
 	prevProgress := headerProgress
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
-		req = hd.RequestMoreHeaders(currentTime)
+		req = cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			peer = headerReqSend(ctx, req)
+			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
-				hd.SentRequest(req, currentTime, 5 /* timeout */)
+				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
 				log.Debug("Sent request", "height", req.Number)
 			}
 		}
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
 		for req != nil && peer != nil && maxRequests > 0 {
-			req = hd.RequestMoreHeaders(currentTime)
+			req = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				peer = headerReqSend(ctx, req)
+				peer = cfg.headerReqSend(ctx, req)
 				if peer != nil {
-					hd.SentRequest(req, currentTime, 5 /*timeout */)
+					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
 					log.Debug("Sent request", "height", req.Number)
 				}
 			}
 			maxRequests--
 		}
 		// Send skeleton request if required
-		req = hd.RequestSkeleton()
+		req = cfg.hd.RequestSkeleton()
 		if req != nil {
-			peer = headerReqSend(ctx, req)
+			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
 				log.Debug("Sent skeleton request", "height", req.Number)
 			}
 		}
 		// Load headers into the database
-		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
+		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
-		if batch.BatchSize() >= int(batchSize) {
+		if batch.BatchSize() >= int(cfg.batchSize) {
 			if err = batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
@@ -140,16 +160,16 @@ func HeadersForward(
 		case <-ctx.Done():
 			stopped = true
 		case <-logEvery.C:
-			progress := hd.Progress()
+			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress, batch)
 			prevProgress = progress
 		case <-timer.C:
 			log.Debug("RequestQueueTime (header) ticked")
-		case <-wakeUpChan:
+		case <-cfg.wakeUpChan:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
-		if initialCycle && hd.InSync() {
-			fmt.Printf("Top seen height: %d\n", hd.TopSeenHeight())
+		if initialCycle && cfg.hd.InSync() {
+			fmt.Printf("Top seen height: %d\n", cfg.hd.TopSeenHeight())
 			break
 		}
 	}

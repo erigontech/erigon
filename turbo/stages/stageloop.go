@@ -5,16 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
@@ -22,26 +19,27 @@ const (
 	logInterval = 30 * time.Second
 )
 
+func NewStagedSync(
+	ctx context.Context,
+	headers stagedsync.HeadersCfg,
+	bodies stagedsync.BodiesCfg,
+	senders stagedsync.SendersCfg,
+) *stagedsync.StagedSync {
+	return stagedsync.New(
+		ReplacementStages(ctx, headers, bodies, senders),
+		ReplacementUnwindOrder(),
+		stagedsync.OptionalParameters{},
+	)
+}
+
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
 	db ethdb.Database,
+	sync *stagedsync.StagedSync,
 	hd *headerdownload.HeaderDownload,
-	bd *bodydownload.BodyDownload,
 	chainConfig *params.ChainConfig,
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
-	penalise func(context.Context, []byte),
-	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
-	blockPropagator adapter.BlockPropagator,
-	wakeUpChan chan struct{},
-	timeout int,
 ) error {
-	sync := stagedsync.New(
-		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout),
-		ReplacementUnwindOrder(),
-		stagedsync.OptionalParameters{},
-	)
 	initialCycle := true
 	stopped := false
 	logEvery := time.NewTicker(logInterval)
@@ -79,7 +77,7 @@ func StageLoop(
 			writeDB = db
 		}
 
-		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil)
+		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil, stagedsync.StageSendersCfg(chainConfig))
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
@@ -107,15 +105,9 @@ func StageLoop(
 }
 
 func ReplacementStages(ctx context.Context,
-	hd *headerdownload.HeaderDownload,
-	bd *bodydownload.BodyDownload,
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
-	penalise func(context.Context, []byte),
-	updateHead func(context.Context, uint64, common.Hash, *uint256.Int),
-	blockPropagator adapter.BlockPropagator,
-	wakeUpChan chan struct{},
-	timeout int,
+	headers stagedsync.HeadersCfg,
+	bodies stagedsync.BodiesCfg,
+	senders stagedsync.SendersCfg,
 ) stagedsync.StageBuilders {
 	return []stagedsync.StageBuilder{
 		{
@@ -125,7 +117,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan, world.BatchSize)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, headers, world.InitialCycle)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)
@@ -155,10 +147,25 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, blockPropagator, wakeUpChan, timeout, world.BatchSize)
+						return stagedsync.BodiesForward(s, ctx, world.TX, bodies)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.DB)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.Senders,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:          stages.Senders,
+					Description: "Recover senders from tx signatures",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindSendersStage(u, s, world.TX)
 					},
 				}
 			},

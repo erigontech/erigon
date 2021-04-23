@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"fmt"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -52,10 +50,12 @@ type StageParameters struct {
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
-	mining                *MiningStagesParameters
+	mining                *MiningCfg
+
+	senders SendersCfg
 }
 
-type MiningStagesParameters struct {
+type MiningCfg struct {
 	// configs
 	params.MiningConfig
 
@@ -66,15 +66,15 @@ type MiningStagesParameters struct {
 	// non-stop and no real transaction will be included.
 	noempty bool
 
-	resultCh     chan<- *types.Block
-	miningCancel <-chan struct{}
+	resultCh   chan<- *types.Block
+	sealCancel <-chan struct{}
 
 	// runtime dat
 	Block *miningBlock
 }
 
-func NewMiningStagesParameters(cfg params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningStagesParameters {
-	return &MiningStagesParameters{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, resultCh: resultCh, miningCancel: sealCancel}
+func StageMiningCfg(cfg params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
+	return &MiningCfg{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, resultCh: resultCh, sealCancel: sealCancel}
 
 }
 
@@ -176,19 +176,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						const batchSize = 10000
-						const blockSize = 4096
-						n := secp256k1.NumOfContexts() // we can only be as parallels as our crypto library supports
-
-						cfg := Stage3Config{
-							BatchSize:       batchSize,
-							BlockSize:       blockSize,
-							BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-							NumOfGoroutines: n,
-							ReadChLen:       4,
-							Now:             time.Now(),
-						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.ChainConfig, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(world.senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -484,7 +472,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.Engine, world.ChainConfig, world.mining.resultCh, world.mining.miningCancel, world.QuitCh)
+						return SpawnMiningFinishStage(s, world.TX, world.mining.Block, world.Engine, world.ChainConfig, world.mining.resultCh, world.mining.sealCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

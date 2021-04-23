@@ -267,7 +267,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 			}
 		}
 
-		stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, nil)
+		stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, nil, stagedsync.StageSendersCfg(chainConfig))
 		if err2 != nil {
 			panic(err2)
 		}
@@ -304,11 +304,12 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.NewMiningStagesParameters(miningConfig, true, miningResultCh, quit)
+			miningWorld := stagedsync.StageMiningCfg(miningConfig, true, miningResultCh, quit)
+			senders := stagedsync.StageSendersCfg(chainConfig)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld)
+			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, func() error { return nil }, false, miningWorld, senders)
 			if err != nil {
 				panic(err)
 			}
