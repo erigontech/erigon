@@ -132,8 +132,8 @@ func (stagedSync *StagedSync) Prepare(
 	return state, nil
 }
 
-func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string) {
+func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string, snapshotMigrator *migrator.SnapshotMigrator2) {
 	stagedSync.params.TorrnetClient=client
 	stagedSync.params.SnapshotDir = snapshotsDir
-	stagedSync.params.SnapshotMigrator = migrator.New(snapshotsDir)
+	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }

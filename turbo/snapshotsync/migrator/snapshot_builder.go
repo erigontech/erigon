@@ -26,6 +26,24 @@ func SnapshotName(baseDir, name string, blockNum uint64) string  {
 	return path.Join(baseDir, name)+strconv.FormatUint(blockNum, 10)
 }
 
+func GetSnapshotInfo(db ethdb.Database) (uint64, []byte, error) {
+	v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, nil, err
+	}
+
+	var snapshotBlock uint64
+	if len(v) == 8 {
+		snapshotBlock = binary.BigEndian.Uint64(v)
+	}
+
+	infohash, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, nil, err
+	}
+	return snapshotBlock, infohash, nil
+}
+
 
 
 type SnapshotMigrator struct {
@@ -273,6 +291,11 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
 
 }
 func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.Database, toBlock uint64, snapshotPath string)  error {
+	// remove created snapshot if it's not saved in main db(to avoid append error)
+	err:= os.RemoveAll(snapshotPath)
+	if err!=nil {
+		return err
+	}
 	snKV,err := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket:              dbutils.BucketsConfigs[dbutils.HeadersBucket],
@@ -353,9 +376,11 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 Проход для каждого снепшота последовательный
 */
 
-func New(snapshotDir string) *SnapshotMigrator2 {
+func New(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator2 {
 	return &SnapshotMigrator2{
 		snapshotsDir: snapshotDir,
+		HeadersCurrentSnapshot: currentSnapshotBlock,
+		HeadersNewSnapshotInfohash: currentSnapshotInfohash,
 	}
 }
 

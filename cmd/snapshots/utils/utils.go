@@ -33,7 +33,7 @@ func rmMdbxLock(path string) error  {
 }
 
 
-func OpenSnapshotKV(dbType string, configsFunc ethdb.BucketConfigsFunc, path string) ethdb.KV {
+func OpenSnapshotKV(dbType string, configsFunc ethdb.BucketConfigsFunc, path string) ethdb.RwKV {
 	if dbType==TypeLMDB {
 		return ethdb.NewLMDB().WithBucketsConfig(configsFunc).Path(path).MustOpen()
 	} else if dbType==TypeMDBX {
