@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -260,7 +261,15 @@ func (c *Clique) snapshotFromAncestors(parentsRef *[]*types.Header) (*Snapshot, 
 				i = 0
 			}
 
-			return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
+			block := parents[0].Number.Uint64() + 1
+			return nil, fmt.Errorf("a nil snap for %d block, parents from %d to %d(stop on %d - index %d): %w\n%s",
+				block,
+				parents[len(parents)-1].Number.Uint64(),
+				parents[0].Number.Uint64(),
+				parents[i].Number.Uint64(),
+				i,
+				consensus.ErrUnknownAncestor,
+				debug.Callers(10))
 		}
 
 		return nil, fmt.Errorf("a nil snap for %d ancestors: %w", len(parents), consensus.ErrUnknownAncestor)
@@ -296,7 +305,13 @@ func (c *Clique) snapshotByHeader(num uint64, hash common.Hash) *Snapshot {
 			return s
 		}
 	}
-	fmt.Printf("snapshotByHeader %d (epoch %d, checkpoint interval %d) %x returns nil\n", num, c.config.Epoch, c.snapshotConfig.CheckpointInterval, hash)
+
+	log.Info("snapshotByHeader returns nil",
+		"block", num,
+		"epoch", c.config.Epoch,
+		"checkpoint interval",
+		c.snapshotConfig.CheckpointInterval,
+		"hash", hash.Hex())
 
 	return nil
 }

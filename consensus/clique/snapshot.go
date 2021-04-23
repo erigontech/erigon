@@ -413,7 +413,7 @@ type snapObj struct {
 }
 
 func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
-	const batchSize = 100000
+	const batchSize = 1000
 	const syncSmallBatch = time.Minute
 
 	st := &storage{
@@ -449,7 +449,7 @@ func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 					syncSmall.Reset(syncSmallBatch)
 				}
 			case <-syncSmall.C:
-				if len(snaps) > 0 && len(snaps) < int(syncSmallBatch.Seconds()) {
+				if len(snaps) > 0 {
 					snaps, isSorted = st.saveAndReset(snaps, isSorted)
 				}
 			case <-st.exit:

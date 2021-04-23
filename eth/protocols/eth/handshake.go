@@ -53,8 +53,10 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	go func() {
 		errc <- p.readStatus(network, &status, genesis, forkFilter)
 	}()
+
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
+
 	for i := 0; i < 2; i++ {
 		select {
 		case err := <-errc:
