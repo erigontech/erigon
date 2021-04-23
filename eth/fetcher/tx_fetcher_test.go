@@ -1244,7 +1244,7 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 }
 
 func testTransactionFetcherParallel(t *testing.T, tt txFetcherTest) {
-	t.Parallel()
+	//t.Parallel()
 	testTransactionFetcher(t, tt)
 }
 

@@ -93,7 +93,6 @@ func (s *Server) FindUnknownTransactions(ctx context.Context, in *proto_txpool.T
 	txAnnounceInMeter.Mark(int64(len(in.Hashes)))
 	txAnnounceKnownMeter.Mark(int64(len(in.Hashes) - len(reply.Hashes)))
 	txAnnounceUnderpricedMeter.Mark(int64(underpriced))
-
 	return reply, nil
 }
 
