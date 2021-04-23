@@ -304,6 +304,8 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader, upTo uin
 
 	total := int(upTo) - int(lastSnap)
 
+	log.Info("Clique snapshots", "currentSnapshot", lastSnap, "latestBlock", currentBlock, "behind", total)
+
 	if total < 1024 {
 		return
 	}
