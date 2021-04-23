@@ -165,7 +165,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
+						return stagedsync.SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, ctx.Done())
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.UnwindSendersStage(u, s, world.TX)
@@ -180,10 +180,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.SpawnExecuteBlocksStage(s, world.TX, 0, world.QuitCh, exec)
+						return stagedsync.SpawnExecuteBlocksStage(s, world.TX, 0, ctx.Done(), exec)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return stagedsync.UnwindExecutionStage(u, s, world.TX, world.QuitCh, exec)
+						return stagedsync.UnwindExecutionStage(u, s, world.TX, ctx.Done(), exec)
 					},
 				}
 			},
