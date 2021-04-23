@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -273,13 +274,12 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	// Verify the header's EIP-1559 attributes.
-	/*
-		if chain.Config().IsAleut(header.Number.Uint64()) {
-			if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
-				return err
-			}
+	if chain.Config().IsAleut(header.Number.Uint64()) {
+		parent := chain.GetHeaderByHash(header.ParentHash)
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+			return err
 		}
-	*/
+	}
 	c.reinit.Do(func() {
 		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
