@@ -92,11 +92,6 @@ func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	defer func() {
-		if header.Number.Uint64() == 63670 || header.Number.Uint64() == 63669 {
-			fmt.Println("***** header", header.Number.Uint64(), header.Hash().String())
-		}
-	}()
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
 	if chain.GetHeader(header.Hash(), number) != nil {
@@ -301,7 +296,9 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the block's gas usage and (if applicable) verify the base fee.
 	if chain.Config().IsAleut(header.Number.Uint64()) {
-		return nil
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+			return err
+		}
 	} else {
 		// Verify that the gasUsed is <= gasLimit
 		if header.GasUsed > header.GasLimit {
