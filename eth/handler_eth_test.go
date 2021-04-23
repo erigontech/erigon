@@ -149,7 +149,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 				t.Fatalf("frontier nofork <-> profork failed: %v", err)
 			}
 		case <-time.After(250 * time.Millisecond):
-			t.Fatalf("frontier nofork <-> profork handler timeout")
+			t.Fatal("frontier nofork <-> profork handler timeout")
 		}
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
@@ -166,7 +166,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 				t.Fatalf("homestead nofork <-> profork failed: %v", err)
 			}
 		case <-time.After(250 * time.Millisecond):
-			t.Fatalf("homestead nofork <-> profork handler timeout")
+			t.Fatal("homestead nofork <-> profork handler timeout")
 		}
 	}
 	atomic.StoreUint64(&ethNoFork.currentHeight, 2)
@@ -182,11 +182,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			if err == nil {
 				successes++
 				if successes == 2 { // Only one side disconnects
-					t.Fatalf("fork ID rejection didn't happen")
+					t.Fatal("fork ID rejection didn't happen")
 				}
 			}
 		case <-time.After(250 * time.Millisecond):
-			t.Fatalf("split peers not rejected")
+			t.Fatal("split peers not rejected")
 		}
 	}
 }
@@ -236,7 +236,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	tx, _ = types.SignTx(tx, *types.LatestSignerForChainID(nil), testKey)
 
 	b, _ := rlp.EncodeToBytes(tx)
-	if err := src.SendTransactions([]rlp.RawValue{b}, common.Hashes{tx.Hash()}); err != nil {
+	if err = src.SendTransactions([]rlp.RawValue{b}, common.Hashes{tx.Hash()}); err != nil {
 		t.Fatalf("failed to send transaction: %v", err)
 	}
 	select {
@@ -292,7 +292,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+	if err = sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -385,8 +385,8 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
-		if err := sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
-			t.Fatalf("failed to run protocol handshake")
+		if err = sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+			t.Fatalf("failed to run protocol handshake: %v", err)
 		}
 		//nolint:errcheck
 		go eth.Handle(sink, sinkPeer)
@@ -462,8 +462,8 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
-		t.Fatalf("failed to run protocol handshake")
+	if err = sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
+		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// After the handshake completes, the source handler should stream the sink
 	// the blocks, subscribe to inbound network events
@@ -487,12 +487,12 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	// Try to broadcast all malformations and ensure they all get discarded
 	for _, header := range []*types.Header{malformedUncles, malformedTransactions, malformedEverything} {
 		block := types.NewBlockWithHeader(header).WithBody(head.Transactions(), head.Uncles())
-		if err := src.SendNewBlock(block, big.NewInt(131136)); err != nil {
+		if err = src.SendNewBlock(block, big.NewInt(131136)); err != nil {
 			t.Fatalf("failed to broadcast block: %v", err)
 		}
 		select {
 		case <-blocks:
-			t.Fatalf("malformed block forwarded")
+			t.Fatal("malformed block forwarded")
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
