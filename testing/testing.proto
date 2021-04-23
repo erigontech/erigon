@@ -11,7 +11,7 @@ mesage TestReport {
     bool end = 1;
     // Indication whether the report is about success of part of the test, or failure
     bool success = 2;
-    string message = 3;
+    string log = 3;
 }
 
 service TestDriver {
