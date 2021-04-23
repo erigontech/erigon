@@ -246,6 +246,7 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 	)
 	serialized, err := txpool.MarshalTxs(txs)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	results, err := f.addTxs(serialized)
@@ -841,7 +842,6 @@ func rotateHashes(slice []common.Hash, n int) {
 
 func FindUnknownTxsF(txpool eth.TxPool) func(hashes common.Hashes) (common.Hashes, error) {
 	return func(hashes common.Hashes) (common.Hashes, error) {
-
 		reply, err2 := txpool.FindUnknownTransactions(context.Background(), &proto_txpool.TxHashes{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
 		if err2 != nil {
 			return nil, err2
@@ -851,9 +851,9 @@ func FindUnknownTxsF(txpool eth.TxPool) func(hashes common.Hashes) (common.Hashe
 }
 func ImportTxsF(txpool eth.TxPool) func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
 	return func(txs [][]byte) ([]proto_txpool.ImportResult, error) {
-		reply, err2 := txpool.ImportTransactions(context.Background(), &proto_txpool.ImportRequest{Txs: txs})
-		if err2 != nil {
-			return nil, err2
+		reply, err := txpool.ImportTransactions(context.Background(), &proto_txpool.ImportRequest{Txs: txs})
+		if err != nil {
+			return nil, err
 		}
 		return reply.Imported, nil
 	}

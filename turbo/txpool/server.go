@@ -162,7 +162,7 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 			continue
 		}
 		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+		if err := rlp.Encode(buf, &txn); err != nil {
 			return nil, err
 		}
 		reply.Txs[i] = common.CopyBytes(buf.Bytes())
@@ -181,6 +181,7 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 		}
 		result[i], err = rlp.EncodeToBytes(&txs[i])
 		if err != nil {
+			panic(err)
 			return nil, err
 		}
 	}
@@ -189,8 +190,10 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 
 func UnmarshalTxs(txs [][]byte) ([]types.Transaction, error) {
 	result := make([]types.Transaction, len(txs))
+	var err error
 	for i := range txs {
-		if err := rlp.DecodeBytes(txs[i], &result[i]); err != nil {
+		result[i], err = types.UnmarshalTransactionFromBinary(txs[i])
+		if err != nil {
 			return nil, err
 		}
 	}

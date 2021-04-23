@@ -181,6 +181,8 @@ func makeDecoder(typ reflect.Type, tags tags) (dec decoder, err error) {
 	case kind == reflect.Interface:
 		return decodeInterface, nil
 	default:
+		panic(fmt.Sprintf("%v, %s", typ, kind))
+
 		return nil, fmt.Errorf("rlp: type %v is not RLP-serializable", typ)
 	}
 }
@@ -509,6 +511,7 @@ var ifsliceType = reflect.TypeOf([]interface{}{})
 
 func decodeInterface(s *Stream, val reflect.Value) error {
 	if val.Type().NumMethod() != 0 {
+		panic(fmt.Sprintf("%v, %T, %s", val, val, val.Type()))
 		return fmt.Errorf("rlp: type %v is not RLP-serializable", val.Type())
 	}
 	kind, _, err := s.Kind()
@@ -788,9 +791,11 @@ func (s *Stream) Decode(val interface{}) error {
 	rval := reflect.ValueOf(val)
 	rtyp := rval.Type()
 	if rtyp.Kind() != reflect.Ptr {
+		panic(1)
 		return errNoPointer
 	}
 	if rval.IsNil() {
+		panic(2)
 		return errDecodeIntoNil
 	}
 	dcd, err := cachedDecoder(rtyp.Elem())
