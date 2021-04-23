@@ -43,14 +43,40 @@ type StateReaderBuilder func(ethdb.Database) state.StateReader
 
 type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
 
-type ExecuteBlockStageParams struct {
-	ToBlock               uint64 // not setting this params means no limit
+type ExecuteBlockCfg struct {
 	WriteReceipts         bool
 	BatchSize             datasize.ByteSize
 	ChangeSetHook         ChangeSetHook
 	ReaderBuilder         StateReaderBuilder
 	WriterBuilder         StateWriterBuilder
 	SilkwormExecutionFunc unsafe.Pointer
+	chainConfig           *params.ChainConfig
+	engine                consensus.Engine
+	vmConfig              *vm.Config
+}
+
+func StageExecuteBlocksCfg(
+	WriteReceipts bool,
+	BatchSize datasize.ByteSize,
+	ReaderBuilder StateReaderBuilder,
+	WriterBuilder StateWriterBuilder,
+	SilkwormExecutionFunc unsafe.Pointer,
+	ChangeSetHook ChangeSetHook,
+	chainConfig *params.ChainConfig,
+	engine consensus.Engine,
+	vmConfig *vm.Config,
+) ExecuteBlockCfg {
+	return ExecuteBlockCfg{
+		WriteReceipts:         WriteReceipts,
+		BatchSize:             BatchSize,
+		ChangeSetHook:         ChangeSetHook,
+		ReaderBuilder:         ReaderBuilder,
+		WriterBuilder:         WriterBuilder,
+		SilkwormExecutionFunc: SilkwormExecutionFunc,
+		chainConfig:           chainConfig,
+		engine:                engine,
+		vmConfig:              vmConfig,
+	}
 }
 
 func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
@@ -62,8 +88,7 @@ func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
-
+func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -82,7 +107,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter)
+	receipts, err := core.ExecuteBlockEphemerally(params.chainConfig, params.vmConfig, getHeader, params.engine, block, stateReader, stateWriter)
 	if err != nil {
 		return err
 	}
@@ -102,14 +127,14 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	return nil
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint64, quit <-chan struct{}, params ExecuteBlockCfg) error {
 	prevStageProgress, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
 	var to = prevStageProgress
-	if params.ToBlock > 0 {
-		to = min(prevStageProgress, params.ToBlock)
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
 		s.Done()
@@ -158,7 +183,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		if useSilkworm {
 			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			if blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, int(params.BatchSize), params.WriteReceipts); err != nil {
+			if blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, params.chainConfig.ChainID, blockNum, to, int(params.BatchSize), params.WriteReceipts); err != nil {
 				return err
 			}
 		} else {
@@ -170,7 +195,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, chainConfig, engine, vmConfig, params); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, params); err != nil {
 				return err
 			}
 		}
@@ -239,7 +264,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, quit <-chan struct{}, params ExecuteBlockCfg) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -275,7 +300,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, params ExecuteBlockCfg) error {
 	logPrefix := s.state.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength

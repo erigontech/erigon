@@ -245,14 +245,9 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage4.BlockNumber = blockNumber - 1
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx,
-			chainConfig, engine, vmConfig,
-			ch,
-			stagedsync.ExecuteBlockStageParams{
-				ToBlock:       blockNumber, // limit execution to the specified block
-				WriteReceipts: false,
-				BatchSize:     batchSize,
-			})
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, blockNumber, ch,
+			stagedsync.StageExecuteBlocksCfg(false, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig),
+		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
 		}
