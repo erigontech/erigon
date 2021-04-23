@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+// This is the Service Interface Version: change these numbers according to semver rules
+// anytime the service-level protocol changes (e.g. string or bytes format). Such version
+// cannot change at runtime during service execution.
+//
+// Examples of how to change version (M.m.p) for the KV protocol are:
+// 1. bump M obtaining (M+1.m.p) when
+// - changing table name i.e. bucketName field in Cursor
+// - changing key/value format i.e. k, v fields in Pair
+// 2. bump m obtaining (M.m+1.p) when
+// - adding new table name i.e. bucketName field in Cursor
+// 3. bump p obtaining (M.m.p+1) when
+// - correcting wrong data in value i.e. v field in Pair
+option (types.service_major_version) = 1;
+option (types.service_minor_version) = 0;
+option (types.service_patch_version) = 0;
+
+package remote;
+
+option go_package = "./remote;remote";
+
+// Provides methods to access key-value data
+service KV {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // Tx exposes read-only transactions for the key-value store
+  rpc Tx(stream Cursor) returns (stream Pair);
+}
+
+enum Op {
+  FIRST = 0;
+  FIRST_DUP = 1;
+  SEEK = 2;
+  SEEK_BOTH = 3;
+  CURRENT = 4;
+  LAST = 6;
+  LAST_DUP = 7;
+  NEXT = 8;
+  NEXT_DUP = 9;
+  NEXT_NO_DUP = 11;
+  PREV = 12;
+  PREV_DUP = 13;
+  PREV_NO_DUP = 14;
+  SEEK_EXACT = 15;
+  SEEK_BOTH_EXACT = 16;
+
+  OPEN = 30;
+  CLOSE = 31;
+}
+
+message Cursor {
+  Op op = 1;
+  string bucketName = 2;
+  uint32 cursor = 3;
+  bytes k = 4;
+  bytes v = 5;
+}
+
+message Pair {
+  bytes k = 1;
+  bytes v = 2;
+  uint32 cursorID = 3;
+}
