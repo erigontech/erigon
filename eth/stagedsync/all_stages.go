@@ -73,24 +73,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnExecuteBlocksStage(s, world.TX,
-							world.ChainConfig, world.Engine, world.vmConfig,
+							0,
 							world.QuitCh,
-							ExecuteBlockStageParams{
-								WriteReceipts:         world.storageMode.Receipts,
-								BatchSize:             world.BatchSize,
-								ReaderBuilder:         world.stateReaderBuilder,
-								WriterBuilder:         world.stateWriterBuilder,
-								SilkwormExecutionFunc: world.silkwormExecutionFunc,
-							})
+							StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig),
+						)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
-							WriteReceipts:         world.storageMode.Receipts,
-							BatchSize:             world.BatchSize,
-							ReaderBuilder:         world.stateReaderBuilder,
-							WriterBuilder:         world.stateWriterBuilder,
-							SilkwormExecutionFunc: world.silkwormExecutionFunc,
-						})
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh,
+							StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig),
+						)
 					},
 				}
 			},

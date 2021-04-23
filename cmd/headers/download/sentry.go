@@ -460,13 +460,8 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-	sentryServer := &SentryServerImpl{
-		ctx:             ctx,
-		receiveCh:       make(chan StreamMsg, 1024),
-		receiveUploadCh: make(chan StreamMsg, 1024),
-		stopCh:          make(chan struct{}),
-		uploadStopCh:    make(chan struct{}),
-	}
+
+	sentryServer := NewSentryServer(ctx)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -477,6 +472,16 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 		}
 	}()
 	return sentryServer, nil
+}
+
+func NewSentryServer(ctx context.Context) *SentryServerImpl {
+	return &SentryServerImpl{
+		ctx:             ctx,
+		receiveCh:       make(chan StreamMsg, 1024),
+		receiveUploadCh: make(chan StreamMsg, 1024),
+		stopCh:          make(chan struct{}),
+		uploadStopCh:    make(chan struct{}),
+	}
 }
 
 func p2pServer(ctx context.Context,

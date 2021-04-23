@@ -166,19 +166,11 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 	defer tx.Rollback()
 
 	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync2(db, tx)
+	execCfg := stagedsync.StageExecuteBlocksCfg(sm.Receipts, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(
-				s, tx,
-				chainConfig, engine, vmConfig,
-				quit,
-				stagedsync.ExecuteBlockStageParams{
-					ToBlock:       execToBlock, // limit execution to the specified block
-					WriteReceipts: sm.Receipts,
-					BatchSize:     batchSize,
-					ChangeSetHook: changeSetHook,
-				}); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(s, tx, execToBlock, quit, execCfg); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
@@ -271,7 +263,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 		if err2 != nil {
 			panic(err2)
 		}
-		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
+		stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Finish)
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
@@ -490,18 +482,11 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 
 	from := progress(stages.Execution).BlockNumber
 	to := from + unwind
+	cfg := stagedsync.StageExecuteBlocksCfg(true, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig)
+
 	// set block limit of execute stage
 	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-		if err = stagedsync.SpawnExecuteBlocksStage(
-			stageState, tx,
-			chainConfig, engine, vmConfig,
-			ch,
-			stagedsync.ExecuteBlockStageParams{
-				ToBlock:       to, // limit execution to the specified block
-				WriteReceipts: true,
-				BatchSize:     batchSize,
-				ChangeSetHook: nil,
-			}); err != nil {
+		if err = stagedsync.SpawnExecuteBlocksStage(stageState, tx, to, ch, cfg); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
 		return nil

@@ -393,9 +393,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	checkpoint := config.Checkpoint
 	eth.txPoolServer = txpool.NewServer(context.Background(), eth.txPool)
 	eth.txPoolClient = txpool.NewClientDirect(eth.txPoolServer)
-	if err := eth.StartMining(mining, tmpdir); err != nil {
-		return nil, err
-	}
 	if eth.config.EnableDownloaderV2 {
 
 	} else {
@@ -423,6 +420,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		eth.handler.SetTmpDir(tmpdir)
 		eth.handler.SetBatchSize(config.BatchSize)
 		eth.handler.SetStagedSync(stagedSync)
+	}
+
+	if err := eth.StartMining(mining, tmpdir); err != nil {
+		return nil, err
 	}
 
 	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
@@ -639,7 +640,11 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
-		atomic.StoreUint32(&s.handler.acceptTxs, 1)
+		if s.config.EnableDownloaderV2 {
+
+		} else {
+			atomic.StoreUint32(&s.handler.acceptTxs, 1)
+		}
 
 		tx, err := s.ChainKV().BeginRo(context.Background())
 		if err != nil {
