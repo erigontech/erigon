@@ -262,13 +262,14 @@ func newStagedSync(
 		return nil, err
 	}
 
-	return stages.NewStagedSync(ctx, stagedsync.StageHeadersCfg(
-		controlServer.hd,
-		*controlServer.chainConfig,
-		controlServer.sendHeaderRequest,
-		controlServer.requestWakeUpBodies,
-		batchSize,
-	),
+	return stages.NewStagedSync(ctx,
+		stagedsync.StageHeadersCfg(
+			controlServer.hd,
+			*controlServer.chainConfig,
+			controlServer.sendHeaderRequest,
+			controlServer.requestWakeUpBodies,
+			batchSize,
+		),
 		stagedsync.StageBodiesCfg(
 			controlServer.bd,
 			controlServer.sendBodyRequest,
