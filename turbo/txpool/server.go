@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -185,7 +184,6 @@ func MarshalTxs(txs types.Transactions) ([][]byte, error) {
 			return nil, err
 		}
 		result[i] = common.CopyBytes(buf.Bytes())
-		result[i], err = rlp.EncodeToBytes(&txs[i])
 	}
 	return result, nil
 }
