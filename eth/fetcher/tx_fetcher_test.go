@@ -70,7 +70,7 @@ type isUnderpriced int
 // txFetcherTest represents a test scenario that can be executed by the test
 // runner.
 type txFetcherTest struct {
-	init  func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher
+	init  func() (*TxFetcher, *txpool.Server)
 	steps []interface{}
 }
 
@@ -78,11 +78,12 @@ type txFetcherTest struct {
 // of them are scheduled for retrieval until the wait expires.
 func TestTransactionFetcherWaiting(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool), ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Initial announcement to get something into the waitlist
@@ -167,11 +168,12 @@ func TestTransactionFetcherWaiting(t *testing.T) {
 // already scheduled.
 func TestTransactionFetcherSkipWaiting(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool), ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -229,11 +231,12 @@ func TestTransactionFetcherSkipWaiting(t *testing.T) {
 // and subsequent announces block or get allotted to someone else.
 func TestTransactionFetcherSingletonRequesting(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool), ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -304,14 +307,15 @@ func TestTransactionFetcherFailedRescheduling(t *testing.T) {
 	// Create a channel to control when tx requests can fail
 	proceed := make(chan struct{})
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool), ImportTxsF(pool),
 				func(origin string, hashes []common.Hash) error {
 					<-proceed
 					return errors.New("peer disconnected")
 				},
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -373,7 +377,8 @@ func TestTransactionFetcherFailedRescheduling(t *testing.T) {
 // are cleaned up.
 func TestTransactionFetcherCleanup(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
@@ -381,7 +386,7 @@ func TestTransactionFetcherCleanup(t *testing.T) {
 				//	return make([]error, len(txs))
 				//},
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -413,12 +418,13 @@ func TestTransactionFetcherCleanup(t *testing.T) {
 // this was a bug)).
 func TestTransactionFetcherCleanupEmpty(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -449,12 +455,13 @@ func TestTransactionFetcherCleanupEmpty(t *testing.T) {
 // different peer, or self if they are after the cutoff point.
 func TestTransactionFetcherMissingRescheduling(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -493,12 +500,13 @@ func TestTransactionFetcherMissingRescheduling(t *testing.T) {
 // delivered, the peer gets properly cleaned out from the internal state.
 func TestTransactionFetcherMissingCleanup(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -529,12 +537,13 @@ func TestTransactionFetcherMissingCleanup(t *testing.T) {
 // Tests that transaction broadcasts properly clean up announcements.
 func TestTransactionFetcherBroadcasts(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Set up three transactions to be in different stats, waiting, queued and fetching
@@ -577,12 +586,13 @@ func TestTransactionFetcherBroadcasts(t *testing.T) {
 // Tests that the waiting list timers properly reset and reschedule.
 func TestTransactionFetcherWaitTimerResets(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
@@ -632,12 +642,13 @@ func TestTransactionFetcherWaitTimerResets(t *testing.T) {
 // out and be re-scheduled for someone else.
 func TestTransactionFetcherTimeoutRescheduling(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, txPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
@@ -697,12 +708,13 @@ func TestTransactionFetcherTimeoutRescheduling(t *testing.T) {
 // Tests that the fetching timeout timers properly reset and reschedule.
 func TestTransactionFetcherTimeoutTimerResets(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
@@ -756,12 +768,13 @@ func TestTransactionFetcherRateLimiting(t *testing.T) {
 	}
 
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Announce all the transactions, wait a bit and ensure only a small
@@ -794,12 +807,13 @@ func TestTransactionFetcherDoSProtection(t *testing.T) {
 		hashesB = append(hashesB, common.Hash{0x02, byte(i / 256), byte(i % 256)})
 	}
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Announce half of the transaction and wait for them to be scheduled
@@ -851,7 +865,8 @@ func TestTransactionFetcherDoSProtection(t *testing.T) {
 // Tests that underpriced transactions don't get rescheduled after being rejected.
 func TestTransactionFetcherUnderpricedDedup(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, testPool := txpool.NewTestTxPool()
 			testPool.FailAddRemotes = func(txs []types.Transaction) []error {
 				errs := make([]error, len(txs))
 				for i := 0; i < len(errs); i++ {
@@ -867,7 +882,7 @@ func TestTransactionFetcherUnderpricedDedup(t *testing.T) {
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Deliver a transaction through the fetcher, but reject as underpriced
@@ -925,7 +940,8 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 		steps = append(steps, isUnderpriced((i+1)*maxTxRetrievals))
 	}
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, testPool := txpool.NewTestTxPool()
 			testPool.FailAddRemotes = func(txs []types.Transaction) []error {
 				errs := make([]error, len(txs))
 				for i := 0; i < len(errs); i++ {
@@ -937,7 +953,7 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: append(steps, []interface{}{
 			// The preparation of the test has already been done in `steps`, add the last check
@@ -952,12 +968,13 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 // Tests that unexpected deliveries don't corrupt the internal state.
 func TestTransactionFetcherOutOfBoundDeliveries(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Deliver something out of the blue
@@ -1003,12 +1020,13 @@ func TestTransactionFetcherOutOfBoundDeliveries(t *testing.T) {
 // live or danglng stages.
 func TestTransactionFetcherDrop(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Set up a few hashes into various stages
@@ -1067,12 +1085,13 @@ func TestTransactionFetcherDrop(t *testing.T) {
 // available peer.
 func TestTransactionFetcherDropRescheduling(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Set up a few hashes into various stages
@@ -1110,12 +1129,13 @@ func TestTransactionFetcherDropRescheduling(t *testing.T) {
 // announced one.
 func TestTransactionFetcherFuzzCrash01(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
@@ -1135,12 +1155,13 @@ func TestTransactionFetcherFuzzCrash01(t *testing.T) {
 // concurrently announced one.
 func TestTransactionFetcherFuzzCrash02(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
@@ -1162,12 +1183,13 @@ func TestTransactionFetcherFuzzCrash02(t *testing.T) {
 // with a concurrent notify.
 func TestTransactionFetcherFuzzCrash03(t *testing.T) {
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
 				func(string, []common.Hash) error { return nil },
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
@@ -1192,7 +1214,8 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 	// Create a channel to control when tx requests can fail
 	proceed := make(chan struct{})
 	testTransactionFetcherParallel(t, txFetcherTest{
-		init: func(pool *txpool.ClientDirect, testPool *txpool.TestTxPool) *TxFetcher {
+		init: func() (*TxFetcher, *txpool.Server) {
+			pool, server, _ := txpool.NewTestNoopTxPool()
 			return NewTxFetcher(
 				FindUnknownTxsF(pool),
 				ImportTxsF(pool),
@@ -1200,7 +1223,7 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 					<-proceed
 					return errors.New("peer disconnected")
 				},
-			)
+			), server
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
@@ -1226,13 +1249,11 @@ func testTransactionFetcherParallel(t *testing.T, tt txFetcherTest) {
 }
 
 func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
-	pool, server, testPool := txpool.NewTestTxPool()
-
 	// Create a fetcher and hook into it's simulated fields
 	clock := new(mclock.Simulated)
 	wait := make(chan struct{})
 
-	fetcher := tt.init(pool, testPool)
+	fetcher, server := tt.init()
 	fetcher.clock = clock
 	fetcher.step = wait
 	fetcher.rand = rand.New(rand.NewSource(0x3a29))

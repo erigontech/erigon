@@ -25,9 +25,7 @@ type TestTxPool struct {
 
 // NewTestTxPool creates a mock transaction pool.
 func NewTestTxPool() (*ClientDirect, *Server, *TestTxPool) {
-	deprecated := &TestTxPool{
-		pool: make(map[common.Hash]types.Transaction),
-	}
+	deprecated := &TestTxPool{pool: make(map[common.Hash]types.Transaction)}
 	server := NewServer(context.Background(), deprecated)
 	return NewClientDirect(server), server, deprecated
 }
@@ -37,7 +35,6 @@ func NewTestTxPool() (*ClientDirect, *Server, *TestTxPool) {
 func (p *TestTxPool) Has(hash common.Hash) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-
 	return p.pool[hash] != nil
 }
 
@@ -102,5 +99,23 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 // SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
 // send events to the given channel.
 func (p *TestTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
+	return p.txFeed.Subscribe(ch)
+}
+
+type TestNoopTxPool struct {
+	txFeed event.Feed
+}
+
+func NewTestNoopTxPool() (*ClientDirect, *Server, *TestNoopTxPool) {
+	deprecated := &TestNoopTxPool{}
+	server := NewServer(context.Background(), deprecated)
+	return NewClientDirect(server), server, deprecated
+}
+
+func (p *TestNoopTxPool) Has(hash common.Hash) bool                           { return false }
+func (p *TestNoopTxPool) Get(hash common.Hash) types.Transaction              { return nil }
+func (p *TestNoopTxPool) AddRemotes(txs []types.Transaction) []error          { return make([]error, len(txs)) }
+func (p *TestNoopTxPool) Pending() (types.TransactionsGroupedBySender, error) { return nil, nil }
+func (p *TestNoopTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return p.txFeed.Subscribe(ch)
 }
