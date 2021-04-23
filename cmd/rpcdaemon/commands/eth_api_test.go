@@ -20,7 +20,7 @@ func TestGetTransactionReceipt(t *testing.T) {
 	}
 }
 
-func TestGetTransactionReceiptUnproteced(t *testing.T) {
+func TestGetTransactionReceiptUnprotected(t *testing.T) {
 	db, err := createTestKV()
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
