@@ -1264,8 +1264,8 @@ func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg)
+func RegisterEthService(stack *node.Node, cfg *eth.Config, gitCommit string) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg, gitCommit)
 	if err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}

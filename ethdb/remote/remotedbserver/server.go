@@ -36,7 +36,7 @@ type KvServer struct {
 	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -44,7 +44,7 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 	}
 
 	kv2Srv := NewKvServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
+	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor

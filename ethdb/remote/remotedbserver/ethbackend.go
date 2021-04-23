@@ -12,23 +12,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth    core.EthBackend
-	events *Events
-	ethash *ethash.API
+	eth       core.EthBackend
+	events    *Events
+	ethash    *ethash.API
+	gitCommit string
 }
 
-func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi}
+func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API, gitCommit string) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
@@ -149,9 +150,10 @@ func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) 
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
-	return &remote.ProtocolVersionReply{Id: eth.ProtocolVersions[0]}, nil
+	// Hardcoding to avoid import cycle
+	return &remote.ProtocolVersionReply{Id: 66}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("TurboGeth", params.VersionWithCommit(s.gitCommit, ""))}, nil
 }

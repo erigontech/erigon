@@ -80,7 +80,7 @@ func New(
 
 	ethConfig.StagedSync = sync
 
-	ethereum := utils.RegisterEthService(node, ethConfig)
+	ethereum := utils.RegisterEthService(node, ethConfig, optionalParams.GitCommit)
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
