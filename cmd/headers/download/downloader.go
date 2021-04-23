@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
@@ -111,19 +112,35 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		}(sentry)
 	}
 
+	batchSize := 512 * datasize.MB
+
+	sync := stages.NewStagedSync(
+		ctx,
+		stagedsync.StageHeadersCfg(
+			controlServer.hd,
+			*controlServer.chainConfig,
+			controlServer.sendHeaderRequest,
+			controlServer.requestWakeUpBodies,
+			batchSize,
+		),
+		stagedsync.StageBodiesCfg(
+			controlServer.bd,
+			controlServer.sendBodyRequest,
+			controlServer.penalise,
+			controlServer.updateHead,
+			controlServer,
+			controlServer.requestWakeUpBodies,
+			timeout,
+			batchSize,
+		),
+		stagedsync.StageSendersCfg(controlServer.chainConfig),
+	)
 	if err := stages.StageLoop(
 		ctx,
 		db,
+		sync,
 		controlServer.hd,
-		controlServer.bd,
 		controlServer.chainConfig,
-		controlServer.sendHeaderRequest,
-		controlServer.sendBodyRequest,
-		controlServer.penalise,
-		controlServer.updateHead,
-		controlServer,
-		controlServer.requestWakeUpBodies,
-		timeout,
 	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
@@ -218,19 +235,108 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go recvMessage(ctx, sentry, controlServer)
 	go recvUploadMessage(ctx, sentry, controlServer)
 
+	batchSize := 512 * datasize.MB
+
+	sync := stages.NewStagedSync(
+		ctx,
+		stagedsync.StageHeadersCfg(
+			controlServer.hd,
+			*controlServer.chainConfig,
+			controlServer.sendHeaderRequest,
+			controlServer.requestWakeUpBodies,
+			batchSize,
+		),
+		stagedsync.StageBodiesCfg(
+			controlServer.bd,
+			controlServer.sendBodyRequest,
+			controlServer.penalise,
+			controlServer.updateHead,
+			controlServer,
+			controlServer.requestWakeUpBodies,
+			timeout,
+			batchSize,
+		),
+		stagedsync.StageSendersCfg(controlServer.chainConfig),
+	)
 	if err := stages.StageLoop(
 		ctx,
 		db,
+		sync,
 		controlServer.hd,
-		controlServer.bd,
 		controlServer.chainConfig,
-		controlServer.sendHeaderRequest,
-		controlServer.sendBodyRequest,
-		controlServer.penalise,
-		controlServer.updateHead,
-		controlServer,
-		controlServer.requestWakeUpBodies,
-		timeout,
+	); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
+	return nil
+}
+
+// Combined2 creates and starts sentry and downloader in the same process
+func Combined2(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string) error {
+	ctx := rootContext()
+
+	sentryServer := &SentryServerImpl{
+		ctx:             ctx,
+		receiveCh:       make(chan StreamMsg, 1024),
+		receiveUploadCh: make(chan StreamMsg, 1024),
+	}
+	sentry := &SentryClientDirect{}
+	sentry.SetServer(sentryServer)
+	controlServer, err := NewControlServer(db, []proto_sentry.SentryClient{sentry}, window, chain, nil)
+	if err != nil {
+		return fmt.Errorf("create core P2P server: %w", err)
+	}
+
+	var readNodeInfo = func() *eth.NodeInfo {
+		var res *eth.NodeInfo
+		_ = db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+			res = eth.ReadNodeInfo(db, controlServer.chainConfig, controlServer.genesisHash, controlServer.networkId)
+			return nil
+		})
+		return res
+	}
+
+	sentryServer.p2pServer, err = p2pServer(ctx, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
+	if err != nil {
+		return err
+	}
+
+	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+		return fmt.Errorf("setting initial status message: %w", err)
+	}
+
+	go recvMessage(ctx, sentry, controlServer)
+	go recvUploadMessage(ctx, sentry, controlServer)
+
+	batchSize := 512 * datasize.MB
+
+	sync := stages.NewStagedSync(
+		ctx,
+		stagedsync.StageHeadersCfg(
+			controlServer.hd,
+			*controlServer.chainConfig,
+			controlServer.sendHeaderRequest,
+			controlServer.requestWakeUpBodies,
+			batchSize,
+		),
+		stagedsync.StageBodiesCfg(
+			controlServer.bd,
+			controlServer.sendBodyRequest,
+			controlServer.penalise,
+			controlServer.updateHead,
+			controlServer,
+			controlServer.requestWakeUpBodies,
+			timeout,
+			batchSize,
+		),
+		stagedsync.StageSendersCfg(controlServer.chainConfig),
+	)
+
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		sync,
+		controlServer.hd,
+		controlServer.chainConfig,
 	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}

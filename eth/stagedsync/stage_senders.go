@@ -20,17 +20,32 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-type Stage3Config struct {
-	BatchSize       int
-	BlockSize       int
-	BufferSize      int
-	ToProcess       int
-	NumOfGoroutines int
-	ReadChLen       int
-	Now             time.Time
+type SendersCfg struct {
+	batchSize       int
+	blockSize       int
+	bufferSize      int
+	numOfGoroutines int
+	readChLen       int
+
+	chainConfig *params.ChainConfig
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
+func StageSendersCfg(chainCfg *params.ChainConfig) SendersCfg {
+	const sendersBatchSize = 10000
+	const sendersBlockSize = 4096
+
+	return SendersCfg{
+		batchSize:       sendersBatchSize,
+		blockSize:       sendersBlockSize,
+		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
+		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		readChLen:       4,
+
+		chainConfig: chainCfg,
+	}
+}
+
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, db ethdb.Database, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -96,15 +111,15 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}
 	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
-	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
-	out := make(chan *senderRecoveryJob, cfg.BatchSize)
+	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
+	out := make(chan *senderRecoveryJob, cfg.batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(cfg.NumOfGoroutines)
-	for i := 0; i < cfg.NumOfGoroutines; i++ {
+	wg.Add(cfg.numOfGoroutines)
+	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
+			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 

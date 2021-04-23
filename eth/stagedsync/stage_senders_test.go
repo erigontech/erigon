@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
@@ -110,15 +109,8 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := Stage3Config{
-		BatchSize:       1024,
-		BlockSize:       1024,
-		BufferSize:      (1024 * 10 / 20) * 10000, // 20*4096
-		NumOfGoroutines: 2,
-		ReadChLen:       4,
-		Now:             time.Now(),
-	}
-	err = SpawnRecoverSendersStage(cfg, &StageState{Stage: stages.Senders}, tx, params.TestChainConfig, 3, "", nil)
+	cfg := StageSendersCfg(params.TestChainConfig)
+	err = SpawnRecoverSendersStage(cfg, &StageState{Stage: stages.Senders}, tx, 3, "", nil)
 	assert.NoError(t, err)
 
 	{

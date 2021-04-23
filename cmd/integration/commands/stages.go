@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -354,24 +353,13 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	ch := make(chan struct{})
 	defer close(ch)
 
-	const batchSize = 10000
-	const blockSize = 4096
-	n := runtime.NumCPU()
-
-	cfg := stagedsync.Stage3Config{
-		BatchSize:       batchSize,
-		BlockSize:       blockSize,
-		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-		NumOfGoroutines: n,
-		ReadChLen:       4,
-		Now:             time.Now(),
-	}
+	cfg := stagedsync.StageSendersCfg(params.MainnetChainConfig)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
 		return stagedsync.UnwindSendersStage(u, stage3, db)
 	}
 
-	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
+	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, block, tmpdir, ch)
 }
 
 func silkwormExecutionFunc() unsafe.Pointer {
@@ -694,7 +682,7 @@ func stage(st *stagedsync.State, db ethdb.Getter, stage stages.SyncStage) *stage
 }
 
 //nolint:unparam
-func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningStagesParameters) (consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.State, *stagedsync.State, progressFunc) {
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, miningParams *stagedsync.MiningCfg) (consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.State, *stagedsync.State, progressFunc) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -705,11 +693,13 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 	engine := ethash.NewFaker()
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
+	senders := stagedsync.StageSendersCfg(chainConfig)
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, nil)
+	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, nil, senders)
 	if err != nil {
 		panic(err)
 	}
@@ -718,7 +708,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, minin
 		stagedsync.MiningStages(),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, miningParams)
+	).Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), batchSize, quitCh, nil, nil, func() error { return nil }, false, miningParams, senders)
 	if err != nil {
 		panic(err)
 	}
