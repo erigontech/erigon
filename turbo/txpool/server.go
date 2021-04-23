@@ -153,7 +153,7 @@ func (s *Server) UnderpricedAmount() int {
 }
 
 func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransactionsRequest) (*proto_txpool.GetTransactionsReply, error) {
-	buf := bytes.NewBuffer(nil)
+	var buf bytes.Buffer
 	reply := &proto_txpool.GetTransactionsReply{Txs: make([][]byte, len(in.Hashes))}
 	for i := range in.Hashes {
 		txn := s.txPool.Get(gointerfaces.ConvertH256ToHash(in.Hashes[i]))
@@ -162,7 +162,8 @@ func (s *Server) GetTransactions(ctx context.Context, in *proto_txpool.GetTransa
 			continue
 		}
 		buf.Reset()
-		if err := rlp.Encode(buf, &txn); err != nil {
+		err := txn.MarshalBinary(&buf)
+		if err != nil {
 			return nil, err
 		}
 		reply.Txs[i] = common.CopyBytes(buf.Bytes())
