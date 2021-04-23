@@ -305,7 +305,6 @@ func (c *Clique) snapshotByHeader(num uint64, hash common.Hash) *Snapshot {
 			return s
 		}
 	}
-	fmt.Printf("snapshotByHeader %d (epoch %d, checkpoint interval %d) %x returns nil\n", num, c.config.Epoch, c.snapshotConfig.CheckpointInterval, hash)
 
 	return nil
 }
