@@ -32,7 +32,7 @@ func (c *ClientDirect) GetTransactions(ctx context.Context, in *proto_txpool.Get
 	return c.server.GetTransactions(ctx, in)
 }
 
-func (c *ClientDirect) GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error) {
+func (c *ClientDirect) SerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error) {
 	reply, err := c.GetTransactions(ctx, &proto_txpool.GetTransactionsRequest{Hashes: gointerfaces.ConvertHashesToH256(hashes)})
 	if err != nil {
 		return nil, err

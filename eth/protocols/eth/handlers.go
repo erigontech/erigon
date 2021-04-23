@@ -468,7 +468,7 @@ func AnswerGetPooledTransactions(txPool TxPool, query GetPooledTransactionsPacke
 		hashes []common.Hash
 		txs    []rlp.RawValue
 	)
-	reply, err := txPool.GetSerializedTransactions(context.Background(), common.Hashes(query))
+	reply, err := txPool.SerializedTransactions(context.Background(), common.Hashes(query))
 	if err != nil {
 		log.Error("Failed to get transactions from txPool", "err", err)
 		return nil, nil

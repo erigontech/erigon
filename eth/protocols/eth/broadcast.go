@@ -84,7 +84,7 @@ func (p *Peer) broadcastTransactions() {
 				txs    []rlp.RawValue
 				size   common.StorageSize
 			)
-			reply, _ := p.txpool.GetSerializedTransactions(context.Background(), queue)
+			reply, _ := p.txpool.SerializedTransactions(context.Background(), queue)
 			for count = 0; count < len(reply) && size < maxTxPacketSize; count++ {
 				if reply[count] == nil {
 					continue

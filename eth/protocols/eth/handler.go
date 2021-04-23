@@ -90,7 +90,7 @@ type Backend interface {
 // TxPool defines the methods needed by the protocol handler to serve transactions.
 type TxPool interface {
 	proto_txpool.TxpoolClient
-	GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error)
+	SerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error)
 }
 
 // MakeProtocols constructs the P2P protocol definitions for `eth`.
