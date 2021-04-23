@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -145,4 +146,12 @@ func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) 
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	return &remote.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+}
+
+func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
+	return &remote.ProtocolVersionReply{Id: eth.ProtocolVersions[0]}, nil
+}
+
+func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
+	return &remote.ClientVersionReply{}, nil
 }
