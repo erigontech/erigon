@@ -6,7 +6,7 @@ package testing;
 
 option go_package = "./testing;testing";
 
-mesage TestReport {
+message TestReport {
     // End of test signal
     bool end = 1;
     // Indication whether the report is about success of part of the test, or failure
