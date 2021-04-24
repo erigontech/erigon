@@ -1,8 +1,6 @@
 package txpropagate
 
 import (
-	"sync"
-
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -14,7 +12,6 @@ import (
 const maxTxUnderpricedSetSize = 32768
 
 type TxPropagate struct {
-	lock     sync.RWMutex
 	txpool   *core.TxPool
 	knownTxs map[string]mapset.Set
 	requests []TxsRequest
