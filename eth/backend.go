@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -404,7 +405,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloaderV2 {
-
+		download.NewControlServer(chainDb)
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
 		if genesisBlock == nil {

@@ -35,16 +35,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
-)
-
-var (
-	// gitCommit is injected through the build flags (see Makefile)
-	gitCommit string
-	gitBranch string
 )
 
 const (
@@ -71,6 +64,7 @@ func nodeKey() *ecdsa.PrivateKey {
 
 func makeP2PServer(
 	ctx context.Context,
+	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	natSetting string,
 	port int,
@@ -100,8 +94,7 @@ func makeP2PServer(
 	p2pConfig.NAT = natif
 	p2pConfig.PrivateKey = serverKey
 
-	nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
-	p2pConfig.Name = nodeConfig.NodeName()
+	p2pConfig.Name = nodeName
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
@@ -485,6 +478,7 @@ func NewSentryServer(ctx context.Context) *SentryServerImpl {
 }
 
 func p2pServer(ctx context.Context,
+	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	sentryServer *SentryServerImpl,
 	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
@@ -492,6 +486,7 @@ func p2pServer(ctx context.Context,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
+		nodeName,
 		readNodeInfo,
 		natSetting,
 		port,
@@ -562,6 +557,7 @@ type SentryServerImpl struct {
 	peerTimeMap     sync.Map
 	statusData      *proto_sentry.StatusData
 	p2pServer       *p2p.Server
+	nodeName        string
 	receiveCh       chan StreamMsg
 	stopCh          chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
 	receiveUploadCh chan StreamMsg
@@ -761,7 +757,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.p2pServer, err = p2pServer(ss.ctx, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.p2pServer, err = p2pServer(ss.ctx, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}

@@ -60,7 +60,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 }
 
 // Download creates and starts standalone downloader
-func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string) error {
+func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string, nodeName string) error {
 	ctx := rootContext()
 
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
@@ -77,7 +77,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
 
-	controlServer, err1 := NewControlServer(db, chainConfig, genesisHash, engine, networkID, sentries, window, chain)
+	controlServer, err1 := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window, chain)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
@@ -204,7 +204,7 @@ func recvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string) error {
 	ctx := rootContext()
 
 	sentryServer := NewSentryServer(ctx)
@@ -214,7 +214,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
 
-	controlServer, err := NewControlServer(db, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window, chain)
+	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window, chain)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -235,7 +235,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return res
 	}
 
-	sentryServer.p2pServer, err = p2pServer(ctx, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
+	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
 	if err != nil {
 		return err
 	}
@@ -321,6 +321,7 @@ type ControlServerImpl struct {
 	lock                 sync.RWMutex
 	hd                   *headerdownload.HeaderDownload
 	bd                   *bodydownload.BodyDownload
+	nodeName             string
 	sentries             []proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
@@ -377,7 +378,7 @@ func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, gene
 	return chainConfig, genesisHash, engine, networkID
 }
 
-func NewControlServer(db ethdb.Database, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -392,6 +393,7 @@ func NewControlServer(db ethdb.Database, chainConfig *params.ChainConfig, genesi
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 
 	cs := &ControlServerImpl{
+		nodeName:             nodeName,
 		hd:                   hd,
 		bd:                   bd,
 		sentries:             sentries,

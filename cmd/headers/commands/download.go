@@ -2,6 +2,7 @@ package commands
 
 import (
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
+	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"github.com/spf13/cobra"
 )
 
@@ -10,6 +11,12 @@ var (
 	timeout  int    // Timeout for delivery requests
 	window   int    // Size of sliding window for downloading block bodies
 	chain    string // Name of the network to connect to
+)
+
+var (
+	// gitCommit is injected through the build flags (see Makefile)
+	gitCommit string
+	gitBranch string
 )
 
 func init() {
@@ -36,10 +43,13 @@ var downloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db := openDatabase(chaindata)
 		defer db.Close()
+		nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+		nodeName := nodeConfig.NodeName()
+
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain)
+			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName)
 		}
 
-		return download.Download(sentryAddrs, db, timeout, window, chain)
+		return download.Download(sentryAddrs, db, timeout, window, chain, nodeName)
 	},
 }
