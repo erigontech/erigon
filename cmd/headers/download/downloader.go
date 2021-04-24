@@ -263,11 +263,12 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 }
 
 func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
-	if _, err := sentry.SetStatus(context.Background(), makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
 		return err
 	}
 	return nil
 }
+
 func newStagedSync(
 	ctx context.Context,
 	db ethdb.Database,

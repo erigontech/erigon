@@ -22,8 +22,8 @@ import (
 func testSentryServer(db ethdb.KVGetter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
 	s := &SentryServerImpl{
 		ctx:             context.Background(),
-		receiveCh:       make(chan StreamMsg, 1024),
-		receiveUploadCh: make(chan StreamMsg, 1024),
+		ReceiveCh:       make(chan StreamMsg, 1024),
+		ReceiveUploadCh: make(chan StreamMsg, 1024),
 	}
 
 	head := rawdb.ReadCurrentHeader(db)
@@ -83,8 +83,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pProFork.Close()
 
 	errc := make(chan error, 2)
-	go func() { errc <- handShake(ctx, s1.getStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.getStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -101,8 +101,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s1.statusData.MaxBlock = 1
 	s2.statusData.MaxBlock = 1
 
-	go func() { errc <- handShake(ctx, s1.getStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.getStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -120,8 +120,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s2.statusData.MaxBlock = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
-	go func() { errc <- handShake(ctx, s1.getStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.getStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
 
 	var successes int
 	for i := 0; i < 2; i++ {

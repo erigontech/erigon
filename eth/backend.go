@@ -103,12 +103,13 @@ type Ethereum struct {
 	quitMining  chan struct{}
 
 	// downloader v2 fields
-	downloaderV2Ctx    context.Context
-	downloaderV2Cancel context.CancelFunc
-	downloadServer     *download.ControlServerImpl
-	txPoolServer       *download.TxPoolServer
-	txFetcher          *fetcher.TxFetcher
-	sentries           []proto_sentry.SentryClient
+	downloadV2Ctx    context.Context
+	downloadV2Cancel context.CancelFunc
+	downloadServer   *download.ControlServerImpl
+	sentryServer     *download.SentryServerImpl
+	txPoolServer     *download.TxPoolServer
+	txFetcher        *fetcher.TxFetcher
+	sentries         []proto_sentry.SentryClient
 }
 
 // New creates a new Ethereum object (including the
@@ -415,19 +416,19 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	checkpoint := config.Checkpoint
-	if eth.config.EnableDownloaderV2 {
+	if eth.config.EnableDownloadV2 {
 		sentryServer := download.NewSentryServer(context.Background())
 		sentry := &download.SentryClientDirect{}
 		sentryServer.P2pServer = eth.p2pServer
 		sentry.SetServer(sentryServer)
 		eth.sentries = []proto_sentry.SentryClient{sentry}
 		blockDownloaderWindow := 65536
-		eth.downloaderV2Ctx, eth.downloaderV2Cancel = context.WithCancel(context.Background())
+		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
 		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
-		if err = download.SetSentryStatus(eth.downloaderV2Ctx, sentry, eth.downloadServer); err != nil {
+		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
 			return nil, err
 		}
 		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
@@ -685,13 +686,13 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
-		if s.config.EnableDownloaderV2 {
+		if s.config.EnableDownloadV2 {
 
 		} else {
 			atomic.StoreUint32(&s.handler.acceptTxs, 1)
 		}
 
-		tx, err := s.ChainKV().BeginRo(context.Background())
+		tx, err := s.chainKV.BeginRo(context.Background())
 		if err != nil {
 			return err
 		}
@@ -807,8 +808,19 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 		return res
 	}
-	if s.config.EnableDownloaderV2 {
-		return nil // downloader.MakeProtocols()
+	if s.config.EnableDownloadV2 {
+		return download.MakeProtocols(
+			s.downloadV2Ctx,
+			readNodeInfo,
+			s.ethDialCandidates,
+			&s.sentryServer.Peers,
+			&s.sentryServer.PeerHeightMap,
+			&s.sentryServer.PeerTimeMap,
+			&s.sentryServer.PeerRwMap,
+			s.sentryServer.GetStatus,
+			s.sentryServer.ReceiveCh,
+			s.sentryServer.ReceiveUploadCh,
+			s.sentryServer.ReceiveTxCh)
 	} else {
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}
@@ -821,11 +833,11 @@ func (s *Ethereum) Start() error {
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	if s.config.EnableDownloaderV2 {
+	if s.config.EnableDownloadV2 {
 		s.txFetcher.Start()
-		go download.RecvMessage(s.downloaderV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.RecvUploadMessage(s.downloaderV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.RecvTxMessage(s.downloaderV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
+		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
 	} else {
 		// Start the networking layer and the light server if requested
 		s.handler.Start(maxPeers)
@@ -837,8 +849,8 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	if s.config.EnableDownloaderV2 {
-		s.downloaderV2Cancel()
+	if s.config.EnableDownloadV2 {
+		s.downloadV2Cancel()
 		s.txFetcher.Stop()
 		s.txPool.Stop()
 	} else {
