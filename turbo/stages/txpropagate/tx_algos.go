@@ -7,6 +7,8 @@ import (
 )
 
 func (tp *TxPropagate) DeliverTransactions(peerID string, txs []types.Transaction, direct bool) {
+	tp.lock.Lock()
+	defer tp.lock.Unlock()
 	// Keep track of all the propagated transactions
 	//if direct {
 	//	txReplyInMeter.Mark(int64(len(txs)))
@@ -154,6 +156,8 @@ func (tp *TxPropagate) DeliverTransactions(peerID string, txs []types.Transactio
 	//}
 }
 func (tp *TxPropagate) DeliverAnnounces(peerID string, hashes []common.Hash) {
+	tp.lock.Lock()
+	defer tp.lock.Unlock()
 	// Skip any transaction announcements that we already know of, or that we've
 	// previously marked as cheap and discarded. This check is of course racey,
 	// because multiple concurrent notifies will still manage to pass it, but it's
