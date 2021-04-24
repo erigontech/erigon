@@ -40,7 +40,7 @@ func StageBodiesCfg(bd *bodydownload.BodyDownload,
 	timeout int,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, wakeUpChan: wakeUpChan, timeout: timeout, batchSize: batchSize}
+	return BodiesCfg{bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, wakeUpChan: wakeUpChan, timeout: timeout, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
