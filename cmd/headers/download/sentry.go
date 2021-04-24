@@ -580,7 +580,7 @@ type SentryServerImpl struct {
 	peerRwMap       sync.Map
 	peerTimeMap     sync.Map
 	statusData      *proto_sentry.StatusData
-	p2pServer       *p2p.Server
+	P2pServer       *p2p.Server
 	nodeName        string
 	receiveCh       chan StreamMsg
 	stopCh          chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
@@ -782,17 +782,17 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.p2pServer, err = p2pServer(ss.ctx, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}
 		// Add protocol
-		if err := ss.p2pServer.Start(); err != nil {
+		if err := ss.P2pServer.Start(); err != nil {
 			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
 		}
 	}
 	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
+	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return &empty.Empty{}, nil
 }

@@ -33,13 +33,13 @@ func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, cha
 	}
 
 	fetchTx := func(peerID string, hashes []common.Hash) error {
-		controlServer.sendTxsRequest(context.TODO(), peerID, hashes)
+		controlServer.SendTxsRequest(context.TODO(), peerID, hashes)
 		return nil
 	}
 	txFetcher := fetcher.NewTxFetcher(controlServer.txPool.Has, controlServer.txPool.AddRemotes, fetchTx)
 	txFetcher.Start()
 
-	go recvTxMessage(ctx, sentries[0], controlServer.handleInboundMessage)
+	go RecvTxMessage(ctx, sentries[0], controlServer.HandleInboundMessage)
 
 	<-txFetcher.Quit
 
@@ -116,7 +116,7 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 	return nil
 }
 
-func (tp *TxPoolServer) sendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
+func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
 	bytes, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
 		RequestId:                   rand.Uint64(), //nolint:gosec
 		GetPooledTransactionsPacket: hashes,
@@ -158,7 +158,7 @@ func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	}
 }
 
-func (tp *TxPoolServer) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
 	case proto_sentry.MessageId_NewPooledTransactionHashes:
 		return tp.newPooledTransactionHashes(ctx, inreq, sentry)
@@ -173,7 +173,7 @@ func (tp *TxPoolServer) handleInboundMessage(ctx context.Context, inreq *proto_s
 	}
 }
 
-func recvTxMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+func RecvTxMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

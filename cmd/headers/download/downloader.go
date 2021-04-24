@@ -73,7 +73,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	}
 
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err1 := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window, chain)
+	controlServer, err1 := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
@@ -95,7 +95,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 					return
 				default:
 				}
-				recvMessage(ctx, sentry, controlServer.handleInboundMessage)
+				RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
 				// Wait before trying to reconnect to prevent log flooding
 				time.Sleep(2 * time.Second)
 			}
@@ -109,7 +109,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 					return
 				default:
 				}
-				recvUploadMessage(ctx, sentry, controlServer.handleInboundMessage)
+				RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
 				// Wait before trying to reconnect to prevent log flooding
 				time.Sleep(2 * time.Second)
 			}
@@ -141,7 +141,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	return nil
 }
 
-func recvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -166,7 +166,7 @@ func recvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 	}
 }
 
-func recvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -199,7 +199,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window, chain)
+	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -213,18 +213,15 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return res
 	}
 
-	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
+	sentryServer.P2pServer, err = p2pServer(ctx, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
 	if err != nil {
 		return err
 	}
 
-	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
-		return fmt.Errorf("setting initial status message: %w", err)
+	if err = SetSentryStatus(ctx, sentry, controlServer); err != nil {
+		log.Error("failed to set sentry status", "error", err)
+		return nil
 	}
-
-	go recvMessage(ctx, sentry, controlServer.handleInboundMessage)
-	go recvUploadMessage(ctx, sentry, controlServer.handleInboundMessage)
-
 	batchSize := 512 * datasize.MB
 	sync, err := newStagedSync(
 		ctx,
@@ -236,6 +233,9 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err != nil {
 		return err
 	}
+
+	go RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
+	go RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
 
 	if err := stages.StageLoop(
 		ctx,
@@ -249,6 +249,25 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	return nil
 }
 
+func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl) {
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		sync,
+		controlServer.hd,
+		controlServer.chainConfig,
+	); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
+
+}
+
+func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
+	if _, err := sentry.SetStatus(context.Background(), makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+		return err
+	}
+	return nil
+}
 func newStagedSync(
 	ctx context.Context,
 	db ethdb.Database,
@@ -355,7 +374,7 @@ func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, gene
 	return chainConfig, genesisHash, engine, networkID
 }
 
-func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int, chain string) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -364,7 +383,7 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chain)
+	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chainConfig.ChainID)
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
@@ -666,7 +685,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	return nil
 }
 
-func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	defer func() {
 		select {
 		case cs.requestWakeUpHeaders <- struct{}{}:

@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -404,14 +405,14 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
+func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
 	switch chain {
-	case "mainnet":
+	case params.MainnetChainConfig.ChainID:
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
-	case "ropsten":
+	case params.RopstenChainConfig.ChainID:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
