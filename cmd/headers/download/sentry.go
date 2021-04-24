@@ -495,8 +495,10 @@ func NewSentryServer(ctx context.Context) *SentryServerImpl {
 		ctx:             ctx,
 		ReceiveCh:       make(chan StreamMsg, 1024),
 		ReceiveUploadCh: make(chan StreamMsg, 1024),
+		ReceiveTxCh:     make(chan StreamMsg, 1024),
 		stopCh:          make(chan struct{}),
 		uploadStopCh:    make(chan struct{}),
+		txStopCh:        make(chan struct{}),
 	}
 }
 
@@ -585,8 +587,9 @@ type SentryServerImpl struct {
 	ReceiveCh       chan StreamMsg
 	stopCh          chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
 	ReceiveUploadCh chan StreamMsg
-	ReceiveTxCh     chan StreamMsg
 	uploadStopCh    chan struct{} // Channel used to signal (by closing) to the receiver on `receiveUploadCh` to stop reading
+	ReceiveTxCh     chan StreamMsg
+	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	lock            sync.RWMutex
 }
 
@@ -875,8 +878,8 @@ func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sen
 	ss.restartUpload()
 	for {
 		select {
-		case <-ss.uploadStopCh:
-			log.Warn("Finished receive upload messages")
+		case <-ss.txStopCh:
+			log.Warn("Finished receive txs messages")
 			return nil
 		case streamMsg := <-ss.ReceiveTxCh:
 			outreq := proto_sentry.InboundMessage{
