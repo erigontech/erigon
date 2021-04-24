@@ -169,6 +169,7 @@ grpc:
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
+		consensus_engine/consensus.proto \
 		testing/testing.proto
 
 prometheus:
