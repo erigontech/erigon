@@ -28,7 +28,9 @@ var (
 	integrityFast      bool
 	silkwormPath       string
 	file               string
-	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
+	txtrace            bool   // Whether to trace the execution (should only be used together eith `block`)
+	testingAddr        string // Address of the gRPC endpoint of the integration testing server
+	sentryAddr         string // Address of the gRPC endpoint of the test sentry (mimicking sentry for the integration tests)
 )
 
 func must(err error) {
@@ -127,4 +129,9 @@ func withSilkworm(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withTesting(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&testingAddr, "testing.addr", "localhost:9092", "address of the gRPC endpoint of the integration testing server")
+	cmd.Flags().StringVar(&sentryAddr, "sentry.addr", "localhost:9091", "Address of the gRPC endpoint of the test sentry (mimicking sentry for the integration tests)")
 }

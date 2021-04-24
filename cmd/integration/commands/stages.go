@@ -311,6 +311,9 @@ func init() {
 
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+
+	withTesting(cmdTestDriver)
+	rootCmd.AddCommand(cmdTestDriver)
 }
 
 func stageBodies(db ethdb.Database, ctx context.Context) error {
