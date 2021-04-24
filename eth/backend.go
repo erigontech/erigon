@@ -713,9 +713,11 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 		}
 		defer tx.Rollback()
 		hh := rawdb.ReadCurrentHeader(tx)
-		execution, _ := stages.GetStageProgress(tx, stages.Execution)
-		if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-			return err
+		if hh != nil {
+			execution, _ := stages.GetStageProgress(tx, stages.Execution)
+			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+				return err
+			}
 		}
 	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
