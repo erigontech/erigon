@@ -851,6 +851,14 @@ func (ss *SentryServerImpl) restartUpload() {
 	ss.uploadStopCh = make(chan struct{})
 }
 
+func (ss *SentryServerImpl) restartTxs() {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	// Close previous channel and recreate
+	close(ss.txStopCh)
+	ss.txStopCh = make(chan struct{})
+}
+
 func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartUpload()
@@ -875,7 +883,7 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 
 func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveTxMessagesServer) error {
 	// Close previous channel and recreate
-	ss.restartUpload()
+	ss.restartTxs()
 	for {
 		select {
 		case <-ss.txStopCh:
