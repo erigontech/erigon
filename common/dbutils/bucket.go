@@ -231,9 +231,7 @@ var (
 	//StorageModeCallTraces - does not build index of call traces
 	StorageModeCallTraces = []byte("smCallTraces")
 
-	DBSchemaVersionMajor = []byte("dbVersionMajor")
-	DBSchemaVersionMinor = []byte("dbVersionMinor")
-	DBSchemaVersionPatch = []byte("dbVersionPatch")
+	DBSchemaVersionKey = []byte("dbVersion")
 
 	HeadHeaderKey = "LastHeader"
 

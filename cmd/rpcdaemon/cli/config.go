@@ -118,35 +118,26 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 func checkDbCompatibility(db ethdb.RwKV) error {
 	// DB schema version compatibility check
-	var major, minor, patch []byte
+	var version []byte
 	var compatErr error
 	var compatTx ethdb.Tx
 	if compatTx, compatErr = db.BeginRo(context.Background()); compatErr != nil {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if major, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
-		return fmt.Errorf("read major version for DB schema compability check: %w", compatErr)
+	if version, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey); compatErr != nil {
+		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
-	if len(major) != 4 {
+	if len(version) != 12 {
 		return fmt.Errorf("database does not have major schema version. upgrade and restart turbo-geth core")
 	}
-	if minor, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMinor); compatErr != nil {
-		return fmt.Errorf("read minor version for DB schema compability check: %w", compatErr)
-	}
-	if len(minor) != 4 {
-		return fmt.Errorf("database does not have minor schema version. upgrade and restart turbo-geth core")
-	}
-	if patch, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionPatch); compatErr != nil {
-		return fmt.Errorf("read patch version for DB schema compability check: %w", compatErr)
-	}
-	if len(patch) != 4 {
-		return fmt.Errorf("database does not have patch schema version. upgrade and restart turbo-geth core")
-	}
+	major := binary.BigEndian.Uint32(version[:])
+	minor := binary.BigEndian.Uint32(version[4:])
+	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	if binary.BigEndian.Uint32(major[:]) != dbutils.DBSchemaVersion.Major {
+	if major != dbutils.DBSchemaVersion.Major {
 		compatible = false
-	} else if binary.BigEndian.Uint32(minor[:]) != dbutils.DBSchemaVersion.Minor {
+	} else if minor != dbutils.DBSchemaVersion.Minor {
 		compatible = false
 	} else {
 		compatible = true
@@ -154,10 +145,10 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 	if !compatible {
 		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
 			dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch,
-			binary.BigEndian.Uint32(major[:]), binary.BigEndian.Uint32(minor[:]), binary.BigEndian.Uint32(patch[:]))
+			major, minor, patch)
 	}
 	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch),
-		"database", fmt.Sprintf("%d.%d.%d", binary.BigEndian.Uint32(major[:]), binary.BigEndian.Uint32(minor[:]), binary.BigEndian.Uint32(patch[:])))
+		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	return nil
 }
 
