@@ -128,10 +128,10 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 	if major, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
 		return fmt.Errorf("read major version for DB schema compability check: %w", compatErr)
 	}
-	if minor, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
+	if minor, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMinor); compatErr != nil {
 		return fmt.Errorf("read minor version for DB schema compability check: %w", compatErr)
 	}
-	if patch, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
+	if patch, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionPatch); compatErr != nil {
 		return fmt.Errorf("read patch version for DB schema compability check: %w", compatErr)
 	}
 	var compatible bool

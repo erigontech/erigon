@@ -111,7 +111,7 @@ func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply
 	if dbutils.DBSchemaVersion.Minor > KvServiceAPIVersion.Minor {
 		return &dbutils.DBSchemaVersion, nil
 	}
-	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
+	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
 		return &KvServiceAPIVersion, nil
 	}
 	return &dbutils.DBSchemaVersion, nil
