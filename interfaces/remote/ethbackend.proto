@@ -8,8 +8,17 @@ option go_package = "./remote;remote";
 
 service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
+
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
+
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+
+  // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+  rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);
+
+  // ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+  rpc ClientVersion(ClientVersionRequest) returns (ClientVersionReply);
+
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
 
   // GetWork returns a work package for external miner.
@@ -58,6 +67,14 @@ message EtherbaseReply { types.H160 address = 1; }
 message NetVersionRequest {}
 
 message NetVersionReply { uint64 id = 1; }
+
+message ProtocolVersionRequest {}
+
+message ProtocolVersionReply { uint64 id = 1; }
+
+message ClientVersionRequest {}
+
+message ClientVersionReply { string nodeName = 1; }
 
 message SubscribeRequest {}
 

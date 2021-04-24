@@ -1,11 +1,36 @@
 syntax = "proto3";
 
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+// This is the Service Interface Version: change these numbers according to semver rules
+// anytime the service-level protocol changes (e.g. string or bytes format). Such version
+// cannot change at runtime during service execution.
+//
+// Examples of how to change version (M.m.p) for the KV protocol are:
+// 1. bump M obtaining (M+1.m.p) when
+// - changing table name i.e. bucketName field in Cursor
+// - changing key/value format i.e. k, v fields in Pair
+// 2. bump m obtaining (M.m+1.p) when
+// - adding new table name i.e. bucketName field in Cursor
+// 3. bump p obtaining (M.m.p+1) when
+// - correcting wrong data in value i.e. v field in Pair
+option (types.service_major_version) = 1;
+option (types.service_minor_version) = 0;
+option (types.service_patch_version) = 0;
+
 package remote;
 
 option go_package = "./remote;remote";
 
 // Provides methods to access key-value data
-service KV { rpc Tx(stream Cursor) returns (stream Pair); }
+service KV {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // Tx exposes read-only transactions for the key-value store
+  rpc Tx(stream Cursor) returns (stream Pair);
+}
 
 enum Op {
   FIRST = 0;

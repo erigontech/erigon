@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path"
 
@@ -75,6 +76,7 @@ var migrations = []Migration{
 	deleteExtensionHashesFromTrieBucket,
 	headerPrefixToSeparateBuckets,
 	removeCliqueBucket,
+	dbSchemaVersion,
 }
 
 type Migration struct {
@@ -231,6 +233,18 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 		}
 		log.Info("Applied migration", "name", v.Name)
 	}
+	// Write DB schema version
+	var version [12]byte
+	binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersion.Major)
+	binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersion.Minor)
+	binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersion.Patch)
+	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey, version[:]); err != nil {
+		return fmt.Errorf("writing DB schema version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing DB version update: %w", err)
+	}
+	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch))
 	return nil
 }
 
