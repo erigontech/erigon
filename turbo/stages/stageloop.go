@@ -25,6 +25,8 @@ func NewStagedSync(
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
+
+	txPropagate stagedsync.TxPropagateCfg,
 ) *stagedsync.StagedSync {
 
 	return stagedsync.New(

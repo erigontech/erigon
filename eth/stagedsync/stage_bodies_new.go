@@ -31,7 +31,8 @@ type BodiesCfg struct {
 	batchSize       datasize.ByteSize
 }
 
-func StageBodiesCfg(bd *bodydownload.BodyDownload,
+func StageBodiesCfg(
+	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),

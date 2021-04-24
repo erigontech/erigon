@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/txpropagate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
@@ -288,6 +289,8 @@ func newStagedSync(
 			controlServer.engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
 		),
+
+		stagedsync.StageTxPropagateCfg(controlServer.tp, controlServer.sendTxsRequest),
 	), nil
 }
 
@@ -295,6 +298,7 @@ type ControlServerImpl struct {
 	lock                 sync.RWMutex
 	hd                   *headerdownload.HeaderDownload
 	bd                   *bodydownload.BodyDownload
+	tp                   *txpropagate.TxPropagate
 	sentries             []proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
@@ -311,7 +315,7 @@ type ControlServerImpl struct {
 	engine               consensus.Engine
 }
 
-func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string, txPool eth.TxPool) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, window int, chain string, txPool *core.TxPool) (*ControlServerImpl, error) {
 	ethashConfig := &ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
@@ -362,9 +366,11 @@ func NewControlServer(db ethdb.Database, sentries []proto_sentry.SentryClient, w
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
+	tp := txpropagate.NewTxPropagate(txPool)
 	cs := &ControlServerImpl{
 		hd:                   hd,
 		bd:                   bd,
+		tp:                   tp,
 		sentries:             sentries,
 		requestWakeUpHeaders: make(chan struct{}, 1),
 		requestWakeUpBodies:  make(chan struct{}, 1),
@@ -621,6 +627,43 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	return nil
 }
 
+func (cs *ControlServerImpl) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if cs.txPool == nil {
+		return nil
+	}
+	var query eth.NewPooledTransactionHashesPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	cs.tp.DeliverAnnounces(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
+	return nil
+}
+
+func (cs *ControlServerImpl) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if cs.txPool == nil {
+		return nil
+	}
+	var query eth.PooledTransactionsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+
+	cs.tp.DeliverTransactions(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
+	return nil
+}
+
+func (cs *ControlServerImpl) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if cs.txPool == nil {
+		return nil
+	}
+	var query eth.TransactionsPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
+	}
+	cs.tp.DeliverTransactions(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
+	return nil
+}
+
 func (cs *ControlServerImpl) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if cs.txPool == nil {
 		return nil
@@ -714,6 +757,12 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 		return cs.receipts(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GetReceipts:
 		return cs.getReceipts(ctx, inreq, sentry)
+	case proto_sentry.MessageId_NewPooledTransactionHashes:
+		return cs.newPooledTransactionHashes(ctx, inreq, sentry)
+	case proto_sentry.MessageId_PooledTransactions:
+		return cs.pooledTransactions(ctx, inreq, sentry)
+	case proto_sentry.MessageId_Transactions:
+		return cs.transactions(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GetPooledTransactions:
 		return cs.getPooledTransactions(ctx, inreq, sentry)
 	default:
