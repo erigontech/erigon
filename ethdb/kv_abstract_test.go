@@ -144,13 +144,6 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb := ethdb.NewRemote().InMem(conn).MustOpen()
-	readDBs = []ethdb.RwKV{
-		writeDBs[0],
-		writeDBs[1],
-		rdb,
-	}
-
 	grpcServer := grpc.NewServer()
 	go func() {
 		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
@@ -158,6 +151,13 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
+
+	rdb := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).MustOpen()
+	readDBs = []ethdb.RwKV{
+		writeDBs[0],
+		writeDBs[1],
+		rdb,
+	}
 
 	return writeDBs, readDBs, func() {
 		grpcServer.Stop()
