@@ -188,19 +188,15 @@ func (p *Peer) markTransaction(hash common.Hash) {
 //
 // The reasons this is public is to allow packages using this protocol to write
 // tests that directly send messages without having to do the asyn queueing.
-func (p *Peer) SendTransactions(txs []rlp.RawValue, hashes common.Hashes) error {
+func (p *Peer) SendTransactions(txs types.Transactions) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(txs)) {
 		p.knownTxs.Pop()
 	}
-	for i := range txs {
-		p.knownTxs.Add(hashes[i])
+	for _, tx := range txs {
+		p.knownTxs.Add(tx.Hash())
 	}
-	size, r, err := rlp.EncodeToReader(txs)
-	if err != nil {
-		return err
-	}
-	return p.rw.WriteMsg(p2p.Msg{Code: TransactionsMsg, Size: uint32(size), Payload: r})
+	return p2p.Send(p.rw, TransactionsMsg, txs)
 }
 
 // AsyncSendTransactions queues a list of transactions (by hash) to eventually

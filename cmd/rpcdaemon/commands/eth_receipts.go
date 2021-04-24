@@ -6,7 +6,6 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -268,18 +267,18 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 }
 
 func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]interface{} {
-	var chainId *uint256.Int
+	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V)
+			chainId = types.DeriveChainId(&t.V).ToBig()
 		}
 	case *types.AccessListTx:
-		chainId = t.ChainID
+		chainId = t.ChainID.ToBig()
 	case *types.DynamicFeeTransaction:
-		chainId = t.ChainID
+		chainId = t.ChainID.ToBig()
 	}
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	from, _ := txn.Sender(*signer)
 
 	fields := map[string]interface{}{

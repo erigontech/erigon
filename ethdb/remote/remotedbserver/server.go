@@ -291,13 +291,3 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 
 	return nil
 }
-
-func max(args ...uint32) uint32 {
-	var max uint32
-	for _, arg := range args {
-		if max < arg {
-			max = arg
-		}
-	}
-	return max
-}

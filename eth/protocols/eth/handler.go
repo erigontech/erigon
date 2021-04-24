@@ -17,19 +17,18 @@
 package eth
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -88,8 +87,8 @@ type Backend interface {
 
 // TxPool defines the methods needed by the protocol handler to serve transactions.
 type TxPool interface {
-	// GetSerializedTransactions retrieves the the transaction from the local txpool with the given hash.
-	GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error)
+	// Get retrieves the the transaction from the local txpool with the given hash.
+	Get(hash common.Hash) types.Transaction
 }
 
 // MakeProtocols constructs the P2P protocol definitions for `eth`.

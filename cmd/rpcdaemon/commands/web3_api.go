@@ -16,20 +16,20 @@ type Web3API interface {
 
 type Web3APIImpl struct {
 	*BaseAPI
-	api core.ApiBackend
+	ethBackend core.ApiBackend
 }
 
 // NewWeb3APIImpl returns Web3APIImpl instance
-func NewWeb3APIImpl(api core.ApiBackend) *Web3APIImpl {
+func NewWeb3APIImpl(ethBackend core.ApiBackend) *Web3APIImpl {
 	return &Web3APIImpl{
-		BaseAPI: &BaseAPI{},
-		api:     api,
+		BaseAPI:    &BaseAPI{},
+		ethBackend: ethBackend,
 	}
 }
 
 // ClientVersion implements web3_clientVersion. Returns the current client version.
 func (api *Web3APIImpl) ClientVersion(ctx context.Context) (string, error) {
-	return api.ClientVersion(ctx)
+	return api.ethBackend.ClientVersion(ctx)
 }
 
 // Sha3 implements web3_sha3. Returns Keccak-256 (not the standardized SHA3-256) of the given data.
