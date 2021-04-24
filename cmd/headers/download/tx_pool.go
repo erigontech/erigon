@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"runtime"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -22,40 +19,17 @@ import (
 	"google.golang.org/grpc"
 )
 
-func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, chain string) error {
-	ctx := rootContext()
-	chainConfig, _, _, _ := cfg(db, chain)
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
-	controlServer, err := NewTxPoolServer(sentries, txPool)
-	if err != nil {
-		return fmt.Errorf("create core P2P server: %w", err)
-	}
-
-	fetchTx := func(peerID string, hashes []common.Hash) error {
-		controlServer.SendTxsRequest(context.TODO(), peerID, hashes)
-		return nil
-	}
-	txFetcher := fetcher.NewTxFetcher(controlServer.txPool.Has, controlServer.txPool.AddRemotes, fetchTx)
-	txFetcher.Start()
-
-	go RecvTxMessage(ctx, sentries[0], controlServer.HandleInboundMessage)
-
-	<-txFetcher.Quit
-
-	return nil
-}
-
 type TxPoolServer struct {
 	sentries []proto_sentry.SentryClient
 	txPool   *core.TxPool
 	fetcher  *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool, fetcher *fetcher.TxFetcher) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		sentries: sentries,
 		txPool:   txPool,
+		fetcher:  fetcher,
 	}
 	return cs, nil
 }

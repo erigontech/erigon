@@ -434,7 +434,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
 			return nil, err
 		}
-		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
+		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool, eth.txFetcher)
 		if err != nil {
 			return nil, err
 		}
