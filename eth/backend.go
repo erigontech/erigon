@@ -434,16 +434,17 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
 			return nil, err
 		}
-		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool, eth.txFetcher)
-		if err != nil {
-			return nil, err
-		}
-
 		fetchTx := func(peerID string, hashes []common.Hash) error {
 			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
 			return nil
 		}
 		eth.txFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
+
+		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool, eth.txFetcher)
+		if err != nil {
+			return nil, err
+		}
+
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
