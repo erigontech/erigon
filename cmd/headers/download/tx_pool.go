@@ -24,7 +24,7 @@ func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, cha
 	chainConfig, _, _, _ := cfg(db, chain)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
-	controlServer, err := NewTxPoolService(sentries, txPool)
+	controlServer, err := NewTxPoolServer(sentries, txPool)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -42,21 +42,21 @@ func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, cha
 	return nil
 }
 
-type TxPoolService struct {
+type TxPoolServer struct {
 	sentries []proto_sentry.SentryClient
 	txPool   *core.TxPool
 	fetcher  *fetcher.TxFetcher
 }
 
-func NewTxPoolService(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolService, error) {
-	cs := &TxPoolService{
+func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+	cs := &TxPoolServer{
 		sentries: sentries,
 		txPool:   txPool,
 	}
 	return cs, nil
 }
 
-func (tp *TxPoolService) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
@@ -64,7 +64,7 @@ func (tp *TxPoolService) newPooledTransactionHashes(ctx context.Context, inreq *
 	return tp.fetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolService) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.PooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
@@ -73,7 +73,7 @@ func (tp *TxPoolService) pooledTransactions(ctx context.Context, inreq *proto_se
 	return tp.fetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
 }
 
-func (tp *TxPoolService) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (tp *TxPoolService) transactions(ctx context.Context, inreq *proto_sentry.I
 	return tp.fetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
 
-func (tp *TxPoolService) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (tp *TxPoolService) getPooledTransactions(ctx context.Context, inreq *proto
 	return nil
 }
 
-func (tp *TxPoolService) sendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
+func (tp *TxPoolServer) sendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
 	bytes, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
 		RequestId:                   rand.Uint64(), //nolint:gosec
 		GetPooledTransactionsPacket: hashes,
@@ -142,7 +142,7 @@ func (tp *TxPoolService) sendTxsRequest(ctx context.Context, peerID string, hash
 	return nil
 }
 
-func (tp *TxPoolService) randSentryIndex() (int, bool, func() (int, bool)) {
+func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
 	if len(tp.sentries) > 1 {
 		i = rand.Intn(len(tp.sentries) - 1)
@@ -154,7 +154,7 @@ func (tp *TxPoolService) randSentryIndex() (int, bool, func() (int, bool)) {
 	}
 }
 
-func (tp *TxPoolService) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
 	case proto_sentry.MessageId_NewPooledTransactionHashes:
 		return tp.newPooledTransactionHashes(ctx, inreq, sentry)
