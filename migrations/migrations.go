@@ -76,6 +76,7 @@ var migrations = []Migration{
 	deleteExtensionHashesFromTrieBucket,
 	headerPrefixToSeparateBuckets,
 	removeCliqueBucket,
+	dbSchemaVersion,
 }
 
 type Migration struct {
@@ -249,6 +250,7 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing DB version update: %w", err)
 	}
+	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch))
 	return nil
 }
 

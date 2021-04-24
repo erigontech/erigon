@@ -128,11 +128,20 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 	if major, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
 		return fmt.Errorf("read major version for DB schema compability check: %w", compatErr)
 	}
+	if len(major) != 4 {
+		return fmt.Errorf("database does not have major schema version. upgrade and restart turbo-geth core")
+	}
 	if minor, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMinor); compatErr != nil {
 		return fmt.Errorf("read minor version for DB schema compability check: %w", compatErr)
 	}
+	if len(minor) != 4 {
+		return fmt.Errorf("database does not have minor schema version. upgrade and restart turbo-geth core")
+	}
 	if patch, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionPatch); compatErr != nil {
 		return fmt.Errorf("read patch version for DB schema compability check: %w", compatErr)
+	}
+	if len(patch) != 4 {
+		return fmt.Errorf("database does not have patch schema version. upgrade and restart turbo-geth core")
 	}
 	var compatible bool
 	if binary.BigEndian.Uint32(major[:]) != dbutils.DBSchemaVersion.Major {
