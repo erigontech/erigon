@@ -58,6 +58,10 @@ type txPool interface {
 	// cached with the given hash.
 	Has(hash common.Hash) bool
 
+	// Get retrieves the transaction from local txpool with given
+	// tx hash.
+	Get(hash common.Hash) types.Transaction
+
 	// AddRemotes should add the given transactions to the pool.
 	AddRemotes([]types.Transaction) []error
 
@@ -78,8 +82,7 @@ type handlerConfig struct {
 	vmConfig    *vm.Config
 	genesis     *types.Block
 	engine      consensus.Engine
-	TxPool      txPool // Transaction pool to propagate from
-	TxPool2     eth.TxPool
+	TxPool      txPool                    // Transaction pool to propagate from
 	Network     uint64                    // Network identifier to adfvertise
 	BloomCache  uint64                    // Megabytes to alloc for fast sync bloom
 	Checkpoint  *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
@@ -94,7 +97,6 @@ type handler struct {
 
 	database    ethdb.Database
 	txpool      txPool
-	txpool2     eth.TxPool
 	chainConfig *params.ChainConfig
 	vmConfig    *vm.Config
 	genesis     *types.Block
@@ -131,7 +133,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		networkID:   config.Network,
 		database:    config.Database,
 		txpool:      config.TxPool,
-		txpool2:     config.TxPool2,
 		chainConfig: config.ChainConfig,
 		vmConfig:    config.vmConfig,
 		genesis:     config.genesis,

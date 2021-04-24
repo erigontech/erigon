@@ -468,20 +468,22 @@ func AnswerGetPooledTransactions(txPool TxPool, query GetPooledTransactionsPacke
 		hashes []common.Hash
 		txs    []rlp.RawValue
 	)
-	reply, err := txPool.GetSerializedTransactions(context.Background(), common.Hashes(query))
-	if err != nil {
-		log.Error("Failed to get transactions from txPool", "err", err)
-		return nil, nil
-	}
-	for i := range reply {
-		if reply[i] == nil {
-			continue
-		}
-		hashes = append(hashes, query[i])
-		txs = append(txs, reply[i])
-		bytes += len(reply[i])
+	for _, hash := range query {
 		if bytes >= softResponseLimit {
 			break
+		}
+		// Retrieve the requested transaction, skipping if unknown to us
+		tx := txPool.Get(hash)
+		if tx == nil {
+			continue
+		}
+		// If known, encode and queue for response packet
+		if encoded, err := rlp.EncodeToBytes(tx); err != nil {
+			log.Error("Failed to encode transaction", "err", err)
+		} else {
+			hashes = append(hashes, hash)
+			txs = append(txs, encoded)
+			bytes += len(encoded)
 		}
 	}
 	return hashes, txs

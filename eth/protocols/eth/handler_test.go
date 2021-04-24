@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"math"
 	"math/big"
 	"math/rand"
@@ -35,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 )
 
 var (
@@ -99,9 +97,7 @@ func (b *testBackend) close() {
 }
 
 func (b *testBackend) DB() ethdb.RwKV { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
-func (b *testBackend) TxPool() TxPool {
-	return txpool.NewClientDirect(txpool.NewServer(context.Background(), b.txpool))
-}
+func (b *testBackend) TxPool() TxPool { return b.txpool }
 func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
 	// is omitted and we will just give control back to the handler.

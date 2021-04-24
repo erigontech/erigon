@@ -167,7 +167,6 @@ grpc:
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
-		txpool/txpool.proto txpool/txpool_control.proto
 
 prometheus:
 	docker-compose up prometheus grafana
