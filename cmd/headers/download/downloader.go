@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/txpropagate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
@@ -298,7 +297,6 @@ type ControlServerImpl struct {
 	lock                 sync.RWMutex
 	hd                   *headerdownload.HeaderDownload
 	bd                   *bodydownload.BodyDownload
-	tp                   *txpropagate.TxPropagate
 	sentries             []proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}

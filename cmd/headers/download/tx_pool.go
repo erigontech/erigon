@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -44,7 +43,6 @@ func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, cha
 }
 
 type TxPoolService struct {
-	lock     sync.RWMutex
 	sentries []proto_sentry.SentryClient
 	txPool   *core.TxPool
 	fetcher  *fetcher.TxFetcher

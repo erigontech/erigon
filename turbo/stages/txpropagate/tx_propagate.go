@@ -6,7 +6,6 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 // maxTxUnderpricedSetSize is the size of the underpriced transaction set that
@@ -22,7 +21,6 @@ type TxPropagate struct {
 
 	underpriced        mapset.Set // Transactions discarded as too cheap (don't re-fetch)
 	deliveredAnnounces map[string]map[common.Hash]struct{}
-	deliveredTxs       map[string]types.Transactions
 
 	/*
 		// Stage 1: Waiting lists for newly discovered transactions that might be
