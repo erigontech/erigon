@@ -43,8 +43,7 @@ var (
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
 	TxPool              SyncStage = "TxPool"              // Starts Backend
-	TxPropagate         SyncStage = "TxPropagate"
-	Finish              SyncStage = "Finish" // Nominal stage after all other stages
+	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"
