@@ -878,7 +878,7 @@ func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sen
 		case <-ss.uploadStopCh:
 			log.Warn("Finished receive upload messages")
 			return nil
-		case streamMsg := <-ss.receiveUploadCh:
+		case streamMsg := <-ss.receiveTxCh:
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,
