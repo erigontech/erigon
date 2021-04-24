@@ -163,6 +163,8 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 			opts.versionMajor, opts.versionMinor, opts.versionPatch,
 			versionReply.Major, versionReply.Minor, versionReply.Patch)
 	}
+	log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 
 	db := &RemoteKV{
 		opts:     opts,

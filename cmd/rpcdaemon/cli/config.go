@@ -156,6 +156,8 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 			dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch,
 			binary.BigEndian.Uint32(major[:]), binary.BigEndian.Uint32(minor[:]), binary.BigEndian.Uint32(patch[:]))
 	}
+	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch),
+		"database", fmt.Sprintf("%d.%d.%d", binary.BigEndian.Uint32(major[:]), binary.BigEndian.Uint32(minor[:]), binary.BigEndian.Uint32(patch[:])))
 	return nil
 }
 
