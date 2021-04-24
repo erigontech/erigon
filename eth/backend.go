@@ -82,7 +82,8 @@ type Ethereum struct {
 	ethDialCandidates enode.Iterator
 
 	// DB interfaces
-	chainKV    ethdb.RwKV // Same as chainDb, but different interface
+	chainDB    ethdb.Database // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -110,6 +111,7 @@ type Ethereum struct {
 	txPoolServer     *download.TxPoolServer
 	txFetcher        *fetcher.TxFetcher
 	sentries         []proto_sentry.SentryClient
+	stagedSync2      *stagedsync.StagedSync
 }
 
 // New creates a new Ethereum object (including the
@@ -272,6 +274,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	eth := &Ethereum{
 		config:        config,
+		chainDB:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
@@ -441,6 +444,18 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil
 		}
 		eth.txFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
+		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
+
+		eth.stagedSync2, err = download.NewStagedSync(
+			eth.downloadV2Ctx,
+			eth.chainDB,
+			config.BatchSize,
+			bodyDownloadTimeoutSeconds,
+			eth.downloadServer,
+		)
+		if err != nil {
+			return nil, err
+		}
 
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
@@ -838,6 +853,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
+		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer)
 	} else {
 		// Start the networking layer and the light server if requested
 		s.handler.Start(maxPeers)

@@ -117,7 +117,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	}
 
 	batchSize := 512 * datasize.MB
-	sync, err := newStagedSync(
+	sync, err := NewStagedSync(
 		ctx,
 		db,
 		batchSize,
@@ -229,7 +229,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return nil
 	}
 	batchSize := 512 * datasize.MB
-	sync, err := newStagedSync(
+	sync, err := NewStagedSync(
 		ctx,
 		db,
 		batchSize,
@@ -275,7 +275,7 @@ func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, cont
 	return nil
 }
 
-func newStagedSync(
+func NewStagedSync(
 	ctx context.Context,
 	db ethdb.Database,
 	batchSize datasize.ByteSize,
