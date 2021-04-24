@@ -17,8 +17,6 @@
 package eth
 
 import (
-	"bytes"
-	"context"
 	"math/big"
 	"sort"
 	"sync"
@@ -34,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -78,28 +75,6 @@ func (p *testTxPool) Get(hash common.Hash) types.Transaction {
 	defer p.lock.Unlock()
 
 	return p.pool[hash]
-}
-
-func (p *testTxPool) GetSerializedTransactions(ctx context.Context, hashes common.Hashes) ([]rlp.RawValue, error) {
-	reply := []rlp.RawValue{}
-	var size uint64
-	buf := bytes.NewBuffer(nil)
-
-	for i := range hashes {
-		txn := p.Get(hashes[i])
-		if txn == nil {
-			reply = append(reply, nil)
-			continue
-		}
-		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
-			return nil, err
-		}
-		reply = append(reply, common.CopyBytes(buf.Bytes()))
-		size += uint64(buf.Len())
-	}
-
-	return reply, nil
 }
 
 // AddRemotes appends a batch of transactions to the pool, and notifies any

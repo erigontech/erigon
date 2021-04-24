@@ -52,7 +52,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
-	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -61,7 +60,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -75,8 +73,6 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPoolServer      proto_txpool.TxpoolServer
-	txPoolClient      *txpool.ClientDirect
 	txPool            *core.TxPool
 	handler           *handler
 	ethDialCandidates enode.Iterator
@@ -391,8 +387,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	checkpoint := config.Checkpoint
-	eth.txPoolServer = txpool.NewServer(context.Background(), eth.txPool)
-	eth.txPoolClient = txpool.NewClientDirect(eth.txPoolServer)
 	if eth.config.EnableDownloaderV2 {
 
 	} else {
@@ -408,7 +402,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			vmConfig:    &vmConfig,
 			engine:      eth.engine,
 			TxPool:      eth.txPool,
-			TxPool2:     eth.txPoolClient,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
 

@@ -37,7 +37,7 @@ import (
 type ethHandler handler
 
 func (h *ethHandler) DB() ethdb.RwKV     { return h.database.(ethdb.HasRwKV).RwKV() }
-func (h *ethHandler) TxPool() eth.TxPool { return h.txpool2 }
+func (h *ethHandler) TxPool() eth.TxPool { return h.txpool }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
