@@ -145,7 +145,7 @@ type TxFetcher struct {
 	notify  chan *txAnnounce
 	cleanup chan *txDelivery
 	drop    chan *txDrop
-	Quit    chan struct{}
+	quit    chan struct{}
 
 	underpriced mapset.Set // Transactions discarded as too cheap (don't re-fetch)
 
@@ -192,7 +192,7 @@ func NewTxFetcherForTests(
 		notify:      make(chan *txAnnounce),
 		cleanup:     make(chan *txDelivery),
 		drop:        make(chan *txDrop),
-		Quit:        make(chan struct{}),
+		quit:        make(chan struct{}),
 		waitlist:    make(map[common.Hash]map[string]struct{}),
 		waittime:    make(map[common.Hash]mclock.AbsTime),
 		waitslots:   make(map[string]map[common.Hash]struct{}),
@@ -251,7 +251,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	select {
 	case f.notify <- announce:
 		return nil
-	case <-f.Quit:
+	case <-f.quit:
 		return errTerminated
 	}
 }
@@ -315,7 +315,7 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 	select {
 	case f.cleanup <- &txDelivery{origin: peer, hashes: added, direct: direct}:
 		return nil
-	case <-f.Quit:
+	case <-f.quit:
 		return errTerminated
 	}
 }
@@ -326,7 +326,7 @@ func (f *TxFetcher) Drop(peer string) error {
 	select {
 	case f.drop <- &txDrop{peer: peer}:
 		return nil
-	case <-f.Quit:
+	case <-f.quit:
 		return errTerminated
 	}
 }
@@ -334,347 +334,16 @@ func (f *TxFetcher) Drop(peer string) error {
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *TxFetcher) Start() {
-	go f.Loop()
+	go f.loop()
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *TxFetcher) Stop() {
-	common.SafeClose(f.Quit)
+	common.SafeClose(f.quit)
 }
 
-func (f *TxFetcher) loopStep(waitTimer, timeoutTimer *mclock.Timer, waitTrigger, timeoutTrigger chan struct{}) {
-	select {
-	case ann := <-f.notify:
-		// Drop part of the new announcements if there are too many accumulated.
-		// Note, we could but do not filter already known transactions here as
-		// the probability of something arriving between this call and the pre-
-		// filter outside is essentially zero.
-		used := len(f.waitslots[ann.origin]) + len(f.announces[ann.origin])
-		if used >= maxTxAnnounces {
-			// This can happen if a set of transactions are requested but not
-			// all fulfilled, so the remainder are rescheduled without the cap
-			// check. Should be fine as the limit is in the thousands and the
-			// request size in the hundreds.
-			//txAnnounceDOSMeter.Mark(int64(len(ann.hashes)))
-			break
-		}
-		want := used + len(ann.hashes)
-		if want > maxTxAnnounces {
-			//txAnnounceDOSMeter.Mark(int64(want - maxTxAnnounces))
-			ann.hashes = ann.hashes[:want-maxTxAnnounces]
-		}
-		// All is well, schedule the remainder of the transactions
-		idleWait := len(f.waittime) == 0
-		_, oldPeer := f.announces[ann.origin]
-
-		for _, hash := range ann.hashes {
-			// If the transaction is already downloading, add it to the list
-			// of possible alternates (in case the current retrieval fails) and
-			// also account it for the peer.
-			if f.alternates[hash] != nil {
-				f.alternates[hash][ann.origin] = struct{}{}
-
-				// Stage 2 and 3 share the set of origins per tx
-				if announces := f.announces[ann.origin]; announces != nil {
-					announces[hash] = struct{}{}
-				} else {
-					f.announces[ann.origin] = map[common.Hash]struct{}{hash: {}}
-				}
-				continue
-			}
-			// If the transaction is not downloading, but is already queued
-			// from a different peer, track it for the new peer too.
-			if f.announced[hash] != nil {
-				f.announced[hash][ann.origin] = struct{}{}
-
-				// Stage 2 and 3 share the set of origins per tx
-				if announces := f.announces[ann.origin]; announces != nil {
-					announces[hash] = struct{}{}
-				} else {
-					f.announces[ann.origin] = map[common.Hash]struct{}{hash: {}}
-				}
-				continue
-			}
-			// If the transaction is already known to the fetcher, but not
-			// yet downloading, add the peer as an alternate origin in the
-			// waiting list.
-			if f.waitlist[hash] != nil {
-				f.waitlist[hash][ann.origin] = struct{}{}
-
-				if waitslots := f.waitslots[ann.origin]; waitslots != nil {
-					waitslots[hash] = struct{}{}
-				} else {
-					f.waitslots[ann.origin] = map[common.Hash]struct{}{hash: {}}
-				}
-				continue
-			}
-			// Transaction unknown to the fetcher, insert it into the waiting list
-			f.waitlist[hash] = map[string]struct{}{ann.origin: {}}
-			f.waittime[hash] = f.clock.Now()
-
-			if waitslots := f.waitslots[ann.origin]; waitslots != nil {
-				waitslots[hash] = struct{}{}
-			} else {
-				f.waitslots[ann.origin] = map[common.Hash]struct{}{hash: {}}
-			}
-		}
-		// If a new item was added to the waitlist, schedule it into the fetcher
-		if idleWait && len(f.waittime) > 0 {
-			f.rescheduleWait(waitTimer, waitTrigger)
-		}
-		// If this peer is new and announced something already queued, maybe
-		// request transactions from them
-		if !oldPeer && len(f.announces[ann.origin]) > 0 {
-			f.scheduleFetches(timeoutTimer, timeoutTrigger, map[string]struct{}{ann.origin: {}})
-		}
-
-	case <-waitTrigger:
-		// At least one transaction's waiting time ran out, push all expired
-		// ones into the retrieval queues
-		actives := make(map[string]struct{})
-		for hash, instance := range f.waittime {
-			if time.Duration(f.clock.Now()-instance)+txGatherSlack > txArriveTimeout {
-				// Transaction expired without propagation, schedule for retrieval
-				if f.announced[hash] != nil {
-					panic("announce tracker already contains waitlist item")
-				}
-				f.announced[hash] = f.waitlist[hash]
-				for peer := range f.waitlist[hash] {
-					if announces := f.announces[peer]; announces != nil {
-						announces[hash] = struct{}{}
-					} else {
-						f.announces[peer] = map[common.Hash]struct{}{hash: {}}
-					}
-					delete(f.waitslots[peer], hash)
-					if len(f.waitslots[peer]) == 0 {
-						delete(f.waitslots, peer)
-					}
-					actives[peer] = struct{}{}
-				}
-				delete(f.waittime, hash)
-				delete(f.waitlist, hash)
-			}
-		}
-		// If transactions are still waiting for propagation, reschedule the wait timer
-		if len(f.waittime) > 0 {
-			f.rescheduleWait(waitTimer, waitTrigger)
-		}
-		// If any peers became active and are idle, request transactions from them
-		if len(actives) > 0 {
-			f.scheduleFetches(timeoutTimer, timeoutTrigger, actives)
-		}
-
-	case <-timeoutTrigger:
-		// Clean up any expired retrievals and avoid re-requesting them from the
-		// same peer (either overloaded or malicious, useless in both cases). We
-		// could also penalize (Drop), but there's nothing to gain, and if could
-		// possibly further increase the load on it.
-		for peer, req := range f.requests {
-			if time.Duration(f.clock.Now()-req.time)+txGatherSlack > txFetchTimeout {
-				//txRequestTimeoutMeter.Mark(int64(len(req.hashes)))
-
-				// Reschedule all the not-yet-delivered fetches to alternate peers
-				for _, hash := range req.hashes {
-					// Skip rescheduling hashes already delivered by someone else
-					if req.stolen != nil {
-						if _, ok := req.stolen[hash]; ok {
-							continue
-						}
-					}
-					// Move the delivery back from fetching to queued
-					if _, ok := f.announced[hash]; ok {
-						panic("announced tracker already contains alternate item")
-					}
-					if f.alternates[hash] != nil { // nil if tx was broadcast during fetch
-						f.announced[hash] = f.alternates[hash]
-					}
-					delete(f.announced[hash], peer)
-					if len(f.announced[hash]) == 0 {
-						delete(f.announced, hash)
-					}
-					delete(f.announces[peer], hash)
-					delete(f.alternates, hash)
-					delete(f.fetching, hash)
-				}
-				if len(f.announces[peer]) == 0 {
-					delete(f.announces, peer)
-				}
-				// Keep track of the request as dangling, but never expire
-				f.requests[peer].hashes = nil
-			}
-		}
-		// Schedule a new transaction retrieval
-		f.scheduleFetches(timeoutTimer, timeoutTrigger, nil)
-
-		// No idea if we scheduled something or not, trigger the timer if needed
-		// TODO(karalabe): this is kind of lame, can't we dump it into scheduleFetches somehow?
-		f.rescheduleTimeout(timeoutTimer, timeoutTrigger)
-
-	case delivery := <-f.cleanup:
-		// Independent if the delivery was direct or broadcast, remove all
-		// traces of the hash from internal trackers
-		for _, hash := range delivery.hashes {
-			if _, ok := f.waitlist[hash]; ok {
-				for peer, txset := range f.waitslots {
-					delete(txset, hash)
-					if len(txset) == 0 {
-						delete(f.waitslots, peer)
-					}
-				}
-				delete(f.waitlist, hash)
-				delete(f.waittime, hash)
-			} else {
-				for peer, txset := range f.announces {
-					delete(txset, hash)
-					if len(txset) == 0 {
-						delete(f.announces, peer)
-					}
-				}
-				delete(f.announced, hash)
-				delete(f.alternates, hash)
-
-				// If a transaction currently being fetched from a different
-				// origin was delivered (delivery stolen), mark it so the
-				// actual delivery won't double schedule it.
-				if origin, ok := f.fetching[hash]; ok && (origin != delivery.origin || !delivery.direct) {
-					stolen := f.requests[origin].stolen
-					if stolen == nil {
-						f.requests[origin].stolen = make(map[common.Hash]struct{})
-						stolen = f.requests[origin].stolen
-					}
-					stolen[hash] = struct{}{}
-				}
-				delete(f.fetching, hash)
-			}
-		}
-		// In case of a direct delivery, also reschedule anything missing
-		// from the original query
-		if delivery.direct {
-			// Mark the reqesting successful (independent of individual status)
-			//txRequestDoneMeter.Mark(int64(len(delivery.hashes)))
-
-			// Make sure something was pending, nuke it
-			req := f.requests[delivery.origin]
-			if req == nil {
-				log.Warn("Unexpected transaction delivery", "peer", delivery.origin)
-				break
-			}
-			delete(f.requests, delivery.origin)
-
-			// Anything not delivered should be re-scheduled (with or without
-			// this peer, depending on the response cutoff)
-			delivered := make(map[common.Hash]struct{})
-			for _, hash := range delivery.hashes {
-				delivered[hash] = struct{}{}
-			}
-			cutoff := len(req.hashes) // If nothing is delivered, assume everything is missing, don't retry!!!
-			for i, hash := range req.hashes {
-				if _, ok := delivered[hash]; ok {
-					cutoff = i
-				}
-			}
-			// Reschedule missing hashes from alternates, not-fulfilled from alt+self
-			for i, hash := range req.hashes {
-				// Skip rescheduling hashes already delivered by someone else
-				if req.stolen != nil {
-					if _, ok := req.stolen[hash]; ok {
-						continue
-					}
-				}
-				if _, ok := delivered[hash]; !ok {
-					if i < cutoff {
-						delete(f.alternates[hash], delivery.origin)
-						delete(f.announces[delivery.origin], hash)
-						if len(f.announces[delivery.origin]) == 0 {
-							delete(f.announces, delivery.origin)
-						}
-					}
-					if len(f.alternates[hash]) > 0 {
-						if _, ok := f.announced[hash]; ok {
-							panic(fmt.Sprintf("announced tracker already contains alternate item: %v", f.announced[hash]))
-						}
-						f.announced[hash] = f.alternates[hash]
-					}
-				}
-				delete(f.alternates, hash)
-				delete(f.fetching, hash)
-			}
-			// Something was delivered, try to rechedule requests
-			f.scheduleFetches(timeoutTimer, timeoutTrigger, nil) // Partial delivery may enable others to deliver too
-		}
-
-	case drop := <-f.drop:
-		// A peer was dropped, remove all traces of it
-		if _, ok := f.waitslots[drop.peer]; ok {
-			for hash := range f.waitslots[drop.peer] {
-				delete(f.waitlist[hash], drop.peer)
-				if len(f.waitlist[hash]) == 0 {
-					delete(f.waitlist, hash)
-					delete(f.waittime, hash)
-				}
-			}
-			delete(f.waitslots, drop.peer)
-			if len(f.waitlist) > 0 {
-				f.rescheduleWait(waitTimer, waitTrigger)
-			}
-		}
-		// Clean up any active requests
-		var request *txRequest
-		if request = f.requests[drop.peer]; request != nil {
-			for _, hash := range request.hashes {
-				// Skip rescheduling hashes already delivered by someone else
-				if request.stolen != nil {
-					if _, ok := request.stolen[hash]; ok {
-						continue
-					}
-				}
-				// Undelivered hash, reschedule if there's an alternative origin available
-				delete(f.alternates[hash], drop.peer)
-				if len(f.alternates[hash]) == 0 {
-					delete(f.alternates, hash)
-				} else {
-					f.announced[hash] = f.alternates[hash]
-					delete(f.alternates, hash)
-				}
-				delete(f.fetching, hash)
-			}
-			delete(f.requests, drop.peer)
-		}
-		// Clean up general announcement tracking
-		if _, ok := f.announces[drop.peer]; ok {
-			for hash := range f.announces[drop.peer] {
-				delete(f.announced[hash], drop.peer)
-				if len(f.announced[hash]) == 0 {
-					delete(f.announced, hash)
-				}
-			}
-			delete(f.announces, drop.peer)
-		}
-		// If a request was cancelled, check if anything needs to be rescheduled
-		if request != nil {
-			f.scheduleFetches(timeoutTimer, timeoutTrigger, nil)
-			f.rescheduleTimeout(timeoutTimer, timeoutTrigger)
-		}
-
-	case <-f.Quit:
-		return
-	}
-	// No idea what happened, but bump some sanity metrics
-	//txFetcherWaitingPeers.Update(int64(len(f.waitslots)))
-	//txFetcherWaitingHashes.Update(int64(len(f.waitlist)))
-	//txFetcherQueueingPeers.Update(int64(len(f.announces) - len(f.requests)))
-	//txFetcherQueueingHashes.Update(int64(len(f.announced)))
-	//txFetcherFetchingPeers.Update(int64(len(f.requests)))
-	//txFetcherFetchingHashes.Update(int64(len(f.fetching)))
-
-	// Loop did something, ping the step notifier if needed (tests)
-	if f.step != nil {
-		f.step <- struct{}{}
-	}
-}
-
-func (f *TxFetcher) Loop() {
+func (f *TxFetcher) loop() {
 	var (
 		waitTimer    = new(mclock.Timer)
 		timeoutTimer = new(mclock.Timer)
@@ -683,7 +352,334 @@ func (f *TxFetcher) Loop() {
 		timeoutTrigger = make(chan struct{}, 1)
 	)
 	for {
-		f.loopStep(waitTimer, timeoutTimer, waitTrigger, timeoutTrigger)
+		select {
+		case ann := <-f.notify:
+			// Drop part of the new announcements if there are too many accumulated.
+			// Note, we could but do not filter already known transactions here as
+			// the probability of something arriving between this call and the pre-
+			// filter outside is essentially zero.
+			used := len(f.waitslots[ann.origin]) + len(f.announces[ann.origin])
+			if used >= maxTxAnnounces {
+				// This can happen if a set of transactions are requested but not
+				// all fulfilled, so the remainder are rescheduled without the cap
+				// check. Should be fine as the limit is in the thousands and the
+				// request size in the hundreds.
+				//txAnnounceDOSMeter.Mark(int64(len(ann.hashes)))
+				break
+			}
+			want := used + len(ann.hashes)
+			if want > maxTxAnnounces {
+				//txAnnounceDOSMeter.Mark(int64(want - maxTxAnnounces))
+				ann.hashes = ann.hashes[:want-maxTxAnnounces]
+			}
+			// All is well, schedule the remainder of the transactions
+			idleWait := len(f.waittime) == 0
+			_, oldPeer := f.announces[ann.origin]
+
+			for _, hash := range ann.hashes {
+				// If the transaction is already downloading, add it to the list
+				// of possible alternates (in case the current retrieval fails) and
+				// also account it for the peer.
+				if f.alternates[hash] != nil {
+					f.alternates[hash][ann.origin] = struct{}{}
+
+					// Stage 2 and 3 share the set of origins per tx
+					if announces := f.announces[ann.origin]; announces != nil {
+						announces[hash] = struct{}{}
+					} else {
+						f.announces[ann.origin] = map[common.Hash]struct{}{hash: {}}
+					}
+					continue
+				}
+				// If the transaction is not downloading, but is already queued
+				// from a different peer, track it for the new peer too.
+				if f.announced[hash] != nil {
+					f.announced[hash][ann.origin] = struct{}{}
+
+					// Stage 2 and 3 share the set of origins per tx
+					if announces := f.announces[ann.origin]; announces != nil {
+						announces[hash] = struct{}{}
+					} else {
+						f.announces[ann.origin] = map[common.Hash]struct{}{hash: {}}
+					}
+					continue
+				}
+				// If the transaction is already known to the fetcher, but not
+				// yet downloading, add the peer as an alternate origin in the
+				// waiting list.
+				if f.waitlist[hash] != nil {
+					f.waitlist[hash][ann.origin] = struct{}{}
+
+					if waitslots := f.waitslots[ann.origin]; waitslots != nil {
+						waitslots[hash] = struct{}{}
+					} else {
+						f.waitslots[ann.origin] = map[common.Hash]struct{}{hash: {}}
+					}
+					continue
+				}
+				// Transaction unknown to the fetcher, insert it into the waiting list
+				f.waitlist[hash] = map[string]struct{}{ann.origin: {}}
+				f.waittime[hash] = f.clock.Now()
+
+				if waitslots := f.waitslots[ann.origin]; waitslots != nil {
+					waitslots[hash] = struct{}{}
+				} else {
+					f.waitslots[ann.origin] = map[common.Hash]struct{}{hash: {}}
+				}
+			}
+			// If a new item was added to the waitlist, schedule it into the fetcher
+			if idleWait && len(f.waittime) > 0 {
+				f.rescheduleWait(waitTimer, waitTrigger)
+			}
+			// If this peer is new and announced something already queued, maybe
+			// request transactions from them
+			if !oldPeer && len(f.announces[ann.origin]) > 0 {
+				f.scheduleFetches(timeoutTimer, timeoutTrigger, map[string]struct{}{ann.origin: {}})
+			}
+
+		case <-waitTrigger:
+			// At least one transaction's waiting time ran out, push all expired
+			// ones into the retrieval queues
+			actives := make(map[string]struct{})
+			for hash, instance := range f.waittime {
+				if time.Duration(f.clock.Now()-instance)+txGatherSlack > txArriveTimeout {
+					// Transaction expired without propagation, schedule for retrieval
+					if f.announced[hash] != nil {
+						panic("announce tracker already contains waitlist item")
+					}
+					f.announced[hash] = f.waitlist[hash]
+					for peer := range f.waitlist[hash] {
+						if announces := f.announces[peer]; announces != nil {
+							announces[hash] = struct{}{}
+						} else {
+							f.announces[peer] = map[common.Hash]struct{}{hash: {}}
+						}
+						delete(f.waitslots[peer], hash)
+						if len(f.waitslots[peer]) == 0 {
+							delete(f.waitslots, peer)
+						}
+						actives[peer] = struct{}{}
+					}
+					delete(f.waittime, hash)
+					delete(f.waitlist, hash)
+				}
+			}
+			// If transactions are still waiting for propagation, reschedule the wait timer
+			if len(f.waittime) > 0 {
+				f.rescheduleWait(waitTimer, waitTrigger)
+			}
+			// If any peers became active and are idle, request transactions from them
+			if len(actives) > 0 {
+				f.scheduleFetches(timeoutTimer, timeoutTrigger, actives)
+			}
+
+		case <-timeoutTrigger:
+			// Clean up any expired retrievals and avoid re-requesting them from the
+			// same peer (either overloaded or malicious, useless in both cases). We
+			// could also penalize (Drop), but there's nothing to gain, and if could
+			// possibly further increase the load on it.
+			for peer, req := range f.requests {
+				if time.Duration(f.clock.Now()-req.time)+txGatherSlack > txFetchTimeout {
+					//txRequestTimeoutMeter.Mark(int64(len(req.hashes)))
+
+					// Reschedule all the not-yet-delivered fetches to alternate peers
+					for _, hash := range req.hashes {
+						// Skip rescheduling hashes already delivered by someone else
+						if req.stolen != nil {
+							if _, ok := req.stolen[hash]; ok {
+								continue
+							}
+						}
+						// Move the delivery back from fetching to queued
+						if _, ok := f.announced[hash]; ok {
+							panic("announced tracker already contains alternate item")
+						}
+						if f.alternates[hash] != nil { // nil if tx was broadcast during fetch
+							f.announced[hash] = f.alternates[hash]
+						}
+						delete(f.announced[hash], peer)
+						if len(f.announced[hash]) == 0 {
+							delete(f.announced, hash)
+						}
+						delete(f.announces[peer], hash)
+						delete(f.alternates, hash)
+						delete(f.fetching, hash)
+					}
+					if len(f.announces[peer]) == 0 {
+						delete(f.announces, peer)
+					}
+					// Keep track of the request as dangling, but never expire
+					f.requests[peer].hashes = nil
+				}
+			}
+			// Schedule a new transaction retrieval
+			f.scheduleFetches(timeoutTimer, timeoutTrigger, nil)
+
+			// No idea if we scheduled something or not, trigger the timer if needed
+			// TODO(karalabe): this is kind of lame, can't we dump it into scheduleFetches somehow?
+			f.rescheduleTimeout(timeoutTimer, timeoutTrigger)
+
+		case delivery := <-f.cleanup:
+			// Independent if the delivery was direct or broadcast, remove all
+			// traces of the hash from internal trackers
+			for _, hash := range delivery.hashes {
+				if _, ok := f.waitlist[hash]; ok {
+					for peer, txset := range f.waitslots {
+						delete(txset, hash)
+						if len(txset) == 0 {
+							delete(f.waitslots, peer)
+						}
+					}
+					delete(f.waitlist, hash)
+					delete(f.waittime, hash)
+				} else {
+					for peer, txset := range f.announces {
+						delete(txset, hash)
+						if len(txset) == 0 {
+							delete(f.announces, peer)
+						}
+					}
+					delete(f.announced, hash)
+					delete(f.alternates, hash)
+
+					// If a transaction currently being fetched from a different
+					// origin was delivered (delivery stolen), mark it so the
+					// actual delivery won't double schedule it.
+					if origin, ok := f.fetching[hash]; ok && (origin != delivery.origin || !delivery.direct) {
+						stolen := f.requests[origin].stolen
+						if stolen == nil {
+							f.requests[origin].stolen = make(map[common.Hash]struct{})
+							stolen = f.requests[origin].stolen
+						}
+						stolen[hash] = struct{}{}
+					}
+					delete(f.fetching, hash)
+				}
+			}
+			// In case of a direct delivery, also reschedule anything missing
+			// from the original query
+			if delivery.direct {
+				// Mark the reqesting successful (independent of individual status)
+				//txRequestDoneMeter.Mark(int64(len(delivery.hashes)))
+
+				// Make sure something was pending, nuke it
+				req := f.requests[delivery.origin]
+				if req == nil {
+					log.Warn("Unexpected transaction delivery", "peer", delivery.origin)
+					break
+				}
+				delete(f.requests, delivery.origin)
+
+				// Anything not delivered should be re-scheduled (with or without
+				// this peer, depending on the response cutoff)
+				delivered := make(map[common.Hash]struct{})
+				for _, hash := range delivery.hashes {
+					delivered[hash] = struct{}{}
+				}
+				cutoff := len(req.hashes) // If nothing is delivered, assume everything is missing, don't retry!!!
+				for i, hash := range req.hashes {
+					if _, ok := delivered[hash]; ok {
+						cutoff = i
+					}
+				}
+				// Reschedule missing hashes from alternates, not-fulfilled from alt+self
+				for i, hash := range req.hashes {
+					// Skip rescheduling hashes already delivered by someone else
+					if req.stolen != nil {
+						if _, ok := req.stolen[hash]; ok {
+							continue
+						}
+					}
+					if _, ok := delivered[hash]; !ok {
+						if i < cutoff {
+							delete(f.alternates[hash], delivery.origin)
+							delete(f.announces[delivery.origin], hash)
+							if len(f.announces[delivery.origin]) == 0 {
+								delete(f.announces, delivery.origin)
+							}
+						}
+						if len(f.alternates[hash]) > 0 {
+							if _, ok := f.announced[hash]; ok {
+								panic(fmt.Sprintf("announced tracker already contains alternate item: %v", f.announced[hash]))
+							}
+							f.announced[hash] = f.alternates[hash]
+						}
+					}
+					delete(f.alternates, hash)
+					delete(f.fetching, hash)
+				}
+				// Something was delivered, try to rechedule requests
+				f.scheduleFetches(timeoutTimer, timeoutTrigger, nil) // Partial delivery may enable others to deliver too
+			}
+
+		case drop := <-f.drop:
+			// A peer was dropped, remove all traces of it
+			if _, ok := f.waitslots[drop.peer]; ok {
+				for hash := range f.waitslots[drop.peer] {
+					delete(f.waitlist[hash], drop.peer)
+					if len(f.waitlist[hash]) == 0 {
+						delete(f.waitlist, hash)
+						delete(f.waittime, hash)
+					}
+				}
+				delete(f.waitslots, drop.peer)
+				if len(f.waitlist) > 0 {
+					f.rescheduleWait(waitTimer, waitTrigger)
+				}
+			}
+			// Clean up any active requests
+			var request *txRequest
+			if request = f.requests[drop.peer]; request != nil {
+				for _, hash := range request.hashes {
+					// Skip rescheduling hashes already delivered by someone else
+					if request.stolen != nil {
+						if _, ok := request.stolen[hash]; ok {
+							continue
+						}
+					}
+					// Undelivered hash, reschedule if there's an alternative origin available
+					delete(f.alternates[hash], drop.peer)
+					if len(f.alternates[hash]) == 0 {
+						delete(f.alternates, hash)
+					} else {
+						f.announced[hash] = f.alternates[hash]
+						delete(f.alternates, hash)
+					}
+					delete(f.fetching, hash)
+				}
+				delete(f.requests, drop.peer)
+			}
+			// Clean up general announcement tracking
+			if _, ok := f.announces[drop.peer]; ok {
+				for hash := range f.announces[drop.peer] {
+					delete(f.announced[hash], drop.peer)
+					if len(f.announced[hash]) == 0 {
+						delete(f.announced, hash)
+					}
+				}
+				delete(f.announces, drop.peer)
+			}
+			// If a request was cancelled, check if anything needs to be rescheduled
+			if request != nil {
+				f.scheduleFetches(timeoutTimer, timeoutTrigger, nil)
+				f.rescheduleTimeout(timeoutTimer, timeoutTrigger)
+			}
+
+		case <-f.quit:
+			return
+		}
+		// No idea what happened, but bump some sanity metrics
+		//txFetcherWaitingPeers.Update(int64(len(f.waitslots)))
+		//txFetcherWaitingHashes.Update(int64(len(f.waitlist)))
+		//txFetcherQueueingPeers.Update(int64(len(f.announces) - len(f.requests)))
+		//txFetcherQueueingHashes.Update(int64(len(f.announced)))
+		//txFetcherFetchingPeers.Update(int64(len(f.requests)))
+		//txFetcherFetchingHashes.Update(int64(len(f.fetching)))
+
+		// Loop did something, ping the step notifier if needed (tests)
+		if f.step != nil {
+			f.step <- struct{}{}
+		}
 	}
 }
 
