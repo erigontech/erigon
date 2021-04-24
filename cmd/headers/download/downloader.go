@@ -159,6 +159,9 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 			}
 			return
 		}
+		if req == nil {
+			return
+		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("Handling incoming message", "error", err)
@@ -182,6 +185,9 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 				log.Error("Receive loop terminated", "error", err)
 				return
 			}
+			return
+		}
+		if req == nil {
 			return
 		}
 

@@ -417,10 +417,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloadV2 {
-		sentryServer := download.NewSentryServer(context.Background())
+		eth.sentryServer = download.NewSentryServer(context.Background())
 		sentry := &download.SentryClientDirect{}
-		sentryServer.P2pServer = eth.p2pServer
-		sentry.SetServer(sentryServer)
+		eth.sentryServer.P2pServer = eth.p2pServer
+		sentry.SetServer(eth.sentryServer)
 		eth.sentries = []proto_sentry.SentryClient{sentry}
 		blockDownloaderWindow := 65536
 		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
