@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path"
 
@@ -230,6 +231,23 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
 		}
 		log.Info("Applied migration", "name", v.Name)
+	}
+	// Write DB schema version
+	var major, minor, patch [4]byte
+	binary.BigEndian.PutUint32(major[:], dbutils.DBSchemaVersion.Major)
+	binary.BigEndian.PutUint32(minor[:], dbutils.DBSchemaVersion.Minor)
+	binary.BigEndian.PutUint32(patch[:], dbutils.DBSchemaVersion.Patch)
+	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor, major[:]); err != nil {
+		return fmt.Errorf("writing major DB version: %w", err)
+	}
+	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMinor, minor[:]); err != nil {
+		return fmt.Errorf("writing minor DB version: %w", err)
+	}
+	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionPatch, patch[:]); err != nil {
+		return fmt.Errorf("writing patch DB version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing DB version update: %w", err)
 	}
 	return nil
 }

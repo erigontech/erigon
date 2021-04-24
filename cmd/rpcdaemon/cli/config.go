@@ -2,15 +2,18 @@ package cli
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"path"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -113,6 +116,40 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
+func checkDbCompatibility(db ethdb.RwKV) error {
+	// DB schema version compatibility check
+	var major, minor, patch []byte
+	var compatErr error
+	var compatTx ethdb.Tx
+	if compatTx, compatErr = db.BeginRo(context.Background()); compatErr != nil {
+		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
+	}
+	defer compatTx.Rollback()
+	if major, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
+		return fmt.Errorf("read major version for DB schema compability check: %w", compatErr)
+	}
+	if minor, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
+		return fmt.Errorf("read minor version for DB schema compability check: %w", compatErr)
+	}
+	if patch, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionMajor); compatErr != nil {
+		return fmt.Errorf("read patch version for DB schema compability check: %w", compatErr)
+	}
+	var compatible bool
+	if binary.BigEndian.Uint32(major[:]) != dbutils.DBSchemaVersion.Major {
+		compatible = false
+	} else if binary.BigEndian.Uint32(minor[:]) != dbutils.DBSchemaVersion.Minor {
+		compatible = false
+	} else {
+		compatible = true
+	}
+	if !compatible {
+		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
+			dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch,
+			binary.BigEndian.Uint32(major[:]), binary.BigEndian.Uint32(minor[:]), binary.BigEndian.Uint32(patch[:]))
+	}
+	return nil
+}
+
 func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 	var db ethdb.RwKV
 	var ethBackend core.ApiBackend
@@ -125,6 +162,9 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 		} else {
 			err = errOpen
 			_ = err
+		}
+		if compatErr := checkDbCompatibility(db); compatErr != nil {
+			return nil, nil, compatErr
 		}
 		if cfg.SnapshotMode != "" {
 			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
@@ -140,7 +180,10 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 	}
 	if cfg.PrivateApiAddr != "" {
 		var remoteKv ethdb.RwKV
-		remoteKv, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		remoteKv, err = ethdb.NewRemote(
+			remotedbserver.KvServiceAPIVersion.Major,
+			remotedbserver.KvServiceAPIVersion.Minor,
+			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
