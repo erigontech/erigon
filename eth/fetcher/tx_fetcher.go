@@ -145,7 +145,7 @@ type TxFetcher struct {
 	notify  chan *txAnnounce
 	cleanup chan *txDelivery
 	drop    chan *txDrop
-	quit    chan struct{}
+	Quit    chan struct{}
 
 	underpriced mapset.Set // Transactions discarded as too cheap (don't re-fetch)
 
@@ -192,7 +192,7 @@ func NewTxFetcherForTests(
 		notify:      make(chan *txAnnounce),
 		cleanup:     make(chan *txDelivery),
 		drop:        make(chan *txDrop),
-		quit:        make(chan struct{}),
+		Quit:        make(chan struct{}),
 		waitlist:    make(map[common.Hash]map[string]struct{}),
 		waittime:    make(map[common.Hash]mclock.AbsTime),
 		waitslots:   make(map[string]map[common.Hash]struct{}),
@@ -251,7 +251,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	select {
 	case f.notify <- announce:
 		return nil
-	case <-f.quit:
+	case <-f.Quit:
 		return errTerminated
 	}
 }
@@ -315,7 +315,7 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 	select {
 	case f.cleanup <- &txDelivery{origin: peer, hashes: added, direct: direct}:
 		return nil
-	case <-f.quit:
+	case <-f.Quit:
 		return errTerminated
 	}
 }
@@ -326,7 +326,7 @@ func (f *TxFetcher) Drop(peer string) error {
 	select {
 	case f.drop <- &txDrop{peer: peer}:
 		return nil
-	case <-f.quit:
+	case <-f.Quit:
 		return errTerminated
 	}
 }
@@ -340,7 +340,7 @@ func (f *TxFetcher) Start() {
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *TxFetcher) Stop() {
-	common.SafeClose(f.quit)
+	common.SafeClose(f.Quit)
 }
 
 func (f *TxFetcher) loopStep(waitTimer, timeoutTimer *mclock.Timer, waitTrigger, timeoutTrigger chan struct{}) {
@@ -657,7 +657,7 @@ func (f *TxFetcher) loopStep(waitTimer, timeoutTimer *mclock.Timer, waitTrigger,
 			f.rescheduleTimeout(timeoutTimer, timeoutTrigger)
 		}
 
-	case <-f.quit:
+	case <-f.Quit:
 		return
 	}
 	// No idea what happened, but bump some sanity metrics

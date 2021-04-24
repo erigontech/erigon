@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/txpropagate"
 	"google.golang.org/grpc"
 )
 
@@ -60,36 +59,6 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 		if err1 != nil {
 			log.Error("Could not send block bodies request", "err", err1)
 			return nil
-		}
-		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			continue
-		}
-		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-	}
-	return nil
-}
-
-func (cs *ControlServerImpl) sendTxsRequest(ctx context.Context, req *txpropagate.TxsRequest) []byte {
-	bytes, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
-		RequestId:                   rand.Uint64(), //nolint:gosec
-		GetPooledTransactionsPacket: req.Hashes,
-	})
-	if err != nil {
-		log.Error("Could not send transactions request", "err", err)
-		return nil
-	}
-
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: gointerfaces.ConvertBytesToH512(req.PeerID),
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GetPooledTransactions, Data: bytes},
-	}
-
-	// if sentry not found peers to send such message, try next one. stop if found.
-	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		sentPeers, err1 := cs.sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send block bodies request", "err", err1)
-			continue
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
