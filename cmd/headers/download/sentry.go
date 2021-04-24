@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -76,6 +75,7 @@ func makeP2PServer(
 	statusFn func() *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -121,7 +121,7 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh)
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh, receiveTxCh)
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
@@ -135,6 +135,7 @@ func MakeProtocols(ctx context.Context,
 	statusFn func() *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) []p2p.Protocol {
 	return []p2p.Protocol{
 		{
@@ -158,6 +159,7 @@ func MakeProtocols(ctx context.Context,
 					statusFn(),
 					receiveCh,
 					receiveUploadCh,
+					receiveTxCh,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
@@ -279,6 +281,7 @@ func runPeer(
 	status *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) error {
 	peerID := peer.ID().String()
 	rwRaw, ok := peerRwMap.Load(peerID)
@@ -361,35 +364,55 @@ func runPeer(
 			}
 			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
 		case eth.NewPooledTransactionHashesMsg:
-			var hashes []common.Hash
-			if err := msg.Decode(&hashes); err != nil {
-				return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			var hashesStr strings.Builder
-			for _, hash := range hashes {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
-				}
-				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			}
+			trySend(receiveCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NewPooledTransactionHashes})
+			//var hashes []common.Hash
+			//if err := msg.Decode(&hashes); err != nil {
+			//	return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+			//}
+			//var hashesStr strings.Builder
+			//for _, hash := range hashes {
+			//	if hashesStr.Len() > 0 {
+			//		hashesStr.WriteString(",")
+			//	}
+			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			//}
 			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peerID, hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			trySend(receiveCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GetPooledTransactions})
 			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
 		case eth.TransactionsMsg:
-			var txs eth.TransactionsPacket
-			if err := msg.Decode(&txs); err != nil {
-				return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			var hashesStr strings.Builder
-			for _, tx := range txs {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
-				}
-				hash := tx.Hash()
-				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			}
+			trySend(receiveCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_Transactions})
+			//var txs eth.TransactionsPacket
+			//if err := msg.Decode(&txs); err != nil {
+			//	return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
+			//}
+			//var hashesStr strings.Builder
+			//for _, tx := range txs {
+			//	if hashesStr.Len() > 0 {
+			//		hashesStr.WriteString(",")
+			//	}
+			//	hash := tx.Hash()
+			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			//}
 			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peerID, hashesStr.String()))
 		case eth.PooledTransactionsMsg:
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			trySend(receiveCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_PooledTransactions})
 			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peerID)
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
@@ -498,6 +521,7 @@ func p2pServer(ctx context.Context,
 		sentryServer.getStatus,
 		sentryServer.receiveCh,
 		sentryServer.receiveUploadCh,
+		sentryServer.receiveTxCh,
 	)
 	if err != nil {
 		return nil, err
@@ -561,6 +585,7 @@ type SentryServerImpl struct {
 	receiveCh       chan StreamMsg
 	stopCh          chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
 	receiveUploadCh chan StreamMsg
+	receiveTxCh     chan StreamMsg
 	uploadStopCh    chan struct{} // Channel used to signal (by closing) to the receiver on `receiveUploadCh` to stop reading
 	lock            sync.RWMutex
 }
@@ -824,6 +849,28 @@ func (ss *SentryServerImpl) restartUpload() {
 }
 
 func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
+	// Close previous channel and recreate
+	ss.restartUpload()
+	for {
+		select {
+		case <-ss.uploadStopCh:
+			log.Warn("Finished receive upload messages")
+			return nil
+		case streamMsg := <-ss.receiveUploadCh:
+			outreq := proto_sentry.InboundMessage{
+				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
+				Id:     streamMsg.msgId,
+				Data:   streamMsg.b,
+			}
+			if err := server.Send(&outreq); err != nil {
+				log.Error("Sending msg to core P2P failed", "msg", streamMsg.msgName, "error", err)
+				return err
+			}
+		}
+	}
+}
+
+func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveTxMessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartUpload()
 	for {
