@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"runtime"
 	"sync"
 	"time"
 
@@ -74,21 +73,10 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	}
 
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
-
 	controlServer, err1 := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window, chain)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
-
-	fetchTx := func(peerID string, hashes []common.Hash) error {
-		controlServer.sendTxsRequest(context.TODO(), peerID, hashes)
-		return nil
-	}
-	controlServer.txFetcher = fetcher.NewTxFetcher(controlServer.txPool.Has, controlServer.txPool.AddRemotes, fetchTx)
-	controlServer.txPool = txPool
-	go controlServer.txFetcher.Loop()
 
 	// TODO: Make a reconnection loop
 	statusMsg := makeStatusData(controlServer)
@@ -211,20 +199,10 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db, txCacher)
-
 	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window, chain)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
-
-	fetchTx := func(peerID string, hashes []common.Hash) error {
-		controlServer.sendTxsRequest(context.TODO(), peerID, hashes)
-		return nil
-	}
-	controlServer.txFetcher = fetcher.NewTxFetcher(controlServer.txPool.Has, controlServer.txPool.AddRemotes, fetchTx)
-	controlServer.txPool = txPool
 
 	var readNodeInfo = func() *eth.NodeInfo {
 		var res *eth.NodeInfo
@@ -244,7 +222,6 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
 
-	go controlServer.txFetcher.Loop()
 	go recvMessage(ctx, sentry, controlServer.handleInboundMessage)
 	go recvUploadMessage(ctx, sentry, controlServer.handleInboundMessage)
 
@@ -717,97 +694,9 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 		return cs.receipts(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GetReceipts:
 		return cs.getReceipts(ctx, inreq, sentry)
-	case proto_sentry.MessageId_NewPooledTransactionHashes:
-		return cs.newPooledTransactionHashes(ctx, inreq, sentry)
-	case proto_sentry.MessageId_PooledTransactions:
-		return cs.pooledTransactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_Transactions:
-		return cs.transactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GetPooledTransactions:
-		return cs.getPooledTransactions(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
-}
-
-func (cs *ControlServerImpl) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.NewPooledTransactionHashesPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
-	}
-	return cs.txFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
-}
-
-func (cs *ControlServerImpl) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.PooledTransactionsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
-	}
-
-	return cs.txFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
-}
-
-func (cs *ControlServerImpl) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.TransactionsPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
-	}
-	return cs.txFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
-}
-
-func (cs *ControlServerImpl) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.GetPooledTransactionsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
-	}
-	_, txs := eth.AnswerGetPooledTransactions(cs.txPool, query.GetPooledTransactionsPacket)
-	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
-		RequestId:                   query.RequestId,
-		PooledTransactionsRLPPacket: txs,
-	})
-	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
-	}
-	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_PooledTransactions, Data: b},
-	}
-	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil {
-		return fmt.Errorf("send pooled transactions response: %v", err)
-	}
-	return nil
-}
-
-func (cs *ControlServerImpl) sendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	bytes, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
-		RequestId:                   rand.Uint64(), //nolint:gosec
-		GetPooledTransactionsPacket: hashes,
-	})
-	if err != nil {
-		log.Error("Could not send transactions request", "err", err)
-		return nil
-	}
-
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GetPooledTransactions, Data: bytes},
-	}
-
-	// if sentry not found peers to send such message, try next one. stop if found.
-	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		sentPeers, err1 := cs.sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send block bodies request", "err", err1)
-			continue
-		}
-		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			continue
-		}
-		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-	}
-	return nil
 }
 
 func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
