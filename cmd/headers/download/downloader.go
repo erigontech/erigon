@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -338,8 +337,6 @@ type ControlServerImpl struct {
 	networkId            uint64
 	db                   ethdb.Database
 	engine               consensus.Engine
-	txFetcher            *fetcher.TxFetcher
-	txPool               *core.TxPool
 }
 
 func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64) {
