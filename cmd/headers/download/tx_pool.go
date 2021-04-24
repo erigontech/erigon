@@ -39,6 +39,8 @@ func CombinedTxPool(db ethdb.Database, sentries []proto_sentry.SentryClient, cha
 	go recvMessage(ctx, sentries[0], controlServer.handleInboundMessage)
 	go recvUploadMessage(ctx, sentries[0], controlServer.handleInboundMessage)
 
+	<-txFetcher.Quit
+
 	return nil
 }
 
