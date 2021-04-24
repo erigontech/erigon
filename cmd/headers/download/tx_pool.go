@@ -20,16 +20,15 @@ import (
 )
 
 type TxPoolServer struct {
-	sentries []proto_sentry.SentryClient
-	txPool   *core.TxPool
-	fetcher  *fetcher.TxFetcher
+	sentries  []proto_sentry.SentryClient
+	txPool    *core.TxPool
+	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool, fetcher *fetcher.TxFetcher) (*TxPoolServer, error) {
+func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		sentries: sentries,
 		txPool:   txPool,
-		fetcher:  fetcher,
 	}
 	return cs, nil
 }
@@ -39,7 +38,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *p
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	return tp.fetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
+	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
 func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -48,7 +47,7 @@ func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sen
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
 
-	return tp.fetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
+	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
 }
 
 func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -59,7 +58,7 @@ func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	return tp.fetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
+	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
 
 func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {

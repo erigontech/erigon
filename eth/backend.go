@@ -109,7 +109,6 @@ type Ethereum struct {
 	downloadServer   *download.ControlServerImpl
 	sentryServer     *download.SentryServerImpl
 	txPoolServer     *download.TxPoolServer
-	txFetcher        *fetcher.TxFetcher
 	sentries         []proto_sentry.SentryClient
 	stagedSync2      *stagedsync.StagedSync
 }
@@ -434,17 +433,17 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
 			return nil, err
 		}
-		fetchTx := func(peerID string, hashes []common.Hash) error {
-			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
-			return nil
-		}
-		eth.txFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
-
-		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool, eth.txFetcher)
+		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
 		if err != nil {
 			return nil, err
 		}
 
+		fetchTx := func(peerID string, hashes []common.Hash) error {
+			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+			return nil
+		}
+
+		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
@@ -852,7 +851,7 @@ func (s *Ethereum) Start() error {
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
 	if s.config.EnableDownloadV2 {
-		s.txFetcher.Start()
+		s.txPoolServer.TxFetcher.Stop()
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
@@ -870,7 +869,7 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	if s.config.EnableDownloadV2 {
 		s.downloadV2Cancel()
-		s.txFetcher.Stop()
+		s.txPoolServer.TxFetcher.Stop()
 		s.txPool.Stop()
 	} else {
 		s.handler.Stop()
