@@ -2,7 +2,6 @@ package clique
 
 import (
 	"bytes"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -18,22 +17,6 @@ import (
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	// Verify the header's EIP-1559 attributes.
-	if chain.Config().IsAleut(header.Number.Uint64()) {
-		var parent *types.Header
-		if len(parents) > 0 {
-			parent = parents[len(parents)-1]
-		} else {
-			parent = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-			if parent == nil {
-				return fmt.Errorf("could not find parent with hash %x and number %x in db", header.ParentHash, header.Number.Uint64()-1)
-			}
-		}
-
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
-			return err
-		}
-	}
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -118,7 +101,15 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		parent = parents[len(parents)-1]
 	} else {
 		parent = chain.GetHeader(header.ParentHash, number-1)
-		parents = []*types.Header{parent}
+	}
+	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
+		return consensus.ErrUnknownAncestor
+	}
+	// Verify the header's EIP-1559 attributes.
+	if chain.Config().IsAleut(header.Number.Uint64()) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+			return err
+		}
 	}
 
 	if parent.Time+c.config.Period > header.Time {
