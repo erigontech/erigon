@@ -490,12 +490,13 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage log index", "progress", s.BlockNumber)
 	ch := ctx.Done()
 
+	cfg := stagedsync.StageLogIndexCfg(tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
-		return stagedsync.UnwindLogIndex(u, s, tx, ch)
+		return stagedsync.UnwindLogIndex(u, s, tx, cfg, ch)
 	}
 
-	if err := stagedsync.SpawnLogIndex(s, tx, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnLogIndex(s, tx, cfg, ch); err != nil {
 		return err
 	}
 	return nil

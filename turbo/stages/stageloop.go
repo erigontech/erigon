@@ -21,16 +21,19 @@ const (
 
 func NewStagedSync(
 	ctx context.Context,
+	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	trieCfg stagedsync.TrieCfg,
+	history stagedsync.HistoryCfg,
+	logIndex stagedsync.LogIndexCfg,
 ) *stagedsync.StagedSync {
 
 	return stagedsync.New(
-		ReplacementStages(ctx, headers, bodies, senders, exec, hashState, trieCfg),
+		ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -109,12 +112,15 @@ func StageLoop(
 }
 
 func ReplacementStages(ctx context.Context,
+	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	trieCfg stagedsync.TrieCfg,
+	history stagedsync.HistoryCfg,
+	logIndex stagedsync.LogIndexCfg,
 ) stagedsync.StageBuilders {
 	return []stagedsync.StageBuilder{
 		{
@@ -223,6 +229,57 @@ func ReplacementStages(ctx context.Context,
 				}
 			},
 		},
+		{
+			ID: stages.AccountHistoryIndex,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:                  stages.AccountHistoryIndex,
+					Description:         "Generate account history index",
+					Disabled:            !sm.History,
+					DisabledDescription: "Enable by adding `h` to --storage-mode",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnAccountHistoryIndex(s, world.TX, history, world.QuitCh)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindAccountHistoryIndex(u, s, world.TX, history, world.QuitCh)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.StorageHistoryIndex,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:                  stages.StorageHistoryIndex,
+					Description:         "Generate storage history index",
+					Disabled:            !sm.History,
+					DisabledDescription: "Enable by adding `h` to --storage-mode",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnStorageHistoryIndex(s, world.TX, history, world.QuitCh)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindStorageHistoryIndex(u, s, world.TX, history, world.QuitCh)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.LogIndex,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:                  stages.LogIndex,
+					Description:         "Generate receipt logs index",
+					Disabled:            !sm.Receipts,
+					DisabledDescription: "Enable by adding `r` to --storage-mode",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnLogIndex(s, world.TX, logIndex, world.QuitCh)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindLogIndex(u, s, world.TX, logIndex, world.QuitCh)
+					},
+				}
+			},
+		},
 	}
 }
 
@@ -235,6 +292,7 @@ func ReplacementUnwindOrder() stagedsync.UnwindOrder {
 		3, 4, // senders, exec
 		6, 5, // Unwinding of IHashes needs to happen after unwinding HashState
 		7, 8, // history
-		//9, 10, 11,
+		9, // log index
+		// 10, 11,
 	}
 }

@@ -26,7 +26,21 @@ const (
 	bitmapsFlushEvery = 10 * time.Second
 )
 
-func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+type LogIndexCfg struct {
+	bufLimit   datasize.ByteSize
+	flushEvery time.Duration
+	tmpdir     string
+}
+
+func StageLogIndexCfg(tmpDir string) LogIndexCfg {
+	return LogIndexCfg{
+		bufLimit:   bitmapsBufLimit,
+		flushEvery: bitmapsFlushEvery,
+		tmpdir:     tmpDir,
+	}
+}
+
+func SpawnLogIndex(s *StageState, db ethdb.Database, cfg LogIndexCfg, quit <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -56,7 +70,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, cfg, quit); err != nil {
 		return err
 	}
 
@@ -72,7 +86,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -83,11 +97,11 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit dat
 		return err
 	}
 	defer logs.Close()
-	checkFlushEvery := time.NewTicker(flushEvery)
+	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorTopics := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	collectorAddrs := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTopics := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorAddrs := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	reader := bytes.NewReader(nil)
 
@@ -108,14 +122,14 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit dat
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
-			if needFlush(topics, bufLimit) {
+			if needFlush(topics, cfg.bufLimit) {
 				if err := flushBitmaps(collectorTopics, topics); err != nil {
 					return err
 				}
 				topics = map[string]*roaring.Bitmap{}
 			}
 
-			if needFlush(addresses, bufLimit) {
+			if needFlush(addresses, cfg.bufLimit) {
 				if err := flushBitmaps(collectorAddrs, addresses); err != nil {
 					return err
 				}
@@ -202,7 +216,7 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, bufLimit dat
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
+func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, cfg LogIndexCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -218,7 +232,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -235,7 +249,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, quitCh <-chan struct{}) error {
+func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg, quitCh <-chan struct{}) error {
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 

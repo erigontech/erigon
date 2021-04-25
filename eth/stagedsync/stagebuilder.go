@@ -275,16 +275,17 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.LogIndex,
 			Build: func(world StageParameters) *Stage {
+				logIndexCfg := StageLogIndexCfg(world.TmpDir)
 				return &Stage{
 					ID:                  stages.LogIndex,
 					Description:         "Generate receipt logs index",
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnLogIndex(s, world.TX, logIndexCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
+						return UnwindLogIndex(u, s, world.TX, logIndexCfg, world.QuitCh)
 					},
 				}
 			},

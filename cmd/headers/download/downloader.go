@@ -289,7 +289,7 @@ func NewStagedSync(
 		return nil, err
 	}
 
-	return stages.NewStagedSync(ctx,
+	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
 			controlServer.hd,
 			*controlServer.chainConfig,
@@ -321,6 +321,8 @@ func NewStagedSync(
 		),
 		stagedsync.StageHashStateCfg(tmpdir),
 		stagedsync.StageTrieCfg(true, true, tmpdir),
+		stagedsync.StageHistoryCfg(tmpdir),
+		stagedsync.StageLogIndexCfg(tmpdir),
 	), nil
 }
 
