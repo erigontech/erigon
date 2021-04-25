@@ -24,13 +24,13 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
-	bd.maxProgress = headerProgress + 1
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
+	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.lowWaitUntil = 0
@@ -45,11 +45,14 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	}
 	bd.peerMap = make(map[string]int)
 	headHeight = bodyProgress
-	headHash = rawdb.ReadHeaderByNumber(db, headHeight).Hash()
+	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
+		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)

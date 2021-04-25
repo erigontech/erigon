@@ -120,7 +120,7 @@ type Config struct {
 
 	Pruning bool // Whether to disable pruning and flush everything to disk
 
-	EnableDownloaderV2 bool
+	EnableDownloadV2 bool
 
 	StorageMode     ethdb.StorageMode
 	BatchSize       datasize.ByteSize // Batch size for execution stage

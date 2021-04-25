@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -46,12 +47,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
+	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -73,12 +76,14 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPool            *core.TxPool
+	txPool *core.TxPool
+
 	handler           *handler
 	ethDialCandidates enode.Iterator
 
 	// DB interfaces
-	chainKV    ethdb.RwKV // Same as chainDb, but different interface
+	chainDB    ethdb.Database // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -97,6 +102,15 @@ type Ethereum struct {
 	chainConfig *params.ChainConfig
 	genesisHash common.Hash
 	quitMining  chan struct{}
+
+	// downloader v2 fields
+	downloadV2Ctx    context.Context
+	downloadV2Cancel context.CancelFunc
+	downloadServer   *download.ControlServerImpl
+	sentryServer     *download.SentryServerImpl
+	txPoolServer     *download.TxPoolServer
+	sentries         []proto_sentry.SentryClient
+	stagedSync2      *stagedsync.StagedSync
 }
 
 // New creates a new Ethereum object (including the
@@ -259,6 +273,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	eth := &Ethereum{
 		config:        config,
+		chainDB:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
@@ -403,7 +418,44 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	checkpoint := config.Checkpoint
-	if eth.config.EnableDownloaderV2 {
+	if eth.config.EnableDownloadV2 {
+		eth.sentryServer = download.NewSentryServer(context.Background())
+		sentry := &download.SentryClientDirect{}
+		eth.sentryServer.P2pServer = eth.p2pServer
+		sentry.SetServer(eth.sentryServer)
+		eth.sentries = []proto_sentry.SentryClient{sentry}
+		blockDownloaderWindow := 65536
+		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
+		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
+		if err != nil {
+			return nil, err
+		}
+		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
+			return nil, err
+		}
+		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
+		if err != nil {
+			return nil, err
+		}
+
+		fetchTx := func(peerID string, hashes []common.Hash) error {
+			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+			return nil
+		}
+
+		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
+		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
+
+		eth.stagedSync2, err = download.NewStagedSync(
+			eth.downloadV2Ctx,
+			eth.chainDB,
+			config.BatchSize,
+			bodyDownloadTimeoutSeconds,
+			eth.downloadServer,
+		)
+		if err != nil {
+			return nil, err
+		}
 
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
@@ -649,21 +701,23 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
-		if s.config.EnableDownloaderV2 {
+		if s.config.EnableDownloadV2 {
 
 		} else {
 			atomic.StoreUint32(&s.handler.acceptTxs, 1)
 		}
 
-		tx, err := s.ChainKV().BeginRo(context.Background())
+		tx, err := s.chainKV.BeginRo(context.Background())
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		hh := rawdb.ReadCurrentHeader(tx)
-		execution, _ := stages.GetStageProgress(tx, stages.Execution)
-		if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-			return err
+		if hh != nil {
+			execution, _ := stages.GetStageProgress(tx, stages.Execution)
+			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+				return err
+			}
 		}
 	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
@@ -771,8 +825,19 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 		return res
 	}
-	if s.config.EnableDownloaderV2 {
-		return nil // downloader.MakeProtocols()
+	if s.config.EnableDownloadV2 {
+		return download.MakeProtocols(
+			s.downloadV2Ctx,
+			readNodeInfo,
+			s.ethDialCandidates,
+			&s.sentryServer.Peers,
+			&s.sentryServer.PeerHeightMap,
+			&s.sentryServer.PeerTimeMap,
+			&s.sentryServer.PeerRwMap,
+			s.sentryServer.GetStatus,
+			s.sentryServer.ReceiveCh,
+			s.sentryServer.ReceiveUploadCh,
+			s.sentryServer.ReceiveTxCh)
 	} else {
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}
@@ -785,8 +850,12 @@ func (s *Ethereum) Start() error {
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	if s.config.EnableDownloaderV2 {
-
+	if s.config.EnableDownloadV2 {
+		s.txPoolServer.TxFetcher.Stop()
+		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
+		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer)
 	} else {
 		// Start the networking layer and the light server if requested
 		s.handler.Start(maxPeers)
@@ -798,8 +867,10 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	if s.config.EnableDownloaderV2 {
-
+	if s.config.EnableDownloadV2 {
+		s.downloadV2Cancel()
+		s.txPoolServer.TxFetcher.Stop()
+		s.txPool.Stop()
 	} else {
 		s.handler.Stop()
 	}
