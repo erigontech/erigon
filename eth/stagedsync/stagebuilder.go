@@ -334,10 +334,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return spawnTxPool(s, world.TX, txPoolCfg, world.QuitCh)
+						return SpawnTxPool(s, world.TX, txPoolCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindTxPool(u, s, world.TX, txPoolCfg, world.QuitCh)
+						return UnwindTxPool(u, s, world.TX, txPoolCfg, world.QuitCh)
 					},
 				}
 			},

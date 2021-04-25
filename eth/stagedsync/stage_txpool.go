@@ -26,7 +26,7 @@ func StageTxPoolCfg(pool *core.TxPool, poolStart func() error) TxPoolCfg {
 	}
 }
 
-func spawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -146,7 +146,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+func UnwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil

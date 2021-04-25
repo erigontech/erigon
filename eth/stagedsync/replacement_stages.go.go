@@ -220,10 +220,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return spawnTxPool(s, world.TX, txPoolCfg, ctx.Done())
+						return SpawnTxPool(s, world.TX, txPoolCfg, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindTxPool(u, s, world.TX, txPoolCfg, ctx.Done())
+						return UnwindTxPool(u, s, world.TX, txPoolCfg, ctx.Done())
 					},
 				}
 			},
