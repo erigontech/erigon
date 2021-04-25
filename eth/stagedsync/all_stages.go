@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -171,22 +170,18 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.CallTraces,
 			Build: func(world StageParameters) *Stage {
+				callTracesCfg := StageCallTracesCfg(0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
+
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
-							CallTracesStageParams{
-								BatchSize: world.BatchSize,
-							})
+						return SpawnCallTraces(s, world.TX, world.QuitCh, callTracesCfg)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
-							CallTracesStageParams{
-								BatchSize: world.BatchSize,
-							})
+						return UnwindCallTraces(u, s, world.TX, world.QuitCh, callTracesCfg)
 					},
 				}
 			},
@@ -194,16 +189,17 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
+				txLookupCfg := StageTxLookupCfg(world.TmpDir)
 				return &Stage{
 					ID:                  stages.TxLookup,
 					Description:         "Generate tx lookup index",
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnTxLookup(s, world.TX, txLookupCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX, txLookupCfg, world.QuitCh)
 					},
 				}
 			},
@@ -215,28 +211,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						logPrefix := s.state.LogPrefix()
-						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
-
-						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.DB)
-						if err != nil {
-							return err
-						}
-
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return FinishForward(s, world.DB, world.notifier)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return UnwindFinish(u, s, world.DB)
 					},
 				}
 			},

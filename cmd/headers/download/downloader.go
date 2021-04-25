@@ -323,6 +323,8 @@ func NewStagedSync(
 		stagedsync.StageTrieCfg(true, true, tmpdir),
 		stagedsync.StageHistoryCfg(tmpdir),
 		stagedsync.StageLogIndexCfg(tmpdir),
+		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
+		stagedsync.StageTxLookupCfg(tmpdir),
 	), nil
 }
 

@@ -293,22 +293,17 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.CallTraces,
 			Build: func(world StageParameters) *Stage {
+				callTracesCfg := StageCallTracesCfg(0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.ChainConfig, world.Engine, world.TmpDir, world.QuitCh,
-							CallTracesStageParams{
-								BatchSize: world.BatchSize,
-							})
+						return SpawnCallTraces(s, world.TX, world.QuitCh, callTracesCfg)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.ChainConfig, world.Engine, world.QuitCh,
-							CallTracesStageParams{
-								BatchSize: world.BatchSize,
-							})
+						return UnwindCallTraces(u, s, world.TX, world.QuitCh, callTracesCfg)
 					},
 				}
 			},
@@ -316,16 +311,17 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
+				txLookupCfg := StageTxLookupCfg(world.TmpDir)
 				return &Stage{
 					ID:                  stages.TxLookup,
 					Description:         "Generate tx lookup index",
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnTxLookup(s, world.TX, txLookupCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX, txLookupCfg, world.QuitCh)
 					},
 				}
 			},
@@ -333,14 +329,15 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
+				txPoolCfg := StageTxPoolCfg(world.txPool, world.poolStart)
 				return &Stage{
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return spawnTxPool(s, world.TX, world.txPool, world.poolStart, world.QuitCh)
+						return spawnTxPool(s, world.TX, txPoolCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindTxPool(u, s, world.TX, world.txPool, world.QuitCh)
+						return unwindTxPool(u, s, world.TX, txPoolCfg, world.QuitCh)
 					},
 				}
 			},
