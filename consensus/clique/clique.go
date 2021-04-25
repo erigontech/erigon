@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -193,10 +192,8 @@ type Clique struct {
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
 	db             ethdb.Database         // Database to store and retrieve snapshot checkpoints
 
-	signatures     *lru.ARCCache // Signatures of recent blocks to speed up mining
-	recents        *lru.ARCCache // Snapshots for recent block to speed up reorgs
-	recentsNum     *lru.ARCCache // Snapshots for recent block to speed up reorgs
-	snapshotBlocks *lru.ARCCache // blockNum -> hash
+	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
+	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -207,9 +204,8 @@ type Clique struct {
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 
-	reinit      sync.Once
-	snapStorage *storage
-	exitCh      chan struct{}
+	reinit sync.Once
+	exitCh chan struct{}
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
@@ -224,8 +220,6 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueD
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
-	recentsNum, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
-	snapshotBlocks, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
 	signatures, _ := lru.NewARC(snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
@@ -236,11 +230,8 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueD
 		snapshotConfig: snapshotConfig,
 		db:             cliqueDB,
 		recents:        recents,
-		recentsNum:     recentsNum,
-		snapshotBlocks: snapshotBlocks,
 		signatures:     signatures,
 		proposals:      make(map[common.Address]bool),
-		snapStorage:    newStorage(cliqueDB, exitCh),
 		exitCh:         exitCh,
 	}
 
@@ -258,7 +249,6 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueD
 
 		for _, sn := range snaps {
 			c.recentsAdd(sn.Number, sn.Hash, sn)
-			c.snapshotBlocks.Add(sn.Number, sn.Hash)
 		}
 	}
 
@@ -273,22 +263,11 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	// Verify the header's EIP-1559 attributes.
-	if chain.Config().IsAleut(header.Number.Uint64()) {
-		parent := chain.GetHeaderByHash(header.ParentHash)
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
-			return err
-		}
-	}
 	c.reinit.Do(func() {
 		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
 
-	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
-	if err != nil {
-		return err
-	}
-	return c.verifyHeaderBySnapshot(chain, header, snap)
+	return c.verifyHeader(chain, header, nil)
 }
 
 func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader, upTo uint64) {
@@ -312,18 +291,17 @@ func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader, upTo uin
 
 	snapBlock := chain.GetHeaderByNumber(lastSnap)
 	snapHash := snapBlock.Hash()
-
-	snap, ok := c.getSnapshot(lastSnap, &snapHash)
-	if !ok || snap == nil {
-		// genesis case
-		if lastSnap == 0 {
-			snap, err = c.storeGenesisSnapshot(snapBlock)
-			if err != nil || snap == nil {
-				log.Error("can't create a genesis Clique snapshot", "block", lastSnap, "hash", snapHash, "err", err)
-				return
-			}
-		} else {
-			log.Error("can't find latest Clique snapshot", "block", snapBlock, "hash", snapHash, "err", err)
+	var snap *Snapshot
+	// genesis case
+	if lastSnap == 0 {
+		snap, err = c.storeGenesisSnapshot(snapBlock)
+		if err != nil || snap == nil {
+			log.Error("can't create a genesis Clique snapshot", "block", lastSnap, "hash", snapHash, "err", err)
+			return
+		}
+	} else {
+		if snap, err = loadSnapshot(c.db, lastSnap, snapHash); err != nil {
+			log.Error("cannot load last snapshot", "number", lastSnap, "hash", snapHash, "error", err)
 			return
 		}
 	}
@@ -376,25 +354,16 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 		return cancel, results
 	}
 
-	// fixme make it fixed rather than spawn a goroutine each time
 	go func() {
-		ancestorsTillSnapshot := c.getAncestors(chain, headers[0].Number.Uint64(), headers[0].Hash(), headers[0].ParentHash)
-
-		n := len(ancestorsTillSnapshot)
-		if n > 0 {
-			ancestorsTillSnapshot = append(ancestorsTillSnapshot, headers...)
-		} else {
-			ancestorsTillSnapshot = headers
-		}
-
 		for i, header := range headers {
+			err := c.verifyHeader(chain, header, headers[:i])
+
 			select {
 			case <-abort:
 				return
-			case results <- c.verifyHeader(chain, header, ancestorsTillSnapshot[:i+n]):
+			case results <- err:
 			}
 		}
-
 		close(results)
 	}()
 
@@ -407,8 +376,7 @@ type VerifyHeaderResponse struct {
 }
 
 func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
-	c.recents.Add(hash, s.Copy())
-	c.recentsNum.Add(num, struct{}{})
+	c.recents.Add(hash, s.copy())
 }
 
 func (c *Clique) recentsGet(hash common.Hash) (*Snapshot, bool) {
@@ -420,7 +388,7 @@ func (c *Clique) recentsGet(hash common.Hash) (*Snapshot, bool) {
 	if sn == nil {
 		return nil, false
 	}
-	return sn.Copy(), true
+	return sn.copy(), true
 }
 
 func (c *Clique) recentsHas(hash common.Hash) bool {
@@ -432,34 +400,17 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, check bool, headers ...*t
 		return fmt.Errorf("can't create a new snapshot, a previous one is nil: %w", ErrNotFound)
 	}
 
-	num := snap.Number + uint64(len(headers))
-
-	hash := snap.Hash
-	if len(headers) > 0 {
-		hash = headers[len(headers)-1].Hash()
-	}
-
-	if hash != (common.Hash{}) && check {
-		s, ok := c.getSnapshot(num, &hash)
-		if ok {
-			*snap = *s
-			return nil
-		}
-	}
-
 	if len(headers) > 0 && headers[len(headers)-1].Number.Uint64() > snap.Number {
-		if err := snap.apply(c.signatures, headers...); err != nil {
+		if _, err := snap.apply(c.signatures, headers...); err != nil {
 			return err
 		}
 	}
 
 	c.recentsAdd(snap.Number, snap.Hash, snap)
 
-	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-
 	// If we've generated a new checkpoint snapshot, save to disk
 	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-		if err := snap.store(); err != nil {
+		if err := snap.store(c.db); err != nil {
 			return err
 		}
 		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
@@ -484,7 +435,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
 	})
 
-	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), header.ParentHash)
+	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return err
 	}
@@ -504,7 +455,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	number := header.Number.Uint64()
 	// Assemble the voting snapshot to check which votes make sense
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -615,7 +566,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, common.Hash{})
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -675,7 +626,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 		c.regenerateSnapshots(chain, parentNumber)
 	})
 
-	snap, err := c.snapshot(chain, parentNumber, parentHash, common.Hash{})
+	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
 		return nil
 	}
@@ -697,7 +648,6 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
 	common.SafeClose(c.exitCh)
-	c.snapStorage.Close()
 	return nil
 }
 
@@ -774,23 +724,9 @@ func (c *Clique) checkSnapshot(num uint64, hash *common.Hash) bool {
 
 func (c *Clique) findSnapshot(num uint64, hash *common.Hash) bool {
 	var (
-		h        interface{}
-		ok       bool
-		snapHash common.Hash
-		err      error
+		ok  bool
+		err error
 	)
-
-	if h, ok = c.snapshotBlocks.Peek(num); ok {
-		snapHash, ok = h.(common.Hash)
-		if ok {
-			if hash != nil && *hash != snapHash {
-				ok = false
-			} else {
-				// If an in-memory snapshot was found, use that
-				ok = c.recentsHas(snapHash)
-			}
-		}
-	}
 
 	if !ok && hash != nil {
 		// If an on-disk checkpoint snapshot can be found, use that
@@ -801,38 +737,6 @@ func (c *Clique) findSnapshot(num uint64, hash *common.Hash) bool {
 	}
 
 	return ok
-}
-
-func (c *Clique) getSnapshot(num uint64, hash *common.Hash) (*Snapshot, bool) {
-	var (
-		h        interface{}
-		s        *Snapshot
-		ok       bool
-		snapHash common.Hash
-		err      error
-	)
-
-	if h, ok = c.snapshotBlocks.Peek(num); ok {
-		snapHash, ok = h.(common.Hash)
-		if ok {
-			if hash != nil && *hash != snapHash {
-				ok = false
-			} else {
-				// If an in-memory snapshot was found, use that
-				s, ok = c.recentsGet(snapHash)
-			}
-		}
-	}
-
-	if !ok && hash != nil {
-		// If an on-disk checkpoint snapshot can be found, use that
-		s, err = loadSnapshot(c.db, num, *hash)
-		if err != nil {
-			ok = false
-		}
-	}
-
-	return s, ok
 }
 
 func (c *Clique) lookupSnapshot(num uint64) bool {
@@ -897,7 +801,6 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 		}
 
 		s.config = c.config
-		s.snapStorage = c.snapStorage
 
 		res = append(res, s)
 
