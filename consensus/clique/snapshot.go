@@ -89,7 +89,7 @@ func newSnapshot(config *params.CliqueConfig, number uint64, hash common.Hash, s
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *params.CliqueConfig, db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, error) {
 	blob, err := db.Get(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
@@ -99,6 +99,7 @@ func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, e
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
+	snap.config = config
 
 	return snap, nil
 }

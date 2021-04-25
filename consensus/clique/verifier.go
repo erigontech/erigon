@@ -162,7 +162,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%c.snapshotConfig.CheckpointInterval == 0 {
-			if s, err := loadSnapshot(c.db, number, hash); err == nil {
+			if s, err := loadSnapshot(c.config, c.db, number, hash); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
