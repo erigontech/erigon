@@ -21,13 +21,30 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-var cmdTestDriver = &cobra.Command{
-	Use:   "test_driver",
-	Short: "",
+var (
+	testingAddr  string // Address of the gRPC endpoint of the integration testing server
+	sentryAddr   string // Address of the gRPC endpoint of the test sentry (mimicking sentry for the integration tests)
+	consAddr     string // Address of the gRPC endpoint of consensus engine to test
+	consSpecFile string // Path to the specification file for the consensus engine (ideally, integration test and consensus engine use identical spec files)
+)
+
+func init() {
+	cmdTestCore.Flags().StringVar(&testingAddr, "testing.api.addr", "localhost:9092", "address of the gRPC endpoint of the integration testing server")
+	cmdTestCore.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "Address of the gRPC endpoint of the test sentry (mimicking sentry for the integration tests)")
+	rootCmd.AddCommand(cmdTestCore)
+
+	cmdTestCons.Flags().StringVar(&consAddr, "cons.api.addr", "locahost:9093", "Address of the gRPC endpoint of the consensus engine to test")
+	cmdTestCons.Flags().StringVar(&consSpecFile, "cons.spec.file", "", "Specification file for the consensis engine (ideally, integration test and consensus engine use identical spec files)")
+	rootCmd.AddCommand(cmdTestCons)
+}
+
+var cmdTestCore = &cobra.Command{
+	Use:   "test_core",
+	Short: "Test server for testing core of turbo-geth or equivalent component",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 
-		if err := testDriver(ctx); err != nil {
+		if err := testCore(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -35,7 +52,20 @@ var cmdTestDriver = &cobra.Command{
 	},
 }
 
-func testDriver(ctx context.Context) error {
+var cmdTestCons = &cobra.Command{
+	Use:   "test_cons",
+	Short: "Integration test for consensus engine",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := testCons(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
+func testCore(ctx context.Context) error {
 	if _, err := grpcTestDriverServer(ctx, testingAddr); err != nil {
 		return fmt.Errorf("start test driver gRPC server: %w", err)
 	}
@@ -162,4 +192,8 @@ type TestSentryServerImpl struct {
 
 func NewTestSentryServer(_ context.Context) *TestSentryServerImpl {
 	return &TestSentryServerImpl{}
+}
+
+func testCons(ctx context.Context) error {
+	return nil
 }
