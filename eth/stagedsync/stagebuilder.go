@@ -239,16 +239,17 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.AccountHistoryIndex,
 			Build: func(world StageParameters) *Stage {
+				cfg := StageHistoryCfg(world.TmpDir)
 				return &Stage{
 					ID:                  stages.AccountHistoryIndex,
 					Description:         "Generate account history index",
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnAccountHistoryIndex(s, world.TX, cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, s, world.TX, world.QuitCh)
+						return UnwindAccountHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
 					},
 				}
 			},
@@ -256,16 +257,17 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.StorageHistoryIndex,
 			Build: func(world StageParameters) *Stage {
+				cfg := StageHistoryCfg(world.TmpDir)
 				return &Stage{
 					ID:                  stages.StorageHistoryIndex,
 					Description:         "Generate storage history index",
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnStorageHistoryIndex(s, world.TX, cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, s, world.TX, world.QuitCh)
+						return UnwindStorageHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
 					},
 				}
 			},
