@@ -279,7 +279,7 @@ var splitIHBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(true, true, tmpdir), expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {
@@ -321,7 +321,7 @@ var deleteExtensionHashesFromTrieBucket = Migration{
 		}
 		expectedRootHash := syncHeadHeader.Root
 
-		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), true, tmpdir, expectedRootHash, nil); err != nil {
+		if _, err := stagedsync.RegenerateIntermediateHashes(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(true, true, tmpdir), expectedRootHash, nil); err != nil {
 			return err
 		}
 		if err := CommitProgress(db, nil, true); err != nil {

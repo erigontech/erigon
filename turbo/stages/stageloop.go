@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -21,16 +22,22 @@ const (
 
 func NewStagedSync(
 	ctx context.Context,
+	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
+	hashState stagedsync.HashStateCfg,
+	trieCfg stagedsync.TrieCfg,
+	history stagedsync.HistoryCfg,
+	logIndex stagedsync.LogIndexCfg,
+	callTraces stagedsync.CallTracesCfg,
+	txLookup stagedsync.TxLookupCfg,
 ) *stagedsync.StagedSync {
-
 	return stagedsync.New(
-		ReplacementStages(ctx, headers, bodies, senders, exec),
-		ReplacementUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup),
+		stagedsync.ReplacementUnwindOrder(),
+		stagedsync.OptionalParameters{Notifier: remotedbserver.NewEvents()},
 	)
 }
 
@@ -104,95 +111,4 @@ func StageLoop(
 		}
 	}
 	return nil
-}
-
-func ReplacementStages(ctx context.Context,
-	headers stagedsync.HeadersCfg,
-	bodies stagedsync.BodiesCfg,
-	senders stagedsync.SendersCfg,
-	exec stagedsync.ExecuteBlockCfg,
-) stagedsync.StageBuilders {
-	return []stagedsync.StageBuilder{
-		{
-			ID: stages.Headers,
-			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
-				return &stagedsync.Stage{
-					ID:          stages.Headers,
-					Description: "Download headers",
-					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, headers, world.InitialCycle)
-					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return stagedsync.HeadersUnwind(u, s, world.TX)
-					},
-				}
-			},
-		},
-		{
-			ID: stages.BlockHashes,
-			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
-				return &stagedsync.Stage{
-					ID:          stages.BlockHashes,
-					Description: "Write block hashes",
-					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.SpawnBlockHashStage(s, world.TX, world.TmpDir, world.QuitCh)
-					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return u.Done(world.DB)
-					},
-				}
-			},
-		},
-		{
-			ID: stages.Bodies,
-			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
-				return &stagedsync.Stage{
-					ID:          stages.Bodies,
-					Description: "Download block bodies",
-					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.BodiesForward(s, ctx, world.TX, bodies)
-					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return u.Done(world.DB)
-					},
-				}
-			},
-		},
-		{
-			ID: stages.Senders,
-			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
-				return &stagedsync.Stage{
-					ID:          stages.Senders,
-					Description: "Recover senders from tx signatures",
-					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, ctx.Done())
-					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return stagedsync.UnwindSendersStage(u, s, world.TX)
-					},
-				}
-			},
-		},
-		{
-			ID: stages.Execution,
-			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
-				return &stagedsync.Stage{
-					ID:          stages.Execution,
-					Description: "Execute blocks w/o hash checks",
-					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.SpawnExecuteBlocksStage(s, world.TX, 0, ctx.Done(), exec)
-					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return stagedsync.UnwindExecutionStage(u, s, world.TX, ctx.Done(), exec)
-					},
-				}
-			},
-		},
-	}
-}
-
-func ReplacementUnwindOrder() stagedsync.UnwindOrder {
-	return []int{
-		0, 1, 2,
-	}
 }

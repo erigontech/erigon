@@ -51,8 +51,11 @@ func TestLogIndex(t *testing.T) {
 
 	err = rawdb.AppendReceipts(tx, 2, receipts2)
 	require.NoError(err)
-
-	err = promoteLogIndex("logPrefix", tx, 0, 10, time.Millisecond, "", nil)
+	cfg := StageLogIndexCfg("")
+	cfgCopy := cfg
+	cfgCopy.bufLimit = 10
+	cfgCopy.flushEvery = time.Millisecond
+	err = promoteLogIndex("logPrefix", tx, 0, cfgCopy, nil)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -73,7 +76,7 @@ func TestLogIndex(t *testing.T) {
 	require.Equal(2, int(m.GetCardinality()))
 
 	// Unwind test
-	err = unwindLogIndex("logPrefix", tx, 1, nil)
+	err = unwindLogIndex("logPrefix", tx, 1, cfg, nil)
 	require.NoError(err)
 
 	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
@@ -93,7 +96,7 @@ func TestLogIndex(t *testing.T) {
 	require.Equal(1, int(m.GetCardinality()))
 
 	// Unwind test
-	err = unwindLogIndex("logPrefix", tx, 0, nil)
+	err = unwindLogIndex("logPrefix", tx, 0, cfg, nil)
 	require.NoError(err)
 
 	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)

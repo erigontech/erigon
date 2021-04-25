@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"path"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"github.com/spf13/cobra"
 )
@@ -45,11 +48,12 @@ var downloadCmd = &cobra.Command{
 		defer db.Close()
 		nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
 		nodeName := nodeConfig.NodeName()
+		tmpdir := path.Join(nodeConfig.DataDir, etl.TmpDirName)
 
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName)
+			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName, tmpdir)
 		}
 
-		return download.Download(sentryAddrs, db, timeout, window, chain, nodeName)
+		return download.Download(sentryAddrs, db, timeout, window, chain, nodeName, tmpdir)
 	},
 }
