@@ -37,7 +37,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -73,7 +73,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	cfg := StageHashStateCfg(getTmpDir())
+	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -152,13 +153,13 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	err = PromoteHashedStateCleanly("logPrefix", tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			defer tx.Rollback()
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
 			}
 		})
@@ -240,7 +241,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 
-			if err := PromoteHashedStateCleanly("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := PromoteHashedStateCleanly("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), StageHashStateCfg(getTmpDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateCleanly , got: %v, expected: %v", err, tc.errExp)
 			}
 
@@ -277,13 +278,13 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 			defer tx.Rollback()
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-
-			err = PromoteHashedStateCleanly("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), nil)
+			cfg := StageHashStateCfg(getTmpDir())
+			err = PromoteHashedStateCleanly("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, nil)
 			require.NoError(t, err)
 
 			u := &UnwindState{UnwindPoint: 5}
 			s := &StageState{BlockNumber: 10}
-			if err = unwindHashStateStageImpl("logPrefix", u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), getTmpDir(), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err = unwindHashStateStageImpl("logPrefix", u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown unwindHashStateStageImpl, got: %v, expected: %v", err, tc.errExp)
 			}
 

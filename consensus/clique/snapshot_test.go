@@ -500,7 +500,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := blocks[len(blocks)-1]
 
-			snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), head.ParentHash())
+			snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)

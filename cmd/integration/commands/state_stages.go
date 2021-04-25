@@ -418,12 +418,12 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	to := execStage.BlockNumber - unwind
 	_ = st.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, stagedsync.StageHashStateCfg(path.Join(datadir, etl.TmpDirName)), ch); err != nil {
 		return err
 	}
 	_ = st.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(true, true, path.Join(datadir, etl.TmpDirName)), ch); err != nil {
 		return err
 	}
 	_ = clearUnwindStack(tx, context.Background())

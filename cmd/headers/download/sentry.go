@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,16 +34,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
-)
-
-var (
-	// gitCommit is injected through the build flags (see Makefile)
-	gitCommit string
-	gitBranch string
 )
 
 const (
@@ -71,6 +63,7 @@ func nodeKey() *ecdsa.PrivateKey {
 
 func makeP2PServer(
 	ctx context.Context,
+	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	natSetting string,
 	port int,
@@ -82,6 +75,7 @@ func makeP2PServer(
 	statusFn func() *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -100,8 +94,7 @@ func makeP2PServer(
 	p2pConfig.NAT = natif
 	p2pConfig.PrivateKey = serverKey
 
-	nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
-	p2pConfig.Name = nodeConfig.NodeName()
+	p2pConfig.Name = nodeName
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
@@ -128,7 +121,7 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh)
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh, receiveTxCh)
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
@@ -142,6 +135,7 @@ func MakeProtocols(ctx context.Context,
 	statusFn func() *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) []p2p.Protocol {
 	return []p2p.Protocol{
 		{
@@ -165,6 +159,7 @@ func MakeProtocols(ctx context.Context,
 					statusFn(),
 					receiveCh,
 					receiveUploadCh,
+					receiveTxCh,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
@@ -286,6 +281,7 @@ func runPeer(
 	status *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
+	receiveTxCh chan<- StreamMsg,
 ) error {
 	peerID := peer.ID().String()
 	rwRaw, ok := peerRwMap.Load(peerID)
@@ -368,35 +364,55 @@ func runPeer(
 			}
 			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
 		case eth.NewPooledTransactionHashesMsg:
-			var hashes []common.Hash
-			if err := msg.Decode(&hashes); err != nil {
-				return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			var hashesStr strings.Builder
-			for _, hash := range hashes {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
-				}
-				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			}
+			trySend(receiveTxCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NewPooledTransactionHashes})
+			//var hashes []common.Hash
+			//if err := msg.Decode(&hashes); err != nil {
+			//	return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+			//}
+			//var hashesStr strings.Builder
+			//for _, hash := range hashes {
+			//	if hashesStr.Len() > 0 {
+			//		hashesStr.WriteString(",")
+			//	}
+			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			//}
 			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peerID, hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			trySend(receiveTxCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GetPooledTransactions})
 			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
 		case eth.TransactionsMsg:
-			var txs eth.TransactionsPacket
-			if err := msg.Decode(&txs); err != nil {
-				return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			var hashesStr strings.Builder
-			for _, tx := range txs {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
-				}
-				hash := tx.Hash()
-				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			}
+			trySend(receiveTxCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_Transactions})
+			//var txs eth.TransactionsPacket
+			//if err := msg.Decode(&txs); err != nil {
+			//	return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
+			//}
+			//var hashesStr strings.Builder
+			//for _, tx := range txs {
+			//	if hashesStr.Len() > 0 {
+			//		hashesStr.WriteString(",")
+			//	}
+			//	hash := tx.Hash()
+			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			//}
 			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peerID, hashesStr.String()))
 		case eth.PooledTransactionsMsg:
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			trySend(receiveTxCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_PooledTransactions})
 			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peerID)
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
@@ -477,14 +493,17 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 func NewSentryServer(ctx context.Context) *SentryServerImpl {
 	return &SentryServerImpl{
 		ctx:             ctx,
-		receiveCh:       make(chan StreamMsg, 1024),
-		receiveUploadCh: make(chan StreamMsg, 1024),
+		ReceiveCh:       make(chan StreamMsg, 1024),
+		ReceiveUploadCh: make(chan StreamMsg, 1024),
+		ReceiveTxCh:     make(chan StreamMsg, 1024),
 		stopCh:          make(chan struct{}),
 		uploadStopCh:    make(chan struct{}),
+		txStopCh:        make(chan struct{}),
 	}
 }
 
 func p2pServer(ctx context.Context,
+	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	sentryServer *SentryServerImpl,
 	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
@@ -492,17 +511,19 @@ func p2pServer(ctx context.Context,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
+		nodeName,
 		readNodeInfo,
 		natSetting,
 		port,
-		&sentryServer.peers,
-		&sentryServer.peerHeightMap,
-		&sentryServer.peerTimeMap,
-		&sentryServer.peerRwMap,
+		&sentryServer.Peers,
+		&sentryServer.PeerHeightMap,
+		&sentryServer.PeerTimeMap,
+		&sentryServer.PeerRwMap,
 		genesisHash,
-		sentryServer.getStatus,
-		sentryServer.receiveCh,
-		sentryServer.receiveUploadCh,
+		sentryServer.GetStatus,
+		sentryServer.ReceiveCh,
+		sentryServer.ReceiveUploadCh,
+		sentryServer.ReceiveTxCh,
 	)
 	if err != nil {
 		return nil, err
@@ -556,34 +577,37 @@ type SentryServerImpl struct {
 	staticPeers     []string
 	discovery       bool
 	netRestrict     string
-	peers           sync.Map
-	peerHeightMap   sync.Map
-	peerRwMap       sync.Map
-	peerTimeMap     sync.Map
+	Peers           sync.Map
+	PeerHeightMap   sync.Map
+	PeerRwMap       sync.Map
+	PeerTimeMap     sync.Map
 	statusData      *proto_sentry.StatusData
-	p2pServer       *p2p.Server
-	receiveCh       chan StreamMsg
+	P2pServer       *p2p.Server
+	nodeName        string
+	ReceiveCh       chan StreamMsg
 	stopCh          chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
-	receiveUploadCh chan StreamMsg
+	ReceiveUploadCh chan StreamMsg
 	uploadStopCh    chan struct{} // Channel used to signal (by closing) to the receiver on `receiveUploadCh` to stop reading
+	ReceiveTxCh     chan StreamMsg
+	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	lock            sync.RWMutex
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
-	ss.peerRwMap.Delete(strId)
-	ss.peerTimeMap.Delete(strId)
-	ss.peerHeightMap.Delete(strId)
+	ss.PeerRwMap.Delete(strId)
+	ss.PeerTimeMap.Delete(strId)
+	ss.PeerHeightMap.Delete(strId)
 	return &empty.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*empty.Empty, error) {
 	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
-	x, _ := ss.peerHeightMap.Load(peerID)
+	x, _ := ss.PeerHeightMap.Load(peerID)
 	highestBlock, _ := x.(uint64)
 	if req.MinBlock > highestBlock {
-		ss.peerHeightMap.Store(peerID, req.MinBlock)
+		ss.PeerHeightMap.Store(peerID, req.MinBlock)
 	}
 	return &empty.Empty{}, nil
 }
@@ -593,11 +617,11 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, bool) {
 	var peerID string
 	var found bool
 	timeNow := time.Now().Unix()
-	ss.peerHeightMap.Range(func(key, value interface{}) bool {
+	ss.PeerHeightMap.Range(func(key, value interface{}) bool {
 		valUint, _ := value.(uint64)
 		if valUint >= minBlock {
 			peerID = key.(string)
-			timeRaw, _ := ss.peerTimeMap.Load(peerID)
+			timeRaw, _ := ss.PeerTimeMap.Load(peerID)
 			t, _ := timeRaw.(int64)
 			// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
 			if t <= timeNow {
@@ -615,12 +639,12 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	if !found {
 		return &proto_sentry.SentPeers{}, nil
 	}
-	rwRaw, _ := ss.peerRwMap.Load(peerID)
+	rwRaw, _ := ss.PeerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
-		ss.peerHeightMap.Delete(peerID)
-		ss.peerTimeMap.Delete(peerID)
-		ss.peerRwMap.Delete(peerID)
+		ss.PeerHeightMap.Delete(peerID)
+		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock find rw for peer %s", peerID)
 	}
 	var msgcode uint64
@@ -633,18 +657,18 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
-		ss.peerHeightMap.Delete(peerID)
-		ss.peerTimeMap.Delete(peerID)
-		ss.peerRwMap.Delete(peerID)
+		ss.PeerHeightMap.Delete(peerID)
+		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
+	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+5)
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
-	rwRaw, ok := ss.peerRwMap.Load(peerID)
+	rwRaw, ok := ss.PeerRwMap.Load(peerID)
 	if !ok {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
@@ -668,9 +692,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	}
 
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
-		ss.peerHeightMap.Delete(peerID)
-		ss.peerTimeMap.Delete(peerID)
-		ss.peerRwMap.Delete(peerID)
+		ss.PeerHeightMap.Delete(peerID)
+		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
@@ -688,7 +712,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	}
 
 	amount := uint64(0)
-	ss.peerRwMap.Range(func(key, value interface{}) bool {
+	ss.PeerRwMap.Range(func(key, value interface{}) bool {
 		amount++
 		return true
 	})
@@ -701,13 +725,13 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	i := 0
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
-	ss.peerRwMap.Range(func(key, value interface{}) bool {
+	ss.PeerRwMap.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		rw, _ := value.(p2p.MsgReadWriter)
 		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
-			ss.peerHeightMap.Delete(peerID)
-			ss.peerTimeMap.Delete(peerID)
-			ss.peerRwMap.Delete(peerID)
+			ss.PeerHeightMap.Delete(peerID)
+			ss.PeerTimeMap.Delete(peerID)
+			ss.PeerRwMap.Delete(peerID)
 			innerErr = err
 			return false
 		}
@@ -734,13 +758,13 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
-	ss.peerRwMap.Range(func(key, value interface{}) bool {
+	ss.PeerRwMap.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		rw, _ := value.(p2p.MsgReadWriter)
 		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
-			ss.peerHeightMap.Delete(peerID)
-			ss.peerTimeMap.Delete(peerID)
-			ss.peerRwMap.Delete(peerID)
+			ss.PeerHeightMap.Delete(peerID)
+			ss.PeerTimeMap.Delete(peerID)
+			ss.PeerRwMap.Delete(peerID)
 			innerErr = err
 			return false
 		}
@@ -761,22 +785,22 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.p2pServer, err = p2pServer(ss.ctx, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}
 		// Add protocol
-		if err := ss.p2pServer.Start(); err != nil {
+		if err := ss.P2pServer.Start(); err != nil {
 			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
 		}
 	}
 	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-	ss.p2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
+	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return &empty.Empty{}, nil
 }
 
-func (ss *SentryServerImpl) getStatus() *proto_sentry.StatusData {
+func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 	ss.lock.RLock()
 	defer ss.lock.RUnlock()
 	return ss.statusData
@@ -797,7 +821,7 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 		case <-ss.stopCh:
 			log.Warn("Finished receive messages")
 			return nil
-		case streamMsg := <-ss.receiveCh:
+		case streamMsg := <-ss.ReceiveCh:
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,
@@ -827,6 +851,14 @@ func (ss *SentryServerImpl) restartUpload() {
 	ss.uploadStopCh = make(chan struct{})
 }
 
+func (ss *SentryServerImpl) restartTxs() {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	// Close previous channel and recreate
+	close(ss.txStopCh)
+	ss.txStopCh = make(chan struct{})
+}
+
 func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartUpload()
@@ -835,7 +867,29 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 		case <-ss.uploadStopCh:
 			log.Warn("Finished receive upload messages")
 			return nil
-		case streamMsg := <-ss.receiveUploadCh:
+		case streamMsg := <-ss.ReceiveUploadCh:
+			outreq := proto_sentry.InboundMessage{
+				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
+				Id:     streamMsg.msgId,
+				Data:   streamMsg.b,
+			}
+			if err := server.Send(&outreq); err != nil {
+				log.Error("Sending msg to core P2P failed", "msg", streamMsg.msgName, "error", err)
+				return err
+			}
+		}
+	}
+}
+
+func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveTxMessagesServer) error {
+	// Close previous channel and recreate
+	ss.restartTxs()
+	for {
+		select {
+		case <-ss.txStopCh:
+			log.Warn("Finished receive txs messages")
+			return nil
+		case streamMsg := <-ss.ReceiveTxCh:
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,

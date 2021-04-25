@@ -80,11 +80,20 @@ func New(
 
 	ethConfig.StagedSync = sync
 
-	ethereum := utils.RegisterEthService(node, ethConfig, optionalParams.GitCommit)
+	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
 	return &TurboGethNode{stack: node, backend: ethereum}
+}
+
+// RegisterEthService adds an Ethereum client to the stack.
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, gitCommit string) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg, gitCommit)
+	if err != nil {
+		panic(err)
+	}
+	return backend
 }
 
 func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
