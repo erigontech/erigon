@@ -317,16 +317,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	vmConfig, _ := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 
-	// Rewind the chain in case of an incompatible config upgrade.
-	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
-		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
-		core.SetHead(chainDb, compat.RewindTo)
-		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
 		if err != nil {
