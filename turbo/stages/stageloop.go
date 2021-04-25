@@ -228,13 +228,13 @@ func ReplacementStages(ctx context.Context,
 
 func ReplacementUnwindOrder() stagedsync.UnwindOrder {
 	return []int{
-		0, 1, 2,
+		0, 1, 2, // download headers/bodies
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
 		//12,
-		3, 4,
-		// Unwinding of IHashes needs to happen after unwinding HashState
-		6, 5,
-		//7, 8, 9, 10, 11,
+		3, 4, // senders, exec
+		6, 5, // Unwinding of IHashes needs to happen after unwinding HashState
+		7, 8, // history
+		//9, 10, 11,
 	}
 }
