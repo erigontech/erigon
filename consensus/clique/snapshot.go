@@ -103,14 +103,6 @@ func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, e
 	return snap, nil
 }
 
-func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, error) {
-	return db.Has(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
-}
-
-func hasSnapshot(db ethdb.Database, num uint64) (bool, error) {
-	return db.Has(dbutils.CliqueSnapshotBucket, SnapshotKey(num))
-}
-
 var ErrNotFound = errors.New("not found")
 
 func lastSnapshot(db ethdb.Database) (uint64, error) {

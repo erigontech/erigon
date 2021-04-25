@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -204,7 +203,6 @@ type Clique struct {
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 
-	reinit sync.Once
 	exitCh chan struct{}
 }
 
@@ -263,84 +261,13 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
-	})
-
 	return c.verifyHeader(chain, header, nil)
-}
-
-func (c *Clique) regenerateSnapshots(chain consensus.ChainHeaderReader, upTo uint64) {
-	lastSnap, err := lastSnapshot(c.db)
-	if errors.Is(err, ErrNotFound) {
-		lastSnap = 0
-		err = nil
-	}
-	if err != nil {
-		log.Error("can't regenerate Clique snapshots", "err", err)
-		return
-	}
-
-	total := int(upTo) - int(lastSnap)
-
-	log.Info("Clique snapshots", "currentSnapshot", lastSnap, "latestBlock", upTo, "behind", total)
-
-	if total < 1024 {
-		return
-	}
-
-	snapBlock := chain.GetHeaderByNumber(lastSnap)
-	snapHash := snapBlock.Hash()
-	var snap *Snapshot
-	// genesis case
-	if lastSnap == 0 {
-		snap, err = c.storeGenesisSnapshot(snapBlock)
-		if err != nil || snap == nil {
-			log.Error("can't create a genesis Clique snapshot", "block", lastSnap, "hash", snapHash, "err", err)
-			return
-		}
-	} else {
-		if snap, err = loadSnapshot(c.db, lastSnap, snapHash); err != nil {
-			log.Error("cannot load last snapshot", "number", lastSnap, "hash", snapHash, "error", err)
-			return
-		}
-	}
-
-	i := 0
-	var percent int
-	var prevPercent int
-
-	for n := lastSnap + 1; n <= upTo; n++ {
-		current := chain.GetHeaderByNumber(n)
-		if current == nil {
-			log.Error("can't regenerate snapshot. block does not exist", "block", n)
-			return
-		}
-
-		err = c.applyAndStoreSnapshot(snap, false, current)
-		if err != nil {
-			log.Error("can't regenerate snapshot", "block", n, "current", current.Number.Uint64(), "i", i, "err", err)
-			return
-		}
-
-		i++
-		percent = int(float64(i) / float64(total) * 100)
-		if percent != prevPercent && percent%5 == 0 {
-			log.Info("regenerating clique snapshots", "done(%)", percent, "block", i, "from", total)
-		}
-		prevPercent = percent
-	}
-
-	log.Info("regenerating clique snapshots finished")
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
 func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, headers[0].Number.Uint64()-1)
-	})
 
 	abort := make(chan struct{})
 	results := make(chan error, len(headers))
@@ -379,46 +306,6 @@ func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
 	c.recents.Add(hash, s.copy())
 }
 
-func (c *Clique) recentsGet(hash common.Hash) (*Snapshot, bool) {
-	s, ok := c.recents.Get(hash)
-	if !ok {
-		return nil, false
-	}
-	sn := s.(*Snapshot)
-	if sn == nil {
-		return nil, false
-	}
-	return sn.copy(), true
-}
-
-func (c *Clique) recentsHas(hash common.Hash) bool {
-	return c.recents.Contains(hash)
-}
-
-func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, check bool, headers ...*types.Header) error {
-	if snap == nil {
-		return fmt.Errorf("can't create a new snapshot, a previous one is nil: %w", ErrNotFound)
-	}
-
-	if len(headers) > 0 && headers[len(headers)-1].Number.Uint64() > snap.Number {
-		if _, err := snap.apply(c.signatures, headers...); err != nil {
-			return err
-		}
-	}
-
-	c.recentsAdd(snap.Number, snap.Hash, snap)
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-		if err := snap.store(c.db); err != nil {
-			return err
-		}
-		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
-	}
-
-	return nil
-}
-
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error {
@@ -431,9 +318,6 @@ func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
-	})
 
 	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
@@ -445,9 +329,6 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, header.Number.Uint64()-1)
-	})
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -544,9 +425,6 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
 func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, block.NumberU64()-1)
-	})
 
 	header := block.Header()
 
@@ -622,9 +500,6 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
-	c.reinit.Do(func() {
-		c.regenerateSnapshots(chain, parentNumber)
-	})
 
 	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
@@ -707,64 +582,6 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
 	}
-}
-
-func (c *Clique) checkSnapshot(num uint64, hash *common.Hash) bool {
-	ok, _ := hasSnapshot(c.db, num)
-	if !ok {
-		return false
-	}
-
-	if ok := c.findSnapshot(num, hash); !ok {
-		return c.lookupSnapshot(num)
-	}
-
-	return true
-}
-
-func (c *Clique) findSnapshot(num uint64, hash *common.Hash) bool {
-	var (
-		ok  bool
-		err error
-	)
-
-	if !ok && hash != nil {
-		// If an on-disk checkpoint snapshot can be found, use that
-		ok, err = hasSnapshotData(c.db, num, *hash)
-		if err != nil {
-			ok = false
-		}
-	}
-
-	return ok
-}
-
-func (c *Clique) lookupSnapshot(num uint64) bool {
-
-	prefix := dbutils.EncodeBlockNumber(num)
-	var tx ethdb.Tx
-	if dbtx, err := c.db.Begin(context.Background(), ethdb.RO); err == nil {
-		defer dbtx.Rollback()
-		tx = dbtx.(ethdb.HasTx).Tx()
-	} else {
-		log.Error("Lookup snapshot - opening RO tx", "error", err)
-		return false
-	}
-
-	cur, err := tx.Cursor(dbutils.CliqueSeparateBucket)
-	if err != nil {
-		log.Error("Lookup snapshot - opening cursor", "error", err)
-		return false
-	}
-	defer cur.Close()
-
-	k, _, err1 := cur.Seek(prefix)
-	if err1 != nil {
-		log.Error("Lookup snapshot - seek", "error", err1)
-		return false
-	}
-
-	return bytes.HasPrefix(k, prefix)
 }
 
 func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {

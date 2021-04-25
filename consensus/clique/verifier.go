@@ -2,6 +2,7 @@ package clique
 
 import (
 	"bytes"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -19,7 +20,16 @@ import (
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// Verify the header's EIP-1559 attributes.
 	if chain.Config().IsAleut(header.Number.Uint64()) {
-		parent := chain.GetHeaderByHash(header.ParentHash)
+		var parent *types.Header
+		if len(parents) > 0 {
+			parent = parents[len(parents)-1]
+		} else {
+			parent = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+			if parent == nil {
+				return fmt.Errorf("could not find parent with hash %x and number %x in db", header.ParentHash, header.Number.Uint64()-1)
+			}
+		}
+
 		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
 			return err
 		}
@@ -218,20 +228,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	return snap, err
 }
 
-func (c *Clique) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
-	signers := make([]common.Address, (len(h.Extra)-extraVanity-extraSeal)/common.AddressLength)
-	for i := 0; i < len(signers); i++ {
-		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
-	}
-
-	snap := newSnapshot(c.config, h.Number.Uint64(), h.Hash(), signers)
-	if err := c.applyAndStoreSnapshot(snap, false); err != nil {
-		return nil, err
-	}
-
-	return snap, nil
-}
-
 // verifySeal checks whether the signature contained in the header satisfies the
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
@@ -274,83 +270,4 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	return nil
-}
-
-func (c *Clique) getAncestors(chain consensus.ChainHeaderReader, num uint64, hash common.Hash, parentHash common.Hash) []*types.Header {
-	ancestorsNum := uint64(c.findPrevCheckpoint(num, hash, parentHash))
-	if ancestorsNum == 0 {
-		return nil
-	}
-
-	ancestors := make([]*types.Header, ancestorsNum)
-
-	i := ancestorsNum - 1
-	for n := int(num - 1); n >= int(num)-int(ancestorsNum); n-- {
-		ans := chain.GetHeader(parentHash, uint64(n))
-		ancestors[i] = ans
-		parentHash = ans.ParentHash
-		i--
-	}
-
-	return ancestors
-}
-
-func (c *Clique) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash) int {
-	if num == 0 {
-		// If we're at the genesis, snapshot the initial state.
-		return 0
-	}
-
-	var (
-		n       int
-		ok      bool
-		highest = num
-	)
-
-	last, _ := lastSnapshot(c.db)
-	if last < num {
-		highest = last
-	}
-
-	for n = int(highest); n >= 0; n-- {
-		ok = c.checkClosestSnapshot(uint64(n), hash, parentHash, num)
-		if ok {
-			break
-		}
-	}
-
-	if n < 0 {
-		n = 0
-	}
-
-	ancestors := int(num) - n
-
-	if ancestors < 0 {
-		ancestors = 1 // we need at least 1 parent for verification
-	}
-
-	return ancestors
-}
-
-func (c *Clique) checkClosestSnapshot(num uint64, hash common.Hash, parentHash common.Hash, maxNum uint64) bool {
-	var snapshotHash *common.Hash
-
-	switch num {
-	case maxNum:
-		if hash != (common.Hash{}) {
-			snapshotHash = &hash
-		}
-	case maxNum - 1:
-		if parentHash != (common.Hash{}) {
-			snapshotHash = &parentHash
-		}
-	default:
-		// nothing to do
-	}
-
-	return c.checkSnapshot(num, snapshotHash)
-}
-
-func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {
-	return number == 0 || number%checkpointInterval == 0 || number%epoch == 0
 }
