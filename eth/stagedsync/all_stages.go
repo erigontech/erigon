@@ -68,20 +68,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
+				execCfg := StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig)
 				return &Stage{
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX,
-							0,
-							world.QuitCh,
-							StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig),
-						)
+						return SpawnExecuteBlocksStage(s, world.TX, 0, world.QuitCh, execCfg)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.QuitCh,
-							StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig),
-						)
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, execCfg)
 					},
 				}
 			},
@@ -89,14 +84,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
+				hashStateCfg := StageHashStateCfg(world.TmpDir)
 				return &Stage{
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, hashStateCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, hashStateCfg, world.QuitCh)
 					},
 				}
 			},
@@ -104,15 +100,16 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.IntermediateHashes,
 			Build: func(world StageParameters) *Stage {
+				stageTrieCfg := StageTrieCfg(checkRoot, true, world.TmpDir)
 				return &Stage{
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(checkRoot, true, world.TmpDir), world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, stageTrieCfg, world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, stageTrieCfg, world.QuitCh)
 					},
 				}
 			},
