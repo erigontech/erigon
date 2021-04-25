@@ -212,10 +212,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
 					},
 				}
 			},
@@ -227,11 +227,11 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
 					},
 				}
 			},
@@ -432,7 +432,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
@@ -445,7 +445,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, false /* checkRoot */, world.TmpDir, world.QuitCh)
+						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(false, true, world.TmpDir), world.QuitCh)
 						if err != nil {
 							return err
 						}

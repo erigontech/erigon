@@ -452,6 +452,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,
+			tmpdir,
 		)
 		if err != nil {
 			return nil, err

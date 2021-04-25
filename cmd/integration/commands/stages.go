@@ -427,14 +427,14 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	ch := ctx.Done()
-
+	cfg := stagedsync.StageTrieCfg(true, true, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, tmpdir, ch); err != nil {
+		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, cfg, ch); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, tmpdir, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, cfg, ch); err != nil {
 			return err
 		}
 	}
@@ -459,12 +459,12 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	log.Info("Stage6", "progress", stage6.BlockNumber)
 	ch := ctx.Done()
-
+	cfg := stagedsync.StageHashStateCfg(tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindHashStateStage(u, stage6, db, tmpdir, ch)
+		return stagedsync.UnwindHashStateStage(u, stage6, db, cfg, ch)
 	}
-	return stagedsync.SpawnHashStateStage(stage6, db, tmpdir, ch)
+	return stagedsync.SpawnHashStateStage(stage6, db, cfg, ch)
 }
 
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {

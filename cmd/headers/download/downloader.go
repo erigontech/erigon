@@ -58,7 +58,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 }
 
 // Download creates and starts standalone downloader
-func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string, nodeName string) error {
+func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
 	ctx := rootContext()
 
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
@@ -122,6 +122,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		batchSize,
 		timeout,
 		controlServer,
+		tmpdir,
 	)
 	if err != nil {
 		return err
@@ -197,7 +198,7 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
 	ctx := rootContext()
 
 	sentryServer := NewSentryServer(ctx)
@@ -234,6 +235,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		batchSize,
 		timeout,
 		controlServer,
+		tmpdir,
 	)
 	if err != nil {
 		return err
@@ -280,6 +282,7 @@ func NewStagedSync(
 	batchSize datasize.ByteSize,
 	bodyDownloadTimeout int,
 	controlServer *ControlServerImpl,
+	tmpdir string,
 ) (*stagedsync.StagedSync, error) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -316,6 +319,8 @@ func NewStagedSync(
 			controlServer.engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
 		),
+		stagedsync.StageHashStateCfg(tmpdir),
+		stagedsync.StageTrieCfg(true, true, tmpdir),
 	), nil
 }
 

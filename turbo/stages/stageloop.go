@@ -25,10 +25,12 @@ func NewStagedSync(
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
+	hashState stagedsync.HashStateCfg,
+	trieCfg stagedsync.TrieCfg,
 ) *stagedsync.StagedSync {
 
 	return stagedsync.New(
-		ReplacementStages(ctx, headers, bodies, senders, exec),
+		ReplacementStages(ctx, headers, bodies, senders, exec, hashState, trieCfg),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -111,6 +113,8 @@ func ReplacementStages(ctx context.Context,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
+	hashState stagedsync.HashStateCfg,
+	trieCfg stagedsync.TrieCfg,
 ) stagedsync.StageBuilders {
 	return []stagedsync.StageBuilder{
 		{
@@ -188,11 +192,49 @@ func ReplacementStages(ctx context.Context,
 				}
 			},
 		},
+		{
+			ID: stages.HashState,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:          stages.HashState,
+					Description: "Hash the key in the state",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						return stagedsync.SpawnHashStateStage(s, world.TX, hashState, world.QuitCh)
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindHashStateStage(u, s, world.TX, hashState, world.QuitCh)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.IntermediateHashes,
+			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
+				return &stagedsync.Stage{
+					ID:          stages.IntermediateHashes,
+					Description: "Generate intermediate hashes and computing state root",
+					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
+						_, err := stagedsync.SpawnIntermediateHashesStage(s, world.TX, trieCfg, world.QuitCh)
+						return err
+					},
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+						return stagedsync.UnwindIntermediateHashesStage(u, s, world.TX, trieCfg, world.QuitCh)
+					},
+				}
+			},
+		},
 	}
 }
 
 func ReplacementUnwindOrder() stagedsync.UnwindOrder {
 	return []int{
 		0, 1, 2,
+		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// also tx pool is before senders because senders unwind is inside cycle transaction
+		//12,
+		3, 4,
+		// Unwinding of IHashes needs to happen after unwinding HashState
+		6, 5,
+		//7, 8, 9, 10, 11,
 	}
 }
