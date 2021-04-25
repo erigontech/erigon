@@ -168,21 +168,6 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	return signer, nil
 }
 
-func ecrecovers(hs []*types.Header, sigcache *lru.ARCCache) ([]common.Address, error) {
-	res := make([]common.Address, 0, len(hs))
-
-	for _, h := range hs {
-		addr, err := ecrecover(h, sigcache)
-		if err != nil {
-			return nil, err
-		}
-
-		res = append(res, addr)
-	}
-
-	return res, nil
-}
-
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
