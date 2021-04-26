@@ -537,8 +537,8 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string, tmpdir string) (*ethdb.ObjectDatabase, error) {
-	return n.OpenDatabaseWithFreezer(name, tmpdir)
+func (n *Node) OpenDatabase(name string, datadir string) (*ethdb.ObjectDatabase, error) {
+	return n.OpenDatabaseWithFreezer(name, datadir)
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
@@ -547,7 +547,7 @@ func (n *Node) OpenDatabase(name string, tmpdir string) (*ethdb.ObjectDatabase, 
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
 // NOTE: kept for compatibility and for easier rebases (turbo-geth)
-func (n *Node) OpenDatabaseWithFreezer(name string, tmpdir string) (*ethdb.ObjectDatabase, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -610,7 +610,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, tmpdir string) (*ethdb.Objec
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, tmpdir); err != nil {
+			if err = migrator.Apply(db, datadir); err != nil {
 				return nil, err
 			}
 			db.Close()
