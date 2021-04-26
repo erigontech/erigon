@@ -16,7 +16,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
+type TxLookupCfg struct {
+	tmpdir string
+}
+
+func StageTxLookupCfg(
+	tmpdir string,
+) TxLookupCfg {
+	return TxLookupCfg{
+		tmpdir: tmpdir,
+	}
+}
+
+func SpawnTxLookup(s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -45,7 +57,7 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 
 	logPrefix := s.state.LogPrefix()
 	startKey = dbutils.EncodeBlockNumber(blockNum)
-	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, tmpdir); err != nil {
+	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, cfg); err != nil {
 		return err
 	}
 	if err = s.DoneAndUpdate(tx, syncHeadNumber); err != nil {
@@ -60,8 +72,8 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 	return nil
 }
 
-func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
-	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blocknum)
@@ -86,7 +98,7 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -101,7 +113,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir str
 		defer tx.Rollback()
 	}
 
-	if err := unwindTxLookup(u, s, tx, tmpdir, quitCh); err != nil {
+	if err := unwindTxLookup(u, s, tx, cfg, quitCh); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
@@ -116,8 +128,8 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir str
 	return nil
 }
 
-func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, tmpdir string, quitCh <-chan struct{}) error {
-	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+	collector := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	logPrefix := s.state.LogPrefix()
 	c, err := tx.Cursor(dbutils.BlockBodyPrefix)

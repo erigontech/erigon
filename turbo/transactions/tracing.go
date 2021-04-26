@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
-	state2 "github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
 const (
@@ -34,7 +33,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state2.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
 	// Create the parent state database
 	block, err := blockGetter.GetBlockByHash(blockHash)
 	if err != nil {
@@ -48,13 +47,14 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
-	statedb, reader := state2.ComputeIntraBlockState(dbtx, parent)
+	reader := state.NewPlainKvState(dbtx, parent.NumberU64())
+	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, vm.BlockContext{}, vm.TxContext{}, statedb, reader, nil
 	}
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.Number())
+	signer := types.MakeSigner(cfg, block.NumberU64())
 
 	for idx, tx := range block.Transactions() {
 		select {
@@ -65,7 +65,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
-		msg, _ := tx.AsMessage(signer)
+		msg, _ := tx.AsMessage(*signer)
 		BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil)
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
@@ -73,12 +73,12 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(BlockContext, TxContext, statedb, cfg, vm.Config{})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), state.NewNoopWriter())
+		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.NumberU64()), state.NewNoopWriter())
 	}
 	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

@@ -61,7 +61,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		}
 		genesis = gspec.MustCommit(db)
 		// this code generates a log
-		signer = types.HomesteadSigner{}
+		signer = types.LatestSignerForChainID(nil)
 	)
 	genesisDB := db.MemCopy()
 	defer genesisDB.Close()
@@ -82,7 +82,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDB, 2, func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 
 		switch i {
 		case 0:
@@ -97,7 +97,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			}
 			block.AddTx(tx)
 			// Send 1 wei to contract after self-destruction
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt().SetUint64(1000), 21000, uint256.NewInt().SetUint64(1), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt().SetUint64(1000), 21000, uint256.NewInt().SetUint64(1), nil), *signer, key)
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()

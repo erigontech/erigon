@@ -1063,7 +1063,7 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, "", expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(true, true, ""), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
@@ -1494,12 +1494,12 @@ func mint(chaindata string, block uint64) error {
 			var totalGas uint256.Int
 			count := 0
 			for i, tx := range body.Transactions {
-				ethSpent.SetUint64(tx.Gas())
+				ethSpent.SetUint64(tx.GetGas())
 				totalGas.Add(&totalGas, &ethSpent)
 				if senders[i] == header.Coinbase {
 					continue // Mining pool sending payout potentially with abnormally low fee, skip
 				}
-				ethSpent.Mul(&ethSpent, tx.GasPrice())
+				ethSpent.Mul(&ethSpent, tx.GetPrice())
 				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
 				count++
 			}

@@ -17,47 +17,18 @@
 package core
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
-
-// StateProcessor is a basic Processor, which takes care of transitioning
-// state from one point to another.
-//
-// StateProcessor implements Processor.
-type StateProcessor struct {
-	config      *params.ChainConfig // Chain configuration options
-	bc          *BlockChain         // Canonical block chain
-	engine      consensus.Engine    // Consensus engine used for block rewards
-	txTraceHash []byte              // Hash of the transaction to trace (or nil if there nothing to trace)
-}
-
-// NewStateProcessor initialises a new StateProcessor.
-func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *StateProcessor {
-	return &StateProcessor{
-		config: config,
-		bc:     bc,
-		engine: engine,
-	}
-}
-
-// SetTxTraceHash allows setting the hash of the transaction to trace
-func (p *StateProcessor) SetTxTraceHash(txTraceHash common.Hash) {
-	p.txTraceHash = txTraceHash[:]
-}
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
@@ -110,115 +81,17 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 	return formatted
 }
 
-// PreProcess processes the state changes according to the Ethereum rules by running
-// the transaction messages using the IntraBlockState and applying any rewards to both
-// the processor (coinbase) and any included uncles.
-//
-// PreProcess returns the receipts and logs accumulated during the process and
-// returns the amount of gas that was used in the process. If any of the
-// transactions failed to execute due to insufficient gas it will return an error.
-//
-// PreProcess does not calculate receipt roots (required pre-Byzantium)
-// and does not update the TrieDbState. For those two call PostProcess afterwards.
-func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (
-	receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error) {
-
-	header := block.Header()
-	gp := new(GasPool).AddGas(block.GasLimit())
-
-	// Mutate the block and state according to any hard-fork specs
-	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	// Iterate over and process the individual transactions
-	tds.StartNewBuffer()
-	for i, tx := range block.Transactions() {
-		txHash := tx.Hash()
-		ibs.Prepare(txHash, block.Hash(), i)
-		writeTrace := false
-		if !cfg.Debug && p.txTraceHash != nil && bytes.Equal(p.txTraceHash, txHash[:]) {
-			// This code is useful when debugging a certain transaction. If uncommented, together with the code
-			// at the end of this function, after the execution of transaction with given hash, the file
-			// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-			// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			cfg.Debug = true
-			writeTrace = true
-		}
-		var receipt *types.Receipt
-		receipt, err = ApplyTransaction(p.config, p.bc.GetHeader, p.bc.Engine(), nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg)
-		// This code is useful when debugging a certain transaction. If uncommented, together with the code
-		// at the end of this function, after the execution of transaction with given hash, the file
-		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", p.txTraceHash))
-			if err1 != nil {
-				panic(err1)
-			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
-			cfg.Debug = false
-			cfg.Tracer = nil
-		}
-		if err != nil {
-			return nil, nil, 0, common.Hash{}, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
-		}
-		receipts = append(receipts, receipt)
-		allLogs = append(allLogs, receipt.Logs...)
-		if !p.config.IsByzantium(header.Number) {
-			tds.StartNewBuffer()
-		}
-	}
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.config, header, ibs, block.Transactions(), block.Uncles())
-	ctx := p.config.WithEIPsFlags(context.Background(), header.Number)
-	err = ibs.FinalizeTx(ctx, tds.TrieStateWriter())
-	if err != nil {
-		return
-	}
-
-	// Calculate the state root
-	_, err = tds.ResolveStateTrie(false, false)
-	if err != nil {
-		return
-	}
-	root, err = tds.CalcTrieRoots(false)
-	return receipts, allLogs, usedGas, root, err
-}
-
-// PostProcess calculates receipt roots (required pre-Byzantium) and updates the TrieDbState.
-// PostProcess should be called after PreProcess.
-func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState, receipts types.Receipts) error {
-	roots, err := tds.UpdateStateTrie()
-	if err != nil {
-		return err
-	}
-	if !p.config.IsByzantium(block.Header().Number) {
-		for i, receipt := range receipts {
-			receipt.PostState = roots[i].Bytes()
-		}
-	}
-	return nil
-}
-
 // applyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}
 
-	ctx := config.WithEIPsFlags(context.Background(), header.Number)
+	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Create a new context to be used in the EVM environment
 	context := NewEVMBlockContext(header, getHeader, engine, author)
 	txContext := NewEVMTxContext(msg)
@@ -259,7 +132,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.Nonce())
+			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
@@ -274,8 +147,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}

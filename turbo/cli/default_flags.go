@@ -21,12 +21,10 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolAccountQueueFlag,
 	utils.TxPoolGlobalQueueFlag,
 	utils.TxPoolLifetimeFlag,
-	utils.TxLookupLimitFlag,
 	StorageModeFlag,
 	SnapshotModeFlag,
 	SeedSnapshotsFlag,
 	ExternalSnapshotDownloaderAddrFlag,
-	//CacheSizeFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
 	PrivateApiAddr,
@@ -69,4 +67,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerEtherbaseFlag,
 	utils.MinerExtraDataFlag,
 	utils.MinerNoVerfiyFlag,
+	DownloadV2Flag,
 }

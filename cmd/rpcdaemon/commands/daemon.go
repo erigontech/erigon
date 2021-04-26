@@ -21,7 +21,7 @@ func APIList(ctx context.Context, kv ethdb.RoKV, eth core.ApiBackend, filters *f
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(kv, cfg.Gascap, pending)
 	traceImpl := NewTraceAPI(kv, pending, &cfg)
-	web3Impl := NewWeb3APIImpl()
+	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */
 

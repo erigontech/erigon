@@ -37,7 +37,7 @@ import (
 type ethHandler handler
 
 func (h *ethHandler) DB() ethdb.RwKV     { return h.database.(ethdb.HasRwKV).RwKV() }
-func (h *ethHandler) TxPool() eth.TxPool { return h.txpool2 }
+func (h *ethHandler) TxPool() eth.TxPool { return h.txpool }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
@@ -132,7 +132,7 @@ func (h *ethHandler) handleHeaders(peer *eth.Peer, headers []*types.Header) erro
 
 // handleBodies is invoked from a peer's message handler when it transmits a batch
 // of block bodies for the local node to process.
-func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]*types.Transaction, uncles [][]*types.Header) error {
+func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]types.Transaction, uncles [][]*types.Header) error {
 	// Filter out any explicitly requested bodies, deliver the rest to the downloader
 	filter := len(txs) > 0 || len(uncles) > 0
 	if filter {

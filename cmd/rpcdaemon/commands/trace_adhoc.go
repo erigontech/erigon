@@ -41,12 +41,15 @@ const (
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
-	From     *common.Address `json:"from"`
-	To       *common.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     hexutil.Bytes   `json:"data"`
+	From       *common.Address   `json:"from"`
+	To         *common.Address   `json:"to"`
+	Gas        *hexutil.Uint64   `json:"gas"`
+	GasPrice   *hexutil.Big      `json:"gasPrice"`
+	Tip        *hexutil.Big      `json:"tip"`
+	FeeCap     *hexutil.Big      `json:"feeCap"`
+	Value      *hexutil.Big      `json:"value"`
+	Data       hexutil.Bytes     `json:"data"`
+	AccessList *types.AccessList `json:"accessList"`
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -113,18 +116,28 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 	if args.GasPrice != nil {
 		gasPrice.SetFromBig(args.GasPrice.ToInt())
 	}
-
+	var tip *uint256.Int
+	if args.Tip != nil {
+		tip.SetFromBig(args.Tip.ToInt())
+	}
+	var feeCap *uint256.Int
+	if args.FeeCap != nil {
+		feeCap.SetFromBig(args.FeeCap.ToInt())
+	}
 	value := new(uint256.Int)
 	if args.Value != nil {
 		value.SetFromBig(args.Value.ToInt())
 	}
-
-	var input []byte
+	var data []byte
 	if args.Data != nil {
-		input = args.Data
+		data = args.Data
+	}
+	var accessList types.AccessList
+	if args.AccessList != nil {
+		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0 /* nonce */, value, gas, gasPrice, input, types.AccessList{}, false /* checkNonce */)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, feeCap, tip, data, accessList, false /* checkNonce */)
 	return msg
 }
 
@@ -459,7 +472,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	ibs := state.New(stateReader)
 
@@ -574,7 +587,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(stateReader, stateCache)

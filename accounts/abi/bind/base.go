@@ -34,7 +34,7 @@ import (
 
 // SignerFn is a signer function callback when a contract requires a method to
 // sign the transaction before submission.
-type SignerFn func(common.Address, *types.Transaction) (*types.Transaction, error)
+type SignerFn func(common.Address, types.Transaction) (types.Transaction, error)
 
 // CallOpts is the collection of options to fine tune a contract call request.
 type CallOpts struct {
@@ -99,7 +99,7 @@ func NewBoundContract(address common.Address, abi abi.ABI, caller ContractCaller
 
 // DeployContract deploys a contract onto the Ethereum blockchain and binds the
 // deployment address with a Go wrapper.
-func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...interface{}) (common.Address, *types.Transaction, *BoundContract, error) {
+func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...interface{}) (common.Address, types.Transaction, *BoundContract, error) {
 	// Otherwise try to deploy the contract
 	c := NewBoundContract(common.Address{}, abi, backend, backend, backend)
 
@@ -111,7 +111,7 @@ func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend Co
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
-	c.address = crypto.CreateAddress(opts.From, tx.Nonce())
+	c.address = crypto.CreateAddress(opts.From, tx.GetNonce())
 	return c.address, tx, c, nil
 }
 
@@ -177,7 +177,7 @@ func (c *BoundContract) Call(opts *CallOpts, results *[]interface{}, method stri
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (c *BoundContract) Transact(opts *TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (c *BoundContract) Transact(opts *TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	// Otherwise pack up the parameters and invoke the contract
 	input, err := c.abi.Pack(method, params...)
 	if err != nil {
@@ -190,7 +190,7 @@ func (c *BoundContract) Transact(opts *TransactOpts, method string, params ...in
 
 // RawTransact initiates a transaction with the given raw calldata as the input.
 // It's usually used to initiate transactions for invoking **Fallback** function.
-func (c *BoundContract) RawTransact(opts *TransactOpts, calldata []byte) (*types.Transaction, error) {
+func (c *BoundContract) RawTransact(opts *TransactOpts, calldata []byte) (types.Transaction, error) {
 	// todo(rjl493456442) check the method is payable or not,
 	// reject invalid transaction at the first place
 	return c.transact(opts, &c.address, calldata)
@@ -198,7 +198,7 @@ func (c *BoundContract) RawTransact(opts *TransactOpts, calldata []byte) (*types
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (c *BoundContract) Transfer(opts *TransactOpts) (*types.Transaction, error) {
+func (c *BoundContract) Transfer(opts *TransactOpts) (types.Transaction, error) {
 	// todo(rjl493456442) check the payable fallback or receive is defined
 	// or not, reject invalid transaction at the first place
 	return c.transact(opts, &c.address, nil)
@@ -206,7 +206,7 @@ func (c *BoundContract) Transfer(opts *TransactOpts) (*types.Transaction, error)
 
 // transact executes an actual transaction invocation, first deriving any missing
 // authorization fields, and then scheduling the transaction for execution.
-func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, input []byte) (*types.Transaction, error) {
+func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, input []byte) (types.Transaction, error) {
 	var err error
 
 	// Ensure a valid value field and resolve the account nonce
@@ -250,7 +250,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 		}
 	}
 	// Create the transaction, sign it and schedule it for execution
-	var rawTx *types.Transaction
+	var rawTx types.Transaction
 	if contract == nil {
 		rawTx = types.NewContractCreation(nonce, value, gasLimit, gasPrice, input)
 	} else {

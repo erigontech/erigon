@@ -7,8 +7,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
@@ -58,12 +60,12 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	defer tx.Rollback()
 
 	bc := adapter.NewBlockGetter(tx)
-	cc := adapter.NewChainContext(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc.GetHeader, cc.Engine(), tx, blockHash, txIndex)
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -211,12 +213,14 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	defer tx.Rollback()
 
 	bc := adapter.NewBlockGetter(tx)
-	cc := adapter.NewChainContext(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc.GetHeader, cc.Engine(), tx, blockHash, txIndex)
+	GetHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, GetHeader, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

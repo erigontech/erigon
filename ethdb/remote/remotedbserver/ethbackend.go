@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,30 +15,30 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth    core.EthBackend
-	events *Events
-	ethash *ethash.API
+	eth       core.EthBackend
+	events    *Events
+	ethash    *ethash.API
+	gitCommit string
 }
 
-func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi}
+func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API, gitCommit string) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	signedTx := new(types.Transaction)
 	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-
-	if err := rlp.DecodeBytes(in.Signedtx, signedTx); err != nil {
-		return out, err
+	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
+	if err != nil {
+		return nil, err
 	}
-
-	if err := s.eth.TxPool().AddLocal(signedTx); err != nil {
+	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
 		return out, err
 	}
 
@@ -146,4 +147,13 @@ func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) 
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	return &remote.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+}
+
+func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
+	// Hardcoding to avoid import cycle
+	return &remote.ProtocolVersionReply{Id: 66}, nil
+}
+
+func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
+	return &remote.ClientVersionReply{NodeName: common.MakeName("TurboGeth", params.VersionWithCommit(s.gitCommit, ""))}, nil
 }

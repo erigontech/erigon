@@ -33,7 +33,7 @@ const ChangerABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":
 var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60336035565b005b600160008190556002908190556003905556fea264697066735822122055759a7d66bd94e58f9e8393e991422147044bd5fddc39451c4ef60edbcfa29264736f6c63430007020033"
 
 // DeployChanger deploys a new Ethereum contract, binding an instance of Changer to it.
-func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Changer, error) {
+func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Changer, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChangerABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Changer *ChangerRaw) Call(opts *bind.CallOpts, result *[]interface{}, met
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Changer *ChangerRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Changer *ChangerRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Changer.Contract.ChangerTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Changer.Contract.ChangerTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,32 +179,32 @@ func (_Changer *ChangerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Changer *ChangerTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Changer *ChangerTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Changer.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Changer *ChangerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Changer *ChangerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Changer.Contract.contract.Transact(opts, method, params...)
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Changer *ChangerTransactor) Change(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Changer *ChangerTransactor) Change(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Changer.contract.Transact(opts, "change")
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Changer *ChangerSession) Change() (*types.Transaction, error) {
+func (_Changer *ChangerSession) Change() (types.Transaction, error) {
 	return _Changer.Contract.Change(&_Changer.TransactOpts)
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Changer *ChangerTransactorSession) Change() (*types.Transaction, error) {
+func (_Changer *ChangerTransactorSession) Change() (types.Transaction, error) {
 	return _Changer.Contract.Change(&_Changer.TransactOpts)
 }

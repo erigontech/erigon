@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
@@ -57,14 +56,14 @@ func (stagedSync *StagedSync) Prepare(
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
-	cache *shards.StateCache,
 	batchSize datasize.ByteSize,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
 	poolStart func() error,
 	initialCycle bool,
-	miningConfig *MiningStagesParameters,
+	miningConfig *MiningCfg,
+	senders SendersCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -95,7 +94,6 @@ func (stagedSync *StagedSync) Prepare(
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,
 			poolStart:             poolStart,
-			cache:                 cache,
 			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
@@ -104,6 +102,7 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
+			senders:               senders,
 		},
 	)
 	state := NewState(stages)

@@ -21,7 +21,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
+type HistoryCfg struct {
+	bufLimit   datasize.ByteSize
+	flushEvery time.Duration
+	tmpdir     string
+}
+
+func StageHistoryCfg(tmpDir string) HistoryCfg {
+	return HistoryCfg{
+		bufLimit:   bitmapsBufLimit,
+		flushEvery: bitmapsFlushEvery,
+		tmpdir:     tmpDir,
+	}
+}
+
+func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -52,7 +66,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -68,7 +82,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	return nil
 }
 
-func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
+func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -99,7 +113,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -115,15 +129,15 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	return nil
 }
 
-func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, start, stop uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
+func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	updates := map[string]*roaring64.Bitmap{}
-	checkFlushEvery := time.NewTicker(flushEvery)
+	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorUpdates := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorUpdates := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	if err := changeset.Walk(tx, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= stop {
@@ -142,7 +156,7 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
-			if needFlush64(updates, bufLimit) {
+			if needFlush64(updates, cfg.bufLimit) {
 				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
 					return false, err
 				}
@@ -211,7 +225,7 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 	return nil
 }
 
-func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
+func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -227,7 +241,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx, dbutils.PlainAccountChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -243,7 +257,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	return nil
 }
 
-func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
+func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -259,7 +273,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx, dbutils.PlainStorageChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -275,7 +289,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 	return nil
 }
 
-func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, quitCh <-chan struct{}) error {
+func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 

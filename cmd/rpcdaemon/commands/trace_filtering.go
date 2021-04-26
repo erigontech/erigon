@@ -106,7 +106,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	txs := make([]TransactionWithSender, 0, len(senders))
 	for n, tx := range blockTxs {
 		txs = append(txs, TransactionWithSender{
-			tx:     *tx,
+			tx:     tx,
 			sender: senders[n],
 		})
 	}
@@ -228,10 +228,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 					}
 
 					var to *common.Address
-					if txn.To() == nil {
+					if txn.GetTo() == nil {
 						to = &common.Address{}
 					} else {
-						to = txn.To()
+						to = txn.GetTo()
 					}
 
 					if isFromAddress {
@@ -289,14 +289,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 
 	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(tx)
+	engine := ethash.NewFaker()
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
-
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
 	for i, txOrBlockHash := range filteredHashes {
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
@@ -335,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else {
 			// In this case, we're processing a transaction hash
 			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txOrBlockHash)
-			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
+			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, engine, tx, blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -368,17 +370,16 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 	for _, txWithSender := range txs {
 		tx := txWithSender.tx
 		sender := txWithSender.sender
-
-		gas := hexutil.Uint64(tx.Gas())
-		gasPrice := hexutil.Big(*tx.GasPrice().ToBig())
-		value := hexutil.Big(*tx.Value().ToBig())
+		gas := hexutil.Uint64(tx.GetGas())
+		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
+		value := hexutil.Big(*tx.GetValue().ToBig())
 		toExecute = append(toExecute, []interface{}{TraceCallParam{
 			From:     &sender,
-			To:       tx.To(),
+			To:       tx.GetTo(),
 			Gas:      &gas,
 			GasPrice: &gasPrice,
 			Value:    &value,
-			Data:     tx.Data(),
+			Data:     tx.GetData(),
 		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
 	}
 
@@ -435,7 +436,6 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
 func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
@@ -443,7 +443,11 @@ func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, 
 	traceType := "callTracer" // nolint: goconst
 
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
+
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

@@ -30,9 +30,11 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -42,15 +44,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
+	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
-	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -59,7 +63,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -73,15 +76,14 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPoolServer       proto_txpool.TxpoolServer
-	txPoolClient       *txpool.ClientDirect
-	txPool             *core.TxPool
-	handler            *handler
-	ethDialCandidates  enode.Iterator
-	snapDialCandidates enode.Iterator
+	txPool *core.TxPool
+
+	handler           *handler
+	ethDialCandidates enode.Iterator
 
 	// DB interfaces
-	chainKV    ethdb.RwKV // Same as chainDb, but different interface
+	chainDB    ethdb.Database // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -99,17 +101,30 @@ type Ethereum struct {
 	events      *remotedbserver.Events
 	chainConfig *params.ChainConfig
 	genesisHash common.Hash
+	quitMining  chan struct{}
+
+	// downloader v2 fields
+	downloadV2Ctx    context.Context
+	downloadV2Cancel context.CancelFunc
+	downloadServer   *download.ControlServerImpl
+	sentryServer     *download.SentryServerImpl
+	txPoolServer     *download.TxPoolServer
+	sentries         []proto_sentry.SentryClient
+	stagedSync2      *stagedsync.StagedSync
 }
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
 	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
+		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
+	}
 
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
@@ -261,6 +276,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth := &Ethereum{
 		config:        config,
+		chainDB:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
 		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
@@ -284,23 +300,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
-	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
-	var dbVer = "<nil>"
-	if bcVersion != nil {
-		dbVer = fmt.Sprintf("%d", *bcVersion)
-	}
-
-	if !config.SkipBcVersionCheck {
-		if bcVersion != nil && *bcVersion > core.BlockChainVersion {
-			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
-		} else if bcVersion == nil || *bcVersion < core.BlockChainVersion {
-			log.Warn("Upgrade blockchain database version", "from", dbVer, "to", core.BlockChainVersion)
-			if err2 := rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion); err2 != nil {
-				return nil, err2
-			}
-		}
-	}
-
 	err = ethdb.SetStorageModeIfNotExist(chainDb, config.StorageMode)
 	if err != nil {
 		return nil, err
@@ -320,16 +319,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	vmConfig, _ := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-
-	// Rewind the chain in case of an incompatible config upgrade.
-	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
-		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
-		core.SetHead(chainDb, compat.RewindTo)
-		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
@@ -393,26 +382,74 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasRwKV).RwKV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, &creds, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(
+				chainDb.(ethdb.HasRwKV).RwKV(),
+				eth,
+				ethashApi,
+				stack.Config().PrivateApiAddr,
+				stack.Config().PrivateApiRateLimit,
+				&creds,
+				eth.events,
+				gitCommit)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasRwKV).RwKV(), eth, ethashApi, stack.Config().PrivateApiAddr, stack.Config().PrivateApiRateLimit, nil, eth.events)
+			eth.privateAPI, err = remotedbserver.StartGrpc(
+				chainDb.(ethdb.HasRwKV).RwKV(),
+				eth,
+				ethashApi,
+				stack.Config().PrivateApiAddr,
+				stack.Config().PrivateApiRateLimit,
+				nil,
+				eth.events,
+				gitCommit)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
-	eth.snapDialCandidates, _ = setupDiscovery(eth.config.SnapDiscoveryURLs) //nolint:staticcheck
 
 	checkpoint := config.Checkpoint
-	eth.txPoolServer = txpool.NewServer(context.Background(), eth.txPool)
-	eth.txPoolClient = txpool.NewClientDirect(eth.txPoolServer)
-	if err := eth.StartMining(mining, tmpdir); err != nil {
-		return nil, err
-	}
-	if eth.config.EnableDownloaderV2 {
+	if eth.config.EnableDownloadV2 {
+		eth.sentryServer = download.NewSentryServer(context.Background())
+		sentry := &download.SentryClientDirect{}
+		eth.sentryServer.P2pServer = eth.p2pServer
+		sentry.SetServer(eth.sentryServer)
+		eth.sentries = []proto_sentry.SentryClient{sentry}
+		blockDownloaderWindow := 65536
+		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
+		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
+		if err != nil {
+			return nil, err
+		}
+		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
+			return nil, err
+		}
+		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
+		if err != nil {
+			return nil, err
+		}
+
+		fetchTx := func(peerID string, hashes []common.Hash) error {
+			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+			return nil
+		}
+
+		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
+		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
+
+		eth.stagedSync2, err = download.NewStagedSync(
+			eth.downloadV2Ctx,
+			eth.chainDB,
+			config.BatchSize,
+			bodyDownloadTimeoutSeconds,
+			eth.downloadServer,
+			tmpdir,
+		)
+		if err != nil {
+			return nil, err
+		}
 
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
@@ -427,7 +464,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			vmConfig:    &vmConfig,
 			engine:      eth.engine,
 			TxPool:      eth.txPool,
-			TxPool2:     eth.txPoolClient,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
 
@@ -437,8 +473,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 
 		eth.handler.SetTmpDir(tmpdir)
-		eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
+		eth.handler.SetBatchSize(config.BatchSize)
 		eth.handler.SetStagedSync(stagedSync)
+	}
+
+	go SendPendingTxsToRpcDaemon(eth.txPool, eth.events)
+
+	if err := eth.StartMining(mining, tmpdir); err != nil {
+		return nil, err
 	}
 
 	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
@@ -465,6 +507,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	return eth, nil
 }
 
+func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	if notifier == nil {
+		return
+	}
+
+	txsCh := make(chan core.NewTxsEvent, txChanSize)
+	txsSub := txPool.SubscribeNewTxsEvent(txsCh)
+	defer txsSub.Unsubscribe()
+
+	for {
+		select {
+		case e := <-txsCh:
+			notifier.OnNewPendingTxs(e.Txs)
+		case <-txsSub.Err():
+			return
+		}
+	}
+}
+
 func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheConfig) {
 	var (
 		vmConfig = vm.Config{
@@ -478,7 +539,6 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheCo
 			PruneTimeout:        config.PruningTimeout,
 			DownloadOnly:        config.DownloadOnly,
 			NoHistory:           !config.StorageMode.History,
-			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
 	return vmConfig, cacheConfig
@@ -622,13 +682,6 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 	return s.isLocalBlock(block)
 }
 
-// SetEtherbase sets the mining reward address.
-func (s *Ethereum) SetEtherbase(etherbase common.Address) {
-	s.lock.Lock()
-	s.etherbase = etherbase
-	s.lock.Unlock()
-}
-
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
@@ -637,96 +690,104 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 		return nil
 	}
 
-	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() { // For main
-		tx, err := s.ChainKV().BeginRo(context.Background())
+	s.lock.Lock()
+	price := s.gasPrice
+	s.quitMining = make(chan struct{})
+	s.lock.Unlock()
+	s.txPool.SetGasPrice(price)
+
+	// Configure the local mining address
+	eb, err := s.Etherbase()
+	if err != nil {
+		log.Error("Cannot start mining without etherbase", "err", err)
+		return fmt.Errorf("etherbase missing: %v", err)
+	}
+	if clique, ok := s.engine.(*clique.Clique); ok {
+		if s.config.Miner.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
+		}
+
+		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			return crypto.Sign(message, s.config.Miner.SigKey)
+		})
+	}
+
+	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
+		// If mining is started, we can disable the transaction rejection mechanism
+		// introduced to speed sync times.
+		if s.config.EnableDownloadV2 {
+
+		} else {
+			atomic.StoreUint32(&s.handler.acceptTxs, 1)
+		}
+
+		tx, err := s.chainKV.BeginRo(context.Background())
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		hh := rawdb.ReadCurrentHeader(tx)
-		execution, _ := stages.GetStageProgress(tx, stages.Execution)
-		if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-			return err
+		if hh != nil {
+			execution, _ := stages.GetStageProgress(tx, stages.Execution)
+			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+				return err
+			}
 		}
 	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
 	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
+
+	s.quitMining = make(chan struct{})
 	go func() {
 		defer txsSubMining.Unsubscribe()
 		defer close(txsChMining)
-		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir)
+		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir, s.quitMining)
 	}()
 
-	/*
-		// If the miner was not running, initialize it
-		if !s.IsMining() {
-			// Propagate the initial price point to the transaction pool
-			s.lock.RLock()
-			price := s.gasPrice
-			s.lock.RUnlock()
-			s.txPool.SetGasPrice(price)
-
-			// Configure the local mining address
-			eb, err := s.Etherbase()
-			if err != nil {
-				log.Error("Cannot start mining without etherbase", "err", err)
-				return fmt.Errorf("etherbase missing: %v", err)
-			}
-			if clique, ok := s.engine.(*clique.Clique); ok {
-				if s.signer == nil {
-					log.Error("Etherbase account unavailable locally", "err", err)
-					return fmt.Errorf("signer missing: %v", err)
-				}
-
-				clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-					return crypto.Sign(message, s.signer)
-				})
-			}
-			// If mining is started, we can disable the transaction rejection mechanism
-			// introduced to speed sync times.
-			atomic.StoreUint32(&s.handler.acceptTxs, 1)
-		}
-	*/
 	return nil
 }
 
-func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string) {
+func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) {
 	var works bool
+	var hasWork bool
 	errc := make(chan error, 1)
 	resultCh := make(chan *types.Block, 1)
 
 	for {
 		select {
 		case <-newTransactions:
-			// nothing to do, just do miningStep if need
+			hasWork = true
 		case minedBlock := <-resultCh:
 			works = false
 			// TODO: send mined block to sentry
 			_ = minedBlock
 		case err := <-errc:
 			works = false
+			hasWork = false
 			if err != nil {
 				log.Warn("mining", "err", err)
 			}
 		case <-sub.Err():
 			return
+		case <-quitCh:
+			return
 		}
 
-		if !works {
+		if !works && hasWork {
 			works = true
-			go func() { errc <- s.miningStep(resultCh, mining, tmpdir) }()
+			go func() { errc <- s.miningStep(resultCh, mining, tmpdir, quitCh) }()
 		}
 	}
 }
 
-func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string) error {
+func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	tx, err := s.chainKV.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	txdb := ethdb.NewRwTxDb(tx)
-
 	sealCancel := make(chan struct{})
 	miningState, err := mining.Prepare(
 		nil,
@@ -738,14 +799,14 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		"",
 		ethdb.DefaultStorageMode,
 		tmpdir,
-		nil,
 		0,
-		nil, //todo: pass quitch
+		quitCh,
 		nil,
 		s.txPool,
 		nil,
 		false,
-		stagedsync.NewMiningStagesParameters(s.config.Miner, true, resultCh, sealCancel),
+		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
+		stagedsync.StageSendersCfg(s.chainConfig),
 	)
 	if err != nil {
 		return err
@@ -755,12 +816,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	}
 	tx.Rollback()
 	return nil
-}
-
-// StopMining terminates the miner, both at the consensus engine level as well as
-// at the block creation level.
-func (s *Ethereum) StopMining() {
-	//todo
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
@@ -786,8 +841,19 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 		return res
 	}
-	if s.config.EnableDownloaderV2 {
-		return nil // downloader.MakeProtocols()
+	if s.config.EnableDownloadV2 {
+		return download.MakeProtocols(
+			s.downloadV2Ctx,
+			readNodeInfo,
+			s.ethDialCandidates,
+			&s.sentryServer.Peers,
+			&s.sentryServer.PeerHeightMap,
+			&s.sentryServer.PeerTimeMap,
+			&s.sentryServer.PeerRwMap,
+			s.sentryServer.GetStatus,
+			s.sentryServer.ReceiveCh,
+			s.sentryServer.ReceiveUploadCh,
+			s.sentryServer.ReceiveTxCh)
 	} else {
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}
@@ -800,8 +866,12 @@ func (s *Ethereum) Start() error {
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	if s.config.EnableDownloaderV2 {
-
+	if s.config.EnableDownloadV2 {
+		s.txPoolServer.TxFetcher.Stop()
+		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
+		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer)
 	} else {
 		// Start the networking layer and the light server if requested
 		s.handler.Start(maxPeers)
@@ -813,11 +883,17 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	if s.config.EnableDownloaderV2 {
-
+	if s.config.EnableDownloadV2 {
+		s.downloadV2Cancel()
+		s.txPoolServer.TxFetcher.Stop()
+		s.txPool.Stop()
 	} else {
 		s.handler.Stop()
 	}
+	if s.quitMining != nil {
+		close(s.quitMining)
+	}
+
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {

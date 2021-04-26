@@ -42,7 +42,7 @@ var stagesToUseNamedKeys = Migration{
 			}
 			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
-			if err := next(k, newKey, v); err != nil {
+			if err := next(k, []byte(newKey), v); err != nil {
 				return err
 			}
 			return nil
@@ -89,7 +89,7 @@ var unwindStagesToUseNamedKeys = Migration{
 			}
 			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
-			if err := next(k, newKey, v); err != nil {
+			if err := next(k, []byte(newKey), v); err != nil {
 				return err
 			}
 			return nil

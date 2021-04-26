@@ -544,7 +544,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		if err1 != nil {
 			return err1
 		}
-		if chainConfig.IsByzantium(block.Number()) {
+		if chainConfig.IsByzantium(block.Number().Uint64()) {
 			receiptSha := types.DeriveSha(receipts)
 			if receiptSha != block.Header().ReceiptHash {
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
@@ -680,7 +680,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
 		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}

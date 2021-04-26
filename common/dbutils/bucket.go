@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 )
+
+// DBSchemaVersion
+var DBSchemaVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 // Buckets
 
@@ -141,9 +146,6 @@ const (
 	BodiesSnapshotInfoBucket  = "bSNINFO"
 	StateSnapshotInfoBucket   = "sSNINFO"
 
-	// databaseVerisionKey tracks the current database version.
-	DatabaseVerisionKey = "DatabaseVersion"
-
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
 	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
@@ -202,8 +204,6 @@ const (
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	HeadFastBlockKey = "LastFast"
 
 	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
 	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
@@ -231,6 +231,8 @@ var (
 	//StorageModeCallTraces - does not build index of call traces
 	StorageModeCallTraces = []byte("smCallTraces")
 
+	DBSchemaVersionKey = []byte("dbVersion")
+
 	HeadHeaderKey = "LastHeader"
 
 	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
@@ -248,7 +250,6 @@ var Buckets = []string{
 	StorageHistoryBucket,
 	CodeBucket,
 	ContractCodeBucket,
-	DatabaseVerisionKey,
 	HeaderNumberBucket,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
@@ -270,7 +271,6 @@ var Buckets = []string{
 	PlainStorageChangeSetBucket,
 	Senders,
 	HeadBlockKey,
-	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
 	LogTopicIndex,

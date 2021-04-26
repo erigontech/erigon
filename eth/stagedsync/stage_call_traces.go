@@ -25,24 +25,41 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
-type CallTracesStageParams struct {
-	ToBlock   uint64 // not setting this params means no limit
-	BatchSize datasize.ByteSize
-	Cache     *shards.StateCache
+type CallTracesCfg struct {
+	ToBlock     uint64 // not setting this params means no limit
+	BatchSize   datasize.ByteSize
+	tmpdir      string
+	chainConfig *params.ChainConfig
+	engine      consensus.Engine
 }
 
-func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
-	var tx ethdb.DbWithPendingMutations
+func StageCallTracesCfg(
+	ToBlock uint64,
+	BatchSize datasize.ByteSize,
+	tmpdir string,
+	chainConfig *params.ChainConfig,
+	engine consensus.Engine,
+) CallTracesCfg {
+	return CallTracesCfg{
+		ToBlock:     ToBlock,
+		BatchSize:   BatchSize,
+		tmpdir:      tmpdir,
+		chainConfig: chainConfig,
+		engine:      engine,
+	}
+}
+
+func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg CallTracesCfg) error {
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -50,8 +67,8 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
-	if params.ToBlock > 0 && params.ToBlock < endBlock {
-		endBlock = params.ToBlock
+	if cfg.ToBlock > 0 && cfg.ToBlock < endBlock {
+		endBlock = cfg.ToBlock
 	}
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
@@ -62,7 +79,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, chainConfig, engine, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit, params); err != nil {
+	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg); err != nil {
 		return err
 	}
 
@@ -78,19 +95,17 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, engine consensus.Engine, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
+func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, cfg CallTracesCfg) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	froms := map[string]*roaring.Bitmap{}
 	tos := map[string]*roaring.Bitmap{}
-	collectorFrom := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	collectorTo := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorFrom := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTo := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
-
-	var cache = params.Cache
 
 	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
@@ -101,11 +116,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
+			sz, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
 			if err != nil {
 				return err
 			}
-			sz2, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
+			sz2, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
 			if err != nil {
 				return err
 			}
@@ -115,7 +130,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			prev = blockNum
 
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
-				"blk/second", speed, "cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
+				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
@@ -140,7 +155,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		if err2 != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -148,15 +163,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			break
 		}
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-		reader := state.NewPlainDBState(tx, blockNum-1)
-		stateReader = state.NewCachedReader(reader, cache)
-		stateWriter = state.NewCachedWriter(state.NewNoopWriter(), cache)
+		stateReader := state.NewPlainKvState(tx, blockNum-1)
+		stateWriter := state.NewNoopWriter()
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter); err != nil {
+		if _, err := core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 		for addr := range tracer.froms {
@@ -176,14 +188,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				tos[string(a[:])] = m
 			}
 			m.Add(uint32(blockNum))
-		}
-		if cache.WriteSize() >= int(params.BatchSize) {
-			start := time.Now()
-			writes := cache.PrepareWrites()
-			log.Info("PrepareWrites", "in", time.Since(start))
-			start = time.Now()
-			cache.TurnWritesToReads(writes)
-			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 
@@ -240,15 +244,15 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, quitCh <-chan struct{}, params CallTracesStageParams) error {
-	var tx ethdb.DbWithPendingMutations
+func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}, cfg CallTracesCfg) error {
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -256,7 +260,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, engine, quitCh, params); err != nil {
+	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -273,13 +277,12 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, engine consensus.Engine, quitCh <-chan struct{}, params CallTracesStageParams) error {
+func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
-	var cache = params.Cache
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
@@ -289,7 +292,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		if err != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(db), blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -297,19 +300,11 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 			break
 		}
 
-		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)
-		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)
+		stateReader := state.NewPlainKvState(db, blockNum-1)
+		stateWriter := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
-		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, getHeader, engine, block, stateReader, stateWriter); err != nil {
+		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
-		}
-		if cache.WriteSize() >= int(params.BatchSize) {
-			start := time.Now()
-			writes := cache.PrepareWrites()
-			log.Info("PrepareWrites", "in", time.Since(start))
-			start = time.Now()
-			cache.TurnWritesToReads(writes)
-			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 	for addr := range tracer.froms {

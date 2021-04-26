@@ -20,7 +20,6 @@ package ethash
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"math/rand"
 	"os"
@@ -390,18 +389,6 @@ func (d *dataset) finalizer() {
 		d.dump.Close()
 		d.mmap, d.dump = nil, nil
 	}
-}
-
-// MakeCache generates a new ethash cache and optionally stores it to disk.
-func MakeCache(block uint64, dir string) {
-	c := cache{epoch: block / epochLength}
-	c.generate(dir, math.MaxInt32, false, false)
-}
-
-// MakeDataset generates a new ethash dataset and optionally stores it to disk.
-func MakeDataset(block uint64, dir string) {
-	d := dataset{epoch: block / epochLength}
-	d.generate(dir, math.MaxInt32, false, false)
 }
 
 // Mode defines the type and amount of PoW verification an ethash engine makes.

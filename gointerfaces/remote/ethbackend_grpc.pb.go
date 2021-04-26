@@ -21,6 +21,10 @@ type ETHBACKENDClient interface {
 	Add(ctx context.Context, in *TxRequest, opts ...grpc.CallOption) (*AddReply, error)
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
+	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+	ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error)
+	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+	ClientVersion(ctx context.Context, in *ClientVersionRequest, opts ...grpc.CallOption) (*ClientVersionReply, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error)
 	// GetWork returns a work package for external miner.
 	//
@@ -76,6 +80,24 @@ func (c *eTHBACKENDClient) Etherbase(ctx context.Context, in *EtherbaseRequest, 
 func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error) {
 	out := new(NetVersionReply)
 	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/NetVersion", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error) {
+	out := new(ProtocolVersionReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/ProtocolVersion", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) ClientVersion(ctx context.Context, in *ClientVersionRequest, opts ...grpc.CallOption) (*ClientVersionReply, error) {
+	out := new(ClientVersionReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/ClientVersion", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +188,10 @@ type ETHBACKENDServer interface {
 	Add(context.Context, *TxRequest) (*AddReply, error)
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
+	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+	ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error)
+	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+	ClientVersion(context.Context, *ClientVersionRequest) (*ClientVersionReply, error)
 	Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error
 	// GetWork returns a work package for external miner.
 	//
@@ -205,6 +231,12 @@ func (UnimplementedETHBACKENDServer) Etherbase(context.Context, *EtherbaseReques
 }
 func (UnimplementedETHBACKENDServer) NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NetVersion not implemented")
+}
+func (UnimplementedETHBACKENDServer) ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProtocolVersion not implemented")
+}
+func (UnimplementedETHBACKENDServer) ClientVersion(context.Context, *ClientVersionRequest) (*ClientVersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClientVersion not implemented")
 }
 func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error {
 	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
@@ -287,6 +319,42 @@ func _ETHBACKEND_NetVersion_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ETHBACKENDServer).NetVersion(ctx, req.(*NetVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_ProtocolVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProtocolVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).ProtocolVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/ProtocolVersion",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).ProtocolVersion(ctx, req.(*ProtocolVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_ClientVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClientVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).ClientVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/ClientVersion",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).ClientVersion(ctx, req.(*ClientVersionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -420,6 +488,14 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NetVersion",
 			Handler:    _ETHBACKEND_NetVersion_Handler,
+		},
+		{
+			MethodName: "ProtocolVersion",
+			Handler:    _ETHBACKEND_ProtocolVersion_Handler,
+		},
+		{
+			MethodName: "ClientVersion",
+			Handler:    _ETHBACKEND_ClientVersion_Handler,
 		},
 		{
 			MethodName: "GetWork",

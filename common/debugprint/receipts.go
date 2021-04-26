@@ -18,11 +18,11 @@ func Transactions(ts1, ts2 types.Transactions) {
 		fmt.Printf(" ==== Transaction ====\n")
 		if t2 == nil {
 			fmt.Printf(" TxHash:        %x\n", t1.Hash())
-			fmt.Printf(" To:            %x\n", t1.To())
+			fmt.Printf(" To:            %x\n", t1.GetTo())
 			continue
 		}
 		fmt.Printf(" TxHash:        %x, %x\n", t1.Hash(), t2.Hash())
-		fmt.Printf(" To:            %x, %x\n", t1.To(), t2.To())
+		fmt.Printf(" To:            %x, %x\n", t1.GetTo(), t2.GetTo())
 	}
 }
 

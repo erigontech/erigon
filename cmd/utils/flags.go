@@ -36,13 +36,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -169,11 +167,6 @@ var (
 		Usage: `Time of tick`,
 		Value: time.Second * 2,
 	}
-	TxLookupLimitFlag = cli.Uint64Flag{
-		Name:  "txlookuplimit",
-		Usage: "Number of recent blocks to maintain transactions index for (default = about one year, 0 = entire chain)",
-		Value: ethconfig.Defaults.TxLookupLimit,
-	}
 	LightServFlag = cli.IntFlag{
 		Name:  "lightserv",
 		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",
@@ -276,12 +269,6 @@ var (
 		Name:  "txpool.lifetime",
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
-	}
-	// Performance tuning settings
-	ArchiveSyncInterval = cli.IntFlag{
-		Name:  "archive-sync-interval",
-		Usage: "When to switch from full to archive sync",
-		Value: 1024,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -651,6 +638,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -691,6 +680,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -757,20 +748,6 @@ func SplitAndTrim(input string) (ret []string) {
 		}
 	}
 	return ret
-}
-
-// makeDatabaseHandles raises out the number of allowed file handles per process
-// for Geth and returns half of the allowance to assign to the database.
-func makeDatabaseHandles() int {
-	limit, err := fdlimit.Maximum()
-	if err != nil {
-		Fatalf("Failed to retrieve file descriptor allowance: %v", err)
-	}
-	raised, err := fdlimit.Raise(uint64(limit))
-	if err != nil {
-		Fatalf("Failed to raise file descriptor allowance: %v", err)
-	}
-	return int(raised / 2) // Leave half for networking and other stuff
 }
 
 // setEtherbase retrieves the etherbase from the directly specified
@@ -860,6 +837,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.YoloV3ChainName:
 		return filepath.Join(datadir, "yolo-v3")
+	case params.AleutChainName:
+		return filepath.Join(datadir, "aleut")
 	default:
 		return datadir
 	}
@@ -956,7 +935,7 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
-func setEthash(ctx *cli.Context, cfg *eth.Config) {
+func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	}
@@ -1071,7 +1050,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	}
 }
 
-func setWhitelist(ctx *cli.Context, cfg *eth.Config) {
+func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	whitelist := ctx.GlobalString(WhitelistFlag.Name)
 	if whitelist == "" {
 		return
@@ -1149,10 +1128,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-	cfg.DatabaseHandles = makeDatabaseHandles()
-	//if ctx.GlobalIsSet(AncientFlag.Name) {
-	//	cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
-	//}
 
 	// todo uncomment after fix pruning
 	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
@@ -1165,9 +1140,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-	log.Info("Enabling recording of key preimages since archive mode is used")
 
-	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
 	}
@@ -1188,7 +1161,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.RPCTxFeeCap = ctx.GlobalFloat64(RPCGlobalTxFeeCapFlag.Name)
 	}
 	if ctx.GlobalIsSet(NoDiscoverFlag.Name) {
-		cfg.EthDiscoveryURLs, cfg.SnapDiscoveryURLs = []string{}, []string{}
+		cfg.EthDiscoveryURLs = []string{}
 	} else if ctx.GlobalIsSet(DNSDiscoveryFlag.Name) {
 		urls := ctx.GlobalString(DNSDiscoveryFlag.Name)
 		if urls == "" {
@@ -1238,6 +1211,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
 		}
 		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 7822 // aleut
+		}
+		cfg.Genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1274,7 +1252,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
-func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
+func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
@@ -1282,15 +1260,6 @@ func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 	if url := params.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
-}
-
-// RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg)
-	if err != nil {
-		Fatalf("Failed to register the Ethereum service: %v", err)
-	}
-	return backend
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {
@@ -1336,6 +1305,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

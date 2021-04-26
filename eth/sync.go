@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -41,7 +40,7 @@ const (
 
 type txsync struct {
 	p   *eth.Peer
-	txs []*types.Transaction
+	txs []types.Transaction
 }
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
@@ -101,18 +100,10 @@ func (h *handler) txsyncLoop64() {
 		if len(s.txs) == 0 {
 			delete(pending, s.p.Peer.ID())
 		}
-
-		serialized := make([]rlp.RawValue, len(pack.txs))
-		hashes := make(common.Hashes, len(pack.txs))
-		for i := range pack.txs {
-			b, _ := rlp.EncodeToBytes(pack.txs[i])
-			serialized[i] = b
-			hashes[i] = pack.txs[i].Hash()
-		}
 		// Send the pack in the background.
 		s.p.Log().Trace("Sending batch of transactions", "count", len(pack.txs), "bytes", size)
 		sending = true
-		go func() { done <- pack.p.SendTransactions(serialized, hashes) }()
+		go func() { done <- pack.p.SendTransactions(pack.txs) }()
 	}
 	// pick chooses the next pending sync.
 	pick := func() *txsync {

@@ -33,7 +33,7 @@ func generateFakeBlocks(from, to int) (*types.Header, []*types.Header) {
 			time,
 			parent.Time,
 			parent.Difficulty,
-			parent.Number,
+			parent.Number.Uint64(),
 			parent.UncleHash,
 		)
 
