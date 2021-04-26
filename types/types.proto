@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package types;
+
+option go_package = "./types;types";
+
+/* Service-level versioning shall use a 3-part version number (M.m.p) following semver rules */
+/* 1. MAJOR version (M): increment when you make incompatible changes                        */
+/* 2. MINOR version (m): increment when you add functionality in backward compatible manner  */
+/* 3. PATCH version (p): increment when you make backward compatible bug fixes               */
+
+// Extensions of file-level options for service versioning: should *not* be modified
+extend google.protobuf.FileOptions {
+  uint32 service_major_version = 50001;
+  uint32 service_minor_version = 50002;
+  uint32 service_patch_version = 50003;
+}
+
+message H128 {
+  uint64 hi = 1;
+  uint64 lo = 2;
+}
+
+message H160 {
+  H128 hi = 1;
+  uint32 lo = 2;
+}
+
+message H256 {
+  H128 hi = 1;
+  H128 lo = 2;
+}
+
+message H512 {
+  H256 hi = 1;
+  H256 lo = 2;
+}
+
+// Reply message containing the current service version on the service side
+message VersionReply {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
