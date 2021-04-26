@@ -138,7 +138,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
+	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
