@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -77,11 +76,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	}
 	defer historyTx.Rollback()
 	chainConfig := genesis.Config
-	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	cc := &core.TinyChainContext{}
-	//cc.SetDB(chainDb)
-	cc.SetEngine(engine)
 
 	noOpWriter := state.NewNoopWriter()
 
