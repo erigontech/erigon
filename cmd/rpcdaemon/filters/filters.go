@@ -19,6 +19,7 @@ type (
 	HeadsSubID        SubscriptionID
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
+	PendingTxsSubID   SubscriptionID
 )
 
 type Filters struct {
@@ -27,6 +28,7 @@ type Filters struct {
 	headsSubs        map[HeadsSubID]chan *types.Header
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
+	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
 func New(ethBackend core.ApiBackend) *Filters {
@@ -82,6 +84,20 @@ func (ff *Filters) SubscribePendingBlock(out chan *types.Block) PendingBlockSubI
 	id := PendingBlockSubID(generateSubscriptionID())
 	ff.pendingBlockSubs[id] = out
 	return id
+}
+
+func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	id := PendingTxsSubID(generateSubscriptionID())
+	ff.pendingTxsSubs[id] = out
+	return id
+}
+
+func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.pendingTxsSubs, id)
 }
 
 func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
