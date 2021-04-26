@@ -35,7 +35,7 @@ var cmdSnapshotCheck = &cobra.Command{
 	Short:   "check execution over state snapshot by block",
 	Example: "go run cmd/integration/main.go snapshot_check --block 11400000 --datadir /media/b00ris/nvme/backup/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshots/ --snapshotMode s --tmp_db /media/b00ris/nvme/tmp/debug",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		//db to provide headers, blocks, senders ...
 		mainDB, err := ethdb.Open(chaindata, true)
 		if err != nil {

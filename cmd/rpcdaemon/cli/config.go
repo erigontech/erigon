@@ -154,7 +154,7 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 	return nil
 }
 
-func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
+func OpenDB(cfg Flags, rootCancel context.CancelFunc) (ethdb.RoKV, core.ApiBackend, error) {
 	var kv ethdb.RwKV
 	var ethBackend core.ApiBackend
 	var err error
@@ -196,7 +196,7 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 		remoteKv, err = ethdb.NewRemote(
 			remotedbserver.KvServiceAPIVersion.Major,
 			remotedbserver.KvServiceAPIVersion.Minor,
-			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}

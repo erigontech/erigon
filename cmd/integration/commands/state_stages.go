@@ -49,7 +49,7 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		cfg := &node.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -76,7 +76,7 @@ Examples:
 var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -95,7 +95,7 @@ var loopIhCmd = &cobra.Command{
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 		if unwind == 0 {
