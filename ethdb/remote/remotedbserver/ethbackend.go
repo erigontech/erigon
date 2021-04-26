@@ -100,6 +100,36 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		return err
 	})
 
+	s.events.AddPendingTxsSubscription(func(txs []types.Transaction) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			wg.Done()
+			return subscribeServer.Context().Err()
+		default:
+		}
+
+		payload, err := json.Marshal(txs)
+		if err != nil {
+			log.Warn("error while marshaling a transactions", "err", err)
+			return err
+		}
+
+		err = subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_PENDING_TRANSACTIONS,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
 	log.Info("event subscription channel established with the RPC daemon")
 	wg.Wait()
 	log.Info("event subscription channel closed with the RPC daemon")

@@ -147,6 +147,18 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 				v <- &block
 			}
 		}
+	case remote.Event_PENDING_TRANSACTIONS:
+		payload := event.Data
+		var txs []types.Transaction
+		err := json.Unmarshal(payload, &txs)
+		if err != nil {
+			// ignoring what we can't unmarshal
+			log.Warn("rpc filters, unprocessable payload", "err", err)
+		} else {
+			for _, v := range ff.pendingTxsSubs {
+				v <- txs
+			}
+		}
 	default:
 		log.Warn("rpc filters: unsupported event type", "type", event.Type)
 		return
