@@ -65,9 +65,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database     *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine       consensus.Engine
-	chainContext *core.TinyChainContext
+	database  *ethdb.ObjectDatabase // In memory database to store our testing data
+	engine    consensus.Engine
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -93,16 +93,15 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	cc := &core.TinyChainContext{}
-	cc.SetDB(database)
-	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		chainContext: cc,
-		config:       genesis.Config,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
+		config: genesis.Config,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -116,16 +115,15 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	cc := &core.TinyChainContext{}
-	cc.SetDB(database)
-	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
 		config:       genesis.Config,
-		chainContext: cc,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -617,7 +615,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.chainContext.GetHeader, b.chainContext.Engine(), nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -646,7 +644,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.chainContext.GetHeader, b.chainContext.Engine(),
+		b.config, b.getHeader, b.engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -656,9 +654,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
-		block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+		block.AddTxWithChain(b.getHeader, b.engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -777,7 +775,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)
