@@ -6,6 +6,24 @@ package consensus;
 
 option go_package = "./consensus;consensus";
 
+message ChainSpecMessage {
+    string mechanism = 1;       // Name of consensus mechanism, e.g. ethash, clique, aura
+    bytes mechanism_config = 2; // Configuration of specific consensus mechanism - format is specific to the mechanism
+    Genesis genesis = 3;        // Description of genesis block
+    repeated Fork forks = 4;    // Description of forks (upgrades)
+}
+
+message Genesis {
+    types.H256 chain_id = 1; // Chain id starting from genesis block and until the first fork
+    Template template = 2;   // Genesis header without values like "uncle hash", "tx hash" and "state root" calculated
+}
+
+message Fork {
+    string name = 1;         // Code name of the fork
+    uint64 number = 2;       // First block number at which rules of the fork activate
+    types.H256 chain_id = 3; // Chain id starting from this fork until the next fork
+}
+
 message Error {
     uint32 code = 1;
     string description = 2;
@@ -16,22 +34,26 @@ message Result {
     optional Error error = 2;
 }
 
-message BlockHeader {
+message Template {
     types.H256 parent_hash = 1;
+    types.H160 coinbase = 2;
+    types.H256 difficulty = 3;
+    uint64 number = 4;
+    uint64 gas_limit = 5;
+    uint64 time = 6;
+    bytes extra = 7;
+    uint64 nonce = 8;    
+}
+
+message BlockHeader {
+    Template template = 1;
     types.H256 uncle_hash = 2;
-    bytes coinbase = 3;
-    types.H256 root_hash = 4;
-    types.H256 tx_hash = 5;
-    types.H256 receipt_hash = 6;
-    bytes bloom = 7;
-    types.H256 difficulty = 8;
-    uint64 number = 9;
-    uint64 gas_limit = 10;
-    uint64 gas_used = 11;
-    uint64 time = 12;
-    bytes extra = 13;
-    types.H256 mix_digest = 14;
-    uint64 nonce = 15;
+    types.H256 root_hash = 3;
+    types.H256 tx_hash = 4;
+    types.H256 receipt_hash = 5;
+    bytes bloom = 6;
+    uint64 gas_used = 7;
+    types.H256 mix_digest = 8;
 }
 
 message Transaction {
@@ -112,6 +134,8 @@ message FinalizeResponse {
 
 service ConsensusEngine {
     rpc GetAuthor(GetAuthorRequest) returns(GetAuthorResponse);
+
+    rpc ChainSpec(google.protobuf.Empty) returns(ChainSpecMessage);
 
     // Core requests verifications from the Consensus Engine via this function
     rpc VerifyHeaders(stream VerifyHeaderRequest) returns(stream VerifyHeaderResponse);
