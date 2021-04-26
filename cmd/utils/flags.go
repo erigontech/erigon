@@ -35,7 +35,6 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -1281,10 +1280,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
-	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
-
 	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name, tmpdir)
+	chainDb, err := stack.OpenDatabase(name, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

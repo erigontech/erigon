@@ -150,7 +150,7 @@ func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
+func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -190,7 +190,7 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 			return err
 		}
 
-		if err = v.Up(tx, path.Join(tmpdir, "migrations", v.Name), progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
+		if err = v.Up(tx, path.Join(datadir, "migrations", v.Name), progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					err = tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
