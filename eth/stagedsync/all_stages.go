@@ -67,7 +67,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
-				execCfg := StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig)
+				execCfg := StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig, world.TmpDir)
 				return &Stage{
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",

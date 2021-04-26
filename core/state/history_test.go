@@ -115,7 +115,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	defer plainState.Close()
 	for i, addr := range addrs {
 		acc := accounts.NewAccount()
-		if ok, err := rawdb.PlainReadAccount(ethdb.NewRoTxDb(tx), addr, &acc); err != nil {
+		if ok, err := rawdb.PlainReadAccount(tx, addr, &acc); err != nil {
 			t.Fatal("error on get account", i, err)
 		} else if !ok {
 			t.Fatal("error on get account", i)

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -53,6 +54,7 @@ type ExecuteBlockCfg struct {
 	chainConfig           *params.ChainConfig
 	engine                consensus.Engine
 	vmConfig              *vm.Config
+	tmpdir                string
 }
 
 func StageExecuteBlocksCfg(
@@ -65,6 +67,7 @@ func StageExecuteBlocksCfg(
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
+	tmpdir string,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		writeReceipts:         WriteReceipts,
@@ -76,6 +79,7 @@ func StageExecuteBlocksCfg(
 		chainConfig:           chainConfig,
 		engine:                engine,
 		vmConfig:              vmConfig,
+		tmpdir:                tmpdir,
 	}
 }
 
@@ -300,77 +304,78 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, params ExecuteBlockCfg) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
 	logPrefix := s.state.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
-	accountMap, storageMap, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, quit)
+	changes, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, cfg.tmpdir, quit)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
-	for key, value := range accountMap {
-		if len(value) > 0 {
-			var acc accounts.Account
-			if err := acc.DecodeForStorage(value); err != nil {
-				return err
-			}
+	if err := changes.Load(logPrefix, tx, stateBucket, func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(k) == 20 {
+			if len(value) > 0 {
+				var acc accounts.Account
+				if err := acc.DecodeForStorage(value); err != nil {
+					return err
+				}
 
-			// Fetch the code hash
-			recoverCodeHashPlain(&acc, tx, key)
-			if err := writeAccountPlain(logPrefix, tx, key, acc); err != nil {
+				// Fetch the code hash
+				recoverCodeHashPlain(&acc, tx, k)
+				var address common.Address
+				copy(address[:], k)
+				if err := cleanupContractCodeBucket(
+					logPrefix,
+					tx,
+					dbutils.PlainContractCodeBucket,
+					acc,
+					func(db ethdb.Tx, out *accounts.Account) (bool, error) {
+						return rawdb.PlainReadAccount(db, address, out)
+					},
+					func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
+				); err != nil {
+					return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+				}
+
+				newV := make([]byte, acc.EncodingLengthForStorage())
+				acc.EncodeForStorage(newV)
+				if err := next(k, k, newV); err != nil {
+					return err
+				}
+			} else {
+				if err := next(k, k, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if len(value) > 0 {
+			if err := next(k, k[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err := deleteAccountPlain(tx, key); err != nil {
+			if err := next(k, k[:storageKeyLength], nil); err != nil {
 				return err
 			}
 		}
-	}
+		return nil
 
-	for key, value := range storageMap {
-		k := []byte(key)
-		if len(value) > 0 {
-			if err := tx.Put(stateBucket, k[:storageKeyLength], value); err != nil {
-				return err
-			}
-		} else {
-			if err := tx.Delete(stateBucket, k[:storageKeyLength], nil); err != nil {
-				return err
-			}
-		}
+	}, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
 	}
 
 	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if params.writeReceipts {
+	if cfg.writeReceipts {
 		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
 
 	return nil
-}
-
-func writeAccountPlain(logPrefix string, db ethdb.RwTx, key string, acc accounts.Account) error {
-	var address common.Address
-	copy(address[:], key)
-	if err := cleanupContractCodeBucket(
-		logPrefix,
-		db,
-		dbutils.PlainContractCodeBucket,
-		acc,
-		func(db ethdb.Tx, out *accounts.Account) (bool, error) {
-			return rawdb.PlainReadAccount(ethdb.NewRoTxDb(db), address, out)
-		},
-		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
-	); err != nil {
-		return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
-	}
-
-	return rawdb.PlainWriteAccount(db, address, acc)
 }
 
 func cleanupContractCodeBucket(
@@ -398,7 +403,7 @@ func cleanupContractCodeBucket(
 	return nil
 }
 
-func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key string) {
+func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key []byte) {
 	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
@@ -406,12 +411,6 @@ func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key string) {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
-}
-
-func deleteAccountPlain(db ethdb.Deleter, key string) error {
-	var address common.Address
-	copy(address[:], key)
-	return rawdb.PlainDeleteAccount(db, address)
 }
 
 func min(a, b uint64) uint64 {
