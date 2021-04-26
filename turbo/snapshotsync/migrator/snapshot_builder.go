@@ -21,6 +21,13 @@ import (
 	"time"
 )
 
+//What number should we use?
+const maxReorgDepth = 90000
+
+func CalculateEpoch(block, epochSize uint64) uint64 {
+	return 	block - (block + maxReorgDepth)%epochSize//Epoch
+
+}
 
 func SnapshotName(baseDir, name string, blockNum uint64) string  {
 	return path.Join(baseDir, name)+strconv.FormatUint(blockNum, 10)

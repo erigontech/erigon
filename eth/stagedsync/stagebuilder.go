@@ -397,17 +397,8 @@ func DefaultStages() StageBuilders {
 						if err != nil {
 							return err
 						}
-
-						fmt.Println("world.SnapshotBuilder", "bn", s.BlockNumber,"exAt", executionAt)
-						headersBlock, err := stages.GetStageProgress(world.TX, stages.Headers)
-						if err!=nil {
-							return err
-						}
-
-						snBlock:=headersBlock - (headersBlock+ 70000)%50//Epoch
-
-						err = world.SnapshotBuilder.Migrate(world.DB, world.TX, snBlock, world.btClient)
-						if err!=nil {
+						err = MigrateSnapshot(s.BlockNumber+1, world.TX, world.DB, world.btClient, world.SnapshotBuilder)
+						if err != nil {
 							return err
 						}
 						return s.DoneAndUpdate(world.TX, executionAt)
@@ -547,21 +538,21 @@ func WithSnapshotsStages() StageBuilders {
 	defaultStages :=DefaultStages()
 	final:= defaultStages[len(defaultStages)-1]
 	defaultStages = defaultStages[:1]
-	//defaultStages = append(defaultStages, StageBuilder{
-	//	ID: stages.CreateHeadersSnapshot,
-	//	Build: func(world StageParameters) *Stage {
-	//		return &Stage{
-	//			ID:          stages.CreateHeadersSnapshot,
-	//			Description: "Create headers snapshot",
-	//			ExecFunc: func(s *StageState, u Unwinder) error {
-	//				return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
-	//			},
-	//			UnwindFunc: func(u *UnwindState, s *StageState) error {
-	//				return u.Done(world.DB)
-	//			},
-	//		}
-	//	},
-	//})
+	defaultStages = append(defaultStages, StageBuilder{
+		ID: stages.CreateHeadersSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateHeadersSnapshot,
+				Description: "Create headers snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+	})
 	defaultStages = append(defaultStages, final)
 	fmt.Println(defaultStages)
 	return defaultStages
@@ -656,7 +647,7 @@ func WithSnapshotsStages() StageBuilders {
 
 func UnwindOrderWithSnapshots() UnwindOrder {
 	return []int{
-		0, 1,
+		0, 1, 2,
 	}
 	//todo fix unwind order
 	return []int{

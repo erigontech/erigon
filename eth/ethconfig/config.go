@@ -133,6 +133,7 @@ type Config struct {
 	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool
+	SnapshotLayout bool
 
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader

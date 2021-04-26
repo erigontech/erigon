@@ -168,6 +168,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	if config.SnapshotLayout {
+
+	}
 	btEnabled=false
 	if btEnabled {
 		var downloadedSnapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo
@@ -398,7 +401,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.events = remotedbserver.NewEvents()
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		if btEnabled {
+		if config.SnapshotLayout {
 			currentSnapshotBlock, currentInfohash,err:=migrator.GetSnapshotInfo(chainDb)
 			if err!=nil {
 				return nil, err
@@ -414,14 +417,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if stagedSync.Notifier == nil {
 			stagedSync.Notifier = eth.events
 		}
-		currentSnapshotBlock, currentInfohash,err:=migrator.GetSnapshotInfo(chainDb)
-		if err!=nil {
-			return nil, err
-		}
+		if config.SnapshotLayout {
+			currentSnapshotBlock, currentInfohash,err:=migrator.GetSnapshotInfo(chainDb)
+			if err!=nil {
+				return nil, err
+			}
 
-		mg:=migrator.New(snapshotsDir, currentSnapshotBlock, currentInfohash)
-		stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
-		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
+			mg:=migrator.New(snapshotsDir, currentSnapshotBlock, currentInfohash)
+			stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
+			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
+		}
 	}
 
 	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})

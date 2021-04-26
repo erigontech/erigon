@@ -54,16 +54,17 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 		return fmt.Errorf("headers snapshot is higher canonical. snapshot %d headers %d", s.BlockNumber, to)
 	}
 
-	toBlock:=to-to%Epoch
+	//snapshotBlock:=migrator.CalculateEpoch(to, Epoch)
+	snapshotBlock :=migrator.CalculateEpoch(to, 50)
 
 
-	if s.BlockNumber == toBlock {
+	if s.BlockNumber == snapshotBlock {
 		// we already did snapshot creation for this block
 		s.Done()
 		return nil
 	}
 
-	dbPath:=migrator.SnapshotName(snapshotDir, "headers", toBlock)
+	dbPath:=migrator.SnapshotName(snapshotDir, "headers", snapshotBlock)
 	//remove files on this path(in case of failed generation)
 	err = os.RemoveAll(dbPath)
 	if err!=nil {
@@ -77,8 +78,8 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 
 	tt:=time.Now()
-	snapshotPath:=migrator.SnapshotName(snapshotDir, "headers", toBlock)
-	err=migrator.CreateHeadersSnapshot(context.Background(), db, toBlock, snapshotPath)
+	snapshotPath:=migrator.SnapshotName(snapshotDir, "headers", snapshotBlock)
+	err=migrator.CreateHeadersSnapshot(context.Background(), db, snapshotBlock, snapshotPath)
 	if err!=nil {
 		fmt.Println("-----------------------Create Error!", err)
 		return err
@@ -101,7 +102,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 
 	//save new snapshot block
-	err = db.Put(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(toBlock))
+	err = db.Put(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(snapshotBlock))
 	if err!=nil {
 		fmt.Println("Put error", err)
 		return err
@@ -147,7 +148,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 		}
 	}
 
-	log.Info("Start pruning", "from", prevSnapshotBlock, "to", toBlock)
+	log.Info("Start pruning", "from", prevSnapshotBlock, "to", snapshotBlock)
 	tt=time.Now()
 	mainDBRWTx,err:=db.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
 	if err!=nil {
@@ -155,7 +156,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 		return err
 	}
 	defer mainDBRWTx.Rollback()
-	err = migrator.RemoveHeadersData(db, mainDBRWTx, prevSnapshotBlock, toBlock)
+	err = migrator.RemoveHeadersData(db, mainDBRWTx, prevSnapshotBlock, snapshotBlock)
 	if err!=nil {
 		fmt.Println("Remove  error", err)
 		return err
@@ -167,7 +168,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 	log.Info("Pruning successful", "t", time.Since(tt))
 
-	return s.DoneAndUpdate(db, toBlock)
+	return s.DoneAndUpdate(db, snapshotBlock)
 }
 
 

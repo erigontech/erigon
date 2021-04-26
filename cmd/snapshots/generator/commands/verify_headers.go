@@ -25,7 +25,7 @@ func init() {
 var verifyHeadersSnapshotCmd = &cobra.Command{
 	Use:     "verify_headers",
 	Short:   "Copy from state snapshot",
-	Example: "go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/",
+	Example: "go run cmd/snapshots/generator/main.go verify_headers --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return VerifyHeadersSnapshot(cmd.Context(), snapshotFile)
 	},
@@ -81,7 +81,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 					return errors.New("invalid parent hash")
 				}
 			}
-			k, v, innerErr = c.Next() //nolint
+			k, v, innerErr = c.Next()
 			prevHeader = header
 
 			atomic.StoreUint64(&lastHeader, header.Number.Uint64())
