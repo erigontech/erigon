@@ -169,7 +169,7 @@ func HeadersForward(
 			log.Debug("headerLoop woken up by the incoming request")
 		}
 		if initialCycle && cfg.hd.InSync() {
-			fmt.Printf("Top seen height: %d\n", cfg.hd.TopSeenHeight())
+			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
 			break
 		}
 	}
@@ -220,7 +220,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
-			fmt.Printf("ancestor nil for %d %x\n", ancestorHeight, ancestorHash)
+			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--

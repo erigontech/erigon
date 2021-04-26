@@ -145,7 +145,7 @@ func MakeProtocols(ctx context.Context,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.ID().String()
-				log.Info(fmt.Sprintf("[%s] Start with peer", peerID))
+				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
 				peers.Store(peerID, rw)
 				peerRwMap.Store(peerID, rw)
 				if err := runPeer(
@@ -161,7 +161,7 @@ func MakeProtocols(ctx context.Context,
 					receiveUploadCh,
 					receiveTxCh,
 				); err != nil {
-					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+					log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
 				peers.Delete(peerID)
 				peerHeightMap.Delete(peerID)

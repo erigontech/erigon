@@ -129,16 +129,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
 	var err error
-	if config.EnableDebugProtocol {
-		if err = os.RemoveAll("simulator"); err != nil {
-			return nil, fmt.Errorf("removing simulator db: %w", err)
-		}
-		chainDb = ethdb.MustOpen("simulator")
-	} else {
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
-		if err != nil {
-			return nil, err
-		}
+	chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
@@ -296,7 +289,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		consensusConfig = &config.Ethash
 	}
 
-	eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+	if !eth.config.EnableDownloadV2 {
+		eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+	}
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
