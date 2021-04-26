@@ -7,6 +7,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConsensusEngineClient interface {
 	GetAuthor(ctx context.Context, in *GetAuthorRequest, opts ...grpc.CallOption) (*GetAuthorResponse, error)
+	ChainSpec(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ChainSpecMessage, error)
 	// Core requests verifications from the Consensus Engine via this function
 	VerifyHeaders(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyHeadersClient, error)
 	// Consensis Engine may ask for extra informaton (more headers) from the core, and these requests are coming through the stream
@@ -41,6 +43,15 @@ func NewConsensusEngineClient(cc grpc.ClientConnInterface) ConsensusEngineClient
 func (c *consensusEngineClient) GetAuthor(ctx context.Context, in *GetAuthorRequest, opts ...grpc.CallOption) (*GetAuthorResponse, error) {
 	out := new(GetAuthorResponse)
 	err := c.cc.Invoke(ctx, "/consensus.ConsensusEngine/GetAuthor", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *consensusEngineClient) ChainSpec(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ChainSpecMessage, error) {
+	out := new(ChainSpecMessage)
+	err := c.cc.Invoke(ctx, "/consensus.ConsensusEngine/ChainSpec", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +250,7 @@ func (x *consensusEngineSealClient) Recv() (*SealBlockResponse, error) {
 // for forward compatibility
 type ConsensusEngineServer interface {
 	GetAuthor(context.Context, *GetAuthorRequest) (*GetAuthorResponse, error)
+	ChainSpec(context.Context, *emptypb.Empty) (*ChainSpecMessage, error)
 	// Core requests verifications from the Consensus Engine via this function
 	VerifyHeaders(ConsensusEngine_VerifyHeadersServer) error
 	// Consensis Engine may ask for extra informaton (more headers) from the core, and these requests are coming through the stream
@@ -257,6 +269,9 @@ type UnimplementedConsensusEngineServer struct {
 
 func (UnimplementedConsensusEngineServer) GetAuthor(context.Context, *GetAuthorRequest) (*GetAuthorResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAuthor not implemented")
+}
+func (UnimplementedConsensusEngineServer) ChainSpec(context.Context, *emptypb.Empty) (*ChainSpecMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ChainSpec not implemented")
 }
 func (UnimplementedConsensusEngineServer) VerifyHeaders(ConsensusEngine_VerifyHeadersServer) error {
 	return status.Errorf(codes.Unimplemented, "method VerifyHeaders not implemented")
@@ -303,6 +318,24 @@ func _ConsensusEngine_GetAuthor_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConsensusEngineServer).GetAuthor(ctx, req.(*GetAuthorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConsensusEngine_ChainSpec_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConsensusEngineServer).ChainSpec(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/consensus.ConsensusEngine/ChainSpec",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConsensusEngineServer).ChainSpec(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -468,6 +501,10 @@ var ConsensusEngine_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAuthor",
 			Handler:    _ConsensusEngine_GetAuthor_Handler,
+		},
+		{
+			MethodName: "ChainSpec",
+			Handler:    _ConsensusEngine_ChainSpec_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
