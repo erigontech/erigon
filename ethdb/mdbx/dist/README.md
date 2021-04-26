@@ -224,7 +224,7 @@ the user's point of view.
   > due to its internal limitations and unimplemented functions, i.e. the `MDBX_UNABLE_EXTEND_MAPSIZE` error will be returned.
 
 4. Automatic continuous zero-overhead database compactification.
-  > During each commit _libmdbx_ merges suitable freeing pages into unallocated area
+  > During each commit _libmdbx_ merges a freeing pages which adjacent with the unallocated area
   > at the end of file, and then truncates unused space when a lot enough of.
 
 5. The same database format for 32- and 64-bit builds.

@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 8d84a8c94bf33a8a4b959516546f5a33458865e5e2d0f744710c43cf76e37cbd_v0_9_3_125_g2c717590
+#define MDBX_BUILD_SOURCERY 046df7b80c64f3c3baece47f5dad4454d143536b299685cc71d69ecd83016d5b_v0_9_3_104_g934ca25a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1616,22 +1616,6 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_DISABLE_PAGECHECKS must be defined as 0 or 1
 #endif /* MDBX_DISABLE_PAGECHECKS */
 
-#ifndef MDBX_PNL_PREALLOC_FOR_RADIXSORT
-#define MDBX_PNL_PREALLOC_FOR_RADIXSORT 1
-#endif
-#if !(MDBX_PNL_PREALLOC_FOR_RADIXSORT == 0 ||                                  \
-      MDBX_PNL_PREALLOC_FOR_RADIXSORT == 1)
-#error MDBX_PNL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
-#endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
-
-#ifndef MDBX_DPL_PREALLOC_FOR_RADIXSORT
-#define MDBX_DPL_PREALLOC_FOR_RADIXSORT 1
-#endif
-#if !(MDBX_DPL_PREALLOC_FOR_RADIXSORT == 0 ||                                  \
-      MDBX_DPL_PREALLOC_FOR_RADIXSORT == 1)
-#error MDBX_DPL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
-#endif /* MDBX_DPL_PREALLOC_FOR_RADIXSORT */
-
 /** Controls sort order of internal page number lists.
  * The database format depend on this option and libmdbx builded with different
  * option value are incompatible. */
@@ -2185,12 +2169,7 @@ typedef struct MDBX_meta {
  * in the snapshot: Either used by a database or listed in a GC record. */
 typedef struct MDBX_page {
   union {
-#define IS_FROZEN(txn, p) ((p)->mp_txnid < (txn)->mt_txnid)
-#define IS_SPILLED(txn, p) ((p)->mp_txnid == (txn)->mt_txnid)
-#define IS_SHADOWED(txn, p) ((p)->mp_txnid > (txn)->mt_txnid)
-#define IS_VALID(txn, p) ((p)->mp_txnid <= (txn)->mt_front)
-#define IS_MODIFIABLE(txn, p) ((p)->mp_txnid == (txn)->mt_front)
-    uint64_t mp_txnid;
+    uint64_t mp_txnid;         /* txnid that committed this page */
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
@@ -2198,14 +2177,12 @@ typedef struct MDBX_page {
 #define P_LEAF 0x02        /* leaf page */
 #define P_OVERFLOW 0x04    /* overflow page */
 #define P_META 0x08        /* meta page */
-#define P_SPILLED 0x10     /* spilled in parent txn */
+#define P_DIRTY 0x10       /* dirty page, also set for P_SUBP pages */
 #define P_LEAF2 0x20       /* for MDBX_DUPFIXED records */
 #define P_SUBP 0x40        /* for MDBX_DUPSORT sub-pages */
 #define P_BAD 0x80         /* explicit flag for invalid/bad page */
 #define P_LOOSE 0x4000     /* page was dirtied then freed, can be reused */
 #define P_KEEP 0x8000      /* leave this page alone during spill */
-#define P_FROZEN 0x10000   /* used for retire page with known status */
-#define P_ILL_BITS (~(P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW | P_SPILLED))
   uint16_t mp_flags;
   union {
     uint32_t mp_pages; /* number of overflow pages */
@@ -2353,7 +2330,7 @@ typedef struct MDBX_lockinfo {
    * Zero means timed auto-sync is disabled. */
   MDBX_atomic_uint64_t mti_autosync_period;
 
-  /* Marker to distinguish uniqueness of DB/CLK. */
+  /* Marker to distinguish uniqueness of DB/CLK.*/
   MDBX_atomic_uint64_t mti_bait_uniqueness;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
@@ -2378,9 +2355,6 @@ typedef struct MDBX_lockinfo {
 
   /* Timestamp of the last readers check. */
   MDBX_atomic_uint64_t mti_reader_check_timestamp;
-
-  /* Shared anchor for tracking readahead edge and enabled/disabled status. */
-  pgno_t mti_readahead_anchor;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
 
@@ -2449,14 +2423,12 @@ typedef struct MDBX_lockinfo {
 #define MAX_MAPSIZE MAX_MAPSIZE64
 #define MDBX_READERS_LIMIT                                                     \
   ((MAX_PAGESIZE - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
-#define MDBX_PGL_LIMIT ((size_t)MAX_PAGENO)
+#define MDBX_PGL_LIMIT MAX_PAGENO
 #else
 #define MDBX_READERS_LIMIT 1024
 #define MAX_MAPSIZE MAX_MAPSIZE32
 #define MDBX_PGL_LIMIT (MAX_MAPSIZE32 / MIN_PAGESIZE)
 #endif /* MDBX_WORDBITS */
-
-#define MDBX_RADIXSORT_THRESHOLD 333
 
 /*----------------------------------------------------------------------------*/
 
@@ -2497,6 +2469,7 @@ typedef struct MDBX_dpl {
 
 /* PNL sizes */
 #define MDBX_PNL_GRANULATE 1024
+#define MDBX_PNL_RADIXSORT_THRESHOLD 1024
 #define MDBX_PNL_INITIAL                                                       \
   (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
 
@@ -2586,8 +2559,6 @@ struct MDBX_txn {
    * Only committed write transactions increment the ID. If a transaction
    * aborts, the ID may be re-used by the next writer. */
   txnid_t mt_txnid;
-  txnid_t mt_front;
-
   MDBX_env *mt_env; /* the DB environment */
   /* Array of records for each DB known in the environment. */
   MDBX_dbx *mt_dbxs;
@@ -2603,7 +2574,8 @@ struct MDBX_txn {
 #define DBI_CREAT MDBX_DBI_CREAT /* Named-DB handle created in this txn */
 #define DBI_VALID 0x10           /* DB handle is valid, see also DB_VALID */
 #define DBI_USRVALID 0x20        /* As DB_VALID, but not set for FREE_DBI */
-#define DBI_AUDITED 0x40         /* Internal flag for accounting during audit */
+#define DBI_DUPDATA 0x40         /* DB is MDBX_DUPSORT data */
+#define DBI_AUDITED 0x80         /* Internal flag for accounting during audit */
   /* Array of flags for each DB */
   uint8_t *mt_dbistate;
   /* Number of DB records in use, or 0 when the txn is finished.
@@ -2722,6 +2694,8 @@ typedef struct MDBX_xcursor {
   MDBX_db mx_db;
   /* The auxiliary DB record for this Dup DB */
   MDBX_dbx mx_dbx;
+  /* The mt_dbistate for this Dup DB */
+  uint8_t mx_dbistate;
 } MDBX_xcursor;
 
 typedef struct MDBX_cursor_couple {
@@ -2796,7 +2770,6 @@ struct MDBX_env {
   atomic_pgno_t *me_unsynced_pages;
   atomic_pgno_t *me_autosync_threshold;
   atomic_pgno_t *me_discarded_tail;
-  pgno_t *me_readahead_anchor;
   MDBX_atomic_uint32_t *me_meta_sync_txnid;
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
   unsigned me_dp_reserve_len;
@@ -2820,7 +2793,6 @@ struct MDBX_env {
     atomic_pgno_t autosync_pending;
     atomic_pgno_t autosync_threshold;
     atomic_pgno_t discarded_tail;
-    pgno_t readahead_anchor;
     MDBX_atomic_uint32_t meta_sync_txnid;
   } me_lckless_stub;
 #if MDBX_DEBUG
@@ -3102,6 +3074,8 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
 #define IS_OVERFLOW(p) unlikely(((p)->mp_flags & P_OVERFLOW) != 0)
 /* Test if a page is a sub page */
 #define IS_SUBP(p) (((p)->mp_flags & P_SUBP) != 0)
+/* Test if a page is dirty */
+#define IS_DIRTY(p) (((p)->mp_flags & P_DIRTY) != 0)
 
 #define PAGETYPE(p) ((p)->mp_flags & (P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW))
 
