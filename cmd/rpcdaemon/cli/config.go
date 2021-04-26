@@ -158,9 +158,13 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 	var kv ethdb.RwKV
 	var ethBackend core.ApiBackend
 	var err error
+	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
+		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
+	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
+		fmt.Printf("a\n")
 		if cfg.Database == "mdbx" {
 			kv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
@@ -200,10 +204,7 @@ func OpenDB(cfg Flags) (ethdb.RoKV, core.ApiBackend, error) {
 		if kv == nil {
 			kv = remoteKv
 		}
-	} else {
-		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
-
 	return kv, ethBackend, err
 }
 
