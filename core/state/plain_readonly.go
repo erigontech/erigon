@@ -304,43 +304,43 @@ func (dbs *PlainDBState) CreateContract(address common.Address) error {
 }
 
 type PlainKVState struct {
-	db      ethdb.Tx
+	tx      ethdb.Tx
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainKvState(db ethdb.Tx, blockNr uint64) *PlainKVState {
+func NewPlainKvState(tx ethdb.Tx, blockNr uint64) *PlainKVState {
 	return &PlainKVState{
-		db:      db,
+		tx:      tx,
 		blockNr: blockNr,
 		storage: make(map[common.Address]*llrb.LLRB),
 	}
 }
 
-func (dbs *PlainKVState) SetBlockNr(blockNr uint64) {
-	dbs.blockNr = blockNr
+func (s *PlainKVState) SetBlockNr(blockNr uint64) {
+	s.blockNr = blockNr
 }
 
-func (dbs *PlainKVState) GetBlockNr() uint64 {
-	return dbs.blockNr
+func (s *PlainKVState) GetBlockNr() uint64 {
+	return s.blockNr
 }
 
-func (dbs *PlainKVState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (s *PlainKVState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := llrb.New()
-	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
-	copy(s[:], addr[:])
-	accData, _ := GetAsOf(dbs.db, false /* storage */, addr[:], dbs.blockNr+1)
+	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
+	copy(k[:], addr[:])
+	accData, _ := GetAsOf(s.tx, false /* storage */, addr[:], s.blockNr+1)
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
-	copy(s[common.AddressLength+common.IncarnationLength:], startLocation[:])
+	binary.BigEndian.PutUint64(k[common.AddressLength:], acc.Incarnation)
+	copy(k[common.AddressLength+common.IncarnationLength:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}
-	if t, ok := dbs.storage[addr]; ok {
+	if t, ok := s.storage[addr]; ok {
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
 			st.ReplaceOrInsert(item)
@@ -353,7 +353,7 @@ func (dbs *PlainKVState) ForEachStorage(addr common.Address, startLocation commo
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOfStorage(dbs.db, addr, acc.Incarnation, startLocation, dbs.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
 		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
@@ -397,8 +397,8 @@ func (dbs *PlainKVState) ForEachStorage(addr common.Address, startLocation commo
 	return innerErr
 }
 
-func (dbs *PlainKVState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(dbs.db, false /* storage */, address[:], dbs.blockNr+1)
+func (s *PlainKVState) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, err := GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
@@ -411,7 +411,7 @@ func (dbs *PlainKVState) ReadAccountData(address common.Address) (*accounts.Acco
 	}
 	//restore codehash
 	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
-		if codeHash, err1 := dbs.db.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+		if codeHash, err1 := s.tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)
 			}
@@ -422,9 +422,9 @@ func (dbs *PlainKVState) ReadAccountData(address common.Address) (*accounts.Acco
 	return &a, nil
 }
 
-func (dbs *PlainKVState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (s *PlainKVState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := GetAsOf(dbs.db, true /* storage */, compositeKey, dbs.blockNr+1)
+	enc, err := GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
@@ -434,24 +434,24 @@ func (dbs *PlainKVState) ReadAccountStorage(address common.Address, incarnation 
 	return enc, nil
 }
 
-func (dbs *PlainKVState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (s *PlainKVState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := dbs.db.GetOne(dbutils.CodeBucket, codeHash[:])
+	code, err := s.tx.GetOne(dbutils.CodeBucket, codeHash[:])
 	if len(code) == 0 {
 		return nil, nil
 	}
 	return code, err
 }
 
-func (dbs *PlainKVState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	code, err := dbs.ReadAccountCode(address, incarnation, codeHash)
+func (s *PlainKVState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := s.ReadAccountCode(address, incarnation, codeHash)
 	return len(code), err
 }
 
-func (dbs *PlainKVState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(dbs.db, false /* storage */, address[:], dbs.blockNr+2)
+func (s *PlainKVState) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	enc, err := GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+2)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, err
 	}
@@ -468,23 +468,23 @@ func (dbs *PlainKVState) ReadAccountIncarnation(address common.Address) (uint64,
 	return acc.Incarnation - 1, nil
 }
 
-func (dbs *PlainKVState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (s *PlainKVState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *PlainKVState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (s *PlainKVState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
-func (dbs *PlainKVState) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (s *PlainKVState) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *PlainKVState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	t, ok := dbs.storage[address]
+func (s *PlainKVState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	t, ok := s.storage[address]
 	if !ok {
 		t = llrb.New()
-		dbs.storage[address] = t
+		s.storage[address] = t
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -503,7 +503,7 @@ func (dbs *PlainKVState) WriteAccountStorage(_ context.Context, address common.A
 	return nil
 }
 
-func (dbs *PlainKVState) CreateContract(address common.Address) error {
-	delete(dbs.storage, address)
+func (s *PlainKVState) CreateContract(address common.Address) error {
+	delete(s.storage, address)
 	return nil
 }
