@@ -42,7 +42,7 @@ var cmdTestCore = &cobra.Command{
 	Use:   "test_core",
 	Short: "Test server for testing core of turbo-geth or equivalent component",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 
 		if err := testCore(ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -56,7 +56,7 @@ var cmdTestCons = &cobra.Command{
 	Use:   "test_cons",
 	Short: "Integration test for consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		if err := testCons(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
