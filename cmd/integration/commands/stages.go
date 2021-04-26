@@ -35,7 +35,7 @@ var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -51,7 +51,7 @@ var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -67,7 +67,7 @@ var cmdStageExec = &cobra.Command{
 	Use:   "stage_exec",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -83,7 +83,7 @@ var cmdStageTrie = &cobra.Command{
 	Use:   "stage_trie",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -99,7 +99,7 @@ var cmdStageHashState = &cobra.Command{
 	Use:   "stage_hash_state",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -115,7 +115,7 @@ var cmdStageHistory = &cobra.Command{
 	Use:   "stage_history",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -131,7 +131,7 @@ var cmdLogIndex = &cobra.Command{
 	Use:   "stage_log_index",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -147,7 +147,7 @@ var cmdCallTraces = &cobra.Command{
 	Use:   "stage_call_traces",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -163,7 +163,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -178,7 +178,7 @@ var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, false)
 		defer db.Close()
 
@@ -194,7 +194,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
@@ -209,7 +209,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Use:   "remove_migration",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {

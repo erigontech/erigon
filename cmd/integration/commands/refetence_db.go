@@ -40,7 +40,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -57,7 +57,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -74,7 +74,7 @@ var cmdLmdbToMdbx = &cobra.Command{
 	Use:   "lmdb_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := lmdbToMdbx(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -88,7 +88,7 @@ var cmdLmdbToLmdb = &cobra.Command{
 	Use:   "lmdb_to_lmdb",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := lmdbToLmdb(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -102,7 +102,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := mdbxToMdbx(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -116,7 +116,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := fToMdbx(ctx, toChaindata)
 		if err != nil {
 			log.Error(err.Error())

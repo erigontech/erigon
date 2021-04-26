@@ -86,7 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (RwKV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -146,30 +146,34 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 
 	kvClient := remote.NewKVClient(conn)
 	// Perform compatibility check
-	versionReply, err := kvClient.Version(ctx, &emptypb.Empty{}, &grpc.EmptyCallOption{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Version info from remove KV: %w", err)
-	}
-	var compatible bool
-	if versionReply.Major != opts.versionMajor {
-		compatible = false
-	} else if versionReply.Minor != opts.versionMinor {
-		compatible = false
-	} else {
-		compatible = true
-	}
-	if !compatible {
-		return nil, fmt.Errorf("incompatible KV interface versions: client %d.%d.%d, server %d.%d.%d",
-			opts.versionMajor, opts.versionMinor, opts.versionPatch,
-			versionReply.Major, versionReply.Minor, versionReply.Patch)
-	}
-	log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
-		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-
+	go func() {
+		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+		if err != nil {
+			log.Error("getting Version info from remove KV", "error", err)
+			cancelFn()
+			return
+		}
+		var compatible bool
+		if versionReply.Major != opts.versionMajor {
+			compatible = false
+		} else if versionReply.Minor != opts.versionMinor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+				"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+			cancelFn()
+			return
+		}
+		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	}()
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKVClient(conn),
+		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
 	}
@@ -182,7 +186,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 }
 
 func (opts remoteOpts) MustOpen() RwKV {
-	db, err := opts.Open("", "", "")
+	db, err := opts.Open("", "", "", func() {})
 	if err != nil {
 		panic(err)
 	}
