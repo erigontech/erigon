@@ -318,6 +318,7 @@ func NewStagedSync(
 			controlServer.chainConfig,
 			controlServer.engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
+			tmpdir,
 		),
 		stagedsync.StageHashStateCfg(tmpdir),
 		stagedsync.StageTrieCfg(true, true, tmpdir),

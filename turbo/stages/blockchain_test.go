@@ -1353,20 +1353,20 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
-	dbTx, err := db.Begin(context.Background(), ethdb.RO)
+	dbTx, err := db.RwKV().BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer dbTx.Rollback()
-	st = state.New(state.NewPlainDBState(dbTx, 0))
+	st = state.New(state.NewPlainKvState(dbTx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainDBState(dbTx, 1))
+	st = state.New(state.NewPlainKvState(dbTx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainDBState(dbTx, 2))
+	st = state.New(state.NewPlainKvState(dbTx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }

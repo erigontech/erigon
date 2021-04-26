@@ -54,6 +54,7 @@ enum Event {
   HEADER = 0;
   PENDING_LOGS = 1;
   PENDING_BLOCK = 2;
+  PENDING_TRANSACTIONS = 3;
 }
 
 message TxRequest { bytes signedtx = 1; }

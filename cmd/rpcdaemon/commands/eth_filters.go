@@ -77,15 +77,15 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		blocks := make(chan *types.Block, 1)
-		defer close(blocks)
-		id := api.filters.SubscribePendingBlock(blocks)
-		defer api.filters.UnsubscribePendingBlock(id)
+		txsCh := make(chan []types.Transaction, 1)
+		defer close(txsCh)
+		id := api.filters.SubscribePendingTxs(txsCh)
+		defer api.filters.UnsubscribePendingTxs(id)
 
 		for {
 			select {
-			case b := <-blocks:
-				for _, t := range b.Transactions() {
+			case txs := <-txsCh:
+				for _, t := range txs {
 					err := notifier.Notify(rpcSub.ID, t.Hash())
 					if err != nil {
 						log.Warn("error while notifying subscription", "err", err)
