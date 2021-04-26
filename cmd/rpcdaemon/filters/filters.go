@@ -1,10 +1,13 @@
 package filters
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type (
@@ -150,8 +154,13 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_TRANSACTIONS:
 		payload := event.Data
 		var txs []types.Transaction
-		err := json.Unmarshal(payload, &txs)
-		if err != nil {
+		s := rlp.NewStream(bytes.NewReader(payload), uint64(len(payload)))
+		var tx types.Transaction
+		var err error
+		for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+			txs = append(txs, tx)
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
 		} else {
