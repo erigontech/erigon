@@ -15,6 +15,7 @@ var (
 	consensusAddr string // Address of the consensus engine <host>:<port>
 	datadir       string // Path to the working dir
 	database      string // Type of database (lmdb or mdbx)
+	chain         string // Pre-set chain name
 )
 
 func init() {
@@ -52,6 +53,14 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+}
+
+func withApiAddr(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&consensusAddr, "consensus.api.addr", "localhost:9093", "address to listen to for consensus engine api <host>:<port>")
+}
+
+func withChain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, "chain", "", "pre-set chain name")
 }
 
 func openDatabase(path string) *ethdb.ObjectDatabase {
