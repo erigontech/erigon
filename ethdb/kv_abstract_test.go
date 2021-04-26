@@ -149,19 +149,34 @@ func TestRemoteKvVersion(t *testing.T) {
 		}
 	}()
 	// Different Major versions
-	_, err := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major+1, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "")
-	if err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	_, err := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major+1, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "", cancel)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Errorf("Should have failed due to incompatibitity")
 	}
 	// Different Minor versions
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor+1, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "")
-	if err == nil {
+	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor+1, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "", cancel)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Errorf("Should have failed due to incompatibitity")
 	}
 	// Different Patch versions
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch+1).InMem(conn).Open("", "", "")
+	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch+1).InMem(conn).Open("", "", "", cancel)
 	if err != nil {
-		t.Errorf("Should not have failed due to incompatibitity: %v", err)
+		t.Fatalf("%v", err)
+	}
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Errorf("Should not have failed due to incompatibitity: %v", ctx.Err())
 	}
 }
 
