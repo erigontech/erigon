@@ -122,6 +122,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+	//clean files in tmpdir, but not folders
+	if err := os.RemoveAll(tmpdir); err != nil {
+		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
+	}
 
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
