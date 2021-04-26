@@ -508,6 +508,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 }
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	if notifier == nil {
+		return
+	}
+
 	txsCh := make(chan core.NewTxsEvent, txChanSize)
 	txsSub := txPool.SubscribeNewTxsEvent(txsCh)
 	defer txsSub.Unsubscribe()
