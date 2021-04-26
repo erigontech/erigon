@@ -13,7 +13,7 @@ import (
 
 var (
 	consensusAddr string // Address of the consensus engine <host>:<port>
-	datadir       string // Path to td working dir
+	datadir       string // Path to the working dir
 	database      string // Type of database (lmdb or mdbx)
 )
 
@@ -48,7 +48,7 @@ func must(err error) {
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
