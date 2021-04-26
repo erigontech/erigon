@@ -23,7 +23,7 @@ type StorageEntry struct {
 	Value common.Hash  `json:"value"`
 }
 
-func StorageRangeAt(stateReader *state.PlainDBState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+func StorageRangeAt(stateReader *state.PlainKVState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
 
