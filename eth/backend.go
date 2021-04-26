@@ -135,7 +135,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", tmpdir)
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
 		if err != nil {
 			return nil, err
 		}
