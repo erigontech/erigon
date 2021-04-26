@@ -166,7 +166,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 	defer tx.Rollback()
 
 	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync2(db, tx)
-	execCfg := stagedsync.StageExecuteBlocksCfg(sm.Receipts, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig)
+	execCfg := stagedsync.StageExecuteBlocksCfg(sm.Receipts, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
@@ -482,7 +482,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 
 	from := progress(stages.Execution).BlockNumber
 	to := from + unwind
-	cfg := stagedsync.StageExecuteBlocksCfg(true, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig)
+	cfg := stagedsync.StageExecuteBlocksCfg(true, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
 
 	// set block limit of execute stage
 	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
