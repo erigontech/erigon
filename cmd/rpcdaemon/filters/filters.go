@@ -38,7 +38,12 @@ type Filters struct {
 func New(ethBackend core.ApiBackend) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
-	ff := &Filters{headsSubs: make(map[HeadsSubID]chan *types.Header), pendingLogsSubs: make(map[PendingLogsSubID]chan types.Logs), pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block)}
+	ff := &Filters{
+		headsSubs:        make(map[HeadsSubID]chan *types.Header),
+		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
+		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
+		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
+	}
 
 	go func() {
 		var err error
