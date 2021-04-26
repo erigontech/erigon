@@ -56,7 +56,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to turbo-geth working directory")
-	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "", "lmdb|mdbx engines")
+	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "lmdb", "lmdb|mdbx engines")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
