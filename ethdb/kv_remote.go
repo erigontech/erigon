@@ -10,7 +10,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -39,12 +38,11 @@ type remoteOpts struct {
 }
 
 type RemoteKV struct {
-	opts        remoteOpts
-	remoteKV    remote.KVClient
-	compatCheck sync.Once
-	conn        *grpc.ClientConn
-	log         log.Logger
-	buckets     dbutils.BucketsCfg
+	opts     remoteOpts
+	remoteKV remote.KVClient
+	conn     *grpc.ClientConn
+	log      log.Logger
+	buckets  dbutils.BucketsCfg
 }
 
 type remoteTx struct {
@@ -146,10 +144,36 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 		return nil, err
 	}
 
+	kvClient := remote.NewKVClient(conn)
+	// Perform compatibility check
+	go func() {
+		versionReply, err := kvClient.Version(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+		if err != nil {
+			log.Error("getting Version info from remove KV", "error", err)
+			ctx.Done()
+			return
+		}
+		var compatible bool
+		if versionReply.Major != opts.versionMajor {
+			compatible = false
+		} else if versionReply.Minor != opts.versionMinor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+				"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+			ctx.Done()
+			return
+		}
+		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	}()
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKVClient(conn),
+		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
 	}
@@ -200,34 +224,6 @@ func (db *RemoteKV) Close() {
 func (db *RemoteKV) CollectMetrics() {}
 
 func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
-	var compatErr error
-	db.compatCheck.Do(func() {
-		// Perform compatibility check
-		versionReply, err := db.remoteKV.Version(ctx, &emptypb.Empty{}, &grpc.EmptyCallOption{})
-		if err != nil {
-			compatErr = fmt.Errorf("getting Version info from remove KV: %w", err)
-			return
-		}
-		var compatible bool
-		if versionReply.Major != db.opts.versionMajor {
-			compatible = false
-		} else if versionReply.Minor != db.opts.versionMinor {
-			compatible = false
-		} else {
-			compatible = true
-		}
-		if !compatible {
-			compatErr = fmt.Errorf("incompatible KV interface versions: client %d.%d.%d, server %d.%d.%d",
-				db.opts.versionMajor, db.opts.versionMinor, db.opts.versionPatch,
-				versionReply.Major, versionReply.Minor, versionReply.Patch)
-			return
-		}
-		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", db.opts.versionMajor, db.opts.versionMinor, db.opts.versionPatch),
-			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-	})
-	if compatErr != nil {
-		return nil, compatErr
-	}
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
