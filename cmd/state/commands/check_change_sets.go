@@ -71,7 +71,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if chaindata != historyfile {
 		historyDb = ethdb.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
+	historyTx, err1 := historyDb.RwKV().BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -104,6 +104,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 	for !interrupt {
+
 		if blockNum > execAt {
 			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than Exec stage=%d", blockNum, execAt))
 			break
@@ -122,8 +123,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
-		intraBlockState := state.New(dbstate)
+		intraBlockState := state.New(state.NewPlainKvState(historyTx, block.NumberU64()-1))
 		csw := state.NewChangeSetWriterPlain(nil /* db */, block.NumberU64()-1)
 		var blockWriter state.StateWriter
 		if nocheck {
@@ -158,7 +158,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = changeset.Walk(historyTx.(ethdb.HasTx).Tx(), dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
@@ -190,7 +190,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
-			err = changeset.Walk(historyTx.(ethdb.HasTx).Tx(), dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -224,6 +224,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 					return err
 				}
 				rwtx, err = chainDb.RwKV().BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				historyTx.Rollback()
+				historyTx, err = historyDb.RwKV().BeginRo(context.Background())
 				if err != nil {
 					return err
 				}

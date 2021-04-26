@@ -52,14 +52,14 @@ func StageCallTracesCfg(
 }
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg CallTracesCfg) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, cfg CallTracesCfg) error {
+func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, cfg CallTracesCfg) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -116,11 +116,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
+			sz, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
 			if err != nil {
 				return err
 			}
-			sz2, err := tx.(ethdb.HasTx).Tx().(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
+			sz2, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
 			if err != nil {
 				return err
 			}
@@ -155,7 +155,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		if err2 != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -163,7 +163,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			break
 		}
 
-		stateReader := state.NewPlainDBState(tx, blockNum-1)
+		stateReader := state.NewPlainKvState(tx, blockNum-1)
 		stateWriter := state.NewNoopWriter()
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
@@ -245,14 +245,14 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 }
 
 func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}, cfg CallTracesCfg) error {
-	var tx ethdb.DbWithPendingMutations
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -277,7 +277,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, quitCh <
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
+func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 
@@ -292,7 +292,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, quit
 		if err != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(db), blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -300,7 +300,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, quit
 			break
 		}
 
-		stateReader := state.NewPlainDBState(db, blockNum-1)
+		stateReader := state.NewPlainKvState(db, blockNum-1)
 		stateWriter := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
 		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {

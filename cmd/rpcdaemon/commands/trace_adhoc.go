@@ -472,7 +472,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	ibs := state.New(stateReader)
 
@@ -587,7 +587,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(dbtx), blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
