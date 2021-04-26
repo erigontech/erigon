@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -46,8 +45,8 @@ type StateTracer interface {
 
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
+// NOT THREAD SAFE!
 type IntraBlockState struct {
-	sync.RWMutex
 	stateReader StateReader
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
@@ -157,14 +156,10 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 }
 
 func (sdb *IntraBlockState) SetTracer(tracer StateTracer) {
-	sdb.Lock()
-	defer sdb.Unlock()
 	sdb.tracer = tracer
 }
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
-	sdb.Lock()
-	defer sdb.Unlock()
 	sdb.trace = trace
 }
 
@@ -176,17 +171,12 @@ func (sdb *IntraBlockState) setErrorUnsafe(err error) {
 }
 
 func (sdb *IntraBlockState) Error() error {
-	sdb.RLock()
-	defer sdb.RUnlock()
 	return sdb.dbErr
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() error {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	sdb.stateObjects = make(map[common.Address]*stateObject)
 	sdb.stateObjectsDirty = make(map[common.Address]struct{})
 	sdb.thash = common.Hash{}
@@ -201,9 +191,6 @@ func (sdb *IntraBlockState) Reset() error {
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 
 	log.TxHash = sdb.thash
@@ -215,15 +202,10 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 }
 
 func (sdb *IntraBlockState) GetLogs(hash common.Hash) []*types.Log {
-	sdb.RLock()
-	defer sdb.RUnlock()
-
 	return sdb.logs[hash]
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
-	sdb.RLock()
-	defer sdb.RUnlock()
 	var logs []*types.Log
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
@@ -233,8 +215,6 @@ func (sdb *IntraBlockState) Logs() []*types.Log {
 
 // AddPreimage records a SHA3 preimage seen by the VM.
 func (sdb *IntraBlockState) AddPreimage(hash common.Hash, preimage []byte) {
-	sdb.Lock()
-	defer sdb.Unlock()
 	if _, ok := sdb.preimages[hash]; !ok {
 		sdb.journal.append(addPreimageChange{hash: hash})
 		pi := make([]byte, len(preimage))
@@ -245,16 +225,11 @@ func (sdb *IntraBlockState) AddPreimage(hash common.Hash, preimage []byte) {
 
 // Preimages returns a list of SHA3 preimages that have been submitted.
 func (sdb *IntraBlockState) Preimages() map[common.Hash][]byte {
-	sdb.Lock()
-	defer sdb.Unlock()
 	return sdb.preimages
 }
 
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	sdb.refund += gas
 }
@@ -262,9 +237,6 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
 		panic("Refund counter below zero")
@@ -275,9 +247,6 @@ func (sdb *IntraBlockState) SubRefund(gas uint64) {
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for suicided accounts.
 func (sdb *IntraBlockState) Exist(addr common.Address) bool {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -291,9 +260,6 @@ func (sdb *IntraBlockState) Exist(addr common.Address) bool {
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (sdb *IntraBlockState) Empty(addr common.Address) bool {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -307,9 +273,6 @@ func (sdb *IntraBlockState) Empty(addr common.Address) bool {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr common.Address) *uint256.Int {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -325,9 +288,6 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) *uint256.Int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetNonce(addr common.Address) uint64 {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -349,9 +309,6 @@ func (sdb *IntraBlockState) TxIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr common.Address) []byte {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -373,9 +330,6 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) []byte {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -398,9 +352,6 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -417,9 +368,6 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, value *uint256.Int) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil && !stateObject.deleted {
 		stateObject.GetState(key, value)
@@ -431,9 +379,6 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, valu
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *uint256.Int) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil && !stateObject.deleted {
 		stateObject.GetCommittedState(key, value)
@@ -443,9 +388,6 @@ func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.H
 }
 
 func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil {
 		return false
@@ -466,7 +408,6 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
-	sdb.Lock()
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -476,7 +417,6 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
-	sdb.Unlock()
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -487,7 +427,6 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int) {
-	sdb.Lock()
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
@@ -498,7 +437,6 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int)
 		}
 
 	}
-	sdb.Unlock()
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -508,14 +446,12 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int)
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int) {
-	sdb.Lock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
-	sdb.Unlock()
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -525,14 +461,12 @@ func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int)
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetNonce(addr common.Address, nonce uint64) {
-	sdb.Lock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
-	sdb.Unlock()
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -543,14 +477,12 @@ func (sdb *IntraBlockState) SetNonce(addr common.Address, nonce uint64) {
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) {
-	sdb.Lock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
-	sdb.Unlock()
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -597,8 +529,6 @@ func (sdb *IntraBlockState) GetIncarnation(addr common.Address) uint64 {
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
-	sdb.Lock()
-	defer sdb.Unlock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -625,7 +555,6 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
-// do not lock!!!
 // Retrieve a state object given my the address. Returns nil if not found.
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
@@ -659,9 +588,6 @@ func (sdb *IntraBlockState) setStateObject(object *stateObject) {
 
 // Retrieve a state object or create a new state object if nil.
 func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObject {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
 		stateObject = sdb.createObject(addr, nil /* previous */)
@@ -709,8 +635,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
-	sdb.Lock()
-	defer sdb.Unlock()
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace && err != nil {
@@ -751,8 +675,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 // Snapshot returns an identifier for the current revision of the state.
 func (sdb *IntraBlockState) Snapshot() int {
-	sdb.Lock()
-	defer sdb.Unlock()
 	id := sdb.nextRevisionID
 	sdb.nextRevisionID++
 	sdb.validRevisions = append(sdb.validRevisions, revision{id, sdb.journal.length()})
@@ -761,8 +683,6 @@ func (sdb *IntraBlockState) Snapshot() int {
 
 // RevertToSnapshot reverts all state changes made since the given revision.
 func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
-	sdb.Lock()
-	defer sdb.Unlock()
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(sdb.validRevisions), func(i int) bool {
 		return sdb.validRevisions[i].id >= revid
@@ -779,8 +699,6 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
 
 // GetRefund returns the current value of the refund counter.
 func (sdb *IntraBlockState) GetRefund() uint64 {
-	sdb.RLock()
-	defer sdb.RUnlock()
 	return sdb.refund
 }
 
@@ -817,9 +735,6 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWriter) error {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	for addr := range sdb.journal.dirties {
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -846,9 +761,6 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWriter) error {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -866,9 +778,6 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 // Prepare sets the current transaction hash and index and block hash which is
 // used when the EVM emits new state logs.
 func (sdb *IntraBlockState) Prepare(thash, bhash common.Hash, ti int) {
-	sdb.Lock()
-	defer sdb.Unlock()
-
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
