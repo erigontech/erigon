@@ -43,7 +43,6 @@ type RemoteKV struct {
 	conn     *grpc.ClientConn
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
-	rootCtx  context.Context // context that needs to be closed to prevent any operations from succeeding
 }
 
 type remoteTx struct {
