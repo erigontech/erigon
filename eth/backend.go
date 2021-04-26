@@ -477,6 +477,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		eth.handler.SetStagedSync(stagedSync)
 	}
 
+	go SendPendingTxsToRpcDaemon(eth.txPool, eth.events)
+
 	if err := eth.StartMining(mining, tmpdir); err != nil {
 		return nil, err
 	}
@@ -503,6 +505,21 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
 	return eth, nil
+}
+
+func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	txsCh := make(chan core.NewTxsEvent, txChanSize)
+	txsSub := txPool.SubscribeNewTxsEvent(txsCh)
+	defer txsSub.Unsubscribe()
+
+	for {
+		select {
+		case e := <-txsCh:
+			notifier.OnNewPendingTxs(e.Txs)
+		case <-txsSub.Err():
+			return
+		}
+	}
 }
 
 func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheConfig) {
@@ -716,6 +733,7 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 	}
 	txsChMining := make(chan core.NewTxsEvent, txChanSize)
 	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
+
 	s.quitMining = make(chan struct{})
 	go func() {
 		defer txsSubMining.Unsubscribe()

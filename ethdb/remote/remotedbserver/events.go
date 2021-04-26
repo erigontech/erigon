@@ -9,11 +9,13 @@ type RpcEventType uint64
 type HeaderSubscription func(*types.Header) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
+type PendingTxsSubscription func([]types.Transaction) error
 
 type Events struct {
 	headerSubscriptions       map[int]HeaderSubscription
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
+	pendingTxsSubscriptions   map[int]PendingTxsSubscription
 }
 
 func NewEvents() *Events {
@@ -21,6 +23,7 @@ func NewEvents() *Events {
 		headerSubscriptions:       map[int]HeaderSubscription{},
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
+		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
 	}
 }
 
@@ -34,6 +37,10 @@ func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {
 
 func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
+}
+
+func (e *Events) AddPendingTxsSubscription(s PendingTxsSubscription) {
+	e.pendingTxsSubscriptions[len(e.pendingTxsSubscriptions)] = s
 }
 
 func (e *Events) OnNewHeader(newHeader *types.Header) {
@@ -56,6 +63,14 @@ func (e *Events) OnNewPendingBlock(block *types.Block) {
 	for i, sub := range e.pendingBlockSubscriptions {
 		if err := sub(block); err != nil {
 			delete(e.pendingBlockSubscriptions, i)
+		}
+	}
+}
+
+func (e *Events) OnNewPendingTxs(txs []types.Transaction) {
+	for i, sub := range e.pendingTxsSubscriptions {
+		if err := sub(txs); err != nil {
+			delete(e.pendingTxsSubscriptions, i)
 		}
 	}
 }
