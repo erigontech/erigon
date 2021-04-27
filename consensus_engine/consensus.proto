@@ -150,3 +150,14 @@ service ConsensusEngine {
     rpc Finalize(stream FinalizeRequest) returns(stream FinalizeResponse);
     rpc Seal(SealBlockRequest) returns(stream SealBlockResponse);
 }
+
+message StartTestCaseMessage {
+    string mechanism = 1; // Consensus mechanism used in the test case
+    byte config = 2;      // Configuration specific to the consensus engine tested
+}
+
+// Test is only run by consensus engine in the testing mode, and allows the test driver to inject the Configuration
+// (which includes chain spec) into the Consensus Engine and reset it's state
+service Test {
+    rpc StartTestCase(StartTestCaseMessage) returns(google.protobuf.Empty);
+}
