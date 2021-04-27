@@ -22,7 +22,7 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
 		Value: "lmdb",
 	}
-	DatabaseDebugFlag = cli.IntFlag{
+	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
 		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db.",
 		Value: -1,
@@ -192,7 +192,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	setPrivateApi(ctx, cfg)
-	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseDebugFlag.Name))
+	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
 
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.MDBX = strings.EqualFold(databaseFlag, "mdbx") //case insensitive
