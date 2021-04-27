@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_cons "github.com/ledgerwatch/turbo-geth/gointerfaces/consensus"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -158,14 +160,17 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		return err
 	}
 	var (
-		epoch     int64
-		period    int64
-		vanity    string
-		signers   []string
-		gaslimit  int64
-		timestamp int64
-		balances  *toml.Tree
-		ok        bool
+		epoch         int64
+		period        int64
+		vanityStr     string
+		signersStr    []string
+		gaslimit      int64
+		timestamp     int64
+		balances      *toml.Tree
+		chainIdStr    string
+		forksTree     *toml.Tree
+		difficultyStr string
+		ok            bool
 	)
 	if epoch, ok = tree.Get("engine.params.epoch").(int64); !ok {
 		return fmt.Errorf("engine.params.epoch absent or of wrong type")
@@ -173,11 +178,11 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 	if period, ok = tree.Get("engine.params.period").(int64); !ok {
 		return fmt.Errorf("engine.params.period absent or of wrong type")
 	}
-	if vanity, ok = tree.Get("engine.params.genesis.vanity").(string); !ok {
-		return fmt.Errorf("engine.params.period absent or of wrong type")
+	if vanityStr, ok = tree.Get("genesis.vanity").(string); !ok {
+		return fmt.Errorf("genesis.vanity absent or of wrong type")
 	}
-	if signers, ok = tree.GetArray("engine.params.genesis.signers").([]string); !ok {
-		return fmt.Errorf("engine.params.signers absent or of wrong type")
+	if signersStr, ok = tree.GetArray("genesis.signers").([]string); !ok {
+		return fmt.Errorf("signers absent or of wrong type")
 	}
 	if gaslimit, ok = tree.Get("genesis.gas_limit").(int64); !ok {
 		return fmt.Errorf("genesis.gaslimit absent or of wrong type")
@@ -185,13 +190,80 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 	if timestamp, ok = tree.Get("genesis.timestamp").(int64); !ok {
 		return fmt.Errorf("genesis.timestamp absent or of wrong type")
 	}
-	if balances, ok = tree.Get("balances").(*toml.Tree); !ok {
-		return fmt.Errorf("balances absent or of wrong type: %T", tree.Get("balances"))
+	if difficultyStr, ok = tree.Get("genesis.difficulty").(string); !ok {
+		return fmt.Errorf("genesis.difficulty absent or of wrong type")
 	}
-	fmt.Printf("epoch: %d, period: %d, vanity %s, signers %s, gaslimit %d, timestamp %d\n", epoch, period, vanity, signers, gaslimit, timestamp)
+	if balances, ok = tree.Get("genesis.balances").(*toml.Tree); !ok {
+		return fmt.Errorf("genesis.balances absent or of wrong type")
+	}
+	// construct chain config
+	var chainConfig params.ChainConfig
+	if chainIdStr, ok = tree.Get("genesis.chain_id").(string); !ok {
+		return fmt.Errorf("genesis.chain_id absent or of wrong type")
+	}
+	var chainId big.Int
+	chainId.SetBytes(common.Hex2Bytes(chainIdStr))
+	chainConfig.ChainID = &chainId
+	if forksTree, ok = tree.Get("forks").(*toml.Tree); !ok {
+		return fmt.Errorf("forks absent or of wrong type")
+	}
+	for forkName, forkNumber := range forksTree.ToMap() {
+		var number int64
+		if number, ok = forkNumber.(int64); !ok {
+			return fmt.Errorf("forks.%s is of a wrong type: %T", forkName, forkNumber)
+		}
+		bigNumber := big.NewInt(number)
+		switch forkName {
+		case "homestead":
+			chainConfig.HomesteadBlock = bigNumber
+		case "tangerine":
+			chainConfig.EIP150Block = bigNumber
+		case "spurious":
+			chainConfig.EIP155Block = bigNumber
+			chainConfig.EIP158Block = bigNumber
+		case "byzantium":
+			chainConfig.ByzantiumBlock = bigNumber
+		case "constantinople":
+			chainConfig.ConstantinopleBlock = bigNumber
+		case "petersburg":
+			chainConfig.PetersburgBlock = bigNumber
+		case "istanbul":
+			chainConfig.IstanbulBlock = bigNumber
+		case "berlin":
+			chainConfig.BerlinBlock = bigNumber
+		case "aleut":
+			chainConfig.AleutBlock = bigNumber
+		default:
+			return fmt.Errorf("unknown fork name [%s]", forkName)
+		}
+	}
+	chainConfig.Clique = &params.CliqueConfig{
+		Epoch:  uint64(epoch),
+		Period: uint64(period),
+	}
+	// construct genesis
+	var genesis core.Genesis
+	genesis.Config = &chainConfig
+	genesis.Timestamp = uint64(timestamp)
+	genesis.ExtraData = common.FromHex(vanityStr)
+	for _, signer := range signersStr {
+		genesis.ExtraData = append(genesis.ExtraData, common.HexToAddress(signer).Bytes()...)
+	}
+	genesis.ExtraData = append(genesis.ExtraData, make([]byte, clique.ExtraSeal)...)
+	fmt.Printf("ExtraData: %x\n", genesis.ExtraData)
+	genesis.GasLimit = uint64(gaslimit)
+	genesis.Difficulty = new(big.Int).SetBytes(common.FromHex(difficultyStr))
+	genesis.Alloc = make(core.GenesisAlloc)
 	for account, balance := range balances.ToMap() {
-		fmt.Printf("%s: %s\n", account, balance)
+		genesis.Alloc[common.HexToAddress(account)] = core.GenesisAccount{
+			Balance: new(big.Int).SetBytes(common.FromHex(balance.(string))),
+		}
 	}
+	var genesisBlock *types.Block
+	if genesisBlock, _, err = genesis.ToBlock(false /* history */); err != nil {
+		return fmt.Errorf("creating genesis block: %w", err)
+	}
+	log.Info("Created genesis block", "hash", genesisBlock.Hash())
 	return nil
 }
 
