@@ -325,6 +325,20 @@ type EnvInfo struct {
 		Shrink  uint64
 		Grow    uint64
 	}
+	/** Statistics of page operations.
+	 * \details Overall statistics of page operations of all (running, completed
+	 * and aborted) transactions in the current multi-process session (since the
+	 * first process opened the database). */
+	PageOps struct {
+		Newly   uint64 /**< Quantity of a new pages added */
+		Cow     uint64 /**< Quantity of pages copied for update */
+		Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
+		Split   uint64 /**< Page splits */
+		Merge   uint64 /**< Page merges */
+		Spill   uint64 /**< Quantity of spilled dirty pages */
+		Unspill uint64 /**< Quantity of unspilled/reloaded pages */
+		Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
+	}
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -366,6 +380,25 @@ func (env *Env) Info() (*EnvInfo, error) {
 			Current: uint64(_info.mi_geo.current),
 			Shrink:  uint64(_info.mi_geo.shrink),
 			Grow:    uint64(_info.mi_geo.grow),
+		},
+		PageOps: struct {
+			Newly   uint64 /**< Quantity of a new pages added */
+			Cow     uint64 /**< Quantity of pages copied for update */
+			Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
+			Split   uint64 /**< Page splits */
+			Merge   uint64 /**< Page merges */
+			Spill   uint64 /**< Quantity of spilled dirty pages */
+			Unspill uint64 /**< Quantity of unspilled/reloaded pages */
+			Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
+		}{
+			Newly:   uint64(_info.mi_pgop_stat.newely),
+			Cow:     uint64(_info.mi_pgop_stat.cow),
+			Clone:   uint64(_info.mi_pgop_stat.clone),
+			Split:   uint64(_info.mi_pgop_stat.split),
+			Merge:   uint64(_info.mi_pgop_stat.merge),
+			Spill:   uint64(_info.mi_pgop_stat.spill),
+			Unspill: uint64(_info.mi_pgop_stat.unspill),
+			Wops:    uint64(_info.mi_pgop_stat.wops),
 		},
 		LastPNO:        int64(_info.mi_last_pgno),
 		LastTxnID:      int64(_info.mi_recent_txnid),

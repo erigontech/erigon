@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY bbcb0fd59ce19d2a8624d61216a54afc8ff2e62bc38e846a0ea2f96f3999bda5_v0_9_3_150_g31cfce4c
+#define MDBX_BUILD_SOURCERY d6f808426f8a269988a7b1d226eefaef3c4c91e0bdbb504c5ec43b15d6b79e79_v0_9_3_158_gf95a277a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1599,6 +1599,14 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
 
+/** Controls gathering statistics for page operations. */
+#ifndef MDBX_ENABLE_PGOP_STAT
+#define MDBX_ENABLE_PGOP_STAT 1
+#endif
+#if !(MDBX_ENABLE_PGOP_STAT == 0 || MDBX_ENABLE_PGOP_STAT == 1)
+#error MDBX_ENABLE_PGOP_STAT must be defined as 0 or 1
+#endif /* MDBX_ENABLE_PGOP_STAT */
+
 /** Controls use of POSIX madvise() hints and friends. */
 #ifndef MDBX_ENABLE_MADVISE
 #define MDBX_ENABLE_MADVISE 1
@@ -1631,6 +1639,25 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
       MDBX_DPL_PREALLOC_FOR_RADIXSORT == 1)
 #error MDBX_DPL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
 #endif /* MDBX_DPL_PREALLOC_FOR_RADIXSORT */
+
+/* Basically, this build-option is for TODO. Guess it should be replaced
+ * with MDBX_ENABLE_WRITEMAP_SPILLING with the three variants:
+ *  0/OFF = Don't track dirty pages at all and don't spilling ones.
+ *          This should be by-default on Linux and may-be other systems
+ *          (not sure: Darwin/OSX, FreeBSD, Windows 10) where kernel provides
+ *          properly LRU tracking and async writing on-demand.
+ *  1/ON  = Lite tracking of dirty pages but with LRU labels and explicit
+ *          spilling with msync(MS_ASYNC). */
+#ifndef MDBX_FAKE_SPILL_WRITEMAP
+#if defined(__linux__) || defined(__gnu_linux__)
+#define MDBX_FAKE_SPILL_WRITEMAP 1 /* msync(MS_ASYNC) is no-op on Linux */
+#else
+#define MDBX_FAKE_SPILL_WRITEMAP 0
+#endif
+#endif
+#if !(MDBX_FAKE_SPILL_WRITEMAP == 0 || MDBX_FAKE_SPILL_WRITEMAP == 1)
+#error MDBX_FAKE_SPILL_WRITEMAP must be defined as 0 or 1
+#endif /* MDBX_FAKE_SPILL_WRITEMAP */
 
 /** Controls sort order of internal page number lists.
  * The database format depend on this option and libmdbx builded with different
@@ -1987,8 +2014,13 @@ atomic_store64(MDBX_atomic_uint64_t *p, const uint64_t value,
   return value;
 }
 
-static __maybe_unused __always_inline uint64_t
-atomic_load64(const MDBX_atomic_uint64_t *p, enum MDBX_memory_order order) {
+static __maybe_unused
+#if MDBX_64BIT_ATOMIC
+    __always_inline
+#endif /* MDBX_64BIT_ATOMIC */
+        uint64_t
+        atomic_load64(const MDBX_atomic_uint64_t *p,
+                      enum MDBX_memory_order order) {
   STATIC_ASSERT(sizeof(MDBX_atomic_uint64_t) == 8);
 #if MDBX_64BIT_ATOMIC
 #ifdef MDBX_HAVE_C11ATOMICS
@@ -2032,10 +2064,10 @@ atomic_load64(const MDBX_atomic_uint64_t *p, enum MDBX_memory_order order) {
  * recognizable, and it will reflect any byte order mismatches. */
 #define MDBX_MAGIC UINT64_C(/* 56-bit prime */ 0x59659DBDEF4C11)
 
-/* The version number for a database's datafile format. */
+/* FROZEN: The version number for a database's datafile format. */
 #define MDBX_DATA_VERSION 2
 /* The version number for a database's lockfile format. */
-#define MDBX_LOCK_VERSION 3
+#define MDBX_LOCK_VERSION 4
 
 /* handle for the DB used to track free pages. */
 #define FREE_DBI 0
@@ -2227,6 +2259,23 @@ typedef struct MDBX_page {
 
 #pragma pack(pop)
 
+#if MDBX_ENABLE_PGOP_STAT
+/* Statistics of page operations overall of all (running, completed and aborted)
+ * transactions */
+typedef struct {
+  MDBX_atomic_uint64_t newly;   /* Quantity of a new pages added */
+  MDBX_atomic_uint64_t cow;     /* Quantity of pages copied for update */
+  MDBX_atomic_uint64_t clone;   /* Quantity of parent's dirty pages clones
+                                   for nested transactions */
+  MDBX_atomic_uint64_t split;   /* Page splits */
+  MDBX_atomic_uint64_t merge;   /* Page merges */
+  MDBX_atomic_uint64_t spill;   /* Quantity of spilled dirty pages */
+  MDBX_atomic_uint64_t unspill; /* Quantity of unspilled/reloaded pages */
+  MDBX_atomic_uint64_t
+      wops; /* Number of explicit write operations (not a pages) to a disk */
+} MDBX_pgop_stat_t;
+#endif /* MDBX_ENABLE_PGOP_STAT */
+
 #if MDBX_LOCKING == MDBX_LOCKING_WIN32FILES
 #define MDBX_CLOCK_SIGN UINT32_C(0xF10C)
 typedef void mdbx_ipclock_t;
@@ -2355,6 +2404,14 @@ typedef struct MDBX_lockinfo {
 
   /* Marker to distinguish uniqueness of DB/CLK. */
   MDBX_atomic_uint64_t mti_bait_uniqueness;
+
+  alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
+
+#if MDBX_ENABLE_PGOP_STAT
+      /* Statistics of costly ops of all (running, completed and aborted)
+       * transactions */
+      MDBX_pgop_stat_t mti_pgop_stat;
+#endif /* MDBX_ENABLE_PGOP_STAT*/
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
 
@@ -2741,6 +2798,7 @@ typedef struct MDBX_cursor_couple {
 
 /* The database environment. */
 struct MDBX_env {
+  /* ----------------------------------------------------- mostly static part */
 #define MDBX_ME_SIGNATURE UINT32_C(0x9A899641)
   MDBX_atomic_uint32_t me_signature;
   /* Failed to update the meta page. Probably an I/O error. */
@@ -2766,36 +2824,18 @@ struct MDBX_env {
   uint8_t me_psize2log;     /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
   unsigned me_os_psize; /* OS page size, from mdbx_syspagesize() */
-  unsigned me_maxreaders; /* size of the reader table */
-  mdbx_fastmutex_t me_dbi_lock;
-  MDBX_dbi me_numdbs;         /* number of DBs opened */
+  unsigned me_maxreaders;     /* size of the reader table */
   MDBX_dbi me_maxdbs;         /* size of the DB table */
   uint32_t me_pid;            /* process ID of this env */
   mdbx_thread_key_t me_txkey; /* thread-key for readers */
   char *me_pathname;          /* path to the DB files */
   void *me_pbuf;              /* scratch area for DUPSORT put() */
-  MDBX_txn *me_txn;           /* current write transaction */
   MDBX_txn *me_txn0;          /* prealloc'd write transaction */
-
-  /* write-txn lock */
-#if MDBX_LOCKING == MDBX_LOCKING_SYSV
-  union {
-    key_t key;
-    int semid;
-  } me_sysv_ipc;
-#endif /* MDBX_LOCKING == MDBX_LOCKING_SYSV */
-
-#if MDBX_LOCKING > 0
-  mdbx_ipclock_t *me_wlock;
-#endif /* MDBX_LOCKING > 0 */
 
   MDBX_dbx *me_dbxs;         /* array of static DB info */
   uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
   unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
   atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dp_reserve;  /* list of malloc'ed blocks for re-use */
-  /* PNL of pages that became unused in a write txn */
-  MDBX_PNL me_retired_pages;
   /* Number of freelist items that can fit in a single overflow page */
   unsigned me_maxgc_ov1page;
   uint32_t me_live_reader; /* have liveness lock in reader table */
@@ -2807,8 +2847,10 @@ struct MDBX_env {
   atomic_pgno_t *me_discarded_tail;
   pgno_t *me_readahead_anchor;
   MDBX_atomic_uint32_t *me_meta_sync_txnid;
+#if MDBX_ENABLE_PGOP_STAT
+  MDBX_pgop_stat_t *me_pgop_stat;
+#endif                            /* MDBX_ENABLE_PGOP_STAT*/
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
-  unsigned me_dp_reserve_len;
   struct {
     unsigned dp_reserve_limit;
     unsigned rp_augment_limit;
@@ -2819,29 +2861,6 @@ struct MDBX_env {
     uint8_t spill_min_denominator;
     uint8_t spill_parent4child_denominator;
   } me_options;
-  struct {
-#if MDBX_LOCKING > 0
-    mdbx_ipclock_t wlock;
-#endif /* MDBX_LOCKING > 0 */
-    atomic_txnid_t oldest;
-    MDBX_atomic_uint64_t sync_timestamp;
-    MDBX_atomic_uint64_t autosync_period;
-    atomic_pgno_t autosync_pending;
-    atomic_pgno_t autosync_threshold;
-    atomic_pgno_t discarded_tail;
-    pgno_t readahead_anchor;
-    MDBX_atomic_uint32_t meta_sync_txnid;
-  } me_lckless_stub;
-#if MDBX_DEBUG
-  MDBX_assert_func *me_assert_func; /*  Callback for assertion failures */
-#endif
-#ifdef MDBX_USE_VALGRIND
-  int me_valgrind_handle;
-#endif
-#if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
-  pgno_t me_poison_edge;
-#endif /* MDBX_USE_VALGRIND || __SANITIZE_ADDRESS__ */
-  MDBX_env *me_lcklist_next;
 
   /* struct me_dbgeo used for accepting db-geo params from user for the new
    * database creation, i.e. when mdbx_env_set_geometry() was called before
@@ -2854,6 +2873,31 @@ struct MDBX_env {
     size_t shrink; /* threshold to shrink datafile */
   } me_dbgeo;
 
+#if MDBX_LOCKING == MDBX_LOCKING_SYSV
+  union {
+    key_t key;
+    int semid;
+  } me_sysv_ipc;
+#endif /* MDBX_LOCKING == MDBX_LOCKING_SYSV */
+
+  MDBX_env *me_lcklist_next;
+
+  /* --------------------------------------------------- mostly volatile part */
+
+  MDBX_txn *me_txn; /* current write transaction */
+  mdbx_fastmutex_t me_dbi_lock;
+  MDBX_dbi me_numdbs; /* number of DBs opened */
+
+  MDBX_page *me_dp_reserve; /* list of malloc'ed blocks for re-use */
+  unsigned me_dp_reserve_len;
+  /* PNL of pages that became unused in a write txn */
+  MDBX_PNL me_retired_pages;
+
+  /* write-txn lock */
+#if MDBX_LOCKING > 0
+  mdbx_ipclock_t *me_wlock;
+#endif /* MDBX_LOCKING > 0 */
+
 #if defined(_WIN32) || defined(_WIN64)
   MDBX_srwlock me_remap_guard;
   /* Workaround for LockFileEx and WriteFile multithread bug */
@@ -2861,6 +2905,35 @@ struct MDBX_env {
 #else
   mdbx_fastmutex_t me_remap_guard;
 #endif
+
+  struct {
+#if MDBX_LOCKING > 0
+    mdbx_ipclock_t wlock;
+#endif /* MDBX_LOCKING > 0 */
+    atomic_txnid_t oldest;
+    MDBX_atomic_uint64_t sync_timestamp;
+    MDBX_atomic_uint64_t autosync_period;
+    atomic_pgno_t autosync_pending;
+    atomic_pgno_t autosync_threshold;
+    atomic_pgno_t discarded_tail;
+    pgno_t readahead_anchor;
+    MDBX_atomic_uint32_t meta_sync_txnid;
+#if MDBX_ENABLE_PGOP_STAT
+    MDBX_pgop_stat_t pgop_stat;
+#endif /* MDBX_ENABLE_PGOP_STAT*/
+  } me_lckless_stub;
+
+  /* -------------------------------------------------------------- debugging */
+
+#if MDBX_DEBUG
+  MDBX_assert_func *me_assert_func; /*  Callback for assertion failures */
+#endif
+#ifdef MDBX_USE_VALGRIND
+  int me_valgrind_handle;
+#endif
+#if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
+  pgno_t me_poison_edge;
+#endif /* MDBX_USE_VALGRIND || __SANITIZE_ADDRESS__ */
 };
 
 #ifndef __cplusplus

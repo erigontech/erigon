@@ -309,8 +309,19 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	info, _ := db.env.Info()
+	info, err := db.env.Info()
+	if err != nil {
+		return // ignore error for metrics collection
+	}
 	dbSize.Update(int64(info.Geo.Current))
+	dbPgopsNewly.Update(int64(info.PageOps.Newly))
+	dbPgopsCow.Update(int64(info.PageOps.Cow))
+	dbPgopsClone.Update(int64(info.PageOps.Clone))
+	dbPgopsSplit.Update(int64(info.PageOps.Split))
+	dbPgopsMerge.Update(int64(info.PageOps.Merge))
+	dbPgopsSpill.Update(int64(info.PageOps.Spill))
+	dbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	dbPgopsWops.Update(int64(info.PageOps.Wops))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
