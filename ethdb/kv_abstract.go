@@ -15,7 +15,10 @@ var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
-	dbSize = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry) //nolint
+	dbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
+	txSpill   = metrics.GetOrRegisterGauge("tx/spill", metrics.DefaultRegistry)   //nolint
+	txUnspill = metrics.GetOrRegisterGauge("tx/unspill", metrics.DefaultRegistry) //nolint
+	txDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
 )
 
 type Has interface {
@@ -142,6 +145,7 @@ type Tx interface {
 	Comparator(bucket string) dbutils.CmpFunc
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
+	CollectMetrics()
 }
 
 type RwTx interface {
