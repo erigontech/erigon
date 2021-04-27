@@ -3,7 +3,6 @@ package remotedbserver
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -74,13 +73,14 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		default:
 		}
 
-		payload, err := json.Marshal(h)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, h); err != nil {
 			log.Warn("error while marshaling a header", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_HEADER,
 			Data: payload,
 		})
@@ -135,13 +135,14 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		default:
 		}
 
-		payload, err := json.Marshal(data)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
 			log.Warn("error while marshaling a pending logs", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_PENDING_LOGS,
 			Data: payload,
 		})
@@ -164,13 +165,14 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		default:
 		}
 
-		payload, err := json.Marshal(data)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
 			log.Warn("error while marshaling a pending block", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_PENDING_BLOCK,
 			Data: payload,
 		})
