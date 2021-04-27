@@ -24,13 +24,6 @@ snapshot=headers active peers=0 seeding=true hash=2ee9fb6572b2dfb9be0080c60cb140
 	BlocksSnapshotHash   = "296f1703f68afb46c3df040b097e2628fc27a66d" //11кk block 1mb chunk
 	StateSnapshotHash    = "8f024711b2c2c277109b44053fcaab1b13346e69"
 
-	//11
-	//HeadersSnapshotHash  = "2ee9fb6572b2dfb9be0080c60cb140716590d963" //11кk block 1mb chunk
-	//BlocksSnapshotHash   = "ea86a38511daad97066fb4878d87fbede1dee4de" //11кk block 1mb chunk
-	//StateSnapshotHash    = "fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78"
-	//BlocksSnapshotHash   = "2635920470345cd4473e672e47aacef42f28cb4a" //11кk block 1mb chunk
-	ReceiptsSnapshotHash = ""
-
 	SnapshotInfoHashPrefix  = "ih"
 	SnapshotInfoBytesPrefix = "ib"
 )

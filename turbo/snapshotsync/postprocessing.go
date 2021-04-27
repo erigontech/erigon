@@ -37,7 +37,7 @@ eth_tx,212580,47829931,6132023,969755142
  */
 
 var (
-	HeadersPostProcessingStage = stages.SyncStage("snapshot_canonical")
+	HeadersPostProcessingStage = stages.SyncStage("post processing")
 	Snapshot11kkTD = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
@@ -320,7 +320,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		if err = generateHeaderTDAndCanonicalIndexes(ctx, tx); err != nil {
 			return err
 		}
-		err = stages.SaveStageProgress(db, HeadersPostProcessingStage, 1)
+		err = stages.SaveStageProgress(tx, HeadersPostProcessingStage, 1)
 		if err != nil{
 			return err1
 		}
