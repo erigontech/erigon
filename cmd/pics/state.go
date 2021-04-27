@@ -92,6 +92,7 @@ var bucketLabels = map[string]string{
 	dbutils.PlainStorageChangeSetBucket: "Storage Changes",
 	dbutils.IncarnationMapBucket:        "Incarnations",
 	dbutils.Senders:                     "Transaction Senders",
+	dbutils.ContractTEVMCodeBucket:      "Contract TEVM code",
 }
 
 /*dbutils.PlainContractCodeBucket,

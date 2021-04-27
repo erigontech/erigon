@@ -573,7 +573,6 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
 			writeTrace = true
 		}
-
 		receipt, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))

@@ -91,6 +91,11 @@ const (
 	//key - address
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
+
+	//TEVMCodeBucket -
+	//key - contract code hash
+	//value - contract EVTM code
+	ContractTEVMCodeBucket = "TEVM-code"
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket
@@ -260,6 +265,7 @@ var Buckets = []string{
 	BloomBitsIndexPrefix,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
+	ContractTEVMCodeBucket,
 	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,

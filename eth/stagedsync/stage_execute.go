@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -92,22 +93,9 @@ func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg, readerWriterWrapper func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter) error {
 	blockNum := block.NumberU64()
-	var stateReader state.StateReader
-	var stateWriter state.WriterWithChangeSets
-
-	if params.readerBuilder != nil {
-		stateReader = params.readerBuilder(batch)
-	} else {
-		stateReader = state.NewPlainStateReader(batch)
-	}
-
-	if params.writerBuilder != nil {
-		stateWriter = params.writerBuilder(batch, tx, blockNum)
-	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
-	}
+	stateReader, stateWriter := newStateReaderWriter(params, batch, tx, blockNum, readerWriterWrapper)
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -129,6 +117,31 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	}
 
 	return nil
+}
+
+func newStateReaderWriter(params ExecuteBlockCfg, batch ethdb.Database, tx ethdb.Database, blockNum uint64, readerWriterWrapper func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter) (state.StateReader, state.WriterWithChangeSets) {
+	var stateReader state.StateReader
+	var stateWriter state.WriterWithChangeSets
+
+	if params.readerBuilder != nil {
+		stateReader = params.readerBuilder(batch)
+	} else {
+		stateReader = state.NewPlainStateReader(batch)
+	}
+
+	if params.writerBuilder != nil {
+		stateWriter = params.writerBuilder(batch, tx, blockNum)
+	} else {
+		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+	}
+
+	if readerWriterWrapper != nil {
+		wrapper := readerWriterWrapper(stateReader, stateWriter)
+		stateReader = wrapper
+		stateWriter = wrapper
+	}
+
+	return stateReader, stateWriter
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint64, quit <-chan struct{}, params ExecuteBlockCfg) error {
@@ -199,8 +212,31 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, params); err != nil {
+
+			stateReaderWriter := NewTouchReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNum))
+
+			if err = executeBlockWithGo(block, tx, batch, params, NewTouchReaderWriter); err != nil {
 				return err
+			}
+
+			// TEVM sub-stage
+			hashes := stateReaderWriter.AllCodes()
+			for hash := range hashes {
+				// check for TEVM
+				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, hash.Bytes())
+				if err != nil {
+					return err
+				}
+
+				if !ok {
+					// convert to TEVM
+
+					// mark the contract as TEVM
+					err = tx.Put(dbutils.ContractTEVMCodeBucket, hash.Bytes(), []byte{0})
+					if err != nil {
+						return err
+					}
+				}
 			}
 		}
 
@@ -421,4 +457,84 @@ func min(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+func NewTouchReaderWriter(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter {
+	return &TouchReaderWriter{
+		r:                r,
+		w:                w,
+		readCodes:        make(map[common.Hash]struct{}),
+		updatedCodes:     make(map[common.Hash]struct{}),
+		createdContracts: make(map[common.Address]struct{}),
+	}
+}
+
+type TouchReaderWriter struct {
+	r                state.StateReader
+	w                state.WriterWithChangeSets
+	readCodes        map[common.Hash]struct{}
+	updatedCodes     map[common.Hash]struct{}
+	createdContracts map[common.Address]struct{}
+}
+
+func (d *TouchReaderWriter) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return d.r.ReadAccountData(address)
+}
+
+func (d *TouchReaderWriter) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	return d.r.ReadAccountStorage(address, incarnation, key)
+}
+
+func (d *TouchReaderWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	d.readCodes[codeHash] = struct{}{}
+	return d.r.ReadAccountCode(address, incarnation, codeHash)
+}
+
+func (d *TouchReaderWriter) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	return d.r.ReadAccountCodeSize(address, incarnation, codeHash)
+}
+
+func (d *TouchReaderWriter) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return d.r.ReadAccountIncarnation(address)
+}
+
+func (d *TouchReaderWriter) WriteChangeSets() error {
+	return d.w.WriteChangeSets()
+}
+
+func (d *TouchReaderWriter) WriteHistory() error {
+	return d.w.WriteHistory()
+}
+
+func (d *TouchReaderWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	return d.w.UpdateAccountData(ctx, address, original, account)
+}
+
+func (d *TouchReaderWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	d.updatedCodes[codeHash] = struct{}{}
+	return d.w.UpdateAccountCode(address, incarnation, codeHash, code)
+}
+
+func (d *TouchReaderWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	return d.w.DeleteAccount(ctx, address, original)
+}
+
+func (d *TouchReaderWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	return d.w.WriteAccountStorage(ctx, address, incarnation, key, original, value)
+}
+
+func (d *TouchReaderWriter) CreateContract(address common.Address) error {
+	d.createdContracts[address] = struct{}{}
+	return d.w.CreateContract(address)
+}
+
+func (d *TouchReaderWriter) AllCodes() map[common.Hash]struct{} {
+	c := make(map[common.Hash]struct{})
+	for hash := range d.readCodes {
+		c[hash] = struct{}{}
+	}
+	for hash := range d.updatedCodes {
+		c[hash] = struct{}{}
+	}
+	return c
 }

@@ -77,20 +77,21 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 
 // run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
 func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
-	for _, interpreter := range evm.interpreters {
-		if interpreter.CanRun(contract.Code) {
-			if evm.interpreter != interpreter {
-				// Ensure that the interpreter pointer is set back
-				// to its current value upon return.
-				defer func(i Interpreter) {
-					evm.interpreter = i
-				}(evm.interpreter)
-				evm.interpreter = interpreter
-			}
-			return interpreter.Run(contract, input, readOnly)
-		}
+	interpreter := evm.interpreter
+	defer func() {
+		evm.interpreter = interpreter
+	}()
+
+	switch contract.vmType {
+	case EVMType:
+		evm.interpreter = evm.interpreters[EVMType]
+	case TEVMType:
+		evm.interpreter = evm.interpreters[TEVMType]
+	default:
+		return nil, errors.New("no compatible interpreter")
 	}
-	return nil, errors.New("no compatible interpreter")
+
+	return evm.interpreter.Run(contract, input, readOnly)
 }
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -170,11 +171,13 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 		vmConfig:        vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber),
-		interpreters:    make([]Interpreter, 0, 1),
 	}
 
-	evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
-	evm.interpreter = evm.interpreters[0]
+	evm.interpreters = []Interpreter{
+		EVMType:  NewEVMInterpreter(evm, vmConfig, EVMType),
+		TEVMType: NewTEVMInterpreter(evm, vmConfig),
+	}
+	evm.interpreter = evm.interpreters[EVMType]
 
 	return evm
 }
@@ -259,8 +262,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			addrCopy := addr
 			// If the account has no code, we can abort here
 			// The depth-check is already done, and precompiles handled above
+			codehash := evm.IntraBlockState.GetCodeHash(addrCopy)
+			evm.IntraBlockState.GetNonce()
+
 			contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.vmConfig.SkipAnalysis)
-			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), code)
+			contract.SetCallCode(&addrCopy, codehash, code)
 			ret, err = run(evm, contract, input, false)
 			gas = contract.Gas
 		}

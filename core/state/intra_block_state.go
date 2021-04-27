@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -363,6 +364,21 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(stateObject.CodeHash())
+}
+
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
+func (sdb *IntraBlockState) GetCodeVM(addr common.Address) vm.VmType {
+	if sdb.tracer != nil {
+		err := sdb.tracer.CaptureAccountRead(addr)
+		if sdb.trace {
+			fmt.Println("CaptureAccountRead err", err)
+		}
+	}
+	stateObject := sdb.getStateObject(addr)
+	if stateObject == nil || stateObject.deleted {
+		return -1
+	}
+	return stateObject.vmType
 }
 
 // GetState retrieves a value from the given account's storage trie.

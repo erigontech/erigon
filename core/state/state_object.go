@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -97,6 +98,8 @@ type stateObject struct {
 	suicided  bool
 	deleted   bool // true if account was deleted during the lifetime of this object
 	created   bool // true if this object represents a newly created contract
+
+	vmType vm.VmType
 }
 
 // empty returns whether the account is considered empty.
