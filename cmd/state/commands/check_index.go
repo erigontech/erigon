@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	withChaindata(checkIndexCMD)
+	withDatadir(checkIndexCMD)
 	withIndexBucket(checkIndexCMD)
 	withCSBucket(checkIndexCMD)
 	rootCmd.AddCommand(checkIndexCMD)
@@ -17,6 +17,7 @@ var checkIndexCMD = &cobra.Command{
 	Use:   "checkIndex",
 	Short: "Index checker",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return verify.CheckIndex(utils.RootContext(), chaindata, changeSetBucket, indexBucket)
+		ctx, _ := utils.RootContext()
+		return verify.CheckIndex(ctx, chaindata, changeSetBucket, indexBucket)
 	},
 }

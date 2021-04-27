@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -33,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -45,7 +47,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
@@ -331,11 +332,11 @@ func accountSavings(db ethdb.RwKV) (int, int) {
 }
 
 func bucketStats(chaindata string) error {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := ethdb.MustOpenKV(chaindata)
 	defer ethDb.Close()
 
 	var bucketList []string
-	if err1 := ethDb.RwKV().View(context.Background(), func(txa ethdb.Tx) error {
+	if err1 := ethDb.View(context.Background(), func(txa ethdb.Tx) error {
 		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
 			bucketList = bl
 		} else {
@@ -348,7 +349,7 @@ func bucketStats(chaindata string) error {
 	}
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-	switch kv := ethDb.RwKV().(type) {
+	switch kv := ethDb.(type) {
 	case *ethdb.LmdbKV:
 		type LmdbStat interface {
 			BucketStat(name string) (*lmdb.Stat, error)
@@ -706,9 +707,9 @@ func testStartup() {
 }
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err
@@ -795,15 +796,18 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 }
 
 func printCurrentBlockNumber(chaindata string) {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := ethdb.MustOpenKV(chaindata)
 	defer ethDb.Close()
-	hash := rawdb.ReadHeadBlockHash(ethDb)
-	number := rawdb.ReadHeaderNumber(ethDb, hash)
-	fmt.Printf("Block number: %d\n", *number)
+	ethDb.View(context.Background(), func(tx ethdb.Tx) error {
+		hash := rawdb.ReadHeadBlockHash(tx)
+		number := rawdb.ReadHeaderNumber(tx, hash)
+		fmt.Printf("Block number: %d\n", *number)
+		return nil
+	})
 }
 
 func printTxHashes() {
-	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
 		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
@@ -849,8 +853,8 @@ func preimage(chaindata string, image common.Hash) {
 }
 
 func printBranches(block uint64) {
-	//ethDb := ethdb.Open("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/testnet/geth/chaindata")
+	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/testnet/geth/chaindata")
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
 	{
@@ -978,7 +982,7 @@ func repairCurrent() {
 }
 
 func dumpStorage() {
-	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
+	db := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.StorageHistoryBucket)
@@ -1146,9 +1150,9 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func regenerate(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	tx, err := db.RwKV().BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1165,7 +1169,7 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, "", expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(true, true, ""), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return nil
@@ -1180,9 +1184,9 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	tx, err1 := db.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -1256,7 +1260,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := tx.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err1 := tx.GetOne(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
 					return err1
@@ -1596,12 +1600,12 @@ func mint(chaindata string, block uint64) error {
 			var totalGas uint256.Int
 			count := 0
 			for i, tx := range body.Transactions {
-				ethSpent.SetUint64(tx.Gas())
+				ethSpent.SetUint64(tx.GetGas())
 				totalGas.Add(&totalGas, &ethSpent)
 				if senders[i] == header.Coinbase {
 					continue // Mining pool sending payout potentially with abnormally low fee, skip
 				}
-				ethSpent.Mul(&ethSpent, tx.GasPrice())
+				ethSpent.Mul(&ethSpent, tx.GetPrice())
 				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
 				count++
 			}
@@ -1677,6 +1681,7 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
 
 	b := uint64(0)
+	i := 0
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
 		if err != nil {
@@ -1692,13 +1697,23 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 		fmt.Fprintf(w, "	\"")
 
 		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
-		if err = rlp.Encode(base64writer, h); err != nil {
+		gz, err := gzip.NewWriterLevel(base64writer, gzip.BestCompression)
+		if err != nil {
+			base64writer.Close()
 			return err
 		}
+
+		if err = rlp.Encode(gz, h); err != nil {
+			base64writer.Close()
+			gz.Close()
+			return err
+		}
+		gz.Close()
 		base64writer.Close()
 
 		fmt.Fprintf(w, "\",\n")
 		b += blockStep
+		i++
 
 		if b > blockTotal {
 			break
@@ -1827,6 +1842,56 @@ func fixUnwind(chaindata string) error {
 	} else {
 		fmt.Printf("Inc: %x\n", i)
 	}
+	return nil
+}
+
+func snapSizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	dbtx, err := db.Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer dbtx.Rollback()
+	tx := dbtx.(ethdb.HasTx).Tx()
+
+	c, _ := tx.Cursor(dbutils.CliqueSeparateBucket)
+	defer c.Close()
+
+	sizes := make(map[int]int)
+	differentValues := make(map[string]struct{})
+
+	var (
+		total uint64
+		k, v  []byte
+	)
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		sizes[len(v)]++
+		differentValues[string(v)] = struct{}{}
+		total += uint64(len(v) + len(k))
+	}
+
+	var lens = make([]int, len(sizes))
+
+	i := 0
+	for l := range sizes {
+		lens[i] = l
+		i++
+	}
+	sort.Ints(lens)
+
+	for _, l := range lens {
+		fmt.Printf("%6d - %d\n", l, sizes[l])
+	}
+
+	fmt.Printf("Different keys %d\n", len(differentValues))
+	fmt.Printf("Total size: %d bytes\n", total)
+
 	return nil
 }
 
@@ -1965,6 +2030,9 @@ func main() {
 
 	case "printTxHashes":
 		printTxHashes()
+
+	case "snapSizes":
+		err = snapSizes(*chaindata)
 
 	}
 

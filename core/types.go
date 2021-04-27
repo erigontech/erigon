@@ -31,12 +31,6 @@ import (
 type Validator interface {
 	// ValidateBody validates the given block's content.
 	ValidateBody(ctx context.Context, block *types.Block) error
-
-	// ValidateGasAndRoot validates the amount of used gas and the state root.
-	ValidateGasAndRoot(block *types.Block, root common.Hash, usedGas uint64, tds *state.TrieDbState) error
-
-	// ValidateReceipts validates block receipts.
-	ValidateReceipts(block *types.Block, receipts types.Receipts) error
 }
 
 // Prefetcher is an interface for pre-caching transaction signatures and state.

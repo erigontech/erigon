@@ -32,7 +32,6 @@ type MdbxOpts struct {
 	bucketsCfg        BucketConfigsFunc
 	mapSize           datasize.ByteSize
 	dirtyListMaxPages uint64
-	maxFreelistReuse  uint
 }
 
 func NewMDBX() MdbxOpts {
@@ -67,13 +66,13 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
-	opts.mapSize = sz
+func (opts MdbxOpts) Readonly() MdbxOpts {
+	opts.flags = opts.flags | mdbx.Readonly
 	return opts
 }
 
-func (opts MdbxOpts) MaxFreelistReuse(pages uint) MdbxOpts {
-	opts.maxFreelistReuse = pages
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
+	opts.mapSize = sz
 	return opts
 }
 
@@ -116,20 +115,9 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		}
 	}
 
-	var flags = opts.flags
-	if opts.inMem {
-		flags ^= mdbx.Durable
-		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync // it's ok for tests
-		opts.dirtyListMaxPages = 8 * 1024
-	}
-
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-	}
-
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
-			if err = env.SetGeometry(int(1*datasize.MB), int(1*datasize.MB), int(64*datasize.MB), int(1*datasize.MB), 0, 4*1024); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.MB), 0, 4*1024); err != nil {
 				return nil, err
 			}
 		} else {
@@ -145,12 +133,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		}
 	}
 
-	err = env.Open(opts.path, flags, 0664)
+	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
+	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -386,7 +374,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, 0)
+	tx, err := db.env.BeginTxn(nil, mdbx.TxNoMetaSync|mdbx.TxNoSync)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
@@ -642,6 +630,9 @@ func (tx *MdbxTx) Commit() error {
 	if debug.SlowCommit() > 0 {
 		slowTx = debug.SlowCommit()
 	}
+
+	commitTimer := time.Now()
+	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
 	//tx.printDebugInfo()
 

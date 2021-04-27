@@ -15,8 +15,9 @@ import (
 func main() {
 	raiseFdLimit()
 	cmd, cfg := cli.RootCommand()
+	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		db, backend, err := cli.OpenDB(*cfg)
+		db, backend, err := cli.OpenDB(*cfg, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil
@@ -37,7 +38,7 @@ func main() {
 		return nil
 	}
 
-	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
+	if err := cmd.ExecuteContext(rootCtx); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
 	}

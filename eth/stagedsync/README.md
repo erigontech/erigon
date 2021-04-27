@@ -54,7 +54,7 @@ That allows to reduce db write amplification significantly.
 So, when we are generating indexes or hashed state, we do a multi-step process.
 
 1. We write the processed data into a couple of temp files in your data directory;
-2. We and then use a heap to insert data from the temp files them in the order that minimizes db write amplification.
+2. We then use a heap to insert data from the temp files into the database, in the order that minimizes db write amplification.
 
 This optimization sometimes leads to dramatic (orders of magnitude) write speed improvements.
 

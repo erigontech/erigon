@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
@@ -57,11 +58,10 @@ const (
 // exchanges have passed.
 type Handler func(peer *Peer) error
 
-// Backend defines the data retrieval methods to serve remote requests and the
+// Backend defines the data retrieval methods t,o serve remote requests and the
 // callback methods to invoke on remote deliveries.
 type Backend interface {
-	// Chain retrieves the blockchain object to serve data.
-	Chain() *core.BlockChain
+	DB() ethdb.RwKV
 
 	// TxPool retrieves the transaction pool object to serve data.
 	TxPool() TxPool
@@ -88,11 +88,11 @@ type Backend interface {
 // TxPool defines the methods needed by the protocol handler to serve transactions.
 type TxPool interface {
 	// Get retrieves the the transaction from the local txpool with the given hash.
-	Get(hash common.Hash) *types.Transaction
+	Get(hash common.Hash) types.Transaction
 }
 
 // MakeProtocols constructs the P2P protocol definitions for `eth`.
-func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator, chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) []p2p.Protocol {
+func MakeProtocols(backend Backend, readNodeInfo func() *NodeInfo, dnsdisc enode.Iterator, chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) []p2p.Protocol {
 	protocols := make([]p2p.Protocol, len(ProtocolVersions))
 	for i, version := range ProtocolVersions {
 		version := version // Closure
@@ -110,7 +110,7 @@ func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator, chai
 				})
 			},
 			NodeInfo: func() interface{} {
-				return nodeInfo(backend.Chain(), network)
+				return readNodeInfo()
 			},
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
@@ -132,14 +132,15 @@ type NodeInfo struct {
 	Head       common.Hash         `json:"head"`       // Hex hash of the host's best owned block
 }
 
-// nodeInfo retrieves some `eth` protocol metadata about the running host node.
-func nodeInfo(chain *core.BlockChain, network uint64) *NodeInfo {
-	head := chain.CurrentBlock()
+// ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
+func ReadNodeInfo(getter ethdb.KVGetter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
+	head := rawdb.ReadCurrentHeader(getter)
+	td, _ := rawdb.ReadTd(getter, head.Hash(), head.Number.Uint64())
 	return &NodeInfo{
 		Network:    network,
-		Difficulty: chain.GetTd(head.Hash(), head.NumberU64()),
-		Genesis:    chain.Genesis().Hash(),
-		Config:     chain.Config(),
+		Difficulty: td,
+		Genesis:    genesisHash,
+		Config:     config,
 		Head:       head.Hash(),
 	}
 }

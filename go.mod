@@ -9,7 +9,7 @@ require (
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
-	github.com/blend/go-sdk v1.1.1 // indirect
+	github.com/blend/go-sdk v0.0.0-20190205012150-4a150f307fcb // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/cloudflare/cloudflare-go v0.13.2
@@ -24,6 +24,7 @@ require (
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
+	github.com/goccy/go-json v0.4.11
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.1
 	github.com/golang/snappy v0.0.3

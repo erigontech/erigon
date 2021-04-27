@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -33,8 +32,8 @@ var (
 
 func init() {
 	withBlock(checkChangeSetsCmd)
-	withChaindata(checkChangeSetsCmd)
-	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as --chaindata")
+	withDatadir(checkChangeSetsCmd)
+	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/tg/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
 	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn on writing receipts as the execution ongoing")
 	rootCmd.AddCommand(checkChangeSetsCmd)
@@ -71,29 +70,28 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if chaindata != historyfile {
 		historyDb = ethdb.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
+	historyTx, err1 := historyDb.RwKV().BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
 	defer historyTx.Rollback()
 	chainConfig := genesis.Config
-	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	cc := &core.TinyChainContext{}
-	cc.SetDB(chainDb)
-	cc.SetEngine(engine)
 
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	receiptBatch := chainDb.NewBatch()
-	defer receiptBatch.Rollback()
+	rwtx, err := chainDb.RwKV().BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer rwtx.Rollback()
 
-	execAt, err1 := stages.GetStageProgress(chainDb, stages.Execution)
+	execAt, err1 := stages.GetStageProgress(rwtx, stages.Execution)
 	if err1 != nil {
 		return err1
 	}
-	historyAt, err1 := stages.GetStageProgress(chainDb, stages.StorageHistoryIndex)
+	historyAt, err1 := stages.GetStageProgress(rwtx, stages.StorageHistoryIndex)
 	if err1 != nil {
 		return err1
 	}
@@ -101,6 +99,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 	for !interrupt {
+
 		if blockNum > execAt {
 			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than Exec stage=%d", blockNum, execAt))
 			break
@@ -110,17 +109,16 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(chainDb, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(rwtx, blockNum)
 		if err != nil {
 			return err
 		}
-		block := rawdb.ReadBlock(chainDb, blockHash, blockNum)
+		block := rawdb.ReadBlock(ethdb.NewRoTxDb(rwtx), blockHash, blockNum)
 		if block == nil {
 			break
 		}
 
-		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
-		intraBlockState := state.New(dbstate)
+		intraBlockState := state.New(state.NewPlainKvState(historyTx, block.NumberU64()-1))
 		csw := state.NewChangeSetWriterPlain(nil /* db */, block.NumberU64()-1)
 		var blockWriter state.StateWriter
 		if nocheck {
@@ -129,20 +127,20 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
 		if writeReceipts {
-			if chainConfig.IsByzantium(block.Number()) {
+			if chainConfig.IsByzantium(block.Number().Uint64()) {
 				receiptSha := types.DeriveSha(receipts)
 				if receiptSha != block.Header().ReceiptHash {
 					return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 				}
 			}
 
-			if err := rawdb.AppendReceipts(receiptBatch, block.NumberU64(), receipts); err != nil {
+			if err := rawdb.AppendReceipts(rwtx, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 		}
@@ -155,7 +153,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = changeset.Walk(historyTx.(ethdb.HasTx).Tx(), dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
@@ -187,7 +185,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
-			err = changeset.Walk(historyTx.(ethdb.HasTx).Tx(), dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -216,8 +214,17 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			fmt.Println("interrupted, please wait for cleanup...")
 		case <-commitEvery.C:
 			if writeReceipts {
-				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(receiptBatch.BatchSize()))
-				if err := receiptBatch.CommitAndBegin(context.Background()); err != nil {
+				log.Info("Committing receipts", "up to block", block.NumberU64())
+				if err = rwtx.Commit(); err != nil {
+					return err
+				}
+				rwtx, err = chainDb.RwKV().BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				historyTx.Rollback()
+				historyTx, err = historyDb.RwKV().BeginRo(context.Background())
+				if err != nil {
 					return err
 				}
 			}
@@ -225,8 +232,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		}
 	}
 	if writeReceipts {
-		log.Info("Committing final receipts", "batch size", common.StorageSize(receiptBatch.BatchSize()))
-		if err := receiptBatch.Commit(); err != nil {
+		log.Info("Committing final receipts", "batch size")
+		if err = rwtx.Commit(); err != nil {
 			return err
 		}
 	}

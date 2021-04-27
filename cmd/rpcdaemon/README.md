@@ -37,7 +37,7 @@ If you have direct access to turbo-geth's database folder, you may run the `rpcd
 After building, run this command to start the daemon locally:
 
 ```[bash]
-./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net,web3
+./build/bin/rpcdaemon --datadir ~/Library/TurboGeth/ --http.api=eth,debug,net,web3
 ```
 
 This mode is mostly convenient for debugging purposes, because we know that the database does not change as we are sending requests to the RPC daemon.
@@ -66,7 +66,7 @@ INFO [date-time] HTTP endpoint opened url=localhost:8545...
 
 ### Running in dual mode
 
-If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
+If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 ### Testing
 
@@ -124,6 +124,7 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getTransactionByBlockHashAndIndex   | Yes     |                                            |
 | eth_getTransactionByBlockNumberAndIndex | Yes     |                                            |
 | eth_getTransactionReceipt               | Yes     |                                            |
+| eth_getBlockReceipts                    | Yes     |                                            |
 |                                         |         |                                            |
 | eth_estimateGas                         | Yes     |                                            |
 | eth_getBalance                          | Yes     |                                            |

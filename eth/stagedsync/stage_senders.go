@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -21,25 +20,40 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-type Stage3Config struct {
-	BatchSize       int
-	BlockSize       int
-	BufferSize      int
-	ToProcess       int
-	NumOfGoroutines int
-	ReadChLen       int
-	Now             time.Time
+type SendersCfg struct {
+	batchSize       int
+	blockSize       int
+	bufferSize      int
+	numOfGoroutines int
+	readChLen       int
+
+	chainConfig *params.ChainConfig
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
+func StageSendersCfg(chainCfg *params.ChainConfig) SendersCfg {
+	const sendersBatchSize = 10000
+	const sendersBlockSize = 4096
+
+	return SendersCfg{
+		batchSize:       sendersBatchSize,
+		blockSize:       sendersBlockSize,
+		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
+		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		readChLen:       4,
+
+		chainConfig: chainCfg,
+	}
+}
+
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, db ethdb.Database, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
+	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
+		tx = hasTx.Tx().(ethdb.RwTx)
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -68,13 +82,22 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	if err := tx.Walk(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	canonicalC, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	if err != nil {
+		return err
+	}
+	defer canonicalC.Close()
+
+	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, v, err = canonicalC.Next() {
+		if err != nil {
+			return err
+		}
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 
 		if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
-			return false, nil
+			break
 		}
 
 		copy(canonical[currentHeaderIdx][:], v)
@@ -85,23 +108,18 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s] Preload headedrs", logPrefix), "block_number", binary.BigEndian.Uint64(k))
 		}
-
-		return true, nil
-	}); err != nil {
-		return err
 	}
-
 	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
-	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
-	out := make(chan *senderRecoveryJob, cfg.BatchSize)
+	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
+	out := make(chan *senderRecoveryJob, cfg.batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(cfg.NumOfGoroutines)
-	for i := 0; i < cfg.NumOfGoroutines; i++ {
+	wg.Add(cfg.numOfGoroutines)
+	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
+			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 
@@ -135,34 +153,39 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}()
 
-	if err := tx.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
+	bodiesC, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		return err
+	}
+	defer bodiesC.Close()
+
+	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
+		if err != nil {
+			return err
+		}
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
 		if blockNumber > to {
-			return false, nil
+			break
 		}
 
 		if canonical[blockNumber-s.BlockNumber-1] != blockHash {
 			// non-canonical case
-			return true, nil
+			continue
 		}
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
 
 		select {
 		case err := <-errCh:
 			if err != nil {
-				return false, err
+				return err
 			}
 		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
-
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("walking over the block bodies: %w", err)
 	}
 
 	close(jobs)
@@ -174,7 +197,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		}
 	}
 
-	if err := collectorSenders.Load(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+	if err := collectorSenders.Load(logPrefix, tx,
 		dbutils.Senders,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -214,16 +237,12 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 			return
 		}
 		body := job.body
-		signer := types.MakeSigner(config, big.NewInt(int64(job.blockNumber)))
+		signer := types.MakeSigner(config, job.blockNumber)
 		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
 				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
-				break
-			}
-			if tx.Protected() && tx.ChainId().Cmp(signer.ChainID()) != 0 {
-				job.err = fmt.Errorf("%s: invalid chainId, tx.Chain()=%d, igner.ChainID()=%d", logPrefix, tx.ChainId(), signer.ChainID())
 				break
 			}
 			copy(job.senders[i*common.AddressLength:], from[:])
@@ -241,9 +260,9 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 	}
 }
 
-func UnwindSendersStage(u *UnwindState, s *StageState, stateDB ethdb.Database) error {
+func UnwindSendersStage(u *UnwindState, s *StageState, db ethdb.Database) error {
 	// Does not require any special processing
-	mutation := stateDB.NewBatch()
+	mutation := db.NewBatch()
 	err := u.Done(mutation)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {

@@ -9,14 +9,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
@@ -28,12 +31,11 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 
 	block := rawdb.ReadBlock(ethdb.NewRoTxDb(tx), hash, number)
 
-	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	_, _, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, cc.Engine(), tx, hash, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, ethash.NewFaker(), tx, hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +47,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
 		header := rawdb.ReadHeader(tx, hash, number)
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, cc.Engine(), nil, gp, ibs, dbstate, header, txn, usedGas, vm.Config{})
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +109,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(ethdb.NewRoTxDb(tx), dbutils.LogAddressIndex, addr[:], uint32(begin), uint32(end))
+		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], uint32(begin), uint32(end))
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +175,7 @@ func getTopicsBitmap(c ethdb.Tx, topics [][]common.Hash, from, to uint32) (*roar
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Get(ethdb.NewRoTxDb(c), dbutils.LogTopicIndex, topic[:], from, to)
+			m, err := bitmapdb.Get(c, dbutils.LogTopicIndex, topic[:], from, to)
 			if err != nil {
 				return nil, err
 			}
@@ -220,32 +222,73 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
-	receipt := receipts[txIndex]
+	return marshalReceipt(receipts[txIndex], txn), nil
+}
 
-	var signer types.Signer = types.FrontierSigner{}
-	if txn.Protected() {
-		signer = types.NewEIP155Signer(txn.ChainId().ToBig())
+// GetBlockReceipts - receipts for individual block
+func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
-	from, _ := types.Sender(signer, txn)
+	defer tx.Rollback()
 
-	// Fill in the derived information in the logs
-	if receipt.Logs != nil {
-		for _, log := range receipt.Logs {
-			log.BlockNumber = blockNumber
-			log.TxHash = hash
-			log.TxIndex = uint(txIndex)
-			log.BlockHash = blockHash
+	blockNum, err := getBlockNumber(number, tx)
+	if err != nil {
+		return nil, err
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+
+	block := rawdb.ReadBlock(ethdb.NewRoTxDb(tx), hash, blockNum)
+	if block == nil {
+		return nil, nil
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := getReceipts(ctx, tx, chainConfig, blockNum, hash)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %v", err)
+	}
+	result := make([]map[string]interface{}, 0, len(receipts))
+	for _, receipt := range receipts {
+		txn := block.Transactions()[receipt.TransactionIndex]
+		result = append(result, marshalReceipt(receipt, txn))
+	}
+
+	return result, nil
+}
+
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]interface{} {
+	var chainId *big.Int
+	switch t := txn.(type) {
+	case *types.LegacyTx:
+		if t.Protected() {
+			chainId = types.DeriveChainId(&t.V).ToBig()
 		}
+	case *types.AccessListTx:
+		chainId = t.ChainID.ToBig()
+	case *types.DynamicFeeTransaction:
+		chainId = t.ChainID.ToBig()
 	}
+	signer := types.LatestSignerForChainID(chainId)
+	from, _ := txn.Sender(*signer)
 
-	// Now reconstruct the bloom filter
 	fields := map[string]interface{}{
-		"blockHash":         blockHash,
-		"blockNumber":       hexutil.Uint64(blockNumber),
-		"transactionHash":   hash,
-		"transactionIndex":  hexutil.Uint64(txIndex),
+		"blockHash":         receipt.BlockHash,
+		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
+		"transactionHash":   txn.Hash(),
+		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
-		"to":                txn.To(),
+		"to":                txn.GetTo(),
+		"type":              hexutil.Uint(txn.Type()),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
@@ -266,7 +309,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
-	return fields, nil
+	return fields
 }
 
 func includes(addresses []common.Address, a common.Address) bool {

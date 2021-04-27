@@ -40,18 +40,18 @@ var ErrNotAuthorized = errors.New("not authorized to sign this account")
 func NewKeyedTransactor(key *ecdsa.PrivateKey) *TransactOpts {
 	log.Warn("WARNING: NewKeyedTransactor has been deprecated in favour of NewKeyedTransactorWithChainID")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := types.HomesteadSigner{}
+	signer := types.LatestSignerForChainID(nil)
 	return &TransactOpts{
 		From: keyAddr,
-		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		Signer: func(address common.Address, tx types.Transaction) (types.Transaction, error) {
 			if address != keyAddr {
 				return nil, ErrNotAuthorized
 			}
-			signature, err := crypto.Sign(signer.Hash(tx).Bytes(), key)
+			signature, err := crypto.Sign(tx.SigningHash(nil).Bytes(), key)
 			if err != nil {
 				return nil, err
 			}
-			return tx.WithSignature(signer, signature)
+			return tx.WithSignature(*signer, signature)
 		},
 	}
 }
@@ -66,15 +66,15 @@ func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*Tr
 	signer := types.LatestSignerForChainID(chainID)
 	return &TransactOpts{
 		From: keyAddr,
-		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		Signer: func(address common.Address, tx types.Transaction) (types.Transaction, error) {
 			if address != keyAddr {
 				return nil, ErrNotAuthorized
 			}
-			signature, err := crypto.Sign(signer.Hash(tx).Bytes(), key)
+			signature, err := crypto.Sign(tx.SigningHash(chainID).Bytes(), key)
 			if err != nil {
 				return nil, err
 			}
-			return tx.WithSignature(signer, signature)
+			return tx.WithSignature(*signer, signature)
 		},
 	}, nil
 }

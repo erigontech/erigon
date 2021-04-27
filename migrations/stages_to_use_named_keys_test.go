@@ -42,7 +42,7 @@ func TestSyncStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Nil(v)
 
-	v, err = db.GetOne(dbutils.SyncStageProgress, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageProgress, []byte(stages.Execution))
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }
@@ -76,7 +76,7 @@ func TestUnwindStagesToUseNamedKeys(t *testing.T) {
 	require.NoError(err)
 	require.Nil(v)
 
-	v, err = db.GetOne(dbutils.SyncStageUnwind, stages.Execution)
+	v, err = db.GetOne(dbutils.SyncStageUnwind, []byte(stages.Execution))
 	require.NoError(err)
 	require.Equal(42, int(binary.BigEndian.Uint64(v)))
 }

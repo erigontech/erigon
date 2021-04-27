@@ -17,7 +17,6 @@
 package ethash
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"math/big"
 	"net/http"
@@ -25,6 +24,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"

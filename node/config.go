@@ -28,6 +28,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -142,10 +143,9 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use LMDB.
-	LMDB                 bool
-	LMDBMapSize          datasize.ByteSize
-	LMDBMaxFreelistReuse uint
-	MDBX                 bool
+	LMDB        bool
+	LMDBMapSize datasize.ByteSize
+	MDBX        bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
@@ -202,7 +202,7 @@ func DefaultIPCEndpoint(clientIdentifier string) string {
 			panic("empty executable name")
 		}
 	}
-	config := &Config{DataDir: DefaultDataDir(), IPCPath: clientIdentifier + ".ipc"}
+	config := &Config{DataDir: paths.DefaultDataDir(), IPCPath: clientIdentifier + ".ipc"}
 	return config.IPCEndpoint()
 }
 

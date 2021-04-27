@@ -65,9 +65,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database     *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine       consensus.Engine
-	chainContext *core.TinyChainContext
+	database  *ethdb.ObjectDatabase // In memory database to store our testing data
+	engine    consensus.Engine
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -93,16 +93,15 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	cc := &core.TinyChainContext{}
-	cc.SetDB(database)
-	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		chainContext: cc,
-		config:       genesis.Config,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
+		config: genesis.Config,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -116,16 +115,15 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	cc := &core.TinyChainContext{}
-	cc.SetDB(database)
-	cc.SetEngine(engine)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
 		config:       genesis.Config,
-		chainContext: cc,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -150,7 +148,6 @@ func (b *SimulatedBackend) Close() error {
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
-	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
@@ -162,7 +159,6 @@ func (b *SimulatedBackend) Commit() {
 		allLogs = append(allLogs, r.Logs...)
 	}
 	b.logsFeed.Send(allLogs)
-	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -264,7 +260,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 // blockchain. The isPending return value indicates whether the transaction has been
 // mined yet. Note that the transaction may not be part of the canonical chain even if
 // it's not pending.
-func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (*types.Transaction, bool, error) {
+func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (types.Transaction, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -386,7 +382,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 }
 
 // TransactionInBlock returns the transaction for a specific block at a specific index.
-func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error) {
+func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (types.Transaction, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -619,7 +615,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.chainContext.GetHeader, b.chainContext.Engine(), nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -630,26 +626,25 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 // SendTransaction updates the pending block to include the given transaction.
 // It panics if the transaction is invalid.
-func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	block := rawdb.ReadCurrentBlock(b.database)
-	signer := types.MakeSigner(b.config, block.Number())
-	sender, senderErr := types.Sender(signer, tx)
+	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
+	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
-	if tx.Nonce() != nonce {
-		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.Nonce(), nonce)
+	if tx.GetNonce() != nonce {
+		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.chainContext.GetHeader, b.chainContext.Engine(),
+		b.config, b.getHeader, b.engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -659,9 +654,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
-		block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+		block.AddTxWithChain(b.getHeader, b.engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -780,7 +775,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.chainContext.GetHeader, b.chainContext.Engine(), tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)
@@ -803,6 +798,8 @@ func (m callMsg) Nonce() uint64                { return 0 }
 func (m callMsg) CheckNonce() bool             { return false }
 func (m callMsg) To() *common.Address          { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int         { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int            { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }

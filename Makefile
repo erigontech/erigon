@@ -5,6 +5,9 @@ GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GOBUILD = env GO111MODULE=on go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
 
+GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
+GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
+
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
@@ -17,6 +20,12 @@ endif
 
 all: tg hack rpctest state pics rpcdaemon integration db-tools
 
+go-version:
+	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
+		echo "minimum required Golang version is 1.16"; \
+		exit 1 ;\
+	fi
+
 docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
 
@@ -28,7 +37,7 @@ geth: mdbx
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
-tg: mdbx
+tg: go-version mdbx
 	@echo "Building tg"
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
@@ -96,7 +105,6 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 mdbx:
@@ -112,7 +120,7 @@ mdbx:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: mdbx
-	$(GOTEST) --timeout 15m
+	TEST_DB=mdbx $(GOTEST) --timeout 15m
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
@@ -134,7 +142,6 @@ lintci-deps:
 clean:
 	env GO111MODULE=on go clean -cache
 	rm -fr build/*
-	rm -f semantics/z3/build/libz3.a
 	cd ethdb/mdbx/dist/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
@@ -164,17 +171,20 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.6/protoc-3.15.6-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
+		types/types.proto
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
-		types/types.proto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
-		snapshot_downloader/external_downloader.proto
+		snapshot_downloader/external_downloader.proto \
+		testing/testing.proto
 
 prometheus:
 	docker-compose up prometheus grafana

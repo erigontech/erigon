@@ -15,9 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 )
 
-//MaxChangesetsSearch -
-const MaxChangesetsSearch = 256
-
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	v, err := FindByHistory(tx, storage, key, timestamp)
@@ -34,7 +31,7 @@ func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, e
 		return nil, err
 	}
 	if v == nil {
-		return nil, ethdb.ErrKeyNotFound
+		return nil, nil
 	}
 	dat = make([]byte, len(v))
 	copy(dat, v)

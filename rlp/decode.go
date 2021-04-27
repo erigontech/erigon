@@ -748,10 +748,15 @@ func (s *Stream) List() (size uint64, err error) {
 	if kind != List {
 		return 0, ErrExpectedList
 	}
+	s.NewList(size)
+	return size, nil
+}
+
+// NewList starts decoding an RLP list, but without reading its prefix
+func (s *Stream) NewList(size uint64) {
 	s.stack = append(s.stack, listpos{0, size})
 	s.kind = -1
 	s.size = 0
-	return size, nil
 }
 
 // ListEnd returns to the enclosing list.

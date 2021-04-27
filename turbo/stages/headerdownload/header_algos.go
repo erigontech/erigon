@@ -1,9 +1,13 @@
 package headerdownload
 
 import (
+	"bytes"
+	"compress/gzip"
 	"container/heap"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"strings"
@@ -16,8 +20,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -401,14 +405,14 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
+func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
 	switch chain {
-	case "mainnet":
+	case params.MainnetChainConfig.ChainID:
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
-	case "ropsten":
+	case params.RopstenChainConfig.ChainID:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
@@ -514,6 +518,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
+	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	if len(hd.anchors) > 16 {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
@@ -528,7 +533,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, blockPropagator adapter.BlockPropagator) error {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for len(hd.insertList) > 0 {
@@ -547,7 +552,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
-			go blockPropagator.PropagateNewBlockHashes(context.Background(), link.header.Hash(), link.header.Number.Uint64())
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err
@@ -813,4 +817,46 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headerReader = headerReader
+}
+
+func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
+	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+
+	var buf bytes.Buffer
+
+	for i, encoding := range encodings {
+		b, err := base64.RawStdEncoding.DecodeString(encoding)
+		if err != nil {
+			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
+		}
+
+		if _, err = buf.Write(b); err != nil {
+			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
+		}
+
+		zr, err := gzip.NewReader(&buf)
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader on %d: %w %q", i, err, encoding)
+		}
+
+		res, err := io.ReadAll(zr)
+		if err != nil {
+			return nil, fmt.Errorf("gzip copy on %d: %w %q", i, err, encoding)
+		}
+
+		if err := zr.Close(); err != nil {
+			return nil, fmt.Errorf("gzip close on %d: %w", i, err)
+		}
+
+		var h types.Header
+		if err := rlp.DecodeBytes(res, &h); err != nil {
+			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
+		}
+
+		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+
+		buf.Reset()
+	}
+
+	return hardTips, nil
 }

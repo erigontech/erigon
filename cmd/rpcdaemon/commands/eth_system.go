@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -75,8 +74,12 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // ProtocolVersion implements eth_protocolVersion. Returns the current ethereum protocol version.
-func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
-	return hexutil.Uint(eth.ProtocolVersions[0]), nil
+func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
+	ver, err := api.ethBackend.ProtocolVersion(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return hexutil.Uint(ver), nil
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.

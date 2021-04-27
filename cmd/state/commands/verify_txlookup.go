@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withChaindata(verifyTxLookupCmd)
+	withDatadir(verifyTxLookupCmd)
 	rootCmd.AddCommand(verifyTxLookupCmd)
 }
 

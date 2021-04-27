@@ -46,7 +46,7 @@ func TestTrieOfAccountsLayout(t *testing.T) {
 	hash6 := common.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash6, 100_000_000_000))
 
-	_, err = RegenerateIntermediateHashes("IH", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), false /* checkRoot */, nil /* cache */, getTmpDir(), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = RegenerateIntermediateHashes("IH", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), StageTrieCfg(false, true, getTmpDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	account_trie := make(map[string][]byte)

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // generate the messages and services
@@ -30,9 +31,10 @@ import (
 //go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
 
 type remoteOpts struct {
-	DialAddress string
-	inMemConn   *bufconn.Listener // for tests
-	bucketsCfg  BucketConfigsFunc
+	DialAddress                              string
+	inMemConn                                *bufconn.Listener // for tests
+	bucketsCfg                               BucketConfigsFunc
+	versionMajor, versionMinor, versionPatch uint32 // KV interface version of the client - to perform compatibility check when opening
 }
 
 type RemoteKV struct {
@@ -84,7 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (RwKV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -142,10 +144,36 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 		return nil, err
 	}
 
+	kvClient := remote.NewKVClient(conn)
+	// Perform compatibility check
+	go func() {
+		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+		if err != nil {
+			log.Error("getting Version info from remove KV", "error", err)
+			cancelFn()
+			return
+		}
+		var compatible bool
+		if versionReply.Major != opts.versionMajor {
+			compatible = false
+		} else if versionReply.Minor != opts.versionMinor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+				"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+			cancelFn()
+			return
+		}
+		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	}()
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKVClient(conn),
+		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
 	}
@@ -158,15 +186,18 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (RwKV, error) {
 }
 
 func (opts remoteOpts) MustOpen() RwKV {
-	db, err := opts.Open("", "", "")
+	db, err := opts.Open("", "", "", func() {})
 	if err != nil {
 		panic(err)
 	}
 	return db
 }
 
-func NewRemote() remoteOpts {
-	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
+// NewRemote defines new remove KV connection (without actually opening it)
+// version parameters represent the version the KV client is expecting,
+// compatibility check will be performed when the KV connection opens
+func NewRemote(versionMajor, versionMinor, versionPatch uint32) remoteOpts {
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs, versionMajor: versionMajor, versionMinor: versionMinor, versionPatch: versionPatch}
 }
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {

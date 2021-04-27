@@ -42,11 +42,12 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		db     = ethdb.NewMemDatabase()
-		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr   = crypto.PubkeyToAddress(key.PublicKey)
-		engine = New(params.AllCliqueProtocolChanges.Clique, db)
-		signer = new(types.HomesteadSigner)
+		db       = ethdb.NewMemDatabase()
+		cliqueDB = ethdb.NewMemDatabase()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr     = crypto.PubkeyToAddress(key.PublicKey)
+		engine   = New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
+		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &core.Genesis{
 		ExtraData: make([]byte, extraVanity+common.AddressLength+extraSeal),
@@ -56,6 +57,8 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	copy(genspec.ExtraData[extraVanity:], addr[:])
 	genesis := genspec.MustCommit(db)
+
+	defer cliqueDB.Close()
 
 	// Generate a batch of blocks, each properly signed
 	txCacher := core.NewTxSenderCacher(1)
@@ -70,7 +73,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, nil, nil), signer, key)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, nil, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

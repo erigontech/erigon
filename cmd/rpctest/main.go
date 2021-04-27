@@ -178,6 +178,16 @@ func main() {
 	}
 	with(bench13Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
 
+	var benchTraceBlockCmd = &cobra.Command{
+		Use:   "benchTraceBlock",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchTraceBlock(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+		},
+	}
+	with(benchTraceBlockCmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+
 	var proofsCmd = &cobra.Command{
 		Use:   "proofs",
 		Short: "",
@@ -245,6 +255,7 @@ func main() {
 		bench11Cmd,
 		bench12Cmd,
 		bench13Cmd,
+		benchTraceBlockCmd,
 		proofsCmd,
 		fixStateCmd,
 		compareAccountRange,

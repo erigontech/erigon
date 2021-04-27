@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1616929111437,
+  "iteration": 1618909886787,
   "links": [],
   "panels": [
     {
@@ -179,7 +179,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(stage_execution{instance=~\"$instance\"}[1m])",
+          "expr": "rate(stage_execution{instance=~\"$instance\"}[5m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -396,7 +396,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "increase(db_commit_big_batch_count{instance=~\"$instance\"}[2m])",
+          "expr": "rate(db_commit_big_batch_count{instance=~\"$instance\"}[$__rate_interval])",
           "interval": "",
           "legendFormat": "commit: {{instance}}",
           "refId": "A"
@@ -451,6 +451,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -463,6 +464,103 @@
         "h": 4,
         "w": 8,
         "x": 8,
+        "y": 6
+      },
+      "hiddenSeries": false,
+      "id": 166,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "db_commit_big_batch{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "commit: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Commit speed",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:117",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:118",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
         "y": 6
       },
       "hiddenSeries": false,
@@ -877,156 +975,102 @@
       "type": "row"
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
       "datasource": null,
-      "description": "",
       "fieldConfig": {
         "defaults": {
-          "custom": {}
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          },
+          "unit": "short"
         },
         "overrides": []
       },
-      "fill": 1,
-      "fillGradient": 0,
       "gridPos": {
-        "h": 5,
+        "h": 10,
         "w": 8,
         "x": 0,
         "y": 15
       },
-      "hiddenSeries": false,
-      "id": 148,
-      "legend": {
-        "alignAsTable": false,
-        "avg": false,
-        "current": false,
-        "hideEmpty": true,
-        "hideZero": true,
-        "max": true,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
+      "id": 165,
       "options": {
-        "alertThreshold": true
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "range"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 14
+        },
+        "textMode": "auto"
       },
-      "percentage": false,
       "pluginVersion": "7.4.3",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
       "targets": [
         {
-          "expr": "mem_rss{instance=~\"$instance\"}",
-          "hide": false,
+          "expr": "ru_inblock{instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "rss: {{instance}}",
+          "legendFormat": "inblock: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "mem_vms{instance=~\"$instance\"}",
-          "hide": true,
+          "expr": "ru_outblock{instance=~\"$instance\"}",
+          "hide": false,
           "interval": "",
-          "legendFormat": "vms: {{instance}}",
+          "legendFormat": "outblock: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "mem_hwm{instance=~\"$instance\"}",
+          "expr": "ru_minflt{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "hwm: {{instance}}",
+          "legendFormat": "minflt: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "mem_data{instance=~\"$instance\"}",
+          "expr": "ru_majflt{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "data: {{instance}}",
+          "legendFormat": "majflt: {{instance}}",
           "refId": "D"
         },
         {
-          "expr": "mem_stack{instance=~\"$instance\"}",
+          "expr": "system_disk_readbytes{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "stack: {{instance}}",
+          "legendFormat": "system_disk_readbytes: {{instance}}",
           "refId": "E"
         },
         {
-          "expr": "mem_locked{instance=~\"$instance\"}",
+          "expr": "system_disk_writebytes{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "locked: {{instance}}",
+          "legendFormat": "system_disk_writebytes: {{instance}}",
           "refId": "F"
-        },
-        {
-          "expr": "mem_swap{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "swap: {{instance}}",
-          "refId": "G"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
-      "timeRegions": [],
       "timeShift": null,
-      "title": "mem: resident set size",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:161",
-          "format": "decbytes",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:162",
-          "format": "kbytes",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
-        }
-      ],
-      "yaxis": {
-        "align": true,
-        "alignLevel": null
-      }
+      "title": "Rusage Total (\"last value\" - \"first value\" on selected period)",
+      "type": "stat"
     },
     {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
-      "description": "",
+      "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -1042,25 +1086,28 @@
         "y": 15
       },
       "hiddenSeries": false,
-      "id": 153,
+      "id": 155,
       "legend": {
+        "alignAsTable": false,
         "avg": true,
         "current": false,
         "max": false,
         "min": false,
+        "rightSide": false,
         "show": true,
         "total": false,
         "values": true
       },
       "lines": true,
       "linewidth": 1,
+      "links": [],
       "nullPointMode": "null",
       "options": {
         "alertThreshold": true
       },
       "percentage": false,
       "pluginVersion": "7.4.3",
-      "pointradius": 2,
+      "pointradius": 5,
       "points": false,
       "renderer": "flot",
       "seriesOverrides": [],
@@ -1069,24 +1116,29 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(ru_nvcsw{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "voluntarily: {{instance}}",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(ru_nivcsw{instance=~\"$instance\"}[1m])",
+          "expr": "rate(ru_inblock{instance=~\"$instance\"}[30s])",
+          "format": "time_series",
           "hide": false,
           "interval": "",
-          "legendFormat": "involuntarily: {{instance}}",
-          "refId": "B"
+          "intervalFactor": 1,
+          "legendFormat": "in: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(ru_outblock{instance=~\"$instance\"}[1m])",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "out: {{instance}}",
+          "refId": "D"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "getrusage: nvcsw/sec - context switch due to voluntarily giving up the processor (resource wait), nivcsw",
+      "title": "Disk io (same as rusage.inblock/outblock)",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1102,8 +1154,8 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:405",
-          "format": "short",
+          "$$hashKey": "object:577",
+          "format": "iops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1111,13 +1163,13 @@
           "show": true
         },
         {
-          "$$hashKey": "object:406",
+          "$$hashKey": "object:578",
           "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -1261,118 +1313,6 @@
       "gridPos": {
         "h": 5,
         "w": 8,
-        "x": 0,
-        "y": 20
-      },
-      "hiddenSeries": false,
-      "id": 155,
-      "legend": {
-        "alignAsTable": false,
-        "avg": true,
-        "current": false,
-        "max": false,
-        "min": false,
-        "rightSide": false,
-        "show": true,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "links": [],
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.4.3",
-      "pointradius": 5,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(ru_inblock{instance=~\"$instance\"}[1m])",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "in: {{instance}}",
-          "refId": "C"
-        },
-        {
-          "expr": "rate(ru_outblock{instance=~\"$instance\"}[1m])",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "out: {{instance}}",
-          "refId": "D"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Disk io (same as rusage.inblock/outblock)",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:577",
-          "format": "iops",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:578",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 5,
-        "w": 8,
         "x": 8,
         "y": 20
       },
@@ -1471,7 +1411,8 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "Prometheus",
+      "datasource": null,
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -1487,15 +1428,15 @@
         "y": 20
       },
       "hiddenSeries": false,
-      "id": 128,
+      "id": 153,
       "legend": {
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -1514,17 +1455,16 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "go_goroutines{instance=~\"$instance\"}",
-          "instant": false,
+          "expr": "rate(ru_nvcsw{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "go/goroutines: {{instance}}",
+          "legendFormat": "voluntarily: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "go_threads{instance=~\"$instance\"}",
-          "instant": false,
+          "expr": "rate(ru_nivcsw{instance=~\"$instance\"}[1m])",
+          "hide": false,
           "interval": "",
-          "legendFormat": "go/threads: {{instance}}",
+          "legendFormat": "involuntarily: {{instance}}",
           "refId": "B"
         }
       ],
@@ -1532,10 +1472,10 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "GO Goroutines and Threads",
+      "title": "getrusage: nvcsw/sec - context switch due to voluntarily giving up the processor (resource wait), nivcsw",
       "tooltip": {
         "shared": true,
-        "sort": 2,
+        "sort": 0,
         "value_type": "individual"
       },
       "type": "graph",
@@ -1548,8 +1488,8 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:1192",
-          "format": "none",
+          "$$hashKey": "object:405",
+          "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1557,13 +1497,13 @@
           "show": true
         },
         {
-          "$$hashKey": "object:1193",
+          "$$hashKey": "object:406",
           "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": false
+          "show": true
         }
       ],
       "yaxis": {
@@ -1576,7 +1516,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "Prometheus",
+      "datasource": null,
       "description": "",
       "fieldConfig": {
         "defaults": {
@@ -1593,28 +1533,28 @@
         "y": 25
       },
       "hiddenSeries": false,
-      "id": 86,
+      "id": 148,
       "legend": {
         "alignAsTable": false,
         "avg": false,
         "current": false,
-        "max": false,
+        "hideEmpty": true,
+        "hideZero": true,
+        "max": true,
         "min": false,
-        "rightSide": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
-      "links": [],
       "nullPointMode": "null",
       "options": {
         "alertThreshold": true
       },
       "percentage": false,
       "pluginVersion": "7.4.3",
-      "pointradius": 5,
+      "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "seriesOverrides": [],
@@ -1623,28 +1563,60 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_memory_allocs{instance=~\"$instance\"}[5m])",
-          "format": "time_series",
+          "expr": "mem_rss{instance=~\"$instance\"}",
+          "hide": false,
           "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "alloc: {{instance}}",
+          "legendFormat": "rss: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(system_memory_frees{instance=~\"$instance\"}[5m])",
-          "format": "time_series",
+          "expr": "mem_vms{instance=~\"$instance\"}",
+          "hide": true,
+          "interval": "",
+          "legendFormat": "vms: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "mem_hwm{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "free: {{instance}}",
-          "refId": "B"
+          "legendFormat": "hwm: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "mem_data{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "data: {{instance}}",
+          "refId": "D"
+        },
+        {
+          "expr": "mem_stack{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "stack: {{instance}}",
+          "refId": "E"
+        },
+        {
+          "expr": "mem_locked{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "locked: {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "mem_swap{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "swap: {{instance}}",
+          "refId": "G"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Process Mem: allocate objects/sec, free",
+      "title": "mem: resident set size",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1660,8 +1632,8 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:290",
-          "format": "short",
+          "$$hashKey": "object:161",
+          "format": "decbytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1669,17 +1641,17 @@
           "show": true
         },
         {
-          "$$hashKey": "object:291",
-          "format": "short",
+          "$$hashKey": "object:162",
+          "format": "kbytes",
           "label": null,
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
-        "align": false,
+        "align": true,
         "alignLevel": null
       }
     },
@@ -1816,6 +1788,223 @@
         "y": 25
       },
       "hiddenSeries": false,
+      "id": 128,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "go_goroutines{instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "go/goroutines: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "go_threads{instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "go/threads: {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "GO Goroutines and Threads",
+      "tooltip": {
+        "shared": true,
+        "sort": 2,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:1192",
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:1193",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 30
+      },
+      "hiddenSeries": false,
+      "id": 86,
+      "legend": {
+        "alignAsTable": false,
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "links": [],
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 5,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(system_memory_allocs{instance=~\"$instance\"}[5m])",
+          "format": "time_series",
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "alloc: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(system_memory_frees{instance=~\"$instance\"}[5m])",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "free: {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Process Mem: allocate objects/sec, free",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:290",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:291",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 30
+      },
+      "hiddenSeries": false,
       "id": 124,
       "legend": {
         "avg": false,
@@ -1911,7 +2100,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 30
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 106,
@@ -2010,7 +2199,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 40
       },
       "id": 82,
       "panels": [],
@@ -2036,7 +2225,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 36
+        "y": 41
       },
       "hiddenSeries": false,
       "id": 157,
@@ -2193,777 +2382,941 @@
       }
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 46
       },
       "id": 146,
-      "panels": [
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 5,
-            "w": 8,
-            "x": 0,
-            "y": 38
-          },
-          "hiddenSeries": false,
-          "id": 122,
-          "legend": {
-            "alignAsTable": true,
-            "avg": true,
-            "current": false,
-            "hideEmpty": false,
-            "hideZero": false,
-            "max": false,
-            "min": false,
-            "rightSide": false,
-            "show": true,
-            "sort": "avg",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "trie_subtrieloader_flatdb{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "trie_subtrieloader_flatdb: {{quantile}}, {{instance}}",
-              "refId": "B"
-            },
-            {
-              "expr": "trie_subtrieloader_witnessdb{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "trie_subtrieloader_witnessdb: {{quantile}}, {{instance}}",
-              "refId": "C"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Merkle Root calculation (stage 5)",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": 6,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:431",
-              "format": "ns",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:432",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 5,
-            "w": 7,
-            "x": 8,
-            "y": 38
-          },
-          "hiddenSeries": false,
-          "id": 132,
-          "legend": {
-            "avg": false,
-            "current": false,
-            "max": false,
-            "min": false,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": false,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(cache_acc_read_hits{instance=~\"$instance\"}[30s])/delta(cache_acc_read_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "acc_hit_ratio",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(delta(cache_st_read_hits{instance=~\"$instance\"}[30s])/delta(cache_st_read_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "st_hit_ratio",
-              "refId": "B"
-            },
-            {
-              "expr": "sum(delta(cache_writes_hits{instance=~\"$instance\"}[30s])/delta(cache_writes_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "all_hit_ratio",
-              "refId": "C"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Cache Hit Rates",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:60",
-              "format": "percent",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:61",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": null,
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 5,
-            "w": 9,
-            "x": 15,
-            "y": 38
-          },
-          "hiddenSeries": false,
-          "id": 140,
-          "legend": {
-            "avg": true,
-            "current": true,
-            "max": false,
-            "min": false,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "rate(db_get_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "get: {{instance}}",
-              "refId": "A"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "db.Get() calls",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:887",
-              "format": "ops",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:888",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 5,
-            "w": 8,
-            "x": 0,
-            "y": 43
-          },
-          "hiddenSeries": false,
-          "id": 143,
-          "legend": {
-            "avg": false,
-            "current": false,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": false,
-            "min": false,
-            "rightSide": false,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "rate(lmdb_put_direct_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "lmdb_put_direct_rps: {{instance}}",
-              "refId": "E"
-            },
-            {
-              "expr": "rate(lmdb_put_rewrite_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "lmdb_put_rewrite_rps: {{instance}}",
-              "refId": "F"
-            },
-            {
-              "expr": "rate(mdbx_put_direct_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "mdbx_put_direct_rps: {{instance}}",
-              "refId": "G"
-            },
-            {
-              "expr": "rate(mdbx_put_rewrite_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "mdbx_put_rewrite_rps: {{instance}}",
-              "refId": "H"
-            },
-            {
-              "expr": "rate(lmdb_seek_exact_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "lmdb_seek_exact_count: {{instance}}",
-              "refId": "K"
-            },
-            {
-              "expr": "rate(mdbx_seek_exact_count{instance=~\"$instance\"}[1m])",
-              "interval": "",
-              "legendFormat": "mdbx_seek_exact_count: {{instance}}",
-              "refId": "L"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "AutoDupsort Call/Sec",
-          "tooltip": {
-            "shared": true,
-            "sort": 2,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:139",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:140",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 5,
-            "w": 8,
-            "x": 8,
-            "y": 43
-          },
-          "hiddenSeries": false,
-          "id": 142,
-          "legend": {
-            "alignAsTable": false,
-            "avg": true,
-            "current": false,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": false,
-            "min": false,
-            "rightSide": false,
-            "show": true,
-            "sort": "avg",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "lmdb_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "lmdb_put_direct: {{quantile}}, {{instance}}",
-              "refId": "A"
-            },
-            {
-              "expr": "mdbx_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_direct: {{quantile}}, {{instance}}",
-              "refId": "C"
-            },
-            {
-              "expr": "lmdb_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "lmdb_put_both_range: {{quantile}}, {{instance}}",
-              "refId": "B"
-            },
-            {
-              "expr": "mdbx_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_both_range: {{quantile}}, {{instance}}",
-              "refId": "D"
-            },
-            {
-              "expr": "lmdb_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "lmdb_seek_exact: {{quantile}}, {{instance}}",
-              "refId": "I"
-            },
-            {
-              "expr": "mdbx_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "mdbx_seek_exact: {{quantile}}, {{instance}}",
-              "refId": "J"
-            },
-            {
-              "expr": "lmdb_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "lmdb_put_no_overwrite: {{quantile}}, {{instance}}",
-              "refId": "F"
-            },
-            {
-              "expr": "mdbx_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_no_overwrite: {{quantile}}, {{instance}}",
-              "refId": "E"
-            },
-            {
-              "expr": "lmdb_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "lmdb_put_upsert: {{quantile}}, {{instance}}",
-              "refId": "G"
-            },
-            {
-              "expr": "mdbx_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_upsert: {{quantile}}, {{instance}}",
-              "refId": "H"
-            },
-            {
-              "expr": "lmdb_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "lmdb_put_current2: {{quantile}}, {{instance}}",
-              "refId": "K"
-            },
-            {
-              "expr": "mdbx_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_current2: {{quantile}}, {{instance}}",
-              "refId": "L"
-            },
-            {
-              "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "lmdb_put_upsert2: {{quantile}}, {{instance}}",
-              "refId": "M"
-            },
-            {
-              "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_put_upsert2: {{quantile}}, {{instance}}",
-              "refId": "N"
-            },
-            {
-              "expr": "lmdb_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "lmdb_put_current: {{quantile}}, {{instance}}",
-              "refId": "O"
-            },
-            {
-              "expr": "mdbx_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "mdbx_del_current: {{quantile}}, {{instance}}",
-              "refId": "P"
-            },
-            {
-              "expr": "lmdb_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "lmdb_seek_exact2: {{quantile}}, {{instance}}",
-              "refId": "Q"
-            },
-            {
-              "expr": "mdbx_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "mdbx_seek_exact2: {{quantile}}, {{instance}}",
-              "refId": "R"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "AutoDupsort Put latency",
-          "tooltip": {
-            "shared": true,
-            "sort": 2,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:139",
-              "format": "ns",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:140",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": null,
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 4,
-            "w": 8,
-            "x": 16,
-            "y": 43
-          },
-          "hiddenSeries": false,
-          "id": 156,
-          "legend": {
-            "avg": true,
-            "current": true,
-            "max": false,
-            "min": false,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "db_get{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "get: {{quantile}}, {{instance}}",
-              "refId": "A"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "db.Get() latency",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:887",
-              "format": "ns",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:888",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        }
-      ],
+      "panels": [],
       "title": "Hidden",
       "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 47
+      },
+      "hiddenSeries": false,
+      "id": 122,
+      "legend": {
+        "alignAsTable": true,
+        "avg": true,
+        "current": false,
+        "hideEmpty": false,
+        "hideZero": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "sort": "avg",
+        "sortDesc": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "trie_subtrieloader_flatdb{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "trie_subtrieloader_flatdb: {{quantile}}, {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "trie_subtrieloader_witnessdb{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "trie_subtrieloader_witnessdb: {{quantile}}, {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Merkle Root calculation (stage 5)",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": 6,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:431",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:432",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 7,
+        "x": 8,
+        "y": 47
+      },
+      "hiddenSeries": false,
+      "id": 132,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": false,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "sum(delta(cache_acc_read_hits{instance=~\"$instance\"}[30s])/delta(cache_acc_read_total{instance=~\"$instance\"}[30s]))",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "acc_hit_ratio",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(delta(cache_st_read_hits{instance=~\"$instance\"}[30s])/delta(cache_st_read_total{instance=~\"$instance\"}[30s]))",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "st_hit_ratio",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(delta(cache_writes_hits{instance=~\"$instance\"}[30s])/delta(cache_writes_total{instance=~\"$instance\"}[30s]))",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "all_hit_ratio",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Cache Hit Rates",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:60",
+          "format": "percent",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:61",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 47
+      },
+      "hiddenSeries": false,
+      "id": 140,
+      "legend": {
+        "avg": true,
+        "current": true,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(db_get_count{instance=~\"$instance\"}[1m])",
+          "interval": "",
+          "legendFormat": "get: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "db.Get() calls",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:887",
+          "format": "ops",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:888",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 52
+      },
+      "hiddenSeries": false,
+      "id": 143,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "hideEmpty": true,
+        "hideZero": true,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "db_op_set{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "E"
+        },
+        {
+          "expr": "db_op_set_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "F"
+        },
+        {
+          "expr": "db_op_get{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "G"
+        },
+        {
+          "expr": "db_op_get_both{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "expr": "db_op_get_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "B"
+        },
+        {
+          "expr": "db_op_put{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "C"
+        },
+        {
+          "expr": "db_op_put_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "D"
+        },
+        {
+          "expr": "db_op_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "H"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "AutoDupsort Call/Sec",
+      "tooltip": {
+        "shared": true,
+        "sort": 2,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:139",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:140",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 52
+      },
+      "hiddenSeries": false,
+      "id": 162,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "hideEmpty": true,
+        "hideZero": true,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(db_op_set_count{instance=~\"$instance\"}[1m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "E"
+        },
+        {
+          "expr": "rate(db_op_set_range_count{instance=~\"$instance\"}[1m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "F"
+        },
+        {
+          "expr": "rate(db_op_get_count{instance=~\"$instance\"}[1m])",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "G"
+        },
+        {
+          "expr": "rate(db_op_get_both{instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(db_op_get_both_range_count{instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "B"
+        },
+        {
+          "expr": "db_op_put{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "C"
+        },
+        {
+          "expr": "db_op_put_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "D"
+        },
+        {
+          "expr": "db_op_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "H"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "AutoDupsort Call/Sec",
+      "tooltip": {
+        "shared": true,
+        "sort": 2,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:139",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:140",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 52
+      },
+      "hiddenSeries": false,
+      "id": 156,
+      "legend": {
+        "avg": true,
+        "current": true,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "db_get{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "get: {{quantile}}, {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "db.Get() latency",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:887",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:888",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "hiddenSeries": false,
+      "id": 142,
+      "legend": {
+        "alignAsTable": false,
+        "avg": true,
+        "current": false,
+        "hideEmpty": true,
+        "hideZero": true,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "sort": "avg",
+        "sortDesc": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "lmdb_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "lmdb_put_direct: {{quantile}}, {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "mdbx_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_direct: {{quantile}}, {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "lmdb_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "lmdb_put_both_range: {{quantile}}, {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "mdbx_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_both_range: {{quantile}}, {{instance}}",
+          "refId": "D"
+        },
+        {
+          "expr": "lmdb_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "lmdb_seek_exact: {{quantile}}, {{instance}}",
+          "refId": "I"
+        },
+        {
+          "expr": "mdbx_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "mdbx_seek_exact: {{quantile}}, {{instance}}",
+          "refId": "J"
+        },
+        {
+          "expr": "lmdb_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "lmdb_put_no_overwrite: {{quantile}}, {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "mdbx_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_no_overwrite: {{quantile}}, {{instance}}",
+          "refId": "E"
+        },
+        {
+          "expr": "lmdb_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "lmdb_put_upsert: {{quantile}}, {{instance}}",
+          "refId": "G"
+        },
+        {
+          "expr": "mdbx_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_upsert: {{quantile}}, {{instance}}",
+          "refId": "H"
+        },
+        {
+          "expr": "lmdb_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "lmdb_put_current2: {{quantile}}, {{instance}}",
+          "refId": "K"
+        },
+        {
+          "expr": "mdbx_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_current2: {{quantile}}, {{instance}}",
+          "refId": "L"
+        },
+        {
+          "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "lmdb_put_upsert2: {{quantile}}, {{instance}}",
+          "refId": "M"
+        },
+        {
+          "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_put_upsert2: {{quantile}}, {{instance}}",
+          "refId": "N"
+        },
+        {
+          "expr": "lmdb_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "lmdb_put_current: {{quantile}}, {{instance}}",
+          "refId": "O"
+        },
+        {
+          "expr": "mdbx_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "mdbx_del_current: {{quantile}}, {{instance}}",
+          "refId": "P"
+        },
+        {
+          "expr": "lmdb_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "lmdb_seek_exact2: {{quantile}}, {{instance}}",
+          "refId": "Q"
+        },
+        {
+          "expr": "mdbx_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "mdbx_seek_exact2: {{quantile}}, {{instance}}",
+          "refId": "R"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "AutoDupsort Put latency",
+      "tooltip": {
+        "shared": true,
+        "sort": 2,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:139",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:140",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
     },
     {
       "collapsed": false,
@@ -2972,7 +3325,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 62
       },
       "id": 75,
       "panels": [],
@@ -2997,7 +3350,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 63
       },
       "hiddenSeries": false,
       "id": 96,
@@ -3108,7 +3461,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 43
+        "y": 63
       },
       "hiddenSeries": false,
       "id": 77,
@@ -3213,7 +3566,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 69
       },
       "id": 4,
       "panels": [],
@@ -3256,7 +3609,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 50
+        "y": 70
       },
       "id": 108,
       "interval": null,
@@ -3334,7 +3687,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 50
+        "y": 70
       },
       "id": 111,
       "interval": null,
@@ -3412,7 +3765,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 50
+        "y": 70
       },
       "id": 109,
       "interval": null,
@@ -3490,7 +3843,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 50
+        "y": 70
       },
       "id": 113,
       "interval": null,
@@ -3568,7 +3921,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 50
+        "y": 70
       },
       "id": 114,
       "interval": null,
@@ -3646,7 +3999,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 50
+        "y": 70
       },
       "id": 115,
       "interval": null,
@@ -3707,7 +4060,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 73
       },
       "hiddenSeries": false,
       "id": 110,
@@ -3822,7 +4175,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 73
       },
       "hiddenSeries": false,
       "id": 116,
@@ -3937,7 +4290,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 79
       },
       "hiddenSeries": false,
       "id": 117,
@@ -4112,7 +4465,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 86
       },
       "id": 138,
       "panels": [
@@ -4291,7 +4644,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "0.95",
           "value": "0.95"
         },
@@ -4373,7 +4726,7 @@
     ]
   },
   "time": {
-    "from": "now-12h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {
@@ -4403,5 +4756,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 49
+  "version": 71
 }

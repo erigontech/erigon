@@ -3,12 +3,10 @@ package ethdb
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // Implements ethdb.Getter for Tx
@@ -68,6 +66,10 @@ func (m *roTxDb) Rollback() {
 
 func (m *roTxDb) Tx() Tx {
 	return m.tx
+}
+
+func NewRwTxDb(tx Tx) *TxDb {
+	return &TxDb{tx: tx, cursors: map[string]Cursor{}}
 }
 
 // TxDb - provides Database interface around ethdb.Tx
@@ -255,7 +257,6 @@ func (m *TxDb) BatchSize() int {
 }
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
-	m.panicOnEmptyDB()
 	// get cursor out of pool, then calls txDb.Put/Get/Delete on same bucket inside Walk callback - will not affect state of Walk
 	c, ok := m.cursors[bucket]
 	if ok {
@@ -292,10 +293,6 @@ func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 }
 
 func (m *TxDb) Commit() error {
-	if metrics.Enabled {
-		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-	}
-
 	if m.tx == nil {
 		return fmt.Errorf("second call .Commit() on same transaction")
 	}
@@ -324,12 +321,6 @@ func (m *TxDb) Tx() Tx {
 
 func (m *TxDb) Keys() ([][]byte, error) {
 	panic("don't use me")
-}
-
-func (m *TxDb) panicOnEmptyDB() {
-	if m.db == nil {
-		panic("Not implemented")
-	}
 }
 
 func (m *TxDb) BucketExists(name string) (bool, error) {

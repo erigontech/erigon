@@ -22,20 +22,17 @@ type LoadFunc func(*SubTrieLoader, *RetainList, [][]byte, []int) (SubTries, erro
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type SubTrieLoader struct {
-	blockNr      uint64
 	codeRequests []*LoadRequestForCode
 }
 
-func NewSubTrieLoader(blockNr uint64) *SubTrieLoader {
+func NewSubTrieLoader() *SubTrieLoader {
 	tr := SubTrieLoader{
 		codeRequests: []*LoadRequestForCode{},
-		blockNr:      blockNr,
 	}
 	return &tr
 }
 
-func (stl *SubTrieLoader) Reset(blockNr uint64) {
-	stl.blockNr = blockNr
+func (stl *SubTrieLoader) Reset() {
 	stl.codeRequests = stl.codeRequests[:0]
 }
 

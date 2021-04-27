@@ -39,7 +39,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainDBState(ethdb.NewRoTxDb(tx), blockNumber)
+		stateReader = state.NewPlainKvState(tx, blockNumber)
 	}
 	state := state.New(stateReader)
 
@@ -127,8 +127,8 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			Transfer:    core.Transfer,
 			GetHash:     getHashGetter(requireCanonical, tx),
 			Coinbase:    header.Coinbase,
-			BlockNumber: new(big.Int).Set(header.Number),
-			Time:        new(big.Int).SetUint64(header.Time),
+			BlockNumber: header.Number.Uint64(),
+			Time:        header.Time,
 			Difficulty:  new(big.Int).Set(header.Difficulty),
 			GasLimit:    header.GasLimit,
 		},
@@ -140,7 +140,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 
 func getHashGetter(requireCanonical bool, tx ethdb.Tx) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
-		hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), n)
+		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {
 			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}

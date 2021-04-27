@@ -1,10 +1,11 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 )
 
 var (
@@ -17,13 +18,11 @@ var (
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
-	cacheSizeStr       string
 	batchSizeStr       string
 	reset              bool
 	bucket             string
 	datadir            string
 	mapSizeStr         string
-	freelistReuse      int
 	migration          string
 	integritySlow      bool
 	integrityFast      bool
@@ -36,15 +35,6 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func withChaindata(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
-	must(cmd.MarkFlagDirname("chaindata"))
-	must(cmd.MarkFlagRequired("chaindata"))
-	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func withMining(cmd *cobra.Command) {
@@ -63,11 +53,6 @@ func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&file, "file", "", "path to file")
 	must(cmd.MarkFlagFilename("file"))
 	must(cmd.MarkFlagRequired("file"))
-}
-
-func withLmdbFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
-	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {
@@ -101,18 +86,28 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDatadir2(cmd *cobra.Command) {
-	cmd.Flags().String(utils.DataDirFlag.Name, utils.DataDirFlag.Value.String(), utils.DataDirFlag.Usage)
+	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func withDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	must(cmd.MarkFlagDirname("datadir"))
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+
+	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
+	must(cmd.MarkFlagDirname("chaindata"))
+
+	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
+	must(cmd.MarkFlagDirname("snapshot.dir"))
+
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func withBatchSize(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cacheSizeStr, "cacheSize", "0", "cache size for execution stage")
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
 }
 

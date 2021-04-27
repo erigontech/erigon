@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -16,12 +18,14 @@ import (
 )
 
 var (
-	sentryAddr    string   // Address of the sentry <host>:<port>
-	sentryAddrs   []string // Address of the sentry <host>:<port>
-	chaindata     string   // Path to chaindata
-	database      string   // Type of database (lmdb or mdbx)
-	mapSizeStr    string   // Map size for LMDB
-	freelistReuse int
+	sentryAddr   string   // Address of the sentry <host>:<port>
+	sentryAddrs  []string // Address of the sentry <host>:<port>
+	chaindata    string   // Path to chaindata
+	snapshotDir  string
+	snapshotMode string
+	datadir      string // Path to td working dir
+	database     string // Type of database (lmdb or mdbx)
+	mapSizeStr   string // Map size for LMDB
 )
 
 func init() {
@@ -53,6 +57,12 @@ var rootCmd = &cobra.Command{
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
+		if chaindata == "" {
+			chaindata = path.Join(datadir, "tg", "chaindata")
+		}
+		//if snapshotDir == "" {
+		//	snapshotDir = path.Join(datadir, "tg", "snapshot")
+		//}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
@@ -72,16 +82,19 @@ func must(err error) {
 	}
 }
 
-func withChaindata(cmd *cobra.Command) {
+func withDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	must(cmd.MarkFlagDirname("datadir"))
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
-	must(cmd.MarkFlagRequired("chaindata"))
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
-}
 
-func withLmdbFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
-	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
+	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
+	must(cmd.MarkFlagDirname("snapshot.dir"))
+
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
 func openDatabase(path string) *ethdb.ObjectDatabase {
@@ -100,9 +113,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 			opts = opts.MapSize(mapSize)
 		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
 		return opts.MustOpen()
 	}
 
@@ -114,9 +124,6 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		opts = opts.MapSize(mapSize)
-	}
-	if freelistReuse > 0 {
-		opts = opts.MaxFreelistReuse(uint(freelistReuse))
 	}
 	return opts.MustOpen()
 }

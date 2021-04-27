@@ -695,16 +695,17 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (consensus.Engine, *ethdb.Ob
 	genesisDb := db.MemCopy()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 
 	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, len(txs), func(i int, block *core.BlockGen) {
-		var tx *types.Transaction
+		var tx types.Transaction
 		var isContractCall bool
-		signer := types.HomesteadSigner{}
+		signer := types.LatestSignerForChainID(nil)
 
 		if txToSend, ok := txs[i]; ok {
 			tx, isContractCall = txToSend.txFn(block, contractBackend)
 			var err error
-			tx, err = types.SignTx(tx, signer, txToSend.key)
+			tx, err = types.SignTx(tx, *signer, txToSend.key)
 			if err != nil {
 				return
 			}
@@ -734,16 +735,16 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (consensus.Engine, *ethdb.Ob
 	return engine, db, blocks, receipts, clear, err
 }
 
-type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)
+type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
 
 func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blockTx {
-	return func(block *core.BlockGen, _ bind.ContractBackend) (*types.Transaction, bool) {
+	return func(block *core.BlockGen, _ bind.ContractBackend) (types.Transaction, bool) {
 		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
 }
 
 func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Testcontract) blockTx {
-	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
+	return func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool) {
 		contractAddressRes, tx, eipContractRes, err := contracts.DeployTestcontract(transactOpts, backend)
 		if err != nil {
 			panic(err)
@@ -757,16 +758,16 @@ func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddre
 }
 
 func getBlockTestContractTx(transactOpts *bind.TransactOpts, contractCall interface{}, newBalance ...*big.Int) blockTx {
-	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
+	return func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool) {
 		var (
-			tx  *types.Transaction
+			tx  types.Transaction
 			err error
 		)
 
 		switch fn := contractCall.(type) {
-		case func(opts *bind.TransactOpts) (*types.Transaction, error):
+		case func(opts *bind.TransactOpts) (types.Transaction, error):
 			tx, err = fn(transactOpts)
-		case func(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error):
+		case func(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error):
 			if len(newBalance) != 1 {
 				panic("*big.Int type new balance is expected")
 			}

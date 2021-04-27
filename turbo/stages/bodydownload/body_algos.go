@@ -1,9 +1,6 @@
 package bodydownload
 
 import (
-	//"context"
-	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
 	"context"
 	"fmt"
 	"math/big"
@@ -27,13 +24,13 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
-	bd.maxProgress = headerProgress + 1
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
+	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.lowWaitUntil = 0
@@ -48,11 +45,14 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	}
 	bd.peerMap = make(map[string]int)
 	headHeight = bodyProgress
-	headHash = rawdb.ReadHeaderByNumber(db, headHeight).Hash()
+	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
+		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)
@@ -168,15 +168,15 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	}
 }
 
-// DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
+// DeliverBodies takes the block body received from a peer and adds it to the various data structures
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)
 	var delivered, undelivered int
-	for _, body := range bodies {
-		uncleHash := types.CalcUncleHash(body.Uncles)
-		txHash := types.DeriveSha(types.Transactions(body.Transactions))
+	for i := range txs {
+		uncleHash := types.CalcUncleHash(uncles[i])
+		txHash := types.DeriveSha(types.Transactions(txs[i]))
 		var doubleHash DoubleHash
 		copy(doubleHash[:], uncleHash.Bytes())
 		copy(doubleHash[common.HashLength:], txHash.Bytes())
@@ -184,7 +184,8 @@ func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 		// Also, block numbers can be added to bd.delivered for empty blocks, above
 		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
 			bd.delivered.Add(blockNum)
-			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
+			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			bd.deliveries[blockNum-bd.requestedLow] = block
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {

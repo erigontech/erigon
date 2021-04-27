@@ -31,7 +31,7 @@ import (
 // ensure they process the early transactions fast.
 type txSenderCacherRequest struct {
 	signer types.Signer
-	txs    []*types.Transaction
+	txs    []types.Transaction
 	inc    int
 }
 
@@ -73,7 +73,7 @@ func (cacher *TxSenderCacher) cache() {
 		}
 
 		for i := 0; i < len(task.txs); i += task.inc {
-			types.Sender(task.signer, task.txs[i])
+			task.txs[i].Sender(task.signer)
 		}
 	}
 }

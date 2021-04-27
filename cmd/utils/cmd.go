@@ -89,7 +89,7 @@ func SetupUrfave(ctx *cli.Context) error {
 	return debug.Setup(ctx)
 }
 
-func RootContext() context.Context {
+func RootContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		defer cancel()
@@ -106,5 +106,5 @@ func RootContext() context.Context {
 		case <-ctx.Done():
 		}
 	}()
-	return ctx
+	return ctx, cancel
 }

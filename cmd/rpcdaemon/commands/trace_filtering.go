@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
@@ -71,29 +73,69 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
-	tx, err := api.kv.BeginRo(ctx)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, tx)
+	defer dbtx.Rollback()
+	blockNum, err := getBlockNumber(blockNr, dbtx)
 	if err != nil {
 		return nil, err
 	}
 	bn := hexutil.Uint64(blockNum)
-	var req TraceFilterRequest
-	req.FromBlock = &bn
-	req.ToBlock = &bn
-	req.FromAddress = nil
-	req.ToAddress = nil
-	req.After = nil
-	req.Count = nil
 
-	traces, err := api.Filter(ctx, req)
+	// Extract transactions from block
+	hash, hashErr := rawdb.ReadCanonicalHash(dbtx, blockNum)
+	if hashErr != nil {
+		return nil, hashErr
+	}
+	block, senders, sendersErr := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(dbtx), hash, uint64(bn))
+	if sendersErr != nil {
+		return nil, sendersErr
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	blockTxs := block.Transactions()
+
+	if len(blockTxs) != len(senders) {
+		return nil, errors.New("block txs len != senders len")
+	}
+
+	txs := make([]TransactionWithSender, 0, len(senders))
+	for n, tx := range blockTxs {
+		txs = append(txs, TransactionWithSender{
+			tx:     tx,
+			sender: senders[n],
+		})
+	}
+
+	baseBn := bn
+	if baseBn > 0 {
+		baseBn -= 1
+	}
+
+	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
-	return traces, err
+
+	out := make([]ParityTrace, 0, len(traces))
+	blockno := uint64(bn)
+	for txno, trace := range traces {
+		txhash := txs[txno].tx.Hash()
+		txpos := uint64(txno)
+		for _, pt := range trace.Trace {
+			pt.BlockHash = &hash
+			pt.BlockNumber = &blockno
+			pt.TransactionHash = &txhash
+			pt.TransactionPosition = &txpos
+			out = append(out, *pt)
+		}
+	}
+
+	return out, err
 }
 
 // Filter implements trace_filter
@@ -167,7 +209,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		for _, addr := range historyFilter {
 
 			addrBytes := addr.Bytes()
-			blockNumbers, errHistory := retrieveHistory(ethdb.NewRoTxDb(tx), addr, fromBlock, toBlock)
+			blockNumbers, errHistory := retrieveHistory(tx, addr, fromBlock, toBlock)
 			if errHistory != nil {
 				return nil, errHistory
 			}
@@ -186,10 +228,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 					}
 
 					var to *common.Address
-					if txn.To() == nil {
+					if txn.GetTo() == nil {
 						to = &common.Address{}
 					} else {
-						to = txn.To()
+						to = txn.GetTo()
 					}
 
 					if isFromAddress {
@@ -247,14 +289,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 
 	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(tx)
+	engine := ethash.NewFaker()
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
-
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
 	for i, txOrBlockHash := range filteredHashes {
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
@@ -293,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else {
 			// In this case, we're processing a transaction hash
 			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txOrBlockHash)
-			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
+			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, engine, tx, blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -315,7 +359,48 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	return traces, nil
 }
 
-func retrieveHistory(tx ethdb.Getter, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
+type TransactionWithSender struct {
+	tx     types.Transaction
+	sender common.Address
+}
+
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]*TraceCallResult, error) {
+	toExecute := []interface{}{}
+
+	for _, txWithSender := range txs {
+		tx := txWithSender.tx
+		sender := txWithSender.sender
+		gas := hexutil.Uint64(tx.GetGas())
+		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
+		value := hexutil.Big(*tx.GetValue().ToBig())
+		toExecute = append(toExecute, []interface{}{TraceCallParam{
+			From:     &sender,
+			To:       tx.GetTo(),
+			Gas:      &gas,
+			GasPrice: &gasPrice,
+			Value:    &value,
+			Data:     tx.GetData(),
+		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
+	}
+
+	calls, callsErr := json.Marshal(toExecute)
+	if callsErr != nil {
+		return nil, callsErr
+	}
+	traces, cmErr := api.doCallMany(ctx, dbtx, calls, &rpc.BlockNumberOrHash{
+		BlockNumber:      &blockNo,
+		BlockHash:        &blockHash,
+		RequireCanonical: true,
+	})
+
+	if cmErr != nil {
+		return nil, cmErr
+	}
+
+	return traces, nil
+}
+
+func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
 	blocks, err := bitmapdb.Get(tx, dbutils.AccountsHistoryBucket, addr.Bytes(), uint32(fromBlock), uint32(toBlock+1))
 	if err != nil {
 		return nil, err
@@ -351,7 +436,6 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
 func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(tx)
-	chainContext := adapter.NewChainContext(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
@@ -359,7 +443,11 @@ func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, 
 	traceType := "callTracer" // nolint: goconst
 
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext.GetHeader, chainContext.Engine(), tx, blockHash, txIndex)
+
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

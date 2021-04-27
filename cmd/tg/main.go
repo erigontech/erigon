@@ -60,7 +60,7 @@ func runTurboGeth(cliCtx *cli.Context) {
 
 
 
-	ctx := utils.RootContext()
+	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", gitBranch, "git_commit", gitCommit)

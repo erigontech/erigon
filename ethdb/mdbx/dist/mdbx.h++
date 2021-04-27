@@ -803,6 +803,13 @@ protected:
 /// \brief The chunk of data stored inside the buffer or located outside it.
 template <class ALLOCATOR = legacy_allocator> class buffer {
   friend class txn;
+  /* FIXME: replace std::string with custom silo.
+   * The std::string<char> does not guarantee any alignment for allocated
+   * buffer. For instance short values may be stored within internal inplace
+   * buffer, which might odd address. Moreover, allocator for the `char` type
+   * may return unaligned/odd address. This may UB for placing a 32-bit and
+   * 64-bit values.
+   * So seems the std::string<> should be replaced with ad hoc solution. */
   using silo = ::mdbx::string<ALLOCATOR>;
   silo silo_;
   ::mdbx::slice slice_;

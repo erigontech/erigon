@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withChaindata(checkEncCmd)
+	withDatadir(checkEncCmd)
 	withStatsfile(checkEncCmd)
 	rootCmd.AddCommand(checkEncCmd)
 }

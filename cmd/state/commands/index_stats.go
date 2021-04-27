@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withChaindata(indexStatsCmd)
+	withDatadir(indexStatsCmd)
 	withStatsfile(indexStatsCmd)
 	withIndexBucket(indexStatsCmd)
 	rootCmd.AddCommand(indexStatsCmd)

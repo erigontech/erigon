@@ -132,25 +132,6 @@ func WriteHeadBlockHash(db ethdb.Putter, hash common.Hash) {
 	}
 }
 
-// ReadHeadFastBlockHash retrieves the hash of the current fast-sync head block.
-func ReadHeadFastBlockHash(db ethdb.KVGetter) common.Hash {
-	data, err := db.GetOne(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey))
-	if err != nil {
-		log.Error("ReadHeadFastBlockHash failed", "err", err)
-	}
-	if len(data) == 0 {
-		return common.Hash{}
-	}
-	return common.BytesToHash(data)
-}
-
-// WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
-func WriteHeadFastBlockHash(db ethdb.Putter, hash common.Hash) {
-	if err := db.Put(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey), hash.Bytes()); err != nil {
-		log.Crit("Failed to store last fast block's hash", "err", err)
-	}
-}
-
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(dbutils.HeadersBucket, dbutils.HeaderKey(number, hash))
@@ -267,22 +248,23 @@ func ReadStorageBodyRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.
 	return bodyRlp
 }
 
-func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]*types.Transaction, error) {
+func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
-		return []*types.Transaction{}, nil
+		return []types.Transaction{}, nil
 	}
 	txIdKey := make([]byte, 8)
 	reader := bytes.NewReader(nil)
-	txs := make([]*types.Transaction, amount)
+	stream := rlp.NewStream(reader, 0)
+	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-	if err := db.Walk(dbutils.EthTx, txIdKey, 0, func(k, txRlp []byte) (bool, error) {
-		txs[i] = new(types.Transaction)
-		reader.Reset(txRlp)
-		if err := rlp.Decode(reader, txs[i]); err != nil {
-			return false, fmt.Errorf("broken tx rlp: %w", err)
+	if err := db.Walk(dbutils.EthTx, txIdKey, 0, func(k, txData []byte) (bool, error) {
+		var decodeErr error
+		reader.Reset(txData)
+		stream.Reset(reader, 0)
+		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+			return false, decodeErr
 		}
-
 		i++
 		return i < amount, nil
 	}); err != nil {
@@ -293,7 +275,7 @@ func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]*types
 	return txs, nil
 }
 
-func WriteTransactions(db ethdb.Database, txs []*types.Transaction, baseTxId uint64) error {
+func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
@@ -585,7 +567,18 @@ func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) erro
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func AppendReceipts(tx ethdb.Database, blockNumber uint64, receipts types.Receipts) error {
+func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) error {
+	logsC, err := tx.RwCursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
+	defer logsC.Close()
+	receiptsC, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
+	if err != nil {
+		return err
+	}
+	defer receiptsC.Close()
+
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
@@ -599,18 +592,18 @@ func AppendReceipts(tx ethdb.Database, blockNumber uint64, receipts types.Receip
 			return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 		}
 
-		if err = tx.Append(dbutils.Log, dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
+		if err = logsC.Append(dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
 			return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 		}
 	}
 
 	buf.Reset()
-	err := cbor.Marshal(buf, receipts)
+	err = cbor.Marshal(buf, receipts)
 	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
 
-	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
+	if err = receiptsC.Append(dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 	}
 	return nil
@@ -707,9 +700,15 @@ func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint
 
 func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
+	if block == nil {
+		return nil, nil, nil
+	}
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(senders) != block.Transactions().Len() {
+		return nil, nil, nil
 	}
 	block.Body().SendersToTxs(senders)
 	return block, senders, nil

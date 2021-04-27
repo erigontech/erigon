@@ -35,7 +35,7 @@ func handleGetBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v", err, msg)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func handleGetBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
 
-func AnswerGetBlockBodiesQuery(db ethdb.Getter, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db ethdb.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var (
 		bytes  int
@@ -206,7 +206,7 @@ func AnswerGetBlockBodiesQuery(db ethdb.Getter, query GetBlockBodiesPacket) []rl
 		if number == nil {
 			continue
 		}
-		data := rawdb.ReadBodyRLP(db, hash, *number)
+		data := rawdb.ReadBodyRLP(ethdb.NewRoTxDb(db), hash, *number)
 		if len(data) == 0 {
 			continue
 		}
@@ -246,7 +246,7 @@ func handleGetReceipts(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	tx, err := backend.Chain().ChainDb().Begin(context.Background(), ethdb.RO)
+	tx, err := backend.DB().BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
 
-func AnswerGetReceiptsQuery(db ethdb.Getter, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(db ethdb.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -290,7 +290,7 @@ func AnswerGetReceiptsQuery(db ethdb.Getter, query GetReceiptsPacket) ([]rlp.Raw
 			break
 		}
 		// Retrieve the requested block's receipts
-		results := rawdb.ReadReceiptsByHash(db, hash)
+		results := rawdb.ReadReceiptsByHash(ethdb.NewRoTxDb(db), hash)
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {

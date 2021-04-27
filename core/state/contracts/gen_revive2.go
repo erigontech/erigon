@@ -33,7 +33,7 @@ const Revive2ABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":
 var Revive2Bin = "0x608060405234801561001057600080fd5b5061020c806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c80632b85ba3814610030575b600080fd5b61004d6004803603602081101561004657600080fd5b503561004f565b005b60008160405161005e906100c3565b8190604051809103906000f590508015801561007e573d6000803e3d6000fd5b50604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a15050565b60e2806100d08339019056fe6080604052348015600f57600080fd5b5060c48061001e6000396000f3fe60806040526004361060295760003560e01c806335f46994146034578063d09de08a14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605e565b6000ff5b60008054600101905556fea26469706673582212208a7813270390a5ca21790c2447b46da471493e99b652d00cbd4751eb47b7e70164736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058a264697066735822122036eaf56869ab01a8cf151f996b101556189836230bfa0508485784d1821bc2fa64736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058"
 
 // DeployRevive2 deploys a new Ethereum contract, binding an instance of Revive2 to it.
-func DeployRevive2(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Revive2, error) {
+func DeployRevive2(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Revive2, error) {
 	parsed, err := abi.JSON(strings.NewReader(Revive2ABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Revive2 *Revive2Raw) Call(opts *bind.CallOpts, result *[]interface{}, met
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Revive2 *Revive2Raw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Revive2 *Revive2Raw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Revive2.Contract.Revive2Transactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive2 *Revive2Raw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Revive2 *Revive2Raw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Revive2.Contract.Revive2Transactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,33 +179,33 @@ func (_Revive2 *Revive2CallerRaw) Call(opts *bind.CallOpts, result *[]interface{
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Revive2 *Revive2TransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Revive2 *Revive2TransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Revive2.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive2 *Revive2TransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Revive2 *Revive2TransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Revive2.Contract.contract.Transact(opts, method, params...)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0x2b85ba38.
 //
 // Solidity: function deploy(bytes32 salt) returns()
-func (_Revive2 *Revive2Transactor) Deploy(opts *bind.TransactOpts, salt [32]byte) (*types.Transaction, error) {
+func (_Revive2 *Revive2Transactor) Deploy(opts *bind.TransactOpts, salt [32]byte) (types.Transaction, error) {
 	return _Revive2.contract.Transact(opts, "deploy", salt)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0x2b85ba38.
 //
 // Solidity: function deploy(bytes32 salt) returns()
-func (_Revive2 *Revive2Session) Deploy(salt [32]byte) (*types.Transaction, error) {
+func (_Revive2 *Revive2Session) Deploy(salt [32]byte) (types.Transaction, error) {
 	return _Revive2.Contract.Deploy(&_Revive2.TransactOpts, salt)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0x2b85ba38.
 //
 // Solidity: function deploy(bytes32 salt) returns()
-func (_Revive2 *Revive2TransactorSession) Deploy(salt [32]byte) (*types.Transaction, error) {
+func (_Revive2 *Revive2TransactorSession) Deploy(salt [32]byte) (types.Transaction, error) {
 	return _Revive2.Contract.Deploy(&_Revive2.TransactOpts, salt)
 }
 

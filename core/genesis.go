@@ -266,7 +266,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, error) {
 	tmpDB := ethdb.NewMemDatabase()
 	defer tmpDB.Close()
-	r, w := state.NewDbStateReader(tmpDB), state.NewDbStateWriter(tmpDB, 0)
+	tx, err := tmpDB.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 	statedb := state.New(r)
 	for addr, account := range g.Alloc {
 		balance, _ := uint256.FromBig(account.Balance)
@@ -286,7 +291,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if err := statedb.FinalizeTx(context.Background(), w); err != nil {
 		return nil, nil, err
 	}
-	root, err := trie.CalcRoot("genesis", tmpDB)
+	root, err := trie.CalcRoot("genesis", tx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -308,6 +313,10 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	}
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
+	}
+	if g.Config != nil && g.Config.IsAleut(0) {
+		head.Eip1559 = true
+		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 	}
 
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
@@ -378,11 +387,12 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
+
 	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 		return nil, nil, err
 	}
+
 	rawdb.WriteHeadBlockHash(tx, block.Hash())
-	rawdb.WriteHeadFastBlockHash(tx, block.Hash())
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return nil, nil, err
 	}
@@ -497,6 +507,18 @@ func DefaultTurboMineGenesisBlock() *Genesis {
 		GasLimit:   1000000000,
 		Difficulty: big.NewInt(1048576),
 		Alloc:      readPrealloc("allocs/turbomine.json"),
+	}
+}
+
+func DefaultAleutGenesisBlock() *Genesis {
+	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
+	return &Genesis{
+		Config:     params.AleutChainConfig,
+		Timestamp:  0,
+		ExtraData:  hexutil.MustDecode("0x000000000000000000000000000000000000000000000000000000000000000036267c845cc42b57ccb869d655e5d5fb620cc69a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x1312D00,
+		Difficulty: big.NewInt(0x400),
+		Alloc:      readPrealloc("allocs/aleut.json"),
 	}
 }
 

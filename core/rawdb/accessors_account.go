@@ -48,8 +48,8 @@ func DeleteAccount(db ethdb.Deleter, addrHash common.Hash) error {
 	return db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil)
 }
 
-func PlainReadAccount(db ethdb.DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
-	enc, err := db.Get(dbutils.PlainStateBucket, address[:])
+func PlainReadAccount(db ethdb.KVGetter, address common.Address, acc *accounts.Account) (bool, error) {
+	enc, err := db.GetOne(dbutils.PlainStateBucket, address[:])
 	if err != nil {
 		return false, err
 	}

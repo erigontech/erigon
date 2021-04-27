@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 var (
@@ -114,10 +113,9 @@ type Downloader struct {
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
 	syncStatsLock        sync.RWMutex // Lock protecting the sync stats fields
 
-	engine       consensus.Engine
-	vmConfig     *vm.Config
-	chainConfig  *params.ChainConfig
-	miningConfig *params.MiningConfig
+	engine      consensus.Engine
+	vmConfig    *vm.Config
+	chainConfig *params.ChainConfig
 
 	// Callbacks
 	dropPeer peerDropFn // Drops a peer for misbehaving
@@ -156,7 +154,6 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
-	cacheSize   datasize.ByteSize
 	batchSize   datasize.ByteSize
 
 	headersState    *stagedsync.StageState
@@ -166,13 +163,11 @@ type Downloader struct {
 	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSyncState *stagedsync.State
-	miningState     *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
-	mining          *stagedsync.StagedSync
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *params.MiningConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	dl := &Downloader{
 		stateDB:       stateDB,
 		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
@@ -180,7 +175,6 @@ func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, miningConfig *
 		rttEstimate:   uint64(rttMaxEstimate),
 		rttConfidence: uint64(1000000),
 		chainConfig:   chainConfig,
-		miningConfig:  miningConfig,
 		engine:        engine,
 		vmConfig:      vmConfig,
 		dropPeer:      dropPeer,
@@ -202,18 +196,12 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	d.stagedSync = stagedSync
 }
 
-// SetStagedSync sets the staged sync instance (by protocol manager)
-func (d *Downloader) SetMining(mining *stagedsync.StagedSync) {
-	d.mining = mining
-}
-
 // DataDir sets the directory where download is allowed to create temporary files
 func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
-	d.cacheSize = cacheSize
+func (d *Downloader) SetBatchSize(batchSize datasize.ByteSize) {
 	d.batchSize = batchSize
 }
 
@@ -431,7 +419,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 
 	canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
-	syncCycleStart := time.Now()
+	//syncCycleStart := time.Now()
 
 	var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -447,11 +435,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		writeDB = d.stateDB
 	}
 
-	var cache *shards.StateCache
-	if d.cacheSize > 0 {
-		cache = shards.NewStateCache(32, d.cacheSize)
-	}
-
 	d.stagedSyncState, err = d.stagedSync.Prepare(
 		d,
 		d.chainConfig,
@@ -462,7 +445,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		p.id,
 		d.storageMode,
 		d.tmpdir,
-		cache,
 		d.batchSize,
 		d.quitCh,
 		fetchers,
@@ -470,6 +452,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		poolStart,
 		false,
 		nil,
+		stagedsync.StageSendersCfg(d.chainConfig),
 	)
 	if err != nil {
 		return err
@@ -486,6 +469,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		log.Debug("Begin tx")
 		tx, errTx = tx.Begin(context.Background(), ethdb.RW)
 		return errTx
+	})
+	d.stagedSyncState.BeforeStageRun(stages.Finish, func() error {
+		if !canRunCycleInOneTransaction {
+			return nil
+		}
+
+		commitStart := time.Now()
+		if errTx := tx.Commit(); errTx != nil {
+			return errTx
+		}
+		log.Info("Commit cycle", "in", time.Since(commitStart))
+		return nil
 	})
 	d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
 		if !canRunCycleInOneTransaction {
@@ -509,75 +504,19 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 			return nil
 		}
-		log.Info("Commit cycle")
-		errCommit := tx.Commit()
-		return errCommit
+		commitStart := time.Now()
+		if errTx := tx.Commit(); errTx != nil {
+			return errTx
+		}
+		log.Info("Commit unwind cycle", "in", time.Since(commitStart))
+		return nil
 	})
 
 	err = d.stagedSyncState.Run(d.stateDB, writeDB)
 	if err != nil {
 		return err
 	}
-	if canRunCycleInOneTransaction {
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-			return nil
-		}
 
-		commitStart := time.Now()
-		if errTx := tx.Commit(); errTx != nil {
-			return errTx
-		}
-		log.Info("Commit cycle", "in", time.Since(commitStart))
-	}
-
-	// heuristic - run mining only if we are on top of chain
-	canRunMiningCycle := time.Since(syncCycleStart) < 14*time.Second
-
-	if d.miningConfig == nil || !d.miningConfig.Enabled || !canRunMiningCycle {
-		return nil
-	}
-	if tx, err = d.stateDB.Begin(context.Background(), ethdb.RW); err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Fill the block with all available pending transactions.
-	pending, err := txPool.Pending()
-	if err != nil {
-		return fmt.Errorf("failed to fetch pending transactions: %w", err)
-	}
-
-	miningResultCh := make(chan *types.Block, 1)
-	sealCancel := make(chan struct{})
-
-	if d.miningState, err = d.mining.Prepare(
-		d,
-		d.chainConfig,
-		d.engine,
-		d.vmConfig,
-		nil,
-		tx,
-		p.id,
-		d.storageMode,
-		d.tmpdir,
-		cache,
-		d.batchSize,
-		d.quitCh,
-		fetchers,
-		txPool,
-		poolStart,
-		false,
-		stagedsync.NewMiningStagesParameters(d.miningConfig, true, pending, txPool.Locals(), miningResultCh, sealCancel),
-	); err != nil {
-		return err
-	}
-	if err = d.miningState.Run(tx, tx); err != nil {
-		return err
-	}
-	tx.Rollback()
-
-	// TODO: send mined block to sentry
-	<-miningResultCh
 	return nil
 }
 
@@ -1033,7 +972,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 				filled, proced, err := d.fillHeaderSkeleton(from, headers)
 				if err != nil {
 					p.log.Debug("Skeleton chain invalid", "err", err)
-					return fmt.Errorf("%w: %v", errInvalidChain, err)
+					return fmt.Errorf("fillHeaderSkeleton failed %w: %v", errInvalidChain, err)
 				}
 				headers = filled[proced:]
 				from += uint64(proced)
@@ -1512,7 +1451,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
+		return 0, fmt.Errorf("importBlockResults failed %w: %v", errInvalidChain, err)
 	}
 	if index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
@@ -1531,7 +1470,7 @@ func (d *Downloader) DeliverHeaders(id string, headers []*types.Header) error {
 }
 
 // DeliverBodies injects a new batch of block bodies received from a remote node.
-func (d *Downloader) DeliverBodies(id string, transactions [][]*types.Transaction, uncles [][]*types.Header) error {
+func (d *Downloader) DeliverBodies(id string, transactions [][]types.Transaction, uncles [][]*types.Header) error {
 	return d.deliver(d.bodyCh, &bodyPack{id, transactions, uncles})
 }
 

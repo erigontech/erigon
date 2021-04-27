@@ -20,7 +20,7 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -38,7 +38,7 @@ var cmdClearUnwindStack = &cobra.Command{
 	Use:   "clear_unwind_stack",
 	Short: "Clear unwind stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
@@ -53,11 +53,11 @@ var cmdClearUnwindStack = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdResetState)
+	withDatadir(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 
-	withChaindata(cmdClearUnwindStack)
+	withDatadir(cmdClearUnwindStack)
 
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }

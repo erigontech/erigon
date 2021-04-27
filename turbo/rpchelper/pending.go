@@ -16,6 +16,10 @@ type Pending struct {
 func NewPending(filters *filters.Filters, quit <-chan struct{}) *Pending {
 	pending := &Pending{}
 	go func() {
+		if filters == nil {
+			return
+		}
+
 		logs := make(chan types.Logs)
 		defer close(logs)
 		logsId := filters.SubscribePendingLogs(logs)

@@ -24,16 +24,7 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 	cs.headHeight = height
 	cs.headHash = hash
 	cs.headTd = td
-	statusMsg := &proto_sentry.StatusData{
-		NetworkId:       cs.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(cs.headTd),
-		BestHash:        gointerfaces.ConvertHashToH256(cs.headHash),
-		MaxBlock:        cs.headHeight,
-		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(cs.genesisHash),
-			Forks:   cs.forks,
-		},
-	}
+	statusMsg := makeStatusData(cs)
 	for _, sentry := range cs.sentries {
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 			log.Error("Update status message for the sentry", "error", err)
@@ -45,7 +36,11 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 	var bytes []byte
 	var err error
-	bytes, err = rlp.EncodeToBytes(req.Hashes)
+	reqData := &eth.GetBlockBodiesPacket66{
+		RequestId:            rand.Uint64(),
+		GetBlockBodiesPacket: req.Hashes,
+	}
+	bytes, err = rlp.EncodeToBytes(reqData)
 	if err != nil {
 		log.Error("Could not encode block bodies request", "err", err)
 		return nil
@@ -75,11 +70,14 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-	reqData := &eth.GetBlockHeadersPacket{
-		Amount:  req.Length,
-		Reverse: req.Reverse,
-		Skip:    req.Skip,
-		Origin:  eth.HashOrNumber{Hash: req.Hash},
+	reqData := &eth.GetBlockHeadersPacket66{
+		RequestId: rand.Uint64(),
+		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+			Amount:  req.Length,
+			Reverse: req.Reverse,
+			Skip:    req.Skip,
+			Origin:  eth.HashOrNumber{Hash: req.Hash},
+		},
 	}
 	if req.Hash == (common.Hash{}) {
 		reqData.Origin.Number = req.Number

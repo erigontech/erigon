@@ -28,13 +28,13 @@ import (
 //var faucetAddr = common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7")
 var faucetKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 
-func sendSuccessfulTx(t *utesting.T, s *Suite, tx *types.Transaction) {
+func sendSuccessfulTx(t *utesting.T, s *Suite, tx types.Transaction) {
 	sendConn := s.setupConnection(t)
 	sendSuccessfulTxWithConn(t, s, tx, sendConn)
 }
 
-func sendSuccessfulTxWithConn(t *utesting.T, s *Suite, tx *types.Transaction, sendConn *Conn) {
-	t.Logf("sending tx: %v %v %v\n", tx.Hash().String(), tx.GasPrice(), tx.Gas())
+func sendSuccessfulTxWithConn(t *utesting.T, s *Suite, tx types.Transaction, sendConn *Conn) {
+	t.Logf("sending tx: %v %v %v\n", tx.Hash().String(), tx.GetPrice(), tx.GetGas())
 	// Send the transaction
 	if err := sendConn.Write(&Transactions{tx}); err != nil {
 		t.Fatal(err)
@@ -65,12 +65,12 @@ func sendSuccessfulTxWithConn(t *utesting.T, s *Suite, tx *types.Transaction, se
 	}
 }
 
-func sendFailingTx(t *utesting.T, s *Suite, tx *types.Transaction) {
+func sendFailingTx(t *utesting.T, s *Suite, tx types.Transaction) {
 	sendConn, recvConn := s.setupConnection(t), s.setupConnection(t)
 	sendFailingTxWithConns(t, s, tx, sendConn, recvConn)
 }
 
-func sendFailingTxWithConns(t *utesting.T, s *Suite, tx *types.Transaction, sendConn, recvConn *Conn) {
+func sendFailingTxWithConns(t *utesting.T, s *Suite, tx types.Transaction, sendConn, recvConn *Conn) {
 	// Wait for a transaction announcement
 	switch msg := recvConn.ReadAndServe(s.chain, timeout).(type) {
 	case *NewPooledTransactionHashes:
@@ -96,19 +96,19 @@ func sendFailingTxWithConns(t *utesting.T, s *Suite, tx *types.Transaction, send
 	}
 }
 
-func unknownTx(t *utesting.T, s *Suite) *types.Transaction {
+func unknownTx(t *utesting.T, s *Suite) types.Transaction {
 	tx := getNextTxFromChain(t, s)
 	var to common.Address
-	if tx.To() != nil {
-		to = *tx.To()
+	if tx.GetTo() != nil {
+		to = *tx.GetTo()
 	}
-	txNew := types.NewTransaction(tx.Nonce()+1, to, tx.Value(), tx.Gas(), tx.GasPrice(), tx.Data())
+	txNew := types.NewTransaction(tx.GetNonce()+1, to, tx.GetValue(), tx.GetGas(), tx.GetPrice(), tx.GetData())
 	return signWithFaucet(t, txNew)
 }
 
-func getNextTxFromChain(t *utesting.T, s *Suite) *types.Transaction {
+func getNextTxFromChain(t *utesting.T, s *Suite) types.Transaction {
 	// Get a new transaction
-	var tx *types.Transaction
+	var tx types.Transaction
 	for _, blocks := range s.fullChain.blocks[s.chain.Len():] {
 		txs := blocks.Transactions()
 		if txs.Len() != 0 {
@@ -122,8 +122,8 @@ func getNextTxFromChain(t *utesting.T, s *Suite) *types.Transaction {
 	return tx
 }
 
-func getOldTxFromChain(t *utesting.T, s *Suite) *types.Transaction {
-	var tx *types.Transaction
+func getOldTxFromChain(t *utesting.T, s *Suite) types.Transaction {
+	var tx types.Transaction
 	for _, blocks := range s.fullChain.blocks[:s.chain.Len()-1] {
 		txs := blocks.Transactions()
 		if txs.Len() != 0 {
@@ -137,51 +137,51 @@ func getOldTxFromChain(t *utesting.T, s *Suite) *types.Transaction {
 	return tx
 }
 
-func invalidNonceTx(t *utesting.T, s *Suite) *types.Transaction {
+func invalidNonceTx(t *utesting.T, s *Suite) types.Transaction {
 	tx := getNextTxFromChain(t, s)
 	var to common.Address
-	if tx.To() != nil {
-		to = *tx.To()
+	if tx.GetTo() != nil {
+		to = *tx.GetTo()
 	}
-	txNew := types.NewTransaction(tx.Nonce()-2, to, tx.Value(), tx.Gas(), tx.GasPrice(), tx.Data())
+	txNew := types.NewTransaction(tx.GetNonce()-2, to, tx.GetValue(), tx.GetGas(), tx.GetPrice(), tx.GetData())
 	return signWithFaucet(t, txNew)
 }
 
-func hugeAmount(t *utesting.T, s *Suite) *types.Transaction {
+func hugeAmount(t *utesting.T, s *Suite) types.Transaction {
 	tx := getNextTxFromChain(t, s)
 	amount := largeNumber(2)
 	var to common.Address
-	if tx.To() != nil {
-		to = *tx.To()
+	if tx.GetTo() != nil {
+		to = *tx.GetTo()
 	}
-	txNew := types.NewTransaction(tx.Nonce(), to, amount, tx.Gas(), tx.GasPrice(), tx.Data())
+	txNew := types.NewTransaction(tx.GetNonce(), to, amount, tx.GetGas(), tx.GetPrice(), tx.GetData())
 	return signWithFaucet(t, txNew)
 }
 
-func hugeGasPrice(t *utesting.T, s *Suite) *types.Transaction {
+func hugeGasPrice(t *utesting.T, s *Suite) types.Transaction {
 	tx := getNextTxFromChain(t, s)
 	gasPrice := largeNumber(2)
 	var to common.Address
-	if tx.To() != nil {
-		to = *tx.To()
+	if tx.GetTo() != nil {
+		to = *tx.GetTo()
 	}
-	txNew := types.NewTransaction(tx.Nonce(), to, tx.Value(), tx.Gas(), gasPrice, tx.Data())
+	txNew := types.NewTransaction(tx.GetNonce(), to, tx.GetValue(), tx.GetGas(), gasPrice, tx.GetData())
 	return signWithFaucet(t, txNew)
 }
 
-func hugeData(t *utesting.T, s *Suite) *types.Transaction {
+func hugeData(t *utesting.T, s *Suite) types.Transaction {
 	tx := getNextTxFromChain(t, s)
 	var to common.Address
-	if tx.To() != nil {
-		to = *tx.To()
+	if tx.GetTo() != nil {
+		to = *tx.GetTo()
 	}
-	txNew := types.NewTransaction(tx.Nonce(), to, tx.Value(), tx.Gas(), tx.GasPrice(), largeBuffer(2))
+	txNew := types.NewTransaction(tx.GetNonce(), to, tx.GetValue(), tx.GetGas(), tx.GetPrice(), largeBuffer(2))
 	return signWithFaucet(t, txNew)
 }
 
-func signWithFaucet(t *utesting.T, tx *types.Transaction) *types.Transaction {
-	signer := types.HomesteadSigner{}
-	signedTx, err := types.SignTx(tx, signer, faucetKey)
+func signWithFaucet(t *utesting.T, tx types.Transaction) types.Transaction {
+	signer := types.LatestSignerForChainID(nil)
+	signedTx, err := types.SignTx(tx, *signer, faucetKey)
 	if err != nil {
 		t.Fatalf("could not sign tx: %v\n", err)
 	}

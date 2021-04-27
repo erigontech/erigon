@@ -30,30 +30,28 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/flags"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
 )
 
 func init() {
@@ -96,7 +94,7 @@ var (
 	DataDirFlag = DirectoryFlag{
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
-		Value: DirectoryString(node.DefaultDataDir()),
+		Value: DirectoryString(paths.DefaultDataDir()),
 	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
@@ -167,11 +165,6 @@ var (
 		Name:  "pruning.tick",
 		Usage: `Time of tick`,
 		Value: time.Second * 2,
-	}
-	TxLookupLimitFlag = cli.Uint64Flag{
-		Name:  "txlookuplimit",
-		Usage: "Number of recent blocks to maintain transactions index for (default = about one year, 0 = entire chain)",
-		Value: ethconfig.Defaults.TxLookupLimit,
 	}
 	LightServFlag = cli.IntFlag{
 		Name:  "lightserv",
@@ -275,50 +268,6 @@ var (
 		Name:  "txpool.lifetime",
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
-	}
-	// Performance tuning settings
-	CacheFlag = cli.IntFlag{
-		Name:  "cache",
-		Usage: "Megabytes of memory allocated to internal caching (default = 4096 mainnet full node)",
-		Value: 1024,
-	}
-	CacheDatabaseFlag = cli.IntFlag{
-		Name:  "cache.database",
-		Usage: "Percentage of cache memory allowance to use for database io",
-		Value: 50,
-	}
-	CacheTrieFlag = cli.IntFlag{
-		Name:  "cache.trie",
-		Usage: "Percentage of cache memory allowance to use for trie caching (default = 15% full mode, 30% archive mode)",
-		Value: 15,
-	}
-	CacheTrieJournalFlag = cli.StringFlag{
-		Name:  "cache.trie.journal",
-		Usage: "Disk journal directory for trie cache to survive node restarts",
-		Value: ethconfig.Defaults.TrieCleanCacheJournal,
-	}
-	CacheTrieRejournalFlag = cli.DurationFlag{
-		Name:  "cache.trie.rejournal",
-		Usage: "Time interval to regenerate the trie cache journal",
-		Value: ethconfig.Defaults.TrieCleanCacheRejournal,
-	}
-	CacheGCFlag = cli.IntFlag{
-		Name:  "cache.gc",
-		Usage: "Percentage of cache memory allowance to use for trie pruning (default = 25% full mode, 0% archive mode)",
-		Value: 25,
-	}
-	CacheNoPrefetchFlag = cli.BoolFlag{
-		Name:  "cache.noprefetch",
-		Usage: "Disable heuristic state prefetch during block import (less CPU and disk IO, more time waiting for data)",
-	}
-	TrieCacheGenFlag = cli.IntFlag{
-		Name:  "trie-cache-gens",
-		Usage: "Number of trie node generations to keep in memory",
-	}
-	ArchiveSyncInterval = cli.IntFlag{
-		Name:  "archive-sync-interval",
-		Usage: "When to switch from full to archive sync",
-		Value: 1024,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -523,6 +472,11 @@ var (
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
 		Value: "",
 	}
+	StaticPeersFlag = cli.StringFlag{
+		Name:  "staticpeers",
+		Usage: "Comma separated enode URLs to connect to",
+		Value: "",
+	}
 	NodeKeyFileFlag = cli.StringFlag{
 		Name:  "nodekey",
 		Usage: "P2P node key file",
@@ -601,6 +555,27 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
+
+	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
+		Name:  "clique.checkpoint",
+		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Value: 10,
+	}
+	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
+		Name:  "clique.snapshots",
+		Usage: "number of recent vote snapshots to keep in memory",
+		Value: 1024,
+	}
+	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
+		Name:  "clique.signatures",
+		Usage: "number of recent block signatures to keep in memory",
+		Value: 16384,
+	}
+	CliqueDataDirFlag = DirectoryFlag{
+		Name:  "clique.datadir",
+		Usage: "a path to clique db folder",
+		Value: "",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -662,6 +637,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -702,6 +679,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
+		case params.AleutChainName:
+			urls = params.AleutBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -718,6 +697,23 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 				continue
 			}
 			cfg.BootstrapNodesV5 = append(cfg.BootstrapNodesV5, node)
+		}
+	}
+}
+
+func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
+	if !ctx.GlobalIsSet(StaticPeersFlag.Name) {
+		return
+	}
+	urls := SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	for _, url := range urls {
+		if url != "" {
+			node, err := enode.Parse(enode.ValidSchemes, url)
+			if err != nil {
+				log.Error("Static peer URL invalid", "enode", url, "err", err)
+				continue
+			}
+			cfg.StaticNodes = append(cfg.StaticNodes, node)
 		}
 	}
 }
@@ -753,20 +749,6 @@ func SplitAndTrim(input string) (ret []string) {
 	return ret
 }
 
-// makeDatabaseHandles raises out the number of allowed file handles per process
-// for Geth and returns half of the allowance to assign to the database.
-func makeDatabaseHandles() int {
-	limit, err := fdlimit.Maximum()
-	if err != nil {
-		Fatalf("Failed to retrieve file descriptor allowance: %v", err)
-	}
-	raised, err := fdlimit.Raise(uint64(limit))
-	if err != nil {
-		Fatalf("Failed to raise file descriptor allowance: %v", err)
-	}
-	return int(raised / 2) // Leave half for networking and other stuff
-}
-
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
 func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -794,6 +776,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
+	setStaticPeers(ctx, cfg)
 
 	ethPeers := cfg.MaxPeers
 	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
@@ -839,25 +822,34 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
+func DataDirForNetwork(datadir string, network string) string {
+	if datadir != paths.DefaultDataDir() {
+		return datadir
+	}
+
+	switch network {
+	case params.DevChainName:
+		return "" // unless explicitly requested, use memory databases
+	case params.RinkebyChainName:
+		return filepath.Join(datadir, "rinkeby")
+	case params.GoerliChainName:
+		filepath.Join(datadir, "goerli")
+	case params.YoloV3ChainName:
+		return filepath.Join(datadir, "yolo-v3")
+	case params.AleutChainName:
+		return filepath.Join(datadir, "aleut")
+	default:
+		return datadir
+	}
+
+	return datadir
+}
+
 func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	if ctx.GlobalIsSet(DataDirFlag.Name) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
-		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case params.RinkebyChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
-			}
-		case params.GoerliChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
-			}
-		case params.YoloV3ChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
-			}
-		}
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 }
 
@@ -870,22 +862,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	if dirname != "" {
 		cfg.DataDir = dirname
 	} else if chain != nil {
-		switch *chain {
-		case params.DevChainName:
-			cfg.DataDir = "" // unless explicitly requested, use memory databases
-		case params.RinkebyChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "rinkeby")
-			}
-		case params.GoerliChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "goerli")
-			}
-		case params.YoloV3ChainName:
-			if cfg.DataDir == node.DefaultDataDir() {
-				cfg.DataDir = filepath.Join(node.DefaultDataDir(), "yolo-v3")
-			}
-		}
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, *chain)
 	}
 }
 
@@ -957,7 +934,7 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
-func setEthash(ctx *cli.Context, cfg *eth.Config) {
+func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	}
@@ -1030,6 +1007,18 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdbx bool) {
+	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
+	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
+	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
+	if ctx.GlobalIsSet(CliqueDataDirFlag.Name) {
+		cfg.DBPath = path.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique/db")
+	} else {
+		cfg.DBPath = path.Join(datadir, "clique/db")
+	}
+	cfg.MDBX = mdbx
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1060,7 +1049,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	}
 }
 
-func setWhitelist(ctx *cli.Context, cfg *eth.Config) {
+func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	whitelist := ctx.GlobalString(WhitelistFlag.Name)
 	if whitelist == "" {
 		return
@@ -1131,18 +1120,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
+	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
-	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheDatabaseFlag.Name) {
-		cfg.DatabaseCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheDatabaseFlag.Name) / 100
-	}
-	cfg.DatabaseHandles = makeDatabaseHandles()
-	if ctx.GlobalIsSet(AncientFlag.Name) {
-		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
 	}
 
 	// todo uncomment after fix pruning
@@ -1156,22 +1139,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-	log.Info("Enabling recording of key preimages since archive mode is used")
 
-	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
-
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {
-		cfg.TrieCleanCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheTrieFlag.Name) / 100
-	}
-	if ctx.GlobalIsSet(CacheTrieJournalFlag.Name) {
-		cfg.TrieCleanCacheJournal = ctx.GlobalString(CacheTrieJournalFlag.Name)
-	}
-	if ctx.GlobalIsSet(CacheTrieRejournalFlag.Name) {
-		cfg.TrieCleanCacheRejournal = ctx.GlobalDuration(CacheTrieRejournalFlag.Name)
-	}
-	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheGCFlag.Name) {
-		cfg.TrieDirtyCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
-	}
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
 	}
@@ -1192,7 +1160,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.RPCTxFeeCap = ctx.GlobalFloat64(RPCGlobalTxFeeCapFlag.Name)
 	}
 	if ctx.GlobalIsSet(NoDiscoverFlag.Name) {
-		cfg.EthDiscoveryURLs, cfg.SnapDiscoveryURLs = []string{}, []string{}
+		cfg.EthDiscoveryURLs = []string{}
 	} else if ctx.GlobalIsSet(DNSDiscoveryFlag.Name) {
 		urls := ctx.GlobalString(DNSDiscoveryFlag.Name)
 		if urls == "" {
@@ -1242,6 +1210,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
 		}
 		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 7822 // aleut
+		}
+		cfg.Genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1278,7 +1251,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
-func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
+func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
@@ -1286,15 +1259,6 @@ func SetDNSDiscoveryDefaults(cfg *eth.Config, genesis common.Hash) {
 	if url := params.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
-}
-
-// RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *eth.Config) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg)
-	if err != nil {
-		Fatalf("Failed to register the Ethereum service: %v", err)
-	}
-	return backend
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {
@@ -1316,10 +1280,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
-	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
-
 	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name, tmpdir)
+	chainDb, err := stack.OpenDatabase(name, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
@@ -1340,6 +1302,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
+	case params.AleutChainName:
+		genesis = core.DefaultAleutGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

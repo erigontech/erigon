@@ -178,7 +178,7 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 }
 
 func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {
-	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
 	eg := errgroup.Group{}
 

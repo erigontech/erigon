@@ -24,7 +24,7 @@ import (
 type miningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []*types.Transaction
+	Txs      []types.Transaction
 	Receipts types.Receipts
 
 	LocalTxs  types.TransactionsStream
@@ -34,7 +34,12 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs types.TransactionsGroupedBySender, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+	txPoolLocals := txPool.Locals()
+	pendingTxs, err := txPool.Pending()
+	if err != nil {
+		return err
+	}
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -54,9 +59,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if parent == nil { // todo: how to return error and don't stop TG?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-	signer := types.NewEIP155Signer(chainConfig.ChainID)
 
 	blockNum := executionAt + 1
+	signer := types.MakeSigner(chainConfig, blockNum)
 
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -81,13 +86,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	}
 
 	type envT struct {
-		signer    types.Signer
+		signer    *types.Signer
 		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
 		family    mapset.Set // family set (used for checking uncle invalidity)
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.NewEIP155Signer(chainConfig.ChainID),
+		signer:    types.MakeSigner(chainConfig, blockNum),
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -217,7 +222,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		if len(txs) == 0 {
 			continue
 		}
-		from, _ := types.Sender(signer, txs[0])
+		from, _ := txs[0].Sender(*signer)
 		isLocal := false
 		for _, local := range txPoolLocals {
 			if local == from {
@@ -233,8 +238,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		}
 	}
 
-	current.LocalTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
-	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
+	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
+	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
 	s.Done()
 	return nil
 }

@@ -22,21 +22,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
-
-// ChainContext supports retrieving headers and consensus parameters from the
-// current blockchain to be used during transaction processing.
-type ChainContext interface {
-	// Engine retrieves the chain's consensus engine.
-	Engine() consensus.Engine
-
-	// GetHeader returns the hash corresponding to their hash.
-	GetHeader(common.Hash, uint64) *types.Header
-}
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address) vm.BlockContext {
@@ -47,14 +35,19 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	} else {
 		beneficiary = *author
 	}
+	var baseFee uint256.Int
+	if header.BaseFee != nil {
+		baseFee.SetFromBig(header.BaseFee)
+	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    Transfer,
 		GetHash:     GetHashFn(header, getHeader),
 		Coinbase:    beneficiary,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int).SetUint64(header.Time),
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
 		Difficulty:  new(big.Int).Set(header.Difficulty),
+		BaseFee:     &baseFee,
 		GasLimit:    header.GasLimit,
 	}
 }
@@ -73,8 +66,8 @@ func NewEVMContextByHeader(msg Message, header *types.Header, hashGetter func(n 
 		Transfer:    Transfer,
 		GetHash:     hashGetter,
 		Coinbase:    header.Coinbase,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int).SetUint64(header.Time),
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
 		Difficulty:  new(big.Int).Set(header.Difficulty),
 		GasLimit:    header.GasLimit,
 	}
@@ -126,20 +119,4 @@ func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *u
 		db.SubBalance(sender, amount)
 	}
 	db.AddBalance(recipient, amount)
-}
-
-type TinyChainContext struct {
-	db     ethdb.Database
-	engine consensus.Engine
-}
-
-func (c *TinyChainContext) Engine() consensus.Engine     { return c.engine }
-func (c *TinyChainContext) SetEngine(e consensus.Engine) { c.engine = e }
-func (c *TinyChainContext) SetDB(db ethdb.Database)      { c.db = db }
-func (c *TinyChainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	header := rawdb.ReadHeader(c.db, hash, number)
-	if header == nil {
-		return nil
-	}
-	return header
 }

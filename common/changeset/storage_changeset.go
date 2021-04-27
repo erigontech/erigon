@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -46,52 +47,30 @@ func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addres
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, quit <-chan struct{}) (map[string][]byte, map[string][]byte, error) {
+func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, tmpdir string, quit <-chan struct{}) (*etl.Collector, error) {
 	// Collect list of buckets and keys that need to be considered
-	collector := newRewindDataCollector()
+
+	changes := etl.NewCollector(tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 
 	if err := walkAndCollect(
-		collector.AccountWalker,
+		changes.Collect,
 		db, dbutils.PlainAccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := walkAndCollect(
-		collector.StorageWalker,
+		changes.Collect,
 		db, dbutils.PlainStorageChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return collector.AccountData, collector.StorageData, nil
-}
-
-type rewindDataCollector struct {
-	AccountData map[string][]byte
-	StorageData map[string][]byte
-}
-
-func newRewindDataCollector() *rewindDataCollector {
-	return &rewindDataCollector{make(map[string][]byte), make(map[string][]byte)}
-}
-
-func (c *rewindDataCollector) AccountWalker(k, v []byte) error {
-	if _, ok := c.AccountData[string(k)]; !ok {
-		c.AccountData[string(k)] = v
-	}
-	return nil
-}
-
-func (c *rewindDataCollector) StorageWalker(k, v []byte) error {
-	if _, ok := c.StorageData[string(k)]; !ok {
-		c.StorageData[string(k)] = v
-	}
-	return nil
+	return changes, nil
 }
 
 func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {

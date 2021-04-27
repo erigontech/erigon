@@ -1,10 +1,13 @@
 package filters
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type (
@@ -19,6 +23,7 @@ type (
 	HeadsSubID        SubscriptionID
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
+	PendingTxsSubID   SubscriptionID
 )
 
 type Filters struct {
@@ -27,12 +32,18 @@ type Filters struct {
 	headsSubs        map[HeadsSubID]chan *types.Header
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
+	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
 func New(ethBackend core.ApiBackend) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
-	ff := &Filters{headsSubs: make(map[HeadsSubID]chan *types.Header), pendingLogsSubs: make(map[PendingLogsSubID]chan types.Logs), pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block)}
+	ff := &Filters{
+		headsSubs:        make(map[HeadsSubID]chan *types.Header),
+		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
+		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
+		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
+	}
 
 	go func() {
 		var err error
@@ -84,6 +95,20 @@ func (ff *Filters) SubscribePendingBlock(out chan *types.Block) PendingBlockSubI
 	return id
 }
 
+func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	id := PendingTxsSubID(generateSubscriptionID())
+	ff.pendingTxsSubs[id] = out
+	return id
+}
+
+func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.pendingTxsSubs, id)
+}
+
 func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
@@ -129,6 +154,23 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		} else {
 			for _, v := range ff.pendingBlockSubs {
 				v <- &block
+			}
+		}
+	case remote.Event_PENDING_TRANSACTIONS:
+		payload := event.Data
+		var txs []types.Transaction
+		s := rlp.NewStream(bytes.NewReader(payload), uint64(len(payload)))
+		var tx types.Transaction
+		var err error
+		for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+			txs = append(txs, tx)
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			// ignoring what we can't unmarshal
+			log.Warn("rpc filters, unprocessable payload", "err", err)
+		} else {
+			for _, v := range ff.pendingTxsSubs {
+				v <- txs
 			}
 		}
 	default:

@@ -42,7 +42,7 @@ func createTestDb() (ethdb.Database, error) {
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
-		signer = types.HomesteadSigner{}
+		signer = types.LatestSignerForChainID(nil)
 	)
 	// Create intermediate hash bucket since it is mandatory now
 	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
@@ -54,6 +54,8 @@ func createTestDb() (ethdb.Database, error) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainId)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainId)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
@@ -63,20 +65,20 @@ func createTestDb() (ethdb.Database, error) {
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 10, func(i int, block *core.BlockGen) {
 		var (
-			tx  *types.Transaction
-			txs []*types.Transaction
+			tx  types.Transaction
+			txs []types.Transaction
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -94,7 +96,7 @@ func createTestDb() (ethdb.Database, error) {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -131,7 +133,7 @@ func createTestDb() (ethdb.Database, error) {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

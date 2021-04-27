@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"reflect"
 	"testing"
 
@@ -76,7 +75,7 @@ func TestState(t *testing.T) {
 						if !ok {
 							return UnsupportedForkError{subtest.Fork}
 						}
-						ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
+						ctx := config.WithEIPsFlags(context.Background(), 1)
 
 						tx, err := db.Begin(context.Background(), ethdb.RW)
 						if err != nil {

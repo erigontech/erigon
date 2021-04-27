@@ -22,11 +22,6 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
 		Value: "lmdb",
 	}
-	CacheSizeFlag = cli.StringFlag{
-		Name:  "cacheSize",
-		Usage: "Cache size for the execution stage",
-		Value: "0",
-	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
@@ -48,6 +43,11 @@ var (
 		Name:  "private.api.ratelimit",
 		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
 		Value: 500,
+	}
+
+	DownloadV2Flag = cli.BoolFlag{
+		Name:  "download.v2",
+		Usage: "enable experimental downloader v2",
 	}
 
 	StorageModeFlag = cli.StringFlag{
@@ -89,11 +89,6 @@ var (
 		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
 		Value: ethdb.LMDBDefaultMapSize.String(),
 	}
-	LMDBMaxFreelistReuseFlag = cli.UintFlag{
-		Name:  "lmdb.maxFreelistReuse",
-		Usage: "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.",
-		Value: ethdb.LMDBDefaultMaxFreelistReuse,
-	}
 
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
@@ -123,6 +118,7 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -136,20 +132,11 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 	cfg.SnapshotLayout = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 
-	if ctx.GlobalString(CacheSizeFlag.Name) != "" {
-		err := cfg.CacheSize.UnmarshalText([]byte(ctx.GlobalString(CacheSizeFlag.Name)))
-		if err != nil {
-			utils.Fatalf("Invalid cacheSize provided: %v", err)
-		}
-	}
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
-		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 
 	if ctx.GlobalString(EtlBufferSizeFlag.Name) != "" {
@@ -182,20 +169,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.Bool(SeedSnapshotsFlag.Name, false, SeedSnapshotsFlag.Usage); v != nil {
 		cfg.SnapshotSeeding = *v
 	}
-	if v := f.String(CacheSizeFlag.Name, CacheSizeFlag.Value, CacheSizeFlag.Usage); v != nil {
-		err := cfg.CacheSize.UnmarshalText([]byte(*v))
-		if err != nil {
-			utils.Fatalf("Invalid cacheSize provided: %v", err)
-		}
-	}
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-	}
-	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
-		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
@@ -236,15 +214,6 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		}
 	}
 
-	if cfg.LMDB {
-		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
-		if cfg.LMDBMaxFreelistReuse < 16 {
-			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
-				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
-				"err", "the value should be at least 16",
-			)
-		}
-	}
 }
 
 // setPrivateApi populates configuration fields related to the remote

@@ -9,7 +9,7 @@ until which we have manually checked the usefulness of the Jump dest code bitmap
 commands:
 ````
 make state
-./build/bin/state checkChangeSets --chaindata <path to chaindata> --block <value of MainnetNotCheckedFrom>
+./build/bin/state checkChangeSets --datadir <path to datadir> --block <value of MainnetNotCheckedFrom>
 ````
 If there are any transactions where code bitmap was useful, warning messages like this will be displayed:
 ````
@@ -20,3 +20,14 @@ utility before it exits, like this:
 ````
 INFO [08-01|15:36:04.282] Checked                                  blocks=10573804 next time specify --block=10573804 duration=36m54.789025062s
 ````
+
+## Update DB Schema version if required
+
+In the file `common/dbutils/bucket.go` there is variable `DBSchemaVersion` that needs to be update if there are any changes in the database schema, leading to data migrations.
+In most cases, it is enough to bump minor version.
+
+## Update remote KV version if required
+
+In the file `ethdb/remote/remotedbserver/server.go` there is variable `KvServiceAPIVersion` that needs to be update if there are any changes in the remote KV interface, or
+database schema, leading to data migrations.
+In most cases, it is enough to bump minor version. It is best to change both DB schema version and remove KV version together.

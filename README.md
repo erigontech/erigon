@@ -1,3 +1,4 @@
+
 # Turbo-Geth
 
 Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
@@ -177,7 +178,7 @@ it can run from a snapshot of a database for read-only calls.
 This is only possible if RPC daemon runs on the same computer as turbo-geth. This mode of operation uses shared memory access to the database of turbo-geth, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
 > make rpcdaemon
-> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
+> ./build/bin/rpcdaemon --datadir ~/Library/TurboGeth/ --http.api=eth,debug,net
 ```
 
 In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
@@ -197,7 +198,7 @@ Run RPC daemon
 
 **For dual mode**
 
-If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
+If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
@@ -287,3 +288,7 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
+### Blocks Execution is slow on cloud-network-drives
+
+Please read https://github.com/ledgerwatch/turbo-geth/issues/1516#issuecomment-811958891
+In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.

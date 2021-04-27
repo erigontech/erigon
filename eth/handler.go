@@ -60,10 +60,10 @@ type txPool interface {
 
 	// Get retrieves the transaction from local txpool with given
 	// tx hash.
-	Get(hash common.Hash) *types.Transaction
+	Get(hash common.Hash) types.Transaction
 
 	// AddRemotes should add the given transactions to the pool.
-	AddRemotes([]*types.Transaction) []error
+	AddRemotes([]types.Transaction) []error
 
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.
@@ -77,8 +77,7 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database    ethdb.Database   // Database for direct sync insertions
-	Chain       *core.BlockChain // Blockchain to serve data from
+	Database    ethdb.Database // Database for direct sync insertions
 	ChainConfig *params.ChainConfig
 	vmConfig    *vm.Config
 	genesis     *types.Block
@@ -88,7 +87,6 @@ type handlerConfig struct {
 	BloomCache  uint64                    // Megabytes to alloc for fast sync bloom
 	Checkpoint  *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
 	Whitelist   map[uint64]common.Hash    // Hard coded whitelist for sync challenged
-	Mining      *params.MiningConfig
 }
 
 type handler struct {
@@ -99,7 +97,6 @@ type handler struct {
 
 	database    ethdb.Database
 	txpool      txPool
-	chain       *core.BlockChain
 	chainConfig *params.ChainConfig
 	vmConfig    *vm.Config
 	genesis     *types.Block
@@ -125,10 +122,8 @@ type handler struct {
 	peerWG    sync.WaitGroup
 
 	tmpdir        string
-	cacheSize     datasize.ByteSize
 	batchSize     datasize.ByteSize
 	stagedSync    *stagedsync.StagedSync
-	mining        *stagedsync.StagedSync
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -138,7 +133,6 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		networkID:   config.Network,
 		database:    config.Database,
 		txpool:      config.TxPool,
-		chain:       config.Chain,
 		chainConfig: config.ChainConfig,
 		vmConfig:    config.vmConfig,
 		genesis:     config.genesis,
@@ -164,9 +158,9 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(config.Database, config.ChainConfig, config.Mining, config.engine, config.vmConfig, h.removePeer, sm)
+	h.downloader = downloader.New(config.Database, config.ChainConfig, config.engine, config.vmConfig, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
-	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
+	h.downloader.SetBatchSize(h.batchSize)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
@@ -179,8 +173,8 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		return 0, err
 	}
 
-	GetBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
-	h.blockFetcher = fetcher.NewBlockFetcher(nil, GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+	getBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
+	h.blockFetcher = fetcher.NewBlockFetcher(nil, getBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)
@@ -201,11 +195,10 @@ func (h *handler) SetTmpDir(tmpdir string) {
 	}
 }
 
-func (h *handler) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
-	h.cacheSize = cacheSize
+func (h *handler) SetBatchSize(batchSize datasize.ByteSize) {
 	h.batchSize = batchSize
 	if h.downloader != nil {
-		h.downloader.SetBatchSize(cacheSize, batchSize)
+		h.downloader.SetBatchSize(batchSize)
 	}
 }
 
@@ -213,13 +206,6 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	h.stagedSync = stagedSync
 	if h.downloader != nil {
 		h.downloader.SetStagedSync(stagedSync)
-	}
-}
-
-func (h *handler) SetMining(mining *stagedsync.StagedSync) {
-	h.mining = mining
-	if h.downloader != nil {
-		h.downloader.SetMining(mining)
 	}
 }
 
@@ -338,7 +324,6 @@ func (h *handler) Start(maxPeers int) {
 	go h.chainSync.loop()
 	go h.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 }
-
 func (h *handler) Stop() {
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 

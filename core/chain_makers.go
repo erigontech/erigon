@@ -44,7 +44,7 @@ type BlockGen struct {
 	ibs         *state.IntraBlockState
 
 	gasPool  *GasPool
-	txs      []*types.Transaction
+	txs      []types.Transaction
 	receipts []*types.Receipt
 	uncles   []*types.Header
 
@@ -90,7 +90,7 @@ func (b *BlockGen) SetDifficulty(diff *big.Int) {
 // further limitations on the content of transactions that can be
 // added. Notably, contract code relying on the BLOCKHASH instruction
 // will panic during execution.
-func (b *BlockGen) AddTx(tx *types.Transaction) {
+func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
 
@@ -102,7 +102,7 @@ func (b *BlockGen) AddTx(tx *types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, tx *types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
@@ -120,7 +120,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 //
 // AddUncheckedTx will cause consensus failures when used during real
 // chain processing. This is best used in conjunction with raw block insertion.
-func (b *BlockGen) AddUncheckedTx(tx *types.Transaction) {
+func (b *BlockGen) AddUncheckedTx(tx types.Transaction) {
 	b.txs = append(b.txs, tx)
 }
 
@@ -175,7 +175,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
 	parent := b.parent.Header()
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -211,7 +211,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
-	chainreader := &FakeChainReader{Cfg: config}
+	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
 	if errBegin != nil {
 		return nil, nil, errBegin
@@ -220,7 +220,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -243,7 +243,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
-			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number.Uint64())
 			// Write state changes to db
 			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
@@ -347,14 +347,14 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	return &types.Header{
+	header := &types.Header{
 		Root:       common.Hash{},
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
 		Difficulty: engine.CalcDifficulty(chain, time,
 			time-10,
 			parent.Difficulty(),
-			parent.Number(),
+			parent.Number().Uint64(),
 			parent.Hash(),
 			parent.UncleHash(),
 		),
@@ -362,10 +362,21 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
+
+	if chain.Config().IsAleut(parent.Number().Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(parent.Header())
+		header.Eip1559 = true
+	} else if chain.Config().IsAleut(header.Number.Uint64()) {
+		header.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		header.Eip1559 = true
+	}
+
+	return header
 }
 
 type FakeChainReader struct {
-	Cfg *params.ChainConfig
+	Cfg     *params.ChainConfig
+	current *types.Block
 }
 
 // Config returns the chain configuration.
@@ -373,7 +384,7 @@ func (cr *FakeChainReader) Config() *params.ChainConfig {
 	return cr.Cfg
 }
 
-func (cr *FakeChainReader) CurrentHeader() *types.Header                            { return nil }
+func (cr *FakeChainReader) CurrentHeader() *types.Header                            { return cr.current.Header() }
 func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
 func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }

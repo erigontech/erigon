@@ -33,7 +33,7 @@ const TestcontractABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"ty
 var TestcontractBin = "0x608060405234801561001057600080fd5b5033600090815260208190526040902060649055610208806100336000396000f3fe608060405234801561001057600080fd5b506004361061009e5760003560e01c8063c2ce0ef711610066578063c2ce0ef71461010a578063c53e5ae314610127578063cb946a0714610127578063d592ed1f14610144578063f64c050d1461010a5761009e565b806327e235e3146100a3578063660cc200146100db578063780900dc146100e557806382ab890a146100e5578063a7f4377914610102575b600080fd5b6100c9600480360360208110156100b957600080fd5b50356001600160a01b031661014c565b60408051918252519081900360200190f35b6100e361015e565b005b6100e3600480360360208110156100fb57600080fd5b5035610170565b6100e3610182565b6100e36004803603602081101561012057600080fd5b5035610194565b6100e36004803603602081101561013d57600080fd5b50356101a8565b6100e36101bd565b60006020819052908152604090205481565b33600090815260208190526040812055fe5b33600090815260208190526040902055565b33600090815260208190526040812055565b336000908152602081905260409020819055fe5b33600090815260208190526040812082905580fd5b33600090815260208190526040812081905580fdfea2646970667358221220c40698b47133056d15d4a84d769c07a1f24008b50347105be970e1f0191ca44f64736f6c63430007020033"
 
 // DeployTestcontract deploys a new Ethereum contract, binding an instance of Testcontract to it.
-func DeployTestcontract(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Testcontract, error) {
+func DeployTestcontract(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Testcontract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TestcontractABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Testcontract *TestcontractRaw) Call(opts *bind.CallOpts, result *[]interf
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Testcontract *TestcontractRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Testcontract *TestcontractRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Testcontract.Contract.TestcontractTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Testcontract *TestcontractRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Testcontract *TestcontractRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Testcontract.Contract.TestcontractTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,12 +179,12 @@ func (_Testcontract *TestcontractCallerRaw) Call(opts *bind.CallOpts, result *[]
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Testcontract *TestcontractTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Testcontract.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Testcontract.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -222,188 +222,188 @@ func (_Testcontract *TestcontractCallerSession) Balances(arg0 common.Address) (*
 // Create is a paid mutator transaction binding the contract method 0x780900dc.
 //
 // Solidity: function create(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) Create(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) Create(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "create", newBalance)
 }
 
 // Create is a paid mutator transaction binding the contract method 0x780900dc.
 //
 // Solidity: function create(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) Create(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) Create(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.Create(&_Testcontract.TransactOpts, newBalance)
 }
 
 // Create is a paid mutator transaction binding the contract method 0x780900dc.
 //
 // Solidity: function create(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) Create(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) Create(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.Create(&_Testcontract.TransactOpts, newBalance)
 }
 
 // CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
 //
 // Solidity: function createAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) CreateAndException(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) CreateAndException(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "createAndException", newBalance)
 }
 
 // CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
 //
 // Solidity: function createAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) CreateAndException(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) CreateAndException(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.CreateAndException(&_Testcontract.TransactOpts, newBalance)
 }
 
 // CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
 //
 // Solidity: function createAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) CreateAndException(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) CreateAndException(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.CreateAndException(&_Testcontract.TransactOpts, newBalance)
 }
 
 // CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
 //
 // Solidity: function createAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) CreateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) CreateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "createAndRevert", newBalance)
 }
 
 // CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
 //
 // Solidity: function createAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) CreateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) CreateAndRevert(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.CreateAndRevert(&_Testcontract.TransactOpts, newBalance)
 }
 
 // CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
 //
 // Solidity: function createAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) CreateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) CreateAndRevert(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.CreateAndRevert(&_Testcontract.TransactOpts, newBalance)
 }
 
 // Remove is a paid mutator transaction binding the contract method 0xa7f43779.
 //
 // Solidity: function remove() returns()
-func (_Testcontract *TestcontractTransactor) Remove(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) Remove(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "remove")
 }
 
 // Remove is a paid mutator transaction binding the contract method 0xa7f43779.
 //
 // Solidity: function remove() returns()
-func (_Testcontract *TestcontractSession) Remove() (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) Remove() (types.Transaction, error) {
 	return _Testcontract.Contract.Remove(&_Testcontract.TransactOpts)
 }
 
 // Remove is a paid mutator transaction binding the contract method 0xa7f43779.
 //
 // Solidity: function remove() returns()
-func (_Testcontract *TestcontractTransactorSession) Remove() (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) Remove() (types.Transaction, error) {
 	return _Testcontract.Contract.Remove(&_Testcontract.TransactOpts)
 }
 
 // RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
 //
 // Solidity: function removeAndException() returns()
-func (_Testcontract *TestcontractTransactor) RemoveAndException(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) RemoveAndException(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "removeAndException")
 }
 
 // RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
 //
 // Solidity: function removeAndException() returns()
-func (_Testcontract *TestcontractSession) RemoveAndException() (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) RemoveAndException() (types.Transaction, error) {
 	return _Testcontract.Contract.RemoveAndException(&_Testcontract.TransactOpts)
 }
 
 // RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
 //
 // Solidity: function removeAndException() returns()
-func (_Testcontract *TestcontractTransactorSession) RemoveAndException() (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) RemoveAndException() (types.Transaction, error) {
 	return _Testcontract.Contract.RemoveAndException(&_Testcontract.TransactOpts)
 }
 
 // RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
 //
 // Solidity: function removeAndRevert() returns()
-func (_Testcontract *TestcontractTransactor) RemoveAndRevert(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) RemoveAndRevert(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "removeAndRevert")
 }
 
 // RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
 //
 // Solidity: function removeAndRevert() returns()
-func (_Testcontract *TestcontractSession) RemoveAndRevert() (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) RemoveAndRevert() (types.Transaction, error) {
 	return _Testcontract.Contract.RemoveAndRevert(&_Testcontract.TransactOpts)
 }
 
 // RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
 //
 // Solidity: function removeAndRevert() returns()
-func (_Testcontract *TestcontractTransactorSession) RemoveAndRevert() (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) RemoveAndRevert() (types.Transaction, error) {
 	return _Testcontract.Contract.RemoveAndRevert(&_Testcontract.TransactOpts)
 }
 
 // Update is a paid mutator transaction binding the contract method 0x82ab890a.
 //
 // Solidity: function update(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) Update(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) Update(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "update", newBalance)
 }
 
 // Update is a paid mutator transaction binding the contract method 0x82ab890a.
 //
 // Solidity: function update(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) Update(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) Update(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.Update(&_Testcontract.TransactOpts, newBalance)
 }
 
 // Update is a paid mutator transaction binding the contract method 0x82ab890a.
 //
 // Solidity: function update(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) Update(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) Update(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.Update(&_Testcontract.TransactOpts, newBalance)
 }
 
 // UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
 //
 // Solidity: function updateAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) UpdateAndException(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) UpdateAndException(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "updateAndException", newBalance)
 }
 
 // UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
 //
 // Solidity: function updateAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) UpdateAndException(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) UpdateAndException(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.UpdateAndException(&_Testcontract.TransactOpts, newBalance)
 }
 
 // UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
 //
 // Solidity: function updateAndException(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) UpdateAndException(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) UpdateAndException(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.UpdateAndException(&_Testcontract.TransactOpts, newBalance)
 }
 
 // UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
 //
 // Solidity: function updateAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactor) UpdateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactor) UpdateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.contract.Transact(opts, "updateAndRevert", newBalance)
 }
 
 // UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
 //
 // Solidity: function updateAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractSession) UpdateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractSession) UpdateAndRevert(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.UpdateAndRevert(&_Testcontract.TransactOpts, newBalance)
 }
 
 // UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
 //
 // Solidity: function updateAndRevert(uint256 newBalance) returns()
-func (_Testcontract *TestcontractTransactorSession) UpdateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorSession) UpdateAndRevert(newBalance *big.Int) (types.Transaction, error) {
 	return _Testcontract.Contract.UpdateAndRevert(&_Testcontract.TransactOpts, newBalance)
 }

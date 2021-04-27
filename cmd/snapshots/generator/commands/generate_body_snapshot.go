@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	withChaindata(generateBodiesSnapshotCmd)
+	withDatadir(generateBodiesSnapshotCmd)
 	withSnapshotFile(generateBodiesSnapshotCmd)
 	withSnapshotData(generateBodiesSnapshotCmd)
 	withBlock(generateBodiesSnapshotCmd)
@@ -29,7 +29,7 @@ func init() {
 var generateBodiesSnapshotCmd = &cobra.Command{
 	Use:     "bodies",
 	Short:   "Generate bodies snapshot",
-	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
+	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --datadir /media/b00ris/nvme/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
