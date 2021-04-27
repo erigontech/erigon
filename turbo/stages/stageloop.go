@@ -87,7 +87,7 @@ func StageLoop(
 			writeDB = db
 		}
 
-		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil, stagedsync.StageSendersCfg(chainConfig))
+		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, make(chan struct{}), nil, nil, initialCycle, nil, stagedsync.StageSendersCfg(chainConfig))
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}

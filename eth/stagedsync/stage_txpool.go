@@ -15,14 +15,12 @@ import (
 )
 
 type TxPoolCfg struct {
-	pool      *core.TxPool
-	poolStart func() error
+	pool *core.TxPool
 }
 
-func StageTxPoolCfg(pool *core.TxPool, poolStart func() error) TxPoolCfg {
+func StageTxPoolCfg(pool *core.TxPool) TxPoolCfg {
 	return TxPoolCfg{
-		pool:      pool,
-		poolStart: poolStart,
+		pool: pool,
 	}
 }
 
@@ -57,9 +55,6 @@ func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan 
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
-		}
-		if err := cfg.poolStart(); err != nil {
-			return fmt.Errorf("%s: start pool phase 2: %w", logPrefix, err)
 		}
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {

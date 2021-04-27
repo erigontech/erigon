@@ -124,7 +124,6 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		controlServer,
 		tmpdir,
 		nil,
-		nil,
 	)
 	if err != nil {
 		return err
@@ -239,7 +238,6 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		controlServer,
 		tmpdir,
 		nil,
-		nil,
 	)
 	if err != nil {
 		return err
@@ -288,7 +286,6 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	poolStart func() error,
 ) (*stagedsync.StagedSync, error) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -332,7 +329,7 @@ func NewStagedSync(
 		stagedsync.StageLogIndexCfg(tmpdir),
 		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(tmpdir),
-		stagedsync.StageTxPoolCfg(txPool, poolStart),
+		stagedsync.StageTxPoolCfg(txPool),
 	), nil
 }
 

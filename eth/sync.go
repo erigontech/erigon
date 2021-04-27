@@ -277,7 +277,7 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 func (h *handler) doSync(op *chainSyncOp) error {
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
 	txPool, _ := h.txpool.(*core.TxPool)
-	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, txPool, func() error { return nil })
+	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, txPool)
 	if err != nil {
 		return err
 	}

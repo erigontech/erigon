@@ -442,7 +442,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.downloadServer,
 			tmpdir,
 			eth.txPool,
-			func() error { return nil },
 		)
 		if err != nil {
 			return nil, err
@@ -800,7 +799,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		quitCh,
 		nil,
 		s.txPool,
-		nil,
 		false,
 		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
 		stagedsync.StageSendersCfg(s.chainConfig),
