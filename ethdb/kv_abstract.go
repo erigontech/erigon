@@ -21,6 +21,8 @@ var (
 	txDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
 )
 
+type DBVerbosityLvl int8
+
 type Has interface {
 	// Has indicates whether a key exists in the database.
 	Has(bucket string, key []byte) (bool, error)
