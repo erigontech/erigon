@@ -391,7 +391,7 @@ func (env *Env) Info() (*EnvInfo, error) {
 			Unspill uint64 /**< Quantity of unspilled/reloaded pages */
 			Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
 		}{
-			Newly:   uint64(_info.mi_pgop_stat.newely),
+			Newly:   uint64(_info.mi_pgop_stat.newly),
 			Cow:     uint64(_info.mi_pgop_stat.cow),
 			Clone:   uint64(_info.mi_pgop_stat.clone),
 			Split:   uint64(_info.mi_pgop_stat.split),
