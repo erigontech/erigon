@@ -158,13 +158,40 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		return err
 	}
 	var (
-		period int64
-		ok     bool
+		epoch     int64
+		period    int64
+		vanity    string
+		signers   []string
+		gaslimit  int64
+		timestamp int64
+		balances  *toml.Tree
+		ok        bool
 	)
+	if epoch, ok = tree.Get("engine.params.epoch").(int64); !ok {
+		return fmt.Errorf("engine.params.epoch absent or of wrong type")
+	}
 	if period, ok = tree.Get("engine.params.period").(int64); !ok {
 		return fmt.Errorf("engine.params.period absent or of wrong type")
 	}
-	fmt.Printf("period: %d\n", period)
+	if vanity, ok = tree.Get("engine.params.genesis.vanity").(string); !ok {
+		return fmt.Errorf("engine.params.period absent or of wrong type")
+	}
+	if signers, ok = tree.GetArray("engine.params.genesis.signers").([]string); !ok {
+		return fmt.Errorf("engine.params.signers absent or of wrong type")
+	}
+	if gaslimit, ok = tree.Get("genesis.gas_limit").(int64); !ok {
+		return fmt.Errorf("genesis.gaslimit absent or of wrong type")
+	}
+	if timestamp, ok = tree.Get("genesis.timestamp").(int64); !ok {
+		return fmt.Errorf("genesis.timestamp absent or of wrong type")
+	}
+	if balances, ok = tree.Get("balances").(*toml.Tree); !ok {
+		return fmt.Errorf("balances absent or of wrong type: %T", tree.Get("balances"))
+	}
+	fmt.Printf("epoch: %d, period: %d, vanity %s, signers %s, gaslimit %d, timestamp %d\n", epoch, period, vanity, signers, gaslimit, timestamp)
+	for account, balance := range balances.ToMap() {
+		fmt.Printf("%s: %s\n", account, balance)
+	}
 	return nil
 }
 

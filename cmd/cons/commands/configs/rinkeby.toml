@@ -21,89 +21,88 @@ signers = [
 ]
 
 [hardforks]
-eip140 = "0xfcc25"
-eip145 = "0x37db77"
-eip150 = "0x2"
-eip155 = "0x3"
-eip160 = "0x0"
-eip161abc = "0x0"
-eip161d = "0x0"
-eip211 = "0xfcc25"
-eip214 = "0xfcc25"
-eip658 = "0xfcc25"
-eip1014 = "0x37db77"
-eip1052 = "0x37db77"
-eip1283 = "0x37db77"
-eip1283_disable = "0x41efd2"
-eip1283_reenable = "0x52efd1"
-eip1344 = "0x52efd1"
-eip1706 = "0x52efd1"
-eip1884 = "0x52efd1"
-eip2028 = "0x52efd1"
-max_code_size = "0x0"
+eip140 = 1035301
+eip145 = 3660663
+eip150 = 2
+eip155 = 2
+eip160 = 0
+eip161abc = 0
+eip161d = 0
+eip211 = 1035301
+eip214 = 1035301
+eip658 = 1035301
+eip1014 = 3660663
+eip1052 = 3660663
+eip1283 = 3660663
+eip1283_disable = 4321234
+eip1283_reenable = 5435345
+eip1344 = 5435345
+eip1706 = 5435345
+eip1884 = 5435345
+eip2028 = 5435345
 
 [params]
-account_start_nonce = "0x0"
+account_start_nonce = 0
 chain_id = "0x4"
-gas_limit_bound_divisor = "0x400"
-max_code_size = "0x6000"
-maximum_extra_data_size = "0xffff"
-min_gas_limit = "0x1388"
+gas_limit_bound_divisor = 1024
+max_code_size = 24576
+maximum_extra_data_size = 65535
+min_gas_limit = 5000
 network_id = "0x4"
 
 [genesis]
-gas_limit = "0x47b760"
-timestamp = "0x58ee40ba"
+gas_limit = 4700000
+timestamp = 1492009146
 
 [precompiles.0.0x0000000000000000000000000000000000000001]
 name = "ecrecover"
-pricing = { formula = "linear", params = { base = 3000.0, word = 0.0 } }
+pricing = { formula = "linear", params = { base = 3000.0, word = 0 } }
 
 [precompiles.0.0x0000000000000000000000000000000000000002]
 name = "sha256"
-pricing = { formula = "linear", params = { base = 60.0, word = 12.0 } }
+pricing = { formula = "linear", params = { base = 60, word = 12 } }
 
 [precompiles.0.0x0000000000000000000000000000000000000003]
 name = "ripemd160"
-pricing = { formula = "linear", params = { base = 600.0, word = 120.0 } }
+pricing = { formula = "linear", params = { base = 600, word = 120 } }
 
 [precompiles.0.0x0000000000000000000000000000000000000004]
 name = "identity"
-pricing = { formula = "linear", params = { base = 15.0, word = 3.0 } }
+pricing = { formula = "linear", params = { base = 15, word = 3 } }
 
 # EIP 1108 transition at block 5_435_345 (0x52efd1)
-[precompiles.0xfcc25.0x0000000000000000000000000000000000000005]
+[precompiles.1035301.0x0000000000000000000000000000000000000005]
 name = "modexp"
-pricing = { formula = "modexp", params = { divisor = 20.0 } }
+pricing = { formula = "modexp", params = { divisor = 20 } }
 
-[precompiles.0xfcc25.0x0000000000000000000000000000000000000006]
+[precompiles.1035301.0x0000000000000000000000000000000000000006]
 name = "alt_bn128_add"
-pricing = { formula = "alt_bn128_const_operations", params = { price = 500.0 } }
+pricing = { formula = "alt_bn128_const_operations", params = { price = 500 } }
 
-[precompiles.0xfcc25.0x0000000000000000000000000000000000000007]
+[precompiles.1035301.0x0000000000000000000000000000000000000007]
 name = "alt_bn128_mul"
-pricing = { formula = "alt_bn128_const_operations", params = { price = 40000.0 } }
+pricing = { formula = "alt_bn128_const_operations", params = { price = 40000 } }
 
-[precompiles.0xfcc25.0x0000000000000000000000000000000000000008]
+[precompiles.1035301.0x0000000000000000000000000000000000000008]
 name = "alt_bn128_pairing"
-pricing = { formula = "alt_bn128_pairing", params = { base = 100000.0, pair = 80000.0 } }
+pricing = { formula = "alt_bn128_pairing", params = { base = 100000, pair = 80000 } }
 
 # EIP 1108 transition at block 5_435_345 (0x52efd1)
-[precompiles.0x52efd1.0x0000000000000000000000000000000000000006]
+[precompiles.5435345.0x0000000000000000000000000000000000000006]
 name = "alt_bn128_add"
-pricing = { formula = "alt_bn128_const_operations", params = { price = 150.0 } }
+pricing = { formula = "alt_bn128_const_operations", params = { price = 150 } }
 
-[precompiles.0x52efd1.0x0000000000000000000000000000000000000007]
+[precompiles.5435345.0x0000000000000000000000000000000000000007]
 name = "alt_bn128_mul"
-pricing = { formula = "alt_bn128_const_operations", params = { price = 40000.0 } }
+pricing = { formula = "alt_bn128_const_operations", params = { price = 40000 } }
 
-[precompiles.0x52efd1.0x0000000000000000000000000000000000000008]
+[precompiles.5435345.0x0000000000000000000000000000000000000008]
 name = "alt_bn128_pairing"
-pricing = { formula = "alt_bn128_pairing", params = { base = 45000.0, pair = 34000.0 } }
+pricing = { formula = "alt_bn128_pairing", params = { base = 45000, pair = 34000 } }
 
-[precompiles.0x52efd1.0x0000000000000000000000000000000000000009]
+[precompiles.5435345.0x0000000000000000000000000000000000000009]
 name = "blake2_f"
-pricing = { formula = "blake2_f", params = { gas_per_round = 1.0 } }
+pricing = { formula = "blake2_f", params = { gas_per_round = 1 } }
 
 [balances]
 "0x0000000000000000000000000000000000000000" = "0x1"
