@@ -2,10 +2,13 @@ package commands
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,10 +32,13 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+//go:embed configs
+var configs embed.FS
+
 func init() {
 	withApiAddr(cliqueCmd)
 	withDatadir(cliqueCmd)
-	withChain(cliqueCmd)
+	withConfig(cliqueCmd)
 	rootCmd.AddCommand(cliqueCmd)
 }
 
@@ -46,35 +52,41 @@ var cliqueCmd = &cobra.Command{
 }
 
 func cliqueEngine(ctx context.Context) error {
-	var genesis *core.Genesis
-	var chainConfig *params.ChainConfig
-	cliqueConfig := params.NewSnapshotConfig(10, 1024, 16384, false /* inMemory */, "clique", false /* mdbx */)
-	switch chain {
-	case params.RinkebyChainName:
-		genesis = core.DefaultRinkebyGenesisBlock()
-		chainConfig = params.RinkebyChainConfig
-	case params.GoerliChainName:
-		genesis = core.DefaultGoerliGenesisBlock()
-		chainConfig = params.GoerliChainConfig
-	case params.AleutChainName:
-		genesis = core.DefaultAleutGenesisBlock()
-		chainConfig = params.AleutChainConfig
-	default:
-		return fmt.Errorf("chain with name [%s] is not supported for clique", chain)
+	var server *CliqueServerImpl
+	var err error
+	if config == "test" {
+		// Configuration will be received from the test driver
+		server, err = grpcCliqueServer(ctx, true /* testServer */)
+		if err != nil {
+			return err
+		}
+	} else {
+		var configuration []byte
+		if strings.HasPrefix(config, "embed:") {
+			filename := config[len("embed:"):]
+			if configuration, err = configs.ReadFile(filepath.Join("configs", filename)); err != nil {
+				return fmt.Errorf("reading embedded configuration for %s: %w", filename, err)
+			}
+		} else if strings.HasPrefix(config, "file:") {
+			filename := config[len("file:"):]
+			if configuration, err = os.ReadFile(filename); err != nil {
+				return fmt.Errorf("reading configuration from file %s: %w", filename, err)
+			}
+		} else {
+			return fmt.Errorf("unrecognized config option: [%s], `file:<path>` to specify config file in file system, `embed:<path>` to use embedded file, `test` to register test interface and receive config from test driver", config)
+		}
+		if server, err = grpcCliqueServer(ctx, false /* testServer */); err != nil {
+			return err
+		}
+		if err = server.initAndConfig(configuration); err != nil {
+			return err
+		}
 	}
-	dbPath := filepath.Join(datadir, "clique", "db")
-	db := openDatabase(dbPath)
-	clique.New(chainConfig, cliqueConfig, db)
-	server, err := grpcCliqueServer(ctx)
-	if err != nil {
-		return err
-	}
-	server.genesis = genesis
-	server.chainConfig = chainConfig
+	<-ctx.Done()
 	return nil
 }
 
-func grpcCliqueServer(ctx context.Context) (*CliqueServerImpl, error) {
+func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Clique server", "on", consensusAddr)
 	listenConfig := net.ListenConfig{
@@ -114,6 +126,9 @@ func grpcCliqueServer(ctx context.Context) (*CliqueServerImpl, error) {
 
 	cliqueServer := NewCliqueServer(ctx)
 	proto_cons.RegisterConsensusEngineServer(grpcServer, cliqueServer)
+	if testServer {
+		proto_cons.RegisterTestServer(grpcServer, cliqueServer)
+	}
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
@@ -127,12 +142,43 @@ func grpcCliqueServer(ctx context.Context) (*CliqueServerImpl, error) {
 
 type CliqueServerImpl struct {
 	proto_cons.UnimplementedConsensusEngineServer
+	proto_cons.UnimplementedTestServer
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {
 	return &CliqueServerImpl{}
+}
+
+// initAndConfig resets the Clique Engine and configures it according to given configuration
+func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
+	tree, err := toml.LoadBytes(configuration)
+	if err != nil {
+		return err
+	}
+	var (
+		period int64
+		ok     bool
+	)
+	if period, ok = tree.Get("engine.params.period").(int64); !ok {
+		return fmt.Errorf("engine.params.period absent or of wrong type")
+	}
+	fmt.Printf("period: %d\n", period)
+	return nil
+}
+
+// StartTestCase implements Test interface from consensus.proto
+// When called, it signals to the consensus engine to reset its state and re-initialise using configuration
+// received from the test driver
+func (cs *CliqueServerImpl) StartTestCase(_ context.Context, testCase *proto_cons.StartTestCaseMessage) (*emptypb.Empty, error) {
+	if testCase.Mechanism != "clique" {
+		return &emptypb.Empty{}, fmt.Errorf("expected mechanism [clique], got [%s]", testCase.Mechanism)
+	}
+	if err := cs.initAndConfig(testCase.Config); err != nil {
+		return &emptypb.Empty{}, err
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (cs *CliqueServerImpl) ChainSpec(context.Context, *emptypb.Empty) (*proto_cons.ChainSpecMessage, error) {
