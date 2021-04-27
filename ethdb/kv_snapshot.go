@@ -253,6 +253,8 @@ func (s *sn2TX) Delete(bucket string, k, v []byte) error {
 	return s.dbTX.(RwTx).Delete(bucket, k, v)
 }
 
+func (s *sn2TX) CollectMetrics() {}
+
 func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
