@@ -239,7 +239,10 @@ func (bc *BlockChain) loadLastState() error {
 		return fmt.Errorf("empty or corrupt database")
 	}
 	// Make sure the entire head block is available
-	currentBlock := bc.GetBlockByHash(head)
+	currentBlock, err := rawdb.ReadBlockByHash(bc.db, head)
+	if err != nil {
+		return err
+	}
 	if currentBlock == nil {
 		// Corrupt or empty database, init from scratch
 		return fmt.Errorf("head block missing, hash %x", head)
@@ -252,62 +255,19 @@ func (bc *BlockChain) loadLastState() error {
 	// Restore the last known head header
 	currentHeader := currentBlock.Header()
 	if head := rawdb.ReadHeadHeaderHash(bc.db); head != (common.Hash{}) {
-		if header := bc.GetHeaderByHash(head); header != nil {
+		if header, _ := rawdb.ReadHeaderByHash(bc.db, head); header != nil {
 			currentHeader = header
 		}
 	}
 	bc.hc.SetCurrentHeader(bc.db, currentHeader)
 	// Issue a status log for the user
 
-	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
-	blockTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
+	headerTd, _ := rawdb.ReadTd(bc.db, currentHeader.Hash(), currentHeader.Number.Uint64())
+	blockTd, _ := rawdb.ReadTd(bc.db, currentBlock.Hash(), currentBlock.NumberU64())
 
 	log.Info("Most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
 	log.Info("Most recent local block", "number", currentBlock.Number(), "hash", currentBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
 
-	return nil
-}
-
-func SetHead(db ethdb.Database, head uint64) error {
-	log.Warn("Rewinding blockchain", "target", head)
-
-	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
-		// Rewind the block chain, ensuring we don't end up with a stateless head block
-		if currentBlock := rawdb.ReadCurrentBlock(db); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
-			newHeadBlock := rawdb.ReadBlock(db, header.Hash(), header.Number.Uint64())
-			if newHeadBlock == nil {
-				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
-			} else {
-				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
-			}
-		}
-
-		return rawdb.ReadCurrentBlock(db).NumberU64(), false /* we have nothing to wipe in turbo-geth */
-	}
-
-	// Rewind the header chain, deleting all block bodies until then
-	delFn := func(db ethdb.Database, hash common.Hash, num uint64) {
-		// Remove relative body and receipts from the active store.
-		// The header, total difficulty and canonical hash will be
-		// removed in the hc.SetHead function.
-		rawdb.DeleteBody(db, hash, num)
-		if err := rawdb.DeleteReceipts(db, num); err != nil {
-			panic(err)
-		}
-	}
-
-	// If SetHead was only called as a chain reparation method, try to skip
-	// touching the header chain altogether, unless the freezer is broken
-	if block := rawdb.ReadCurrentBlock(db); block.NumberU64() == head {
-		if target, force := updateFn(db, block.Header()); force {
-			SetHeaderHead(db, target, updateFn, delFn)
-		}
-	} else {
-		// Rewind the chain to the requested head and keep going backwards until a
-		// block with a state is found or fast sync pivot is passed
-		log.Warn("Rewinding blockchain", "target", head)
-		SetHeaderHead(db, head, updateFn, delFn)
-	}
 	return nil
 }
 
@@ -374,36 +334,6 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	}
 	bc.receiptsCache.Add(hash, receipts)
 	return receipts
-}
-
-// GetBlocksFromHash returns the block corresponding to hash and up to n-1 ancestors.
-// [deprecated by eth/62]
-func (bc *BlockChain) GetBlocksFromHash(hash common.Hash, n int) (blocks []*types.Block) {
-	number := bc.hc.GetBlockNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	for i := 0; i < n; i++ {
-		block := bc.GetBlock(hash, *number)
-		if block == nil {
-			break
-		}
-		blocks = append(blocks, block)
-		hash = block.ParentHash()
-		*number--
-	}
-	return
-}
-
-// GetUnclesInChain retrieves all the uncles from a given block backwards until
-// a specific distance is reached.
-func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.Header {
-	uncles := []*types.Header{}
-	for i := 0; block != nil && i < length; i++ {
-		uncles = append(uncles, block.Uncles()...)
-		block = bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
-	}
-	return uncles
 }
 
 // Stop stops the blockchain service. If any imports are currently in progress
@@ -502,10 +432,6 @@ Error: %v
 Callers: %v
 ##############################
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err, debug.Callers(20)))
-}
-
-func (bc *BlockChain) HeaderChain() *HeaderChain {
-	return bc.hc
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

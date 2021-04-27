@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -161,7 +160,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 		tx = dbtx.(ethdb.HasTx).Tx()
 	}
 	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+1)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -198,7 +197,7 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := GetAsOf(tx, true /* storage */, compositeKey, dbs.blockNr+1)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -247,7 +246,7 @@ func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64,
 		tx = dbtx.(ethdb.HasTx).Tx()
 	}
 	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+2)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return 0, err
 	}
 	if len(enc) == 0 {
@@ -399,7 +398,7 @@ func (s *PlainKVState) ForEachStorage(addr common.Address, startLocation common.
 
 func (s *PlainKVState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -425,7 +424,7 @@ func (s *PlainKVState) ReadAccountData(address common.Address) (*accounts.Accoun
 func (s *PlainKVState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
@@ -452,7 +451,7 @@ func (s *PlainKVState) ReadAccountCodeSize(address common.Address, incarnation u
 
 func (s *PlainKVState) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	enc, err := GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+2)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	if err != nil {
 		return 0, err
 	}
 	if len(enc) == 0 {

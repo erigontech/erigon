@@ -1,10 +1,12 @@
 package filters
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type (
@@ -34,7 +37,12 @@ type Filters struct {
 func New(ethBackend core.ApiBackend) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
-	ff := &Filters{headsSubs: make(map[HeadsSubID]chan *types.Header), pendingLogsSubs: make(map[PendingLogsSubID]chan types.Logs), pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block)}
+	ff := &Filters{
+		headsSubs:        make(map[HeadsSubID]chan *types.Header),
+		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
+		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
+		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
+	}
 
 	go func() {
 		var err error
@@ -114,7 +122,8 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_HEADER:
 		payload := event.Data
 		var header types.Header
-		err := json.Unmarshal(payload, &header)
+
+		err := rlp.Decode(bytes.NewReader(payload), &header)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
@@ -126,7 +135,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_LOGS:
 		payload := event.Data
 		var logs types.Logs
-		err := json.Unmarshal(payload, &logs)
+		err := rlp.Decode(bytes.NewReader(payload), &logs)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
@@ -138,7 +147,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_BLOCK:
 		payload := event.Data
 		var block types.Block
-		err := json.Unmarshal(payload, &block)
+		err := rlp.Decode(bytes.NewReader(payload), &block)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
@@ -150,8 +159,13 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_TRANSACTIONS:
 		payload := event.Data
 		var txs []types.Transaction
-		err := json.Unmarshal(payload, &txs)
-		if err != nil {
+		s := rlp.NewStream(bytes.NewReader(payload), uint64(len(payload)))
+		var tx types.Transaction
+		var err error
+		for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+			txs = append(txs, tx)
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
 		} else {

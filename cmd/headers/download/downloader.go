@@ -123,6 +123,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		timeout,
 		controlServer,
 		tmpdir,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -164,7 +165,7 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("Handling incoming message", "error", err)
+			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
 		}
 	}
 }
@@ -192,7 +193,7 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("Handling incoming message", "error", err)
+			log.Error("RecvMessage: Handling incoming message", "error", err)
 		}
 	}
 }
@@ -236,6 +237,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		timeout,
 		controlServer,
 		tmpdir,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -283,6 +285,7 @@ func NewStagedSync(
 	bodyDownloadTimeout int,
 	controlServer *ControlServerImpl,
 	tmpdir string,
+	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -326,6 +329,7 @@ func NewStagedSync(
 		stagedsync.StageLogIndexCfg(tmpdir),
 		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(tmpdir),
+		stagedsync.StageTxPoolCfg(txPool),
 	), nil
 }
 

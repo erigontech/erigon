@@ -569,7 +569,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 		if n.config.MDBX {
 			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
 			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize)
+				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
 				if exclusive {
 					opts = opts.Exclusive()
 				}
@@ -582,7 +582,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 		} else {
 			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
 			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize)
+				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
 				if exclusive {
 					opts = opts.Exclusive()
 				}

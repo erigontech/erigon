@@ -3,9 +3,7 @@ package remotedbserver
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -68,23 +66,21 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	log.Debug("establishing event subscription channel with the RPC daemon")
-	wg := sync.WaitGroup{}
-	wg.Add(1)
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(h)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, h); err != nil {
 			log.Warn("error while marshaling a header", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_HEADER,
 			Data: payload,
 		})
@@ -103,18 +99,20 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	s.events.AddPendingTxsSubscription(func(txs []types.Transaction) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(txs)
-		if err != nil {
-			log.Warn("error while marshaling a pending transactions", "err", err)
-			return err
+		var buf bytes.Buffer
+		for _, tx := range txs {
+			if err := rlp.Encode(&buf, tx); err != nil {
+				log.Warn("error while marshaling a pending transaction", "err", err)
+				return err
+			}
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_PENDING_TRANSACTIONS,
 			Data: payload,
 		})
@@ -133,18 +131,18 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	s.events.AddPendingLogsSubscription(func(data types.Logs) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(data)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
 			log.Warn("error while marshaling a pending logs", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_PENDING_LOGS,
 			Data: payload,
 		})
@@ -163,18 +161,18 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	s.events.AddPendingBlockSubscription(func(data *types.Block) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(data)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
 			log.Warn("error while marshaling a pending block", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_PENDING_BLOCK,
 			Data: payload,
 		})
@@ -191,7 +189,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	})
 
 	log.Info("event subscription channel established with the RPC daemon")
-	wg.Wait()
+	<-subscribeServer.Context().Done()
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
 }

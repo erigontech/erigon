@@ -32,6 +32,7 @@ type MdbxOpts struct {
 	bucketsCfg        BucketConfigsFunc
 	mapSize           datasize.ByteSize
 	dirtyListMaxPages uint64
+	verbosity         DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
@@ -71,6 +72,11 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) DBVerbosity(v DBVerbosityLvl) MdbxOpts {
+	opts.verbosity = v
+	return opts
+}
+
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
@@ -98,8 +104,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	if err != nil {
 		return nil, err
 	}
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
+	if opts.verbosity != -1 {
+		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+		if err != nil {
+			return nil, fmt.Errorf("db verbosity set: %w", err)
+		}
+	}
 	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
@@ -299,45 +309,8 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	/*
-		info, _ := db.env.Info()
-			dbSize.Update(int64(info.Geo.Current))
-
-				if err := db.View(context.Background(), func(tx Tx) error {
-				stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
-				tableScsLeaf.Update(int64(stat.LeafPages))
-				tableScsBranch.Update(int64(stat.BranchPages))
-				tableScsOverflow.Update(int64(stat.OverflowPages))
-				tableScsEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
-				tableStateLeaf.Update(int64(stat.LeafPages))
-				tableStateBranch.Update(int64(stat.BranchPages))
-				tableStateOverflow.Update(int64(stat.OverflowPages))
-				tableStateEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
-				tableLogLeaf.Update(int64(stat.LeafPages))
-				tableLogBranch.Update(int64(stat.BranchPages))
-				tableLogOverflow.Update(int64(stat.OverflowPages))
-				tableLogEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
-				tableTxLeaf.Update(int64(stat.LeafPages))
-				tableTxBranch.Update(int64(stat.BranchPages))
-				tableTxOverflow.Update(int64(stat.OverflowPages))
-				tableTxEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat("gc")
-				tableGcLeaf.Update(int64(stat.LeafPages))
-				tableGcBranch.Update(int64(stat.BranchPages))
-				tableGcOverflow.Update(int64(stat.OverflowPages))
-				tableGcEntries.Update(int64(stat.Entries))
-				return nil
-			}); err != nil {
-				log.Error("collecting metrics failed", "err", err)
-			}
-	*/
+	info, _ := db.env.Info()
+	dbSize.Update(int64(info.Geo.Current))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
@@ -416,6 +389,17 @@ func (db *MdbxKV) AllDBI() map[string]dbutils.DBI {
 
 func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
+}
+
+func (tx *MdbxTx) CollectMetrics() {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		panic(err)
+	}
+
+	txDirty.Update(int64(txInfo.SpaceDirty))
+	txSpill.Update(int64(txInfo.Spill))
+	txUnspill.Update(int64(txInfo.Unspill))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {

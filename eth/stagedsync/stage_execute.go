@@ -227,6 +227,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		default:
 		case <-logEvery.C:
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
+			if hasTx, ok := tx.(ethdb.HasTx); ok {
+				hasTx.Tx().CollectMetrics()
+			}
 		}
 		stageExecutionGauge.Update(int64(blockNum))
 	}
