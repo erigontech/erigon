@@ -33,9 +33,10 @@ func NewStagedSync(
 	logIndex stagedsync.LogIndexCfg,
 	callTraces stagedsync.CallTracesCfg,
 	txLookup stagedsync.TxLookupCfg,
+	txPool stagedsync.TxPoolCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup),
+		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{Notifier: remotedbserver.NewEvents()},
 	)

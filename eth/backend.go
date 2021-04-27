@@ -441,6 +441,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,
 			tmpdir,
+			eth.txPool,
+			func() error { return nil },
 		)
 		if err != nil {
 			return nil, err
@@ -862,7 +864,6 @@ func (s *Ethereum) Start() error {
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
 	if s.config.EnableDownloadV2 {
-		s.txPoolServer.TxFetcher.Stop()
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
