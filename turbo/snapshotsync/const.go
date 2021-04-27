@@ -1,11 +1,10 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"errors"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 const (
@@ -37,18 +36,18 @@ snapshot=headers active peers=0 seeding=true hash=2ee9fb6572b2dfb9be0080c60cb140
 )
 
 var (
-	TorrentHashes = map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
+	TorrentHashes = map[uint64]map[SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
-			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
-			snapshotsync.SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
+			SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
+			SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
-func GetAvailableSnapshotTypes(networkID uint64) []snapshotsync.SnapshotType {
-	types := make([]snapshotsync.SnapshotType, 0, len(TorrentHashes[networkID]))
+func GetAvailableSnapshotTypes(networkID uint64) []SnapshotType {
+	types := make([]SnapshotType, 0, len(TorrentHashes[networkID]))
 	for k := range TorrentHashes[networkID] {
 		types = append(types, k)
 	}

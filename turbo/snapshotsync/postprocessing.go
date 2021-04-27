@@ -37,44 +37,30 @@ eth_tx,212580,47829931,6132023,969755142
  */
 
 var (
-	HeaderNumberGenerationStage    = stages.SyncStage("snapshot_header_number")
-	HeaderCanonicalGenerationStage = stages.SyncStage("snapshot_canonical")
 	HeadersPostProcessingStage = stages.SyncStage("snapshot_canonical")
 	Snapshot11kkTD = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
-func PostProcessing(db ethdb.Database, mode SnapshotMode, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
-	if mode.Headers {
+func PostProcessing(db ethdb.Database, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
+	if _,ok:=downloadedSnapshots[SnapshotType_headers]; ok {
 		err := GenerateHeaderIndexes(context.Background(), db)
 		if err != nil {
 			return err
 		}
 	}
-	if mode.State {
+	if _,ok:=downloadedSnapshots[SnapshotType_state]; ok {
 		err := PostProcessState(db, downloadedSnapshots[SnapshotType_state])
 		if err != nil {
 			return err
 		}
 	}
 
-	if mode.Bodies {
+	if _,ok:=downloadedSnapshots[SnapshotType_bodies]; ok {
 		err := PostProcessBodies(db)
 		if err != nil {
 			return err
 		}
 	}
-
-
-
-	/*
-	INFO [01-28|11:33:53.993] [5/14 Execution] Blocks execution        from=11000001 to=11743266
-	WARN [01-28|11:33:53.994] Synchronisation failed, retrying         err="tx 344bf26b00d1e61e2fd7edec191ea77851d785017aad44cdb5dce6f93ff8b68b failed: insufficient funds for gas * price + value"
-	INF
-	 */
-	//err := stages.SaveStageProgress(db, stages.Execution, 11_000_000)
-	//if err != nil {
-	//	return err
-	//}
 
 	return nil
 }
@@ -152,6 +138,7 @@ func PostProcessState(db ethdb.GetterPutter, info *SnapshotsInfo) error {
 	return nil
 }
 
+//It'll be enabled later
 func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash common.Hash, blockHeaderBytes, blockBodyBytes []byte) error {
 	v, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {

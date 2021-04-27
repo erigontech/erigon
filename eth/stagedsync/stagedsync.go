@@ -1,8 +1,7 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -39,8 +38,8 @@ type OptionalParameters struct {
 	SilkwormExecutionFunc unsafe.Pointer
 
 	SnapshotDir string
-	TorrnetClient *bittorrent.Client
-	SnapshotMigrator *migrator.SnapshotMigrator2
+	TorrnetClient *snapshotsync.Client
+	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -131,7 +130,7 @@ func (stagedSync *StagedSync) Prepare(
 	return state, nil
 }
 
-func (stagedSync *StagedSync) SetTorrentParams(client *bittorrent.Client, snapshotsDir string, snapshotMigrator *migrator.SnapshotMigrator2) {
+func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
 	stagedSync.params.TorrnetClient=client
 	stagedSync.params.SnapshotDir = snapshotsDir
 	stagedSync.params.SnapshotMigrator = snapshotMigrator

@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"strings"
 	"unsafe"
 
@@ -9,8 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -57,8 +56,8 @@ type StageParameters struct {
 	senders SendersCfg
 
 	snapshotsDir		 string
-	btClient			 *bittorrent.Client
-	SnapshotBuilder		 *migrator.SnapshotMigrator2
+	btClient			 *snapshotsync.Client
+	SnapshotBuilder		 *snapshotsync.SnapshotMigrator
 }
 
 type MiningCfg struct {

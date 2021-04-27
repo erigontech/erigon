@@ -10,8 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"os"
 	"time"
 )
@@ -33,7 +32,7 @@ if hasTx, ok := tx.(ethdb.HasTx); !ok || hasTx.Tx() != nil {
 
  */
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *migrator.SnapshotMigrator2, snapshotDir string, torrentClient *bittorrent.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *snapshotsync.SnapshotMigrator, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	fmt.Println("SpawnHeadersSnapshotGenerationStage")
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		//we use this stage only for inital sync to save space
@@ -55,7 +54,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 
 	//snapshotBlock:=migrator.CalculateEpoch(to, Epoch)
-	snapshotBlock :=migrator.CalculateEpoch(to, 50)
+	snapshotBlock :=snapshotsync.CalculateEpoch(to, 50)
 
 
 	if s.BlockNumber == snapshotBlock {
@@ -64,7 +63,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 		return nil
 	}
 
-	dbPath:=migrator.SnapshotName(snapshotDir, "headers", snapshotBlock)
+	dbPath:=snapshotsync.SnapshotName(snapshotDir, "headers", snapshotBlock)
 	//remove files on this path(in case of failed generation)
 	err = os.RemoveAll(dbPath)
 	if err!=nil {
@@ -78,8 +77,8 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 
 	tt:=time.Now()
-	snapshotPath:=migrator.SnapshotName(snapshotDir, "headers", snapshotBlock)
-	err=migrator.CreateHeadersSnapshot(context.Background(), db, snapshotBlock, snapshotPath)
+	snapshotPath:=snapshotsync.SnapshotName(snapshotDir, "headers", snapshotBlock)
+	err=snapshotsync.CreateHeadersSnapshot(context.Background(), db, snapshotBlock, snapshotPath)
 	if err!=nil {
 		fmt.Println("-----------------------Create Error!", err)
 		return err
@@ -140,7 +139,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 	}
 
 	if prevSnapshotBlock>0 {
-		oldSnapshotPath:= migrator.SnapshotName(snapshotDir,"headers", prevSnapshotBlock)
+		oldSnapshotPath:= snapshotsync.SnapshotName(snapshotDir,"headers", prevSnapshotBlock)
 		log.Info("Remove previous snapshot","type", "headers", "block", prevSnapshotBlock, "path", oldSnapshotPath)
 		err = os.RemoveAll(oldSnapshotPath)
 		if err!=nil {
@@ -156,7 +155,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *m
 		return err
 	}
 	defer mainDBRWTx.Rollback()
-	err = migrator.RemoveHeadersData(db, mainDBRWTx, prevSnapshotBlock, snapshotBlock)
+	err = snapshotsync.RemoveHeadersData(db, mainDBRWTx, prevSnapshotBlock, snapshotBlock)
 	if err!=nil {
 		fmt.Println("Remove  error", err)
 		return err

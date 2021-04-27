@@ -1,4 +1,4 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"fmt"

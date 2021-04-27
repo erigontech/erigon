@@ -1,4 +1,4 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"bytes"
@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -59,8 +58,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 func (cli *Client) Torrents() []metainfo.Hash {
 	t:=cli.Cli.Torrents()
 	hashes:=make([]metainfo.Hash, 0, len(t))
-	for k,v:=range t {
-		fmt.Println(k, v.Name(), v.InfoHash().String())
+	for _,v:=range t {
 		hashes = append(hashes,v.InfoHash())
 	}
 	return hashes
@@ -116,7 +114,7 @@ func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Has
 	return t, err
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
+func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType SnapshotType, networkID uint64) error { //nolint: interfacer
 	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
 	if err != nil {
 		return err
@@ -177,32 +175,32 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	}
 }
 
-func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {
+func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode SnapshotMode) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
 	eg := errgroup.Group{}
 
 	if mode.Headers {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_headers, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_headers, networkId)
 		})
 	}
 
 	if mode.Bodies {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_bodies, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_bodies, networkId)
 		})
 	}
 
 	if mode.State {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_state, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_state, networkId)
 		})
 	}
 
 	if mode.Receipts {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_receipts, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_receipts, networkId)
 		})
 	}
 	err := eg.Wait()
@@ -254,8 +252,8 @@ func (cli *Client) Download() {
 	}
 }
 
-func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
-	mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[SnapshotType]*SnapshotsInfo, error) {
+	mp := make(map[SnapshotType]*SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
 	err := db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, func(k, v []byte) (bool, error) {
@@ -279,19 +277,19 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 		}
 
 		_, tpStr := ParseInfoHashKey(k)
-		tp, ok := snapshotsync.SnapshotType_value[tpStr]
+		tp, ok := SnapshotType_value[tpStr]
 		if !ok {
 			return false, fmt.Errorf("incorrect type: %v", tpStr)
 		}
 
-		val := &snapshotsync.SnapshotsInfo{
-			Type:          snapshotsync.SnapshotType(tp),
+		val := &SnapshotsInfo{
+			Type:          SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
-			SnapshotBlock: snapshotsync.SnapshotBlock,
+			SnapshotBlock: SnapshotBlock,
 			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
 		}
-		mp[snapshotsync.SnapshotType(tp)] = val
+		mp[SnapshotType(tp)] = val
 		return true, nil
 	})
 	if err != nil {
@@ -371,4 +369,22 @@ func MakeInfoBytesKey(snapshotName string, networkID uint64) []byte {
 // ParseInfoHashKey returns networkID and snapshot name
 func ParseInfoHashKey(k []byte) (uint64, string) {
 	return binary.BigEndian.Uint64(k), string(bytes.TrimPrefix(k[8:], []byte(SnapshotInfoHashPrefix)))
+}
+
+func SnapshotSeeding(chainDB ethdb.Database, cli *Client, name string, snapshotsDir string) error {
+	snapshotBlock,err:=chainDB.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return err
+	}
+
+	if len(snapshotBlock) == 8 {
+		hash, err:=cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, binary.BigEndian.Uint64(snapshotBlock)))
+		if err!=nil {
+			return err
+		}
+		log.Info("Start seeding", "snapshot", name, "hash", hash.String())
+	} else {
+		log.Warn("Snapshot block unknown", "snapshot", name, "v", common.Bytes2Hex(snapshotBlock))
+	}
+	return nil
 }

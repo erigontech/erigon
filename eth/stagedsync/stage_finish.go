@@ -3,8 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -49,13 +48,13 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 	return nil
 }
 
-func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *bittorrent.Client, mg *migrator.SnapshotMigrator2) error {
+func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
 	headersBlock, err := stages.GetStageProgress(tx, stages.Headers)
 	if err!=nil {
 		return err
 	}
 
-	snBlock:=migrator.CalculateEpoch(headersBlock, 50)
+	snBlock:=snapshotsync.CalculateEpoch(headersBlock, 50)
 
 	return mg.Migrate(db, tx, snBlock, btClient)
 }

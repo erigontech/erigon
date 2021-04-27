@@ -130,15 +130,11 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 		for i:=range toClose {
 			i:=i
 			go func() {
-				fmt.Println("close ", i)
 				defer wg.Done()
 				toClose[i].Close()
-				fmt.Println("Done", i)
 			}()
 		}
-		fmt.Println("close chan")
 		wg.Wait()
-		fmt.Println("closed chan")
 		close(done)
 	}()
 }

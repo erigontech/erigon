@@ -1,4 +1,4 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 var (
@@ -16,7 +15,7 @@ var (
 	ErrNotSupportedSnapshot  = errors.New("not supported snapshot for this network id")
 )
 var (
-	_ snapshotsync.DownloaderServer = &SNDownloaderServer{}
+	_ DownloaderServer = &SNDownloaderServer{}
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
@@ -42,13 +41,13 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 }
 
 type SNDownloaderServer struct {
-	snapshotsync.DownloaderServer
+	DownloaderServer
 	t  *Client
 	db ethdb.Database
 }
 
-func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*empty.Empty, error) {
-	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, snapshotsync.FromSnapshotTypes(request.Type))
+func (S *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
+	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, FromSnapshotTypes(request.Type))
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +57,8 @@ func (S *SNDownloaderServer) Load() error {
 	return S.t.Load(S.db)
 }
 
-func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
-	reply := snapshotsync.SnapshotsInfoReply{}
+func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRequest) (*SnapshotsInfoReply, error) {
+	reply := SnapshotsInfoReply{}
 	resp, err := S.t.GetSnapshots(S.db, request.NetworkId)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package bittorrent
+package snapshotsync
 
 import (
 	lg "github.com/anacrolix/log"
