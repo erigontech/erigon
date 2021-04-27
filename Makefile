@@ -114,7 +114,8 @@ test-lmdb:
 test-mdbx: mdbx
 	TEST_DB=mdbx $(GOTEST)
 
-lint: lintci
+lint:
+	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
 
 lintci: mdbx
 	@echo "--> Running linter for code"

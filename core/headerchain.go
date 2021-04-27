@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -213,68 +212,6 @@ type (
 	// before each header is deleted.
 	DeleteBlockContentCallback func(ethdb.Database, common.Hash, uint64)
 )
-
-func SetHeaderHead(db ethdb.Database, head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
-	var (
-		parentHash common.Hash
-		batch      = db.NewBatch()
-	)
-	for hdr := rawdb.ReadCurrentHeader(db); hdr != nil && hdr.Number.Uint64() > head; hdr = rawdb.ReadCurrentHeader(db) {
-		num := hdr.Number.Uint64()
-
-		// Rewind block chain to new head.
-		parent := rawdb.ReadHeader(db, hdr.ParentHash, num-1)
-		if parent == nil {
-			genesisHeader := rawdb.ReadHeaderByNumber(db, 0)
-			if genesisHeader == nil {
-				log.Crit("rewind header chain", "error", ErrNoGenesis)
-			}
-
-			parent = genesisHeader
-		}
-		parentHash = hdr.ParentHash
-
-		// Notably, since geth has the possibility for setting the head to a low
-		// height which is even lower than ancient head.
-		// In order to ensure that the head is always no higher than the data in
-		// the database (ancient store or active store), we need to update head
-		// first then remove the relative data from the database.
-		//
-		// Update head first(head fast block, head full block) before deleting the data.
-		markerBatch := db.NewBatch()
-		if updateFn != nil {
-			newHead, force := updateFn(markerBatch, parent)
-			if force && newHead < head {
-				log.Warn("Force rewinding till ancient limit", "head", newHead)
-				head = newHead
-			}
-		}
-		// Update head header then.
-		rawdb.WriteHeadHeaderHash(markerBatch, parentHash)
-		if err := markerBatch.Commit(); err != nil {
-			log.Crit("Failed to update chain markers", "error", err)
-		}
-
-		// Remove the related data from the database on all sidechains
-		// Gather all the side fork hashes
-		hash := hdr.Hash()
-		if delFn != nil {
-			delFn(batch, hash, num)
-		}
-		rawdb.DeleteHeader(batch, hash, num)
-		if err := rawdb.DeleteTd(batch, hash, num); err != nil {
-			panic(err)
-		}
-
-		if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
-			panic(err)
-		}
-	}
-	if err := batch.Commit(); err != nil {
-		panic(err)
-	}
-
-}
 
 // Config retrieves the header chain's chain configuration.
 func (hc *HeaderChain) Config() *params.ChainConfig { return hc.config }
