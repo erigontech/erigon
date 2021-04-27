@@ -44,7 +44,6 @@ type StageParameters struct {
 	QuitCh                <-chan struct{}
 	headersFetchers       []func() error
 	txPool                *core.TxPool
-	poolStart             func() error
 	prefetchedBlocks      *bodydownload.PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
@@ -325,7 +324,7 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
-				txPoolCfg := StageTxPoolCfg(world.txPool, world.poolStart)
+				txPoolCfg := StageTxPoolCfg(world.txPool)
 				return &Stage{
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",

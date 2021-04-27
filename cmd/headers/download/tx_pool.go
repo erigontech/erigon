@@ -168,7 +168,7 @@ func RecvTxMessage(ctx context.Context, sentry proto_sentry.SentryClient, handle
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("Handling incoming message", "error", err)
+			log.Error("RecvTxMessage: Handling incoming message", "error", err)
 		}
 	}
 }
