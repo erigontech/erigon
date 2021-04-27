@@ -226,7 +226,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, tx, batch)
+			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
+			if hasTx, ok := tx.(ethdb.HasTx); ok {
+				hasTx.Tx().CollectMetrics()
+			}
 		}
 		stageExecutionGauge.Update(int64(blockNum))
 	}
@@ -249,7 +252,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 	return nil
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, tx ethdb.Database, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
