@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
@@ -143,9 +144,10 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use LMDB.
-	LMDB        bool
-	LMDBMapSize datasize.ByteSize
-	MDBX        bool
+	DatabaseVerbosity ethdb.DBVerbosityLvl
+	LMDB              bool
+	LMDBMapSize       datasize.ByteSize
+	MDBX              bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
