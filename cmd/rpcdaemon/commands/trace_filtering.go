@@ -30,7 +30,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 	defer tx.Rollback()
 
-	txn, _, blockNumber, _ := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
+	txn, _, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
@@ -57,7 +57,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 
 	txs := make([]TransactionWithSender, 0, len(senders))
 	for n, tx := range blockTxs {
-		if (tx.Hash() == txHash) {
+		if uint64(n) <= txIndex {
 			txs = append(txs, TransactionWithSender{
 				tx:     tx,
 				sender: senders[n],
@@ -70,6 +70,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		baseBn -= 1
 	}
 
+	// Returns an array of trace arrays, one trace array for each transaction
 	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
@@ -80,12 +81,15 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	for txno, trace := range traces {
 		txhash := txs[txno].tx.Hash()
 		txpos := uint64(txno)
-		for _, pt := range trace.Trace {
-			pt.BlockHash = &hash
-			pt.BlockNumber = &blockno
-			pt.TransactionHash = &txhash
-			pt.TransactionPosition = &txpos
-			out = append(out, *pt)
+		// We're only looking for a specific transaction
+		if txpos == txIndex {
+			for _, pt := range trace.Trace {
+				pt.BlockHash = &hash
+				pt.BlockNumber = &blockno
+				pt.TransactionHash = &txhash
+				pt.TransactionPosition = &txpos
+				out = append(out, *pt)
+			}
 		}
 	}
 
@@ -474,54 +478,6 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 	})
 
 	return i != len(filter)
-}
-
-// getTransactionTraces - returns the traces for a single transaction. Used by trace_get and trace_transaction.
-// TODO(tjayrush):
-// Implementation Notes:
-// -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
-//    these functions or eliminate Geth traces
-// -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	getter := adapter.NewBlockGetter(tx)
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-	traceType := "callTracer" // nolint: goconst
-
-	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
-
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
-	}
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
-	if err != nil {
-		return nil, err
-	}
-
-	// Time spent 176 out of 205
-	trace, err := transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, &tracers.TraceConfig{Tracer: &traceType}, chainConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	traceJSON, ok := trace.(json.RawMessage)
-	if !ok {
-		return nil, fmt.Errorf("unknown type in trace_filter")
-	}
-
-	var gethTrace GethTrace
-	jsonStr, _ := traceJSON.MarshalJSON()
-	// Time spent 26 out of 205
-	json.Unmarshal(jsonStr, &gethTrace) // nolint:errcheck
-
-	traces := ParityTraces{}
-	// Time spent 3 out of 205
-	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, txn, txIndex, []int{})
-	traces = append(traces, converted...)
-
-	return traces, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
