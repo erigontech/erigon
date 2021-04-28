@@ -99,18 +99,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 // TODO(tjayrush): only accepts a single one
 // TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
-	tx, err := api.kv.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	// TODO(tjayrush): Parity fails if it gets more than a single index. Returns nothing in this case.
 	if len(indicies) > 1 {
 		return nil, nil
 	}
 
-	traces, err := api.getTransactionTraces(tx, ctx, txHash)
+	traces, err := api.Transaction(ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
