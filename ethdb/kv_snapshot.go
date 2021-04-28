@@ -240,7 +240,6 @@ func (s *snTX) CreateBucket(bucket string) error {
 }
 
 func (s *snTX) ExistsBucket(bucket string) bool {
-	//todo snapshot check?
 	return s.dbTX.(BucketMigrator).ExistsBucket(bucket)
 }
 
@@ -439,19 +438,19 @@ func (s *snTX) CHandle() unsafe.Pointer {
 }
 
 func (s *snTX) BucketExists(bucket string) (bool, error) {
-	panic("implement me")
+	return s.dbTX.(BucketsMigrator).BucketExists(bucket)
 }
 
 func (s *snTX) ClearBuckets(buckets ...string) error {
-	panic("implement me")
+	return s.dbTX.(BucketsMigrator).ClearBuckets(buckets...)
 }
 
 func (s *snTX) DropBuckets(buckets ...string) error {
-	panic("implement me")
+	return s.dbTX.(BucketsMigrator).DropBuckets(buckets...)
 }
 
 
-var DeletedValue = []byte("it is deleted value")
+var DeletedValue = []byte{0}
 
 type snCursor struct {
 	dbCursor Cursor

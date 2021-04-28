@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -693,38 +692,4 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
 	return stages.SyncStage(append([]byte(s), 0xF0))
-}
-
-func TestName(t *testing.T) {
-	stages:=DefaultStages()
-	for i, s:=range stages {
-		fmt.Println(i, string(s.ID))
-	}
-	fmt.Println("Unwind order")
-	unwindOrder:=DefaultUnwindOrder()
-	for i, v:=range unwindOrder {
-		fmt.Println(i, v, string(stages[v].ID))
-	}
-}
-
-func TestName1(t *testing.T) {
-	stages:=DefaultStages()
-	for i, s:=range stages {
-		fmt.Println(i, string(s.ID))
-	}
-	fmt.Println("Unwind order", len(stages))
-	unwindOrder:=DefaultUnwindOrder()
-	for i, v:=range unwindOrder {
-		fmt.Println(i, v, string(stages[v].ID))
-	}
-	stages=WithSnapshotsStages()
-	fmt.Println("----------------------------------------", len(stages))
-	for i, s:=range stages {
-		fmt.Println(i, string(s.ID))
-	}
-	fmt.Println("Unwind order")
-	unwindOrder=UnwindOrderWithSnapshots()
-	for i, v:=range unwindOrder {
-		fmt.Println(i, v, string(stages[v].ID))
-	}
 }
