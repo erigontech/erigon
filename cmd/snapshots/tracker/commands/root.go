@@ -176,8 +176,6 @@ type Peer struct {
 
 func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("call","url", r.RequestURI)
-	//todo save peerid, uploaded, downloaded, port,
-
 
 	req,err:=ParseRequest(r)
 	if err!=nil {
@@ -311,17 +309,17 @@ func ParseRequest(r *http.Request) (AnnounceReq, error) {
 	downloaded,err := strconv.ParseInt(q.Get("downloaded"),10, 64)
 	if err!=nil {
 		log.Warn("downloaded", "err", err)
-		//return AnnounceReq{}, fmt.Errorf("downloaded %v - %w",q.Get("downloaded"), err)
+		return AnnounceReq{}, fmt.Errorf("downloaded %v - %w",q.Get("downloaded"), err)
 	}
 	uploaded,err := strconv.ParseInt(q.Get("uploaded"),10, 64)
 	if err!=nil {
 		log.Warn("uploaded", "err", err)
-		//return AnnounceReq{}, fmt.Errorf("uploaded %v - %w",q.Get("uploaded"), err)
+		return AnnounceReq{}, fmt.Errorf("uploaded %v - %w",q.Get("uploaded"), err)
 	}
 	left,err := strconv.ParseInt(q.Get("left"),10, 64)
 	if err!=nil {
 		log.Warn("left", "err", err)
-		//return AnnounceReq{}, fmt.Errorf("left: %v - %w",q.Get("left"), err)
+		return AnnounceReq{}, fmt.Errorf("left: %v - %w",q.Get("left"), err)
 	}
 	port,err := strconv.Atoi(q.Get("port"))
 	if err!=nil {

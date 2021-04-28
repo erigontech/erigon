@@ -11,15 +11,8 @@ const (
 	DefaultChunkSize = 1024 * 1024
 	LmdbFilename     = "data.mdb"
 	MdbxFilename     = "mdbx.dat"
+	EpochSize = 500_000
 
-/*
-snapshot=bodies  active peers=0 seeding=true hash=ea86a38511daad97066fb4878d87fbede1dee4de
-snapshot=state   active peers=0 seeding=true hash=fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78
-snapshot=headers active peers=0 seeding=true hash=2ee9fb6572b2dfb9be0080c60cb140716590d963
-
-*/
-//115
-//	hash=
 	HeadersSnapshotHash  = "4dcebdf20f67ce0a478fd5059a4c613ac961e138" //11кk block 1mb chunk
 	BlocksSnapshotHash   = "296f1703f68afb46c3df040b097e2628fc27a66d" //11кk block 1mb chunk
 	StateSnapshotHash    = "8f024711b2c2c277109b44053fcaab1b13346e69"

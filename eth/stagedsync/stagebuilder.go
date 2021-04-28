@@ -592,20 +592,6 @@ func WithSnapshotsStages() StageBuilders {
 	return stagesWithSnapshots
 }
 
-
-//func DefaultUnwindOrder() UnwindOrder {
-//	return []int{
-//		0, 1, 2,
-//		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-//		// also tx pool is before senders because senders unwind is inside cycle transaction
-//		12, //tx lookup
-//		3, 4, //bodies, senders
-//		// Unwinding of IHashes needs to happen after unwinding HashState
-//		6, 5, // hashed state, execution
-//		7, 8, 9, 10, 11,
-//	}
-//}
-
 func UnwindOrderWithSnapshots() UnwindOrder {
 	return []int{
 		0, 1, 2,

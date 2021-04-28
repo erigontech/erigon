@@ -13,12 +13,13 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func Seed(ctx context.Context, datadir string) error {
 	defer func() {
-		time.Sleep(time.Second*2)
+		//hack origin lib don't have proper close handling
+		time.Sleep(time.Second*5)
 	}()
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)

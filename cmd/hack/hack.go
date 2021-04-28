@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -600,112 +599,6 @@ func trieChart() {
 	tool.Check(err)
 }
 
-func extractTrie(block int) {
-	stateDb := ethdb.MustOpen("statedb")
-	defer stateDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	rebuiltRoot := tds.LastRoot()
-	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	filename := fmt.Sprintf("right_%d.txt", baseBlock.NumberU64())
-	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		tds.PrintTrie(f)
-	}
-}
-
-func testRewind(chaindata string, block, rewind int) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	if block == 1 {
-		block = int(currentBlockNr)
-	}
-	baseBlock := bc.GetBlockByNumber(uint64(block))
-	baseBlockNr := baseBlock.NumberU64()
-	fmt.Printf("Base block number: %d\n", baseBlockNr)
-	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
-	db := ethDb.NewBatch()
-	defer db.Rollback()
-	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
-	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	rebuiltRoot := tds.LastRoot()
-	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	startTime := time.Now()
-	rewindLen := uint64(rewind)
-
-	err = tds.UnwindTo(baseBlockNr - rewindLen)
-	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
-	tool.Check(err)
-	rewoundBlock1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
-	fmt.Printf("Rewound+1 block number: %d\n", rewoundBlock1.NumberU64())
-	fmt.Printf("Rewound+1 block hash: %x\n", rewoundBlock1.Hash())
-	fmt.Printf("Rewound+1 block root hash: %x\n", rewoundBlock1.Root())
-	fmt.Printf("Rewound+1 block parent hash: %x\n", rewoundBlock1.ParentHash())
-
-	rewoundBlock := bc.GetBlockByNumber(baseBlockNr - rewindLen)
-	fmt.Printf("Rewound block number: %d\n", rewoundBlock.NumberU64())
-	fmt.Printf("Rewound block hash: %x\n", rewoundBlock.Hash())
-	fmt.Printf("Rewound block root hash: %x\n", rewoundBlock.Root())
-	fmt.Printf("Rewound block parent hash: %x\n", rewoundBlock.ParentHash())
-	rewoundRoot := tds.LastRoot()
-	fmt.Printf("Calculated rewound root hash: %x\n", rewoundRoot)
-	/*
-		filename := fmt.Sprintf("root_%d.txt", rewoundBlock.NumberU64())
-		fmt.Printf("Generating deep snapshot of the wront tries... %s\n", filename)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			tds.PrintTrie(f)
-		}
-
-		{
-			tds, err = state.NewTrieDbState(rewoundBlock.Root(), db, rewoundBlock.NumberU64())
-			tds.SetHistorical(true)
-			check(err)
-			rebuiltRoot, err := tds.TrieRoot()
-			fmt.Printf("Rebuilt root: %x\n", rebuiltRoot)
-			check(err)
-		}
-	*/
-}
-
-func testStartup() {
-	startTime := time.Now()
-	//ethDb := ethdb.Open(node.DefaultDataDir() + "/geth/chaindata")
-	ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	defer ethDb.Close()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	tool.Check(err)
-	defer bc.Stop()
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	fmt.Printf("Current block number: %d\n", currentBlockNr)
-	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	l := trie.NewSubTrieLoader(currentBlockNr)
-	rl := trie.NewRetainList(0)
-	subTries, err1 := l.LoadSubTries(ethDb, currentBlockNr, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
-	if err1 != nil {
-		fmt.Printf("%v\n", err1)
-	}
-	if subTries.Hashes[0] != currentBlock.Root() {
-		fmt.Printf("Hash mismatch, got %x, expected %x\n", subTries.Hashes[0], currentBlock.Root())
-	}
-	fmt.Printf("Took %v\n", time.Since(startTime))
-}
-
 func dbSlice(chaindata string, bucket string, prefix []byte) {
 	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
@@ -1080,7 +973,7 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 func getModifiedAccounts(chaindata string) {
 	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
 	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
-	// db := ethdb.Open(chaindata)
+	// db := ethdb.MustOpen(chaindata)
 	// defer db.Close()
 	// addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
 	// check(err)
