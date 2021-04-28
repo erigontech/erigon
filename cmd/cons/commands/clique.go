@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_cons "github.com/ledgerwatch/turbo-geth/gointerfaces/consensus"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -84,6 +85,8 @@ func cliqueEngine(ctx context.Context) error {
 			return err
 		}
 	}
+	server.db = openDatabase(filepath.Join(datadir, "clique", "db"))
+	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
 	<-ctx.Done()
 	return nil
 }
@@ -147,6 +150,8 @@ type CliqueServerImpl struct {
 	proto_cons.UnimplementedTestServer
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
+	c           *clique.Clique
+	db          ethdb.Database
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {
