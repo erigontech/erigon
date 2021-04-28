@@ -33,6 +33,7 @@ docker:
 docker-compose:
 	docker-compose up
 
+# debug build allows see C stack traces
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 	# use SETCGOTRCKEBACK=1 for profiling C code
