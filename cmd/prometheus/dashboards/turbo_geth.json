@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1619594293685,
+  "iteration": 1619598881043,
   "links": [],
   "panels": [
     {
@@ -839,20 +839,6 @@
           "interval": "",
           "legendFormat": "dirty: {{instance}}",
           "refId": "A"
-        },
-        {
-          "expr": "tx_spill{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "spill: {{instance}}",
-          "refId": "B"
-        },
-        {
-          "expr": "tx_unspill{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "unspill: {{instance}}",
-          "refId": "C"
         }
       ],
       "thresholds": [],
@@ -4369,7 +4355,7 @@
       {
         "allValue": "txpool_invalid",
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "All"
           ],
@@ -4480,7 +4466,8 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
+          "tags": [],
           "text": [
             "turbogeth16c.weblogix.it:6060"
           ],
@@ -4545,5 +4532,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 84
+  "version": 85
 }
