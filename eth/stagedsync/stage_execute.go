@@ -176,7 +176,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		defer batch.Rollback()
 	}
 
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(time.Second)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
