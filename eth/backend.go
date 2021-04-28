@@ -238,15 +238,22 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// setting notifier to support streaming events to rpc daemon
 	eth.events = remotedbserver.NewEvents()
+	var mg *snapshotsync.SnapshotMigrator
+	if config.SnapshotLayout {
+		fmt.Println("SnapshotLayout", config.SnapshotLayout, stagedSync == nil, config.SnapshotMode)
+		currentSnapshotBlock, currentInfohash,err:=snapshotsync.GetSnapshotInfo(chainDb)
+		if err!=nil {
+			return nil, err
+		}
+		mg=snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
+		err = mg.RemoveNonCurrentSnapshots(chainDb)
+		if err!=nil {
+			log.Error("Remove non current snapshot", "err", err)
+		}
+	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
 		if config.SnapshotLayout {
-			currentSnapshotBlock, currentInfohash,err:=snapshotsync.GetSnapshotInfo(chainDb)
-			if err!=nil {
-				return nil, err
-			}
-			mg:=snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
-
 			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: eth.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator:mg})
 		} else {
 			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
@@ -257,12 +264,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			stagedSync.Notifier = eth.events
 		}
 		if config.SnapshotLayout {
-			currentSnapshotBlock, currentInfohash,err:=snapshotsync.GetSnapshotInfo(chainDb)
-			if err!=nil {
-				return nil, err
-			}
-
-			mg:=snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
 			stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
 			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 		}

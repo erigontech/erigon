@@ -20,7 +20,6 @@ import (
 func init() {
 	withDatadir(generateHeadersSnapshotCmd)
 	withSnapshotFile(generateHeadersSnapshotCmd)
-	withSnapshotData(generateHeadersSnapshotCmd)
 	withBlock(generateHeadersSnapshotCmd)
 
 	rootCmd.AddCommand(generateHeadersSnapshotCmd)

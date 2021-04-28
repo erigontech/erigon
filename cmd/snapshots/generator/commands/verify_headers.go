@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/migrator"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"sync/atomic"
 	"time"
@@ -47,7 +47,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 			time.Sleep(time.Second*10)
 		}
 	}()
-	snKV,err := migrator.OpenHeadersSnapshot(snapshotPath)
+	snKV,err := snapshotsync.OpenHeadersSnapshot(snapshotPath)
 	if err!=nil {
 		return err
 	}

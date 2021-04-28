@@ -12,9 +12,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -151,6 +153,34 @@ type SnapshotMigrator struct {
 }
 func (sm *SnapshotMigrator) Close() {
 	sm.cancel()
+}
+
+func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots(db ethdb.Database) error {
+	files, err:=ioutil.ReadDir(sm.snapshotsDir)
+	if err!=nil {
+		return err
+	}
+
+	for i:=range files {
+		snapshotName:=files[i].Name()
+		if files[i].IsDir() && strings.HasPrefix(snapshotName, "headers") {
+			snapshotBlock,err:=strconv.ParseUint(strings.TrimPrefix(snapshotName,"headers"), 10, 64)
+			if err!=nil {
+				log.Warn("unknown snapshot", "name", snapshotName)
+				continue
+			}
+			if snapshotBlock!=sm.HeadersCurrentSnapshot {
+				path:=path.Join(sm.snapshotsDir, snapshotName)
+				err = os.RemoveAll(path)
+				if err!=nil {
+					log.Warn("useless snapshot has't removed", "path",path)
+				}
+				log.Info("removed useless snapshot", "path", path)
+			}
+
+		}
+	}
+
 }
 
 func (sm *SnapshotMigrator) Finished(block uint64) bool {
@@ -381,9 +411,9 @@ func (sm *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.Database, snaps
 	done := make(chan struct{})
 	chainDB.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, done)
 	select {
-	case <-time.After(time.Minute):
+	case <-time.After(time.Minute*10):
+		log.Error("timeout on closing headers snapshot database")
 		panic("timeout")
-		log.Error("timout on closing headers snapshot database")
 	case <-done:
 	}
 

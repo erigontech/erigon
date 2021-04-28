@@ -19,7 +19,6 @@ import (
 func init() {
 	withDatadir(generateStateSnapshotCmd)
 	withSnapshotFile(generateStateSnapshotCmd)
-	withSnapshotData(generateStateSnapshotCmd)
 	withBlock(generateStateSnapshotCmd)
 	rootCmd.AddCommand(generateStateSnapshotCmd)
 

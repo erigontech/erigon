@@ -15,7 +15,6 @@ import (
 func init() {
 	withDatadir(copyFromStateSnapshotCmd)
 	withSnapshotFile(copyFromStateSnapshotCmd)
-	withSnapshotData(copyFromStateSnapshotCmd)
 	withBlock(copyFromStateSnapshotCmd)
 	rootCmd.AddCommand(copyFromStateSnapshotCmd)
 
