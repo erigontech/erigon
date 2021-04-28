@@ -52,29 +52,15 @@ func TestHeaderVerification(t *testing.T) {
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < len(blocks); i++ {
 		for j, valid := range []bool{true, false} {
-			var results <-chan error
-
 			if valid {
 				engine := ethash.NewFaker()
-				_, results = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			} else {
 				engine := ethash.NewFakeFailer(headers[i].Number.Uint64())
-				_, results = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			}
-			// Wait for the verification result
-			select {
-			case result := <-results:
-				if (result == nil) != valid {
-					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, result, valid)
-				}
-			case <-time.After(time.Second):
-				t.Fatalf("test %d.%d: verification timeout", i, j)
-			}
-			// Make sure no more data is returned
-			select {
-			case result := <-results:
-				t.Fatalf("test %d.%d: unexpected result returned: %v", i, j, result)
-			case <-time.After(25 * time.Millisecond):
+			if (err == nil) != valid {
+				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 			}
 		}
 		engine := ethash.NewFaker()
