@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY d6f808426f8a269988a7b1d226eefaef3c4c91e0bdbb504c5ec43b15d6b79e79_v0_9_3_158_gf95a277a
+#define MDBX_BUILD_SOURCERY 3c041ab4d3d07620cff579b3acb5605660c47b2ee4e2ced50c29871f19a2ae10_v0_9_3_165_gde4a52e9
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -2230,13 +2230,12 @@ typedef struct MDBX_page {
 #define P_LEAF 0x02        /* leaf page */
 #define P_OVERFLOW 0x04    /* overflow page */
 #define P_META 0x08        /* meta page */
-#define P_SPILLED 0x10     /* spilled in parent txn */
+#define P_BAD 0x10         /* explicit flag for invalid/bad page */
 #define P_LEAF2 0x20       /* for MDBX_DUPFIXED records */
 #define P_SUBP 0x40        /* for MDBX_DUPSORT sub-pages */
-#define P_BAD 0x80         /* explicit flag for invalid/bad page */
+#define P_SPILLED 0x2000   /* spilled in parent txn */
 #define P_LOOSE 0x4000     /* page was dirtied then freed, can be reused */
-#define P_KEEP 0x8000      /* leave this page alone during spill */
-#define P_FROZEN 0x10000   /* used for retire page with known status */
+#define P_FROZEN 0x8000    /* used for retire page with known status */
 #define P_ILL_BITS (~(P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW | P_SPILLED))
   uint16_t mp_flags;
   union {
@@ -2860,6 +2859,13 @@ struct MDBX_env {
     uint8_t spill_max_denominator;
     uint8_t spill_min_denominator;
     uint8_t spill_parent4child_denominator;
+    union {
+      unsigned all;
+      /* tracks options with non-auto values but tuned by user */
+      struct {
+        unsigned dp_limit : 1;
+      } non_auto;
+    } flags;
   } me_options;
 
   /* struct me_dbgeo used for accepting db-geo params from user for the new

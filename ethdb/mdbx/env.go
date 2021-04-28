@@ -8,6 +8,7 @@ package mdbx
 import "C"
 import (
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"sync"
@@ -312,33 +313,36 @@ func (env *Env) Stat() (*Stat, error) {
 	return &stat, nil
 }
 
+type EnvInfoGeo struct {
+	Lower   uint64
+	Upper   uint64
+	Current uint64
+	Shrink  uint64
+	Grow    uint64
+}
+type EnfInfoPageOps struct {
+	Newly   uint64 /**< Quantity of a new pages added */
+	Cow     uint64 /**< Quantity of pages copied for update */
+	Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
+	Split   uint64 /**< Page splits */
+	Merge   uint64 /**< Page merges */
+	Spill   uint64 /**< Quantity of spilled dirty pages */
+	Unspill uint64 /**< Quantity of unspilled/reloaded pages */
+	Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
+}
+
 // EnvInfo contains information an environment.
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
 	MapSize int64 // Size of the data memory map
 	LastPNO int64 // ID of the last used page
-	Geo     struct {
-		Lower   uint64
-		Upper   uint64
-		Current uint64
-		Shrink  uint64
-		Grow    uint64
-	}
+	Geo     EnvInfoGeo
 	/** Statistics of page operations.
 	 * \details Overall statistics of page operations of all (running, completed
 	 * and aborted) transactions in the current multi-process session (since the
 	 * first process opened the database). */
-	PageOps struct {
-		Newly   uint64 /**< Quantity of a new pages added */
-		Cow     uint64 /**< Quantity of pages copied for update */
-		Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
-		Split   uint64 /**< Page splits */
-		Merge   uint64 /**< Page merges */
-		Spill   uint64 /**< Quantity of spilled dirty pages */
-		Unspill uint64 /**< Quantity of unspilled/reloaded pages */
-		Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
-	}
+	PageOps                        EnfInfoPageOps
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -366,31 +370,17 @@ func (env *Env) Info() (*EnvInfo, error) {
 	if ret != success {
 		return nil, operrno("mdbx_env_info", ret)
 	}
+	fmt.Printf("%+v\n", _info.mi_pgop_stat)
 	info := EnvInfo{
 		MapSize: int64(_info.mi_mapsize),
-		Geo: struct {
-			Lower   uint64
-			Upper   uint64
-			Current uint64
-			Shrink  uint64
-			Grow    uint64
-		}{
+		Geo: EnvInfoGeo{
 			Lower:   uint64(_info.mi_geo.lower),
 			Upper:   uint64(_info.mi_geo.upper),
 			Current: uint64(_info.mi_geo.current),
 			Shrink:  uint64(_info.mi_geo.shrink),
 			Grow:    uint64(_info.mi_geo.grow),
 		},
-		PageOps: struct {
-			Newly   uint64 /**< Quantity of a new pages added */
-			Cow     uint64 /**< Quantity of pages copied for update */
-			Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
-			Split   uint64 /**< Page splits */
-			Merge   uint64 /**< Page merges */
-			Spill   uint64 /**< Quantity of spilled dirty pages */
-			Unspill uint64 /**< Quantity of unspilled/reloaded pages */
-			Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
-		}{
+		PageOps: EnfInfoPageOps{
 			Newly:   uint64(_info.mi_pgop_stat.newly),
 			Cow:     uint64(_info.mi_pgop_stat.cow),
 			Clone:   uint64(_info.mi_pgop_stat.clone),
