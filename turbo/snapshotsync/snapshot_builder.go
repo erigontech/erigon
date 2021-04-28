@@ -182,6 +182,28 @@ const (
 	StagePruneDB  = 5
 	StageFinish  = 6
 )
+func (sm *SnapshotMigrator) GetStage() string {
+	st:=atomic.LoadUint64(&sm.Stage)
+	switch st {
+	case StageStart:
+		return "start"
+	case StageGenerate:
+		return "generate snapshot"
+	case StageReplace:
+		return "snapshot replace"
+	case StageStopSeeding:
+		return "stop seeding"
+	case StageStartSeedingNew:
+		return "start seeding"
+	case StagePruneDB:
+		return "prune db data"
+	case StageFinish:
+		return "finish"
+	default:
+		return "unknown stage"
+
+	}
+}
 func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBlock uint64,  bittorrent *Client) error  {
 	switch atomic.LoadUint64(&sm.Stage) {
 	case StageStart:
