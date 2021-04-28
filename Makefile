@@ -33,7 +33,8 @@ docker:
 docker-compose:
 	docker-compose up
 
-dbg: mdbx-dbg
+# Building all binaries for debugging by delve
+all-dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 geth:
