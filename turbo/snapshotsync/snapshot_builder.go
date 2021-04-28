@@ -164,20 +164,19 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots(db ethdb.Database) error {
 	for i:=range files {
 		snapshotName:=files[i].Name()
 		if files[i].IsDir() && strings.HasPrefix(snapshotName, "headers") {
-			snapshotBlock,err:=strconv.ParseUint(strings.TrimPrefix(snapshotName,"headers"), 10, 64)
-			if err!=nil {
-				log.Warn("unknown snapshot", "name", snapshotName, "err", err)
+			snapshotBlock,innerErr:=strconv.ParseUint(strings.TrimPrefix(snapshotName,"headers"), 10, 64)
+			if innerErr!=nil {
+				log.Warn("unknown snapshot", "name", snapshotName, "err", innerErr)
 				continue
 			}
 			if snapshotBlock!=sm.HeadersCurrentSnapshot {
-				path:=path.Join(sm.snapshotsDir, snapshotName)
-				err = os.RemoveAll(path)
-				if err!=nil {
-					log.Warn("useless snapshot has't removed", "path",path, "err", err)
+				snapshotPath:=path.Join(sm.snapshotsDir, snapshotName)
+				innerErr = os.RemoveAll(snapshotPath)
+				if innerErr!=nil {
+					log.Warn("useless snapshot has't removed", "path",snapshotPath, "err", innerErr)
 				}
-				log.Info("removed useless snapshot", "path", path)
+				log.Info("removed useless snapshot", "path", snapshotPath)
 			}
-
 		}
 	}
 	return nil
