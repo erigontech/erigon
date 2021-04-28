@@ -516,6 +516,10 @@ func WithSnapshotsStages() StageBuilders {
 		},
 	})
 	defaultStages = append(defaultStages, final)
+	fmt.Println("stages")
+	for i:=range defaultStages {
+		fmt.Println(defaultStages[i].ID)
+	}
 	return defaultStages
 
 	blockHashesStageIndex:=-1
