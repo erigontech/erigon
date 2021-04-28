@@ -250,7 +250,6 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		genesis.ExtraData = append(genesis.ExtraData, common.HexToAddress(signer).Bytes()...)
 	}
 	genesis.ExtraData = append(genesis.ExtraData, make([]byte, clique.ExtraSeal)...)
-	fmt.Printf("ExtraData: %x\n", genesis.ExtraData)
 	genesis.GasLimit = uint64(gaslimit)
 	genesis.Difficulty = new(big.Int).SetBytes(common.FromHex(difficultyStr))
 	genesis.Alloc = make(core.GenesisAlloc)

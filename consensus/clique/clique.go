@@ -252,34 +252,16 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
-
-	abort := make(chan struct{})
-	results := make(chan error, len(headers))
-
-	cancel := func() {
-		close(abort)
-	}
-
+func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 	if len(headers) == 0 {
-		close(results)
-		return cancel, results
+		return nil
 	}
-
-	go func() {
-		for i, header := range headers {
-			err := c.verifyHeader(chain, header, headers[:i])
-
-			select {
-			case <-abort:
-				return
-			case results <- err:
-			}
+	for i, header := range headers {
+		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
+			return err
 		}
-		close(results)
-	}()
-
-	return cancel, results
+	}
+	return nil
 }
 
 type VerifyHeaderResponse struct {
@@ -563,7 +545,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 		header.MixDigest,
 		header.Nonce,
 	}
-	if header.BaseFee != nil {
+	if header.Eip1559 {
 		enc = append(enc, header.BaseFee)
 	}
 	if err := rlp.Encode(w, enc); err != nil {
