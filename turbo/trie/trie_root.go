@@ -863,7 +863,7 @@ func (c *AccTrieCursor) _nextSiblingOfParentInMem() bool {
 }
 
 func (c *AccTrieCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	ok := dbutils.NextNibblesSubtree(c.prev, &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
