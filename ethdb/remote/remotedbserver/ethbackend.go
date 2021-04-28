@@ -32,7 +32,7 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
 	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
+	signedTx, err := types.UnmarshalTransactionFromBinary(in.Signedtx)
 	if err != nil {
 		return nil, err
 	}
