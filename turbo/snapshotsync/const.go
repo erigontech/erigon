@@ -14,10 +14,10 @@ const (
 	EpochSize = 500_000
 
 	//todo It'll be changed after enabling new snapshot generation mechanism
-	HeadersSnapshotHash  = "4dcebdf20f67ce0a478fd5059a4c613ac961e138"
-	BlocksSnapshotHash   = "296f1703f68afb46c3df040b097e2628fc27a66d"
-	StateSnapshotHash    = "8f024711b2c2c277109b44053fcaab1b13346e69"
-	
+	HeadersSnapshotHash  = "0000000000000000000000000000000000000000"
+	BlocksSnapshotHash   = "0000000000000000000000000000000000000000"
+	StateSnapshotHash    = "0000000000000000000000000000000000000000"
+
 	SnapshotInfoHashPrefix  = "ih"
 	SnapshotInfoBytesPrefix = "ib"
 )
