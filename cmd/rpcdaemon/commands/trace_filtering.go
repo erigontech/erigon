@@ -97,13 +97,8 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 }
 
 // Get implements trace_get
-// TODO(tjayrush): This command should take an rpc.BlockNumber .This would allow blockNumbers and 'latest',
-// TODO(tjayrush): 'pending', etc. Parity only accepts block hash.
-// TODO(tjayrush): Also, for some reason, Parity definesthe second parameter as an array of indexes, but
-// TODO(tjayrush): only accepts a single one
-// TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
-	// TODO(tjayrush): Parity fails if it gets more than a single index. Returns nothing in this case.
+	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
 	if len(indicies) > 1 {
 		return nil, nil
 	}
@@ -113,7 +108,7 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 		return nil, err
 	}
 
-	// TODO(tjayrush): For some reason, the 'get' index is one-based
+	// 'trace_get' index starts at one (oddly)
 	firstIndex := int(indicies[0]) + 1
 	for i, trace := range traces {
 		if i == firstIndex {
