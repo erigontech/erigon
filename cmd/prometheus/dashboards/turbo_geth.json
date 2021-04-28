@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1619593089370,
+  "iteration": 1619594293685,
   "links": [],
   "panels": [
     {
@@ -283,7 +283,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "stage_execution{instance=~\"$instance\"}",
+          "expr": "chain_execution{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -765,7 +765,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:117",
-          "format": "ops",
+          "format": "decbytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -4360,7 +4360,7 @@
       "type": "row"
     }
   ],
-  "refresh": "10s",
+  "refresh": false,
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4369,7 +4369,7 @@
       {
         "allValue": "txpool_invalid",
         "current": {
-          "selected": true,
+          "selected": false,
           "text": [
             "All"
           ],
@@ -4480,8 +4480,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "tags": [],
+          "selected": false,
           "text": [
             "turbogeth16c.weblogix.it:6060"
           ],
@@ -4546,5 +4545,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 82
+  "version": 84
 }
