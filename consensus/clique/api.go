@@ -16,6 +16,7 @@
 
 package clique
 
+/*
 import (
 	"fmt"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
-
 // API is a user facing RPC API to allow controlling the signer and voting
 // mechanisms of the proof-of-authority scheme.
 type API struct {
@@ -188,3 +188,4 @@ func (api *API) Status() (*status, error) {
 		NumBlocks:     numBlocks,
 	}, nil
 }
+*/

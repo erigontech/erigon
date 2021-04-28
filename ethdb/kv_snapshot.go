@@ -352,6 +352,10 @@ func (s *snTX) Delete(bucket string, k, v []byte) error {
 	return s.dbTX.(RwTx).Put(bucket, k, DeletedValue)
 }
 
+func (s *snTX) CollectMetrics() {
+	s.dbTX.CollectMetrics()
+}
+
 func (s *snTX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {

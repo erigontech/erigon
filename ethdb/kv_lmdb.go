@@ -41,6 +41,7 @@ type LmdbOpts struct {
 	exclusive  bool
 	bucketsCfg BucketConfigsFunc
 	mapSize    datasize.ByteSize
+	verbosity  DBVerbosityLvl
 }
 
 func NewLMDB() LmdbOpts {
@@ -66,6 +67,10 @@ func (opts LmdbOpts) InMem() LmdbOpts {
 
 func (opts LmdbOpts) MapSize(sz datasize.ByteSize) LmdbOpts {
 	opts.mapSize = sz
+	return opts
+}
+func (opts LmdbOpts) DBVerbosity(v DBVerbosityLvl) LmdbOpts {
+	opts.verbosity = v
 	return opts
 }
 
@@ -320,44 +325,8 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) CollectMetrics() {
-	/*
-		fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
-			dbSize.Update(fileInfo.Size())
-			if err := db.View(context.Background(), func(tx Tx) error {
-			stat, _ := tx.(*lmdbTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
-			tableScsLeaf.Update(int64(stat.LeafPages))
-			tableScsBranch.Update(int64(stat.BranchPages))
-			tableScsOverflow.Update(int64(stat.OverflowPages))
-			tableScsEntries.Update(int64(stat.Entries))
-
-			stat, _ = tx.(*lmdbTx).BucketStat(dbutils.PlainStateBucket)
-			tableStateLeaf.Update(int64(stat.LeafPages))
-			tableStateBranch.Update(int64(stat.BranchPages))
-			tableStateOverflow.Update(int64(stat.OverflowPages))
-			tableStateEntries.Update(int64(stat.Entries))
-
-			stat, _ = tx.(*lmdbTx).BucketStat(dbutils.Log)
-			tableLogLeaf.Update(int64(stat.LeafPages))
-			tableLogBranch.Update(int64(stat.BranchPages))
-			tableLogOverflow.Update(int64(stat.OverflowPages))
-			tableLogEntries.Update(int64(stat.Entries))
-
-			stat, _ = tx.(*lmdbTx).BucketStat(dbutils.EthTx)
-			tableTxLeaf.Update(int64(stat.LeafPages))
-			tableTxBranch.Update(int64(stat.BranchPages))
-			tableTxOverflow.Update(int64(stat.OverflowPages))
-			tableTxEntries.Update(int64(stat.Entries))
-
-			stat, _ = tx.(*lmdbTx).BucketStat("gc")
-			tableGcLeaf.Update(int64(stat.LeafPages))
-			tableGcBranch.Update(int64(stat.BranchPages))
-			tableGcOverflow.Update(int64(stat.OverflowPages))
-			tableGcEntries.Update(int64(stat.Entries))
-			return nil
-		}); err != nil {
-			log.Error("collecting metrics failed", "err", err)
-		}
-	*/
+	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	dbSize.Update(fileInfo.Size())
 }
 
 func (db *LmdbKV) BeginRo(_ context.Context) (txn Tx, err error) {
@@ -501,6 +470,8 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 	}
 	return nil
 }
+
+func (tx *lmdbTx) CollectMetrics() {}
 
 func (tx *lmdbTx) CreateBucket(name string) error {
 	var flags = tx.db.buckets[name].Flags
