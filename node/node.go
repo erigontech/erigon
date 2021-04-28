@@ -127,10 +127,7 @@ func New(conf *Config) (*Node, error) {
 		}
 	}
 	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase, err = node.config.NodeDB()
-		if err != nil {
-			return nil, err
-		}
+		node.server.Config.NodeDatabase = node.config.NodeDB()
 	}
 
 	// Check HTTP/WS prefixes are valid.

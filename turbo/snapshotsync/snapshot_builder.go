@@ -130,22 +130,6 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 	return nil
 }
 
-
-
-/*
-Создать снепшот
-Подменить снепшот в базе
-Остановить раздачи старого снепшота
-Удалить раздачу старого снепшота
-Удалить старый снепшот
-Удалить данные из основной бд
-
-
-Находится в стейдже Final
-Сохранение промежуточного прогресса
-Проход для каждого снепшота последовательный
-*/
-
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
 	return &SnapshotMigrator{
 		snapshotsDir: snapshotDir,
@@ -425,14 +409,6 @@ func RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx, currentSnapshot, newSna
 	if headerSnapshot == nil {
 		return  nil
 	}
-
-	/*
-			if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
-		}
-	*/
 
 	snapshotDB:=ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
 	c,err:=tx.RwCursor(dbutils.HeadersBucket)

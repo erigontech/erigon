@@ -191,9 +191,9 @@ func (c *Config) IPCEndpoint() string {
 }
 
 // NodeDB returns the path to the discovery node database.
-func (c *Config) NodeDB() (string, error) {
+func (c *Config) NodeDB() (string) {
 	//todo fix
-	return c.ResolvePath(datadirNodeDatabase), nil
+	return c.ResolvePath(datadirNodeDatabase)
 }
 
 // DefaultIPCEndpoint returns the IPC path used by default.

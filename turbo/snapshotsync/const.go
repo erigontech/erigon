@@ -13,9 +13,10 @@ const (
 	MdbxFilename     = "mdbx.dat"
 	EpochSize = 500_000
 
-	HeadersSnapshotHash  = "4dcebdf20f67ce0a478fd5059a4c613ac961e138" //11кk block 1mb chunk
-	BlocksSnapshotHash   = "296f1703f68afb46c3df040b097e2628fc27a66d" //11кk block 1mb chunk
-	StateSnapshotHash    = "8f024711b2c2c277109b44053fcaab1b13346e69"
+	//todo It'll be changed after enabling new snapshot generation mechanism
+	HeadersSnapshotHash  = ""
+	BlocksSnapshotHash   = ""
+	StateSnapshotHash    = ""
 
 	SnapshotInfoHashPrefix  = "ih"
 	SnapshotInfoBytesPrefix = "ib"
@@ -31,14 +32,6 @@ var (
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
-
-func GetAvailableSnapshotTypes(networkID uint64) []SnapshotType {
-	types := make([]SnapshotType, 0, len(TorrentHashes[networkID]))
-	for k := range TorrentHashes[networkID] {
-		types = append(types, k)
-	}
-	return types
-}
 
 var Trackers = [][]string{{
 	"http://35.189.110.210:80/announce",

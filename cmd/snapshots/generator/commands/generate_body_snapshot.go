@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func init() {
@@ -38,18 +37,6 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
 	var err error
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
 
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{

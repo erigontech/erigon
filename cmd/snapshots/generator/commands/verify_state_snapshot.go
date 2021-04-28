@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -35,25 +34,6 @@ var verifyStateSnapshotCmd = &cobra.Command{
 }
 
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
-	db, err := ethdb.Open(dbPath, true)
-	if err != nil {
-		return fmt.Errorf("open err: %w", err)
-	}
-
-	kv := db.RwKV()
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
-	db.SetRwKV(kv)
-
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
