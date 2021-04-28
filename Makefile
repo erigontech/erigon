@@ -33,10 +33,9 @@ docker:
 docker-compose:
 	docker-compose up
 
-# debug build allows see C stack traces
+# debug build allows see C stack traces. You don't need it for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
-	# use SETCGOTRCKEBACK=1 for profiling C code
 
 geth:
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
