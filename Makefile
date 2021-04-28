@@ -32,10 +32,6 @@ docker:
 docker-compose:
 	docker-compose up
 
-# Building all binaries for debugging by delve
-all-dbg: mdbx
-	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
-
 geth:
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
