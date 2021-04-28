@@ -715,14 +715,14 @@
           "refId": "D"
         },
         {
-          "expr": "db_pgops_merge{instance=~\"$instance\"}",
+          "expr": "rate(db_pgops_merge{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "merge: {{instance}}",
           "refId": "E"
         },
         {
-          "expr": "db_pgop_spill{instance=~\"$instance\"}",
+          "expr": "rate(db_pgop_spill{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "spill: {{instance}}",
@@ -747,7 +747,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "DB Pages Ops",
+      "title": "DB Pages Ops/sec",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4607,7 +4607,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-12h",
     "to": "now"
   },
   "timepicker": {
@@ -4637,5 +4637,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 76
+  "version": 79
 }
