@@ -765,7 +765,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:117",
-          "format": "decbytes",
+          "format": "ops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -4516,7 +4516,7 @@
     ]
   },
   "time": {
-    "from": "now-12h",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {
@@ -4546,5 +4546,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 81
+  "version": 82
 }
