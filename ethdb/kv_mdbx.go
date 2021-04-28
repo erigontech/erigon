@@ -712,6 +712,7 @@ func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Put(k, v)
 	}
 
@@ -725,6 +726,7 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Delete(k, v)
 	}
 
