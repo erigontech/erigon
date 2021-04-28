@@ -23,7 +23,6 @@ import (
 )
 
 // Transaction implements trace_transaction
-// TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
@@ -31,11 +30,66 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 	defer tx.Rollback()
 
-	traces, err := api.getTransactionTraces(tx, ctx, txHash)
+	txn, _, blockNumber, _ := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
+	if txn == nil {
+		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+	}
+
+	bn := hexutil.Uint64(blockNumber)
+
+	// Extract transactions from block
+	hash, hashErr := rawdb.ReadCanonicalHash(tx, blockNumber)
+	if hashErr != nil {
+		return nil, hashErr
+	}
+	block, senders, sendersErr := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), hash, uint64(bn))
+	if sendersErr != nil {
+		return nil, sendersErr
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	blockTxs := block.Transactions()
+	if len(blockTxs) != len(senders) {
+		return nil, errors.New("block txs len != senders len")
+	}
+
+	txs := make([]TransactionWithSender, 0, len(senders))
+	for n, tx := range blockTxs {
+		if (tx.Hash() == txHash) {
+			txs = append(txs, TransactionWithSender{
+				tx:     tx,
+				sender: senders[n],
+			})
+		}
+	}
+
+	baseBn := bn
+	if baseBn > 0 {
+		baseBn -= 1
+	}
+
+	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
-	return traces, err
+
+	out := make([]ParityTrace, 0, len(traces))
+	blockno := uint64(bn)
+	for txno, trace := range traces {
+		txhash := txs[txno].tx.Hash()
+		txpos := uint64(txno)
+		for _, pt := range trace.Trace {
+			pt.BlockHash = &hash
+			pt.BlockNumber = &blockno
+			pt.TransactionHash = &txhash
+			pt.TransactionPosition = &txpos
+			out = append(out, *pt)
+		}
+	}
+
+	return out, err
 }
 
 // Get implements trace_get
