@@ -929,7 +929,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 10,
+        "h": 15,
         "w": 8,
         "x": 0,
         "y": 15
@@ -995,6 +995,62 @@
           "interval": "",
           "legendFormat": "system_disk_writebytes: {{instance}}",
           "refId": "F"
+        },
+        {
+          "expr": "db_pgops_newly{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_newly: {{instance}}",
+          "refId": "H"
+        },
+        {
+          "expr": "db_pgops_cow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_cow: {{instance}}",
+          "refId": "I"
+        },
+        {
+          "expr": "db_pgops_clone{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_clone: {{instance}}",
+          "refId": "J"
+        },
+        {
+          "expr": "db_pgops_split{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_split: {{instance}}",
+          "refId": "K"
+        },
+        {
+          "expr": "db_pgops_merge{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_merge: {{instance}}",
+          "refId": "L"
+        },
+        {
+          "expr": "db_pgops_spill{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_spill: {{instance}}",
+          "refId": "G"
+        },
+        {
+          "expr": "db_pgops_unspill{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_unspill: {{instance}}",
+          "refId": "M"
+        },
+        {
+          "expr": "db_pgops_wops{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pgops_wops: {{instance}}",
+          "refId": "N"
         }
       ],
       "timeFrom": null,
@@ -1453,150 +1509,6 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 0,
-        "y": 25
-      },
-      "hiddenSeries": false,
-      "id": 148,
-      "legend": {
-        "alignAsTable": false,
-        "avg": false,
-        "current": false,
-        "hideEmpty": true,
-        "hideZero": true,
-        "max": true,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.4.3",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "mem_rss{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "rss: {{instance}}",
-          "refId": "A"
-        },
-        {
-          "expr": "mem_vms{instance=~\"$instance\"}",
-          "hide": true,
-          "interval": "",
-          "legendFormat": "vms: {{instance}}",
-          "refId": "B"
-        },
-        {
-          "expr": "mem_hwm{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "hwm: {{instance}}",
-          "refId": "C"
-        },
-        {
-          "expr": "mem_data{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "data: {{instance}}",
-          "refId": "D"
-        },
-        {
-          "expr": "mem_stack{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "stack: {{instance}}",
-          "refId": "E"
-        },
-        {
-          "expr": "mem_locked{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "locked: {{instance}}",
-          "refId": "F"
-        },
-        {
-          "expr": "mem_swap{instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "swap: {{instance}}",
-          "refId": "G"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "mem: resident set size",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:161",
-          "format": "decbytes",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:162",
-          "format": "kbytes",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
-        }
-      ],
-      "yaxis": {
-        "align": true,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
       "datasource": "Prometheus",
       "description": "",
       "fieldConfig": {
@@ -1814,7 +1726,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "Prometheus",
+      "datasource": null,
       "description": "",
       "fieldConfig": {
         "defaults": {
@@ -1829,6 +1741,248 @@
         "w": 8,
         "x": 0,
         "y": 30
+      },
+      "hiddenSeries": false,
+      "id": 148,
+      "legend": {
+        "alignAsTable": false,
+        "avg": false,
+        "current": false,
+        "hideEmpty": true,
+        "hideZero": true,
+        "max": true,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "mem_rss{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "rss: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "mem_vms{instance=~\"$instance\"}",
+          "hide": true,
+          "interval": "",
+          "legendFormat": "vms: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "mem_hwm{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "hwm: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "mem_data{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "data: {{instance}}",
+          "refId": "D"
+        },
+        {
+          "expr": "mem_stack{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "stack: {{instance}}",
+          "refId": "E"
+        },
+        {
+          "expr": "mem_locked{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "locked: {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "mem_swap{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "swap: {{instance}}",
+          "refId": "G"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "mem: resident set size",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:161",
+          "format": "decbytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:162",
+          "format": "kbytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": true,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 30
+      },
+      "hiddenSeries": false,
+      "id": 124,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(system_memory_pauses{instance=~\"$instance\"}[1m])",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "system/memory/pauses: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "GC Stop the World per sec",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:1032",
+          "format": "ns",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:1033",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 86,
@@ -1938,106 +2092,8 @@
       "gridPos": {
         "h": 5,
         "w": 8,
-        "x": 16,
-        "y": 30
-      },
-      "hiddenSeries": false,
-      "id": 124,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.4.3",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(system_memory_pauses{instance=~\"$instance\"}[1m])",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "system/memory/pauses: {{instance}}",
-          "refId": "A"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "GC Stop the World per sec",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:1032",
-          "format": "ns",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:1033",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 5,
-        "w": 8,
         "x": 0,
-        "y": 35
+        "y": 40
       },
       "hiddenSeries": false,
       "id": 106,
@@ -2136,7 +2192,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 45
       },
       "id": 82,
       "panels": [],
@@ -2162,7 +2218,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 41
+        "y": 46
       },
       "hiddenSeries": false,
       "id": 157,
@@ -2325,7 +2381,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 51
       },
       "id": 146,
       "panels": [],
@@ -2350,7 +2406,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 47
+        "y": 52
       },
       "hiddenSeries": false,
       "id": 122,
@@ -2459,7 +2515,7 @@
         "h": 5,
         "w": 9,
         "x": 15,
-        "y": 47
+        "y": 52
       },
       "hiddenSeries": false,
       "id": 140,
@@ -2557,7 +2613,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 143,
@@ -2705,7 +2761,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 162,
@@ -2852,7 +2908,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 57
       },
       "hiddenSeries": false,
       "id": 156,
@@ -2950,7 +3006,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 62
       },
       "hiddenSeries": false,
       "id": 142,
@@ -3150,7 +3206,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 67
       },
       "id": 75,
       "panels": [],
@@ -3175,7 +3231,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 63
+        "y": 68
       },
       "hiddenSeries": false,
       "id": 96,
@@ -3286,7 +3342,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 63
+        "y": 68
       },
       "hiddenSeries": false,
       "id": 77,
@@ -3391,7 +3447,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 74
       },
       "id": 4,
       "panels": [],
@@ -3434,7 +3490,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 70
+        "y": 75
       },
       "id": 108,
       "interval": null,
@@ -3512,7 +3568,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 70
+        "y": 75
       },
       "id": 111,
       "interval": null,
@@ -3590,7 +3646,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 70
+        "y": 75
       },
       "id": 109,
       "interval": null,
@@ -3668,7 +3724,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 70
+        "y": 75
       },
       "id": 113,
       "interval": null,
@@ -3746,7 +3802,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 70
+        "y": 75
       },
       "id": 114,
       "interval": null,
@@ -3824,7 +3880,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 70
+        "y": 75
       },
       "id": 115,
       "interval": null,
@@ -3885,7 +3941,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 73
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 110,
@@ -4000,7 +4056,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 73
+        "y": 78
       },
       "hiddenSeries": false,
       "id": 116,
@@ -4115,7 +4171,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 84
       },
       "hiddenSeries": false,
       "id": 117,
@@ -4290,7 +4346,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 91
       },
       "id": 138,
       "panels": [
@@ -4581,5 +4637,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 75
+  "version": 76
 }
