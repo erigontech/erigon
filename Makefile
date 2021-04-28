@@ -4,7 +4,6 @@ GOTEST = go test ./... -p 1 --tags 'mdbx'
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GOBUILD = env GO111MODULE=on CGO_CFLAGS='-DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
-GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
@@ -104,15 +103,6 @@ mdbx:
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
-#		&& cp config.h ./../ && cp mdbx.h ./../ && cp mdbx.c ./../
-
-mdbx-dbg:
-	@echo "Building mdbx"
-	@cd ethdb/mdbx/dist/ \
-		&& make config.h \
-		&& echo '#define MDBX_DEBUG 1' >> config.h \
-		&& echo '#define MDBX_FORCE_ASSERTIONS 1' >> config.h \
-        && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g' make mdbx-static.o
 #		&& cp config.h ./../ && cp mdbx.h ./../ && cp mdbx.c ./../
 
 test: mdbx
