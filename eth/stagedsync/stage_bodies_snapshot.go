@@ -6,5 +6,6 @@ import (
 )
 
 func SpawnBodiesSnapshotGenerationStage(s *StageState, db ethdb.Database, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
-	return s.DoneAndUpdate(db, 0)
+	s.Done()
+	return nil
 }

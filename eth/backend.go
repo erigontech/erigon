@@ -155,6 +155,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	if config.SnapshotLayout {
 		/*
+		0) Если скачивание начато, то продолжить/начать качать
 		1) Понять, какие сейчас снепшоты есть и рабочие
 		2) Подключиться к ним
 		3) Обернуть в них дб
