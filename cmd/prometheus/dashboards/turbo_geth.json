@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1619536081029,
+  "iteration": 1619578131782,
   "links": [],
   "panels": [
     {
@@ -688,27 +688,27 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "db_pgops_newly{instance=~\"$instance\"}",
+          "expr": "rate(db_pgops_newly{instance=~\"$instance\"}[$__rate_interval])",
           "interval": "",
           "legendFormat": "newly: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "db_pgops_cow{instance=~\"$instance\"}",
+          "expr": "rate(db_pgops_cow{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "cow: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "db_pgops_clone{instance=~\"$instance\"}",
+          "expr": "rate(db_pgops_clone{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "clone: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "db_pgops_split{instance=~\"$instance\"}",
+          "expr": "rate(db_pgops_split{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "split: {{instance}}",
@@ -729,14 +729,14 @@
           "refId": "F"
         },
         {
-          "expr": "db_pgop_wops{instance=~\"$instance\"}",
+          "expr": "rate(db_pgop_wops{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "wops: {{instance}}",
           "refId": "G"
         },
         {
-          "expr": "db_pgop_unspill{instance=~\"$instance\"}",
+          "expr": "rate(db_pgop_unspill{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "unspill: {{instance}}",
@@ -4520,14 +4520,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "tags": [],
-          "text": [
-            "turbogeth16d.weblogix.it:6060"
-          ],
-          "value": [
-            "turbogeth16d.weblogix.it:6060"
-          ]
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "system_cpu_sysload",
@@ -4556,7 +4551,7 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {
@@ -4586,5 +4581,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 74
+  "version": 75
 }
