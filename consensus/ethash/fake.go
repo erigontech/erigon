@@ -55,32 +55,39 @@ func newFakeEth(mode Mode) Ethash {
 	}
 }
 
-func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
+func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (*consensus.ParentsRequest, error) {
 	fakeSeals := make([]bool, len(seals))
-	if err := f.Ethash.VerifyHeaders(chain, headers, fakeSeals); err != nil {
-		return err
+	parentsReq, err := f.Ethash.VerifyHeaders(chain, headers, fakeSeals)
+	if err != nil {
+		return nil, err
+	}
+	if parentsReq != nil {
+		return parentsReq, nil
 	}
 	for i, header := range headers {
 		if seals[i] {
-			if err := f.VerifySeal(chain, header); err != nil {
-				return err
+			if err = f.VerifySeal(chain, header); err != nil {
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	err := f.Ethash.VerifyHeader(chain, header, false)
+func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) (*consensus.ParentsRequest, error) {
+	parentsReq, err := f.Ethash.VerifyHeader(chain, header, false)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if parentsReq != nil {
+		return parentsReq, nil
 	}
 
 	if seal {
-		return f.VerifySeal(chain, header)
+		return nil, f.VerifySeal(chain, header)
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
@@ -156,13 +163,13 @@ func NewFullFaker() *FullFakeEthash {
 }
 
 // If we're running a full engine faking, accept any input as valid
-func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
-	return nil
+func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) (*consensus.ParentsRequest, error) {
+	return nil, nil
 }
 
 // If we're running a full engine faking, accept any input as valid
-func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
-	return nil
+func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (*consensus.ParentsRequest, error) {
+	return nil, nil
 }
 
 func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Block) error {

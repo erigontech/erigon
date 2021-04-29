@@ -89,7 +89,11 @@ func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.Chai
 		seals[len(seals)-1] = true
 	}
 
-	return engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	_, err := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {

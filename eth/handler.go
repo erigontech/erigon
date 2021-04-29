@@ -164,7 +164,11 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
-		return h.engine.VerifyHeader(stagedsync.ChainReader{Cfg: h.chainConfig, Db: h.database}, header, true)
+		_, err := h.engine.VerifyHeader(stagedsync.ChainReader{Cfg: h.chainConfig, Db: h.database}, header, true)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		if err == nil {

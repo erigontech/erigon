@@ -26,11 +26,11 @@ func NewChainContext(tx ethdb.Tx) *chainContext {
 type powEngine struct {
 }
 
-func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) (*consensus.ParentsRequest, error) {
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (*consensus.ParentsRequest, error) {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {

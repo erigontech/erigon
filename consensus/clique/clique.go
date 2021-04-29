@@ -245,28 +245,23 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	return c.verifyHeader(chain, header, nil)
+func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) (*consensus.ParentsRequest, error) {
+	return nil, c.verifyHeader(chain, header, nil)
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
+func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (*consensus.ParentsRequest, error) {
 	if len(headers) == 0 {
-		return nil
+		return nil, nil
 	}
 	for i, header := range headers {
 		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
-}
-
-type VerifyHeaderResponse struct {
-	Results chan error
-	Cancel  func()
+	return nil, nil
 }
 
 func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {

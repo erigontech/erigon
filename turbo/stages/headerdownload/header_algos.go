@@ -547,7 +547,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			heap.Remove(hd.linkQueue, link.idx)
 		}
 		if !link.preverified {
-			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
+			if _, err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				// skip this link and its children
 				continue

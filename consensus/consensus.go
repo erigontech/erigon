@@ -55,6 +55,16 @@ type ChainReader interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
+// ParentsRequest is a possible return value from VerifyHeader and VerifyHeaders functions
+// when returns, it asks the caller to provider and extra header segment starting from
+// given hash, and either extending down (child->parent) for specified number of headers,
+// or until a common ancestor to one of the given header hashes
+type ParentsRequest struct {
+	TopHash   common.Hash   // hash of the heightest header being requested
+	MaxDepth  int           // Maximum number of headers to go down
+	Relatives []common.Hash // Set of header hashes. If a common ancestor is found between TopHash and any of the relatives, no need to go deeper down
+}
+
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
 	// Author retrieves the Ethereum address of the account that minted the given
@@ -65,13 +75,13 @@ type Engine interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
 	// given engine. Verifying the seal may be done optionally here, or explicitly
 	// via the VerifySeal method.
-	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) error
+	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) (*ParentsRequest, error)
 
 	// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
 	// concurrently. The method returns a quit channel to abort the operations and
 	// a results channel to retrieve the async verifications (the order is that of
 	// the input slice).
-	VerifyHeaders(chain ChainHeaderReader, headers []*types.Header, seals []bool) error
+	VerifyHeaders(chain ChainHeaderReader, headers []*types.Header, seals []bool) (*ParentsRequest, error)
 
 	// VerifyUncles verifies that the given block's uncles conform to the consensus
 	// rules of a given engine.

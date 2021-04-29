@@ -53,10 +53,10 @@ func TestHeaderVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				_, err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			} else {
 				engine := ethash.NewFakeFailer(headers[i].Number.Uint64())
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				_, err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)

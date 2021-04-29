@@ -91,27 +91,27 @@ func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
-func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) (*consensus.ParentsRequest, error) {
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
 	if chain.GetHeader(header.Hash(), number) != nil {
-		return nil
+		return nil, nil
 	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
-		return consensus.ErrUnknownAncestor
+		return nil, consensus.ErrUnknownAncestor
 	}
 	// Sanity checks passed, do a proper verification
-	return ethash.verifyHeader(chain, header, parent, false, seal)
+	return nil, ethash.verifyHeader(chain, header, parent, false, seal)
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
 // concurrently. The method returns a quit channel to abort the operations and
 // a results channel to retrieve the async verifications.
-func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
+func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (*consensus.ParentsRequest, error) {
 	if len(headers) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Spawn as many workers as allowed threads
@@ -150,11 +150,11 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 	wg.Wait()
 	for _, err := range errors {
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int) error {
