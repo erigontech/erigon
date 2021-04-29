@@ -42,6 +42,7 @@ func runTurboGeth(cliCtx *cli.Context) {
 	}
 
 	var sync *stagedsync.StagedSync
+	fmt.Println("cliCtx.Bool(turbocli.SnapshotDatabaseLayoutFlag.Name)", cliCtx.Bool(turbocli.SnapshotDatabaseLayoutFlag.Name))
 	if cliCtx.Bool(turbocli.SnapshotDatabaseLayoutFlag.Name) {
 		sync = stagedsync.New(
 			stagedsync.WithSnapshotsStages(),

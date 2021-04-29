@@ -498,29 +498,24 @@ func DefaultUnwindOrder() UnwindOrder {
 
 func WithSnapshotsStages() StageBuilders {
 	defaultStages :=DefaultStages()
-	final:= defaultStages[len(defaultStages)-1]
-	defaultStages = defaultStages[:1]
-	defaultStages = append(defaultStages, StageBuilder{
-		ID: stages.CreateHeadersSnapshot,
-		Build: func(world StageParameters) *Stage {
-			return &Stage{
-				ID:          stages.CreateHeadersSnapshot,
-				Description: "Create headers snapshot",
-				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
-				},
-				UnwindFunc: func(u *UnwindState, s *StageState) error {
-					return u.Done(world.DB)
-				},
-			}
-		},
-	})
-	defaultStages = append(defaultStages, final)
-	fmt.Println("stages")
-	for i:=range defaultStages {
-		fmt.Println(defaultStages[i].ID)
-	}
-	return defaultStages
+	//final:= defaultStages[len(defaultStages)-1]
+	//defaultStages = defaultStages[:1]
+	//defaultStages = append(defaultStages, StageBuilder{
+	//	ID: stages.CreateHeadersSnapshot,
+	//	Build: func(world StageParameters) *Stage {
+	//		return &Stage{
+	//			ID:          stages.CreateHeadersSnapshot,
+	//			Description: "Create headers snapshot",
+	//			ExecFunc: func(s *StageState, u Unwinder) error {
+	//				return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
+	//			},
+	//			UnwindFunc: func(u *UnwindState, s *StageState) error {
+	//				return u.Done(world.DB)
+	//			},
+	//		}
+	//	},
+	//})
+	//defaultStages = append(defaultStages, final)
 
 	blockHashesStageIndex:=-1
 	sendersStageIndex:=-1
@@ -537,7 +532,8 @@ func WithSnapshotsStages() StageBuilders {
 		}
 	}
 	if blockHashesStageIndex < 0 || sendersStageIndex < 0 ||  hashedStateStageIndex < 0{
-		log.Error("Unrecognized block hashes stage")
+		log.Error("Unrecognized block hashes stage", "blockHashesStageIndex < 0", blockHashesStageIndex < 0, "sendersStageIndex < 0", sendersStageIndex < 0, "hashedStateStageIndex < 0", hashedStateStageIndex < 0)
+		panic("sda")
 		return DefaultStages()
 	}
 
@@ -593,13 +589,34 @@ func WithSnapshotsStages() StageBuilders {
 
 	})
 	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[hashedStateStageIndex:]...)
+	fmt.Println("stages")
+	for i:=range stagesWithSnapshots {
+		fmt.Println(stagesWithSnapshots[i].ID)
+	}
+	fmt.Println("==================default=========================")
+	defaultStages2 := DefaultStages()
+	for i:=range defaultStages2 {
+		fmt.Println(defaultStages2[i].ID)
+	}
+
+	fmt.Println("===============unwind=======================")
+	unwindOrder:=UnwindOrderWithSnapshots()
+	for _,i:=range unwindOrder {
+		fmt.Println(i,len(stagesWithSnapshots)-i-2, stagesWithSnapshots[len(stagesWithSnapshots)-i-2].ID)
+	}
+
+	fmt.Println("==================default unwind=========================")
+	unwindOrder=DefaultUnwindOrder()
+	for _,i:=range unwindOrder {
+		fmt.Println(i,len(defaultStages2)-i-2,  defaultStages2[len(defaultStages2)-i-2].ID)
+	}
+	fmt.Println("====================================================")
+
+	panic("fsad")
 	return stagesWithSnapshots
 }
 
 func UnwindOrderWithSnapshots() UnwindOrder {
-	return []int{
-		0, 1, 2,
-	}
 	//todo fix unwind order
 	return []int{
 		0, 1, 2, 3,
@@ -609,9 +626,10 @@ func UnwindOrderWithSnapshots() UnwindOrder {
 		4, 5,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 7,
-		8, 9, 10, 11, 13, 14,
+		8, 9, 10, 11, 12, 13, 14,
 	}
 }
+
 
 
 
