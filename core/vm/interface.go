@@ -37,7 +37,6 @@ type IntraBlockState interface {
 	SetNonce(common.Address, uint64)
 
 	GetCodeHash(common.Address) common.Hash
-	//GetCodeVM(common.Address) VmType
 	GetCode(common.Address) []byte
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int

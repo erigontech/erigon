@@ -78,12 +78,10 @@ type EVMInterpreter struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
-
-	vmType VmType
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
-func NewEVMInterpreter(evm *EVM, cfg Config, vmType VmType) *EVMInterpreter {
+func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
 	case evm.chainRules.IsAleut:
@@ -119,7 +117,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config, vmType VmType) *EVMInterpreter {
 		evm:    evm,
 		cfg:    cfg,
 		jt:     jt,
-		vmType: vmType,
 	}
 }
 

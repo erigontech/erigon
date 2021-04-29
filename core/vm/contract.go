@@ -63,7 +63,7 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool, vmType VmType) *Contract {
+func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool, isTEVM bool) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
 
 	if parent, ok := caller.(*Contract); ok {
@@ -81,7 +81,10 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 
 	c.skipAnalysis = skipAnalysis
 
-	c.vmType = vmType
+	c.vmType = EVMType
+	if isTEVM {
+		c.vmType = TEVMType
+	}
 
 	return c
 }

@@ -93,13 +93,13 @@ func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg, readerWriterWrapper func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg, readerWriterWrapper func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter, checkTEMV func(addr common.Address) (bool, error)) error {
 	blockNum := block.NumberU64()
 	stateReader, stateWriter := newStateReaderWriter(params, batch, tx, blockNum, readerWriterWrapper)
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	receipts, err := core.ExecuteBlockEphemerally(params.chainConfig, params.vmConfig, getHeader, params.engine, block, stateReader, stateWriter)
+	receipts, err := core.ExecuteBlockEphemerally(params.chainConfig, params.vmConfig, getHeader, params.engine, block, stateReader, stateWriter, checkTEMV)
 	if err != nil {
 		return err
 	}
@@ -215,15 +215,17 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 
 			stateReaderWriter := NewTouchReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNum))
 
-			if err = executeBlockWithGo(block, tx, batch, params, NewTouchReaderWriter); err != nil {
+			checkTEMV := func(addr common.Address) (bool, error) { return tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes()) }
+
+			if err = executeBlockWithGo(block, tx, batch, params, NewTouchReaderWriter, checkTEMV); err != nil {
 				return err
 			}
 
 			// TEVM sub-stage
-			hashes := stateReaderWriter.AllCodes()
-			for hash := range hashes {
+			addreses := stateReaderWriter.createdContracts
+			for addr := range addreses {
 				// check for TEVM
-				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, hash.Bytes())
+				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
 				if err != nil {
 					return err
 				}
@@ -232,7 +234,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 					// convert to TEVM
 
 					// mark the contract as TEVM
-					err = tx.Put(dbutils.ContractTEVMCodeBucket, hash.Bytes(), []byte{0})
+					err = tx.Put(dbutils.ContractTEVMCodeBucket, addr.Bytes(), []byte{0})
 					if err != nil {
 						return err
 					}
@@ -463,8 +465,8 @@ func NewTouchReaderWriter(r state.StateReader, w state.WriterWithChangeSets) *To
 	return &TouchReaderWriter{
 		r:                r,
 		w:                w,
-		readCodes:        make(map[common.Hash]struct{}),
-		updatedCodes:     make(map[common.Hash]struct{}),
+		readCodes:        make(map[common.Address]struct{}),
+		updatedCodes:     make(map[common.Address]struct{}),
 		createdContracts: make(map[common.Address]struct{}),
 	}
 }
@@ -472,8 +474,8 @@ func NewTouchReaderWriter(r state.StateReader, w state.WriterWithChangeSets) *To
 type TouchReaderWriter struct {
 	r                state.StateReader
 	w                state.WriterWithChangeSets
-	readCodes        map[common.Hash]struct{}
-	updatedCodes     map[common.Hash]struct{}
+	readCodes        map[common.Address]struct{}
+	updatedCodes     map[common.Address]struct{}
 	createdContracts map[common.Address]struct{}
 }
 
@@ -486,7 +488,7 @@ func (d *TouchReaderWriter) ReadAccountStorage(address common.Address, incarnati
 }
 
 func (d *TouchReaderWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	d.readCodes[codeHash] = struct{}{}
+	d.readCodes[address] = struct{}{}
 	return d.r.ReadAccountCode(address, incarnation, codeHash)
 }
 
@@ -511,7 +513,7 @@ func (d *TouchReaderWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (d *TouchReaderWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	d.updatedCodes[codeHash] = struct{}{}
+	d.updatedCodes[address] = struct{}{}
 	return d.w.UpdateAccountCode(address, incarnation, codeHash, code)
 }
 
@@ -528,13 +530,18 @@ func (d *TouchReaderWriter) CreateContract(address common.Address) error {
 	return d.w.CreateContract(address)
 }
 
-func (d *TouchReaderWriter) AllCodes() map[common.Hash]struct{} {
-	c := make(map[common.Hash]struct{})
-	for hash := range d.readCodes {
-		c[hash] = struct{}{}
+func (d *TouchReaderWriter) AllCodes() map[common.Address]struct{} {
+	c := make(map[common.Address]struct{}, len(d.readCodes)+len(d.updatedCodes)+len(d.createdContracts))
+
+	for addr := range d.readCodes {
+		c[addr] = struct{}{}
 	}
-	for hash := range d.updatedCodes {
-		c[hash] = struct{}{}
+	for addr := range d.updatedCodes {
+		c[addr] = struct{}{}
 	}
+	for addr := range d.createdContracts {
+		c[addr] = struct{}{}
+	}
+
 	return c
 }
