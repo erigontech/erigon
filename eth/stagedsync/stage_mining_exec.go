@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -40,7 +41,13 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	checkTEVM := func(addr common.Address) (bool, error) { return tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes()) }
+	checkTEVM := func(addr common.Address) (bool, error) {
+		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return false, err
+		}
+		return ok, nil
+	}
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since

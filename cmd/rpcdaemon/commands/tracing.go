@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -42,7 +43,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := func(addr common.Address) (bool, error) {return tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())}
+	checkTEVM := func(addr common.Address) (bool, error) {
+		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return false, err
+		}
+		return ok, nil
+	}
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err

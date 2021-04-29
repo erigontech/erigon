@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -168,7 +169,13 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		checkTEVM := func(addr common.Address) (bool, error) { return tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes()) }
+		checkTEVM := func(addr common.Address) (bool, error) {
+			ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
+		}
 		if _, err := core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
@@ -304,7 +311,13 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		stateReader := state.NewPlainKvState(db, blockNum-1)
 		stateWriter := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
-		checkTEVM := func(addr common.Address) (bool, error) { return db.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes()) }
+		checkTEVM := func(addr common.Address) (bool, error) {
+			ok, err := db.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
+		}
 		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}

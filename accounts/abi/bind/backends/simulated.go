@@ -104,7 +104,11 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 			return rawdb.ReadHeader(database, hash, number)
 		},
 		checkTEVM: func(addr common.Address) (bool, error) {
-			return database.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			ok, err := database.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
 		},
 		config: genesis.Config,
 	}
@@ -130,7 +134,11 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return rawdb.ReadHeader(database, hash, number)
 		},
 		checkTEVM: func(addr common.Address) (bool, error) {
-			return database.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			ok, err := database.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
 		},
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})

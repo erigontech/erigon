@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -129,7 +130,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
 		checkTEVM := func(addr common.Address) (bool, error) {
-			return rwtx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			ok, err := rwtx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
 		}
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
 		if err1 != nil {

@@ -220,7 +220,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				return stateReaderWriter
 			}
 
-			checkTEMV := func(addr common.Address) (bool, error) { return tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes()) }
+			checkTEMV := func(addr common.Address) (bool, error) {
+				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+				if !errors.Is(err, ethdb.ErrKeyNotFound) {
+					return false, err
+				}
+				return ok, nil
+			}
 
 			if err = executeBlockWithGo(block, tx, batch, params, readerWriterWrapper, checkTEMV); err != nil {
 				return err
@@ -231,13 +237,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 			for addr := range addreses {
 				// check for TEVM
 				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
-				if err != nil {
+				if !errors.Is(err, ethdb.ErrKeyNotFound) {
 					return err
 				}
 
 				if !ok {
-					// convert to TEVM
-
 					// mark the contract as TEVM
 					err = tx.Put(dbutils.ContractTEVMCodeBucket, addr.Bytes(), []byte{0})
 					if err != nil {

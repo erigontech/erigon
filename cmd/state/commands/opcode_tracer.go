@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -542,7 +543,11 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
 		checkTEVM := func(addr common.Address) (bool, error) {
-			return chainDb.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			ok, err := chainDb.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
+			if !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return false, err
+			}
+			return ok, nil
 		}
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
 		if err1 != nil {
