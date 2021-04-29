@@ -233,8 +233,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 			}
 
 			// TEVM sub-stage
-			addreses := stateReaderWriter.createdContracts
-			for addr := range addreses {
+			addresses := stateReaderWriter.createdContracts
+			for addr := range addresses {
 				// check for TEVM
 				ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
 				if !errors.Is(err, ethdb.ErrKeyNotFound) {
