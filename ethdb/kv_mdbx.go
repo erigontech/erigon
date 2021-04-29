@@ -32,6 +32,7 @@ type MdbxOpts struct {
 	bucketsCfg        BucketConfigsFunc
 	mapSize           datasize.ByteSize
 	dirtyListMaxPages uint64
+	verbosity         DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
@@ -71,6 +72,11 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) DBVerbosity(v DBVerbosityLvl) MdbxOpts {
+	opts.verbosity = v
+	return opts
+}
+
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
@@ -98,8 +104,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	if err != nil {
 		return nil, err
 	}
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
+	if opts.verbosity != -1 {
+		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+		if err != nil {
+			return nil, fmt.Errorf("db verbosity set: %w", err)
+		}
+	}
 	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
@@ -702,6 +712,7 @@ func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Put(k, v)
 	}
 
@@ -715,6 +726,7 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Delete(k, v)
 	}
 

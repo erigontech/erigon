@@ -50,12 +50,12 @@ func TestReimportMirroredState(t *testing.T) {
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &core.Genesis{
-		ExtraData: make([]byte, extraVanity+common.AddressLength+extraSeal),
+		ExtraData: make([]byte, ExtraVanity+common.AddressLength+ExtraSeal),
 		Alloc: map[common.Address]core.GenesisAccount{
 			addr: {Balance: big.NewInt(1)},
 		},
 	}
-	copy(genspec.ExtraData[extraVanity:], addr[:])
+	copy(genspec.ExtraData[ExtraVanity:], addr[:])
 	genesis := genspec.MustCommit(db)
 
 	defer cliqueDB.Close()
@@ -88,11 +88,11 @@ func TestReimportMirroredState(t *testing.T) {
 		if i > 0 {
 			header.ParentHash = blocks[i-1].Hash()
 		}
-		header.Extra = make([]byte, extraVanity+extraSeal)
+		header.Extra = make([]byte, ExtraVanity+ExtraSeal)
 		header.Difficulty = diffInTurn
 
 		sig, _ := crypto.Sign(SealHash(header).Bytes(), key)
-		copy(header.Extra[len(header.Extra)-extraSeal:], sig)
+		copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
 		blocks[i] = block.WithSeal(header)
 	}
 	// Insert the first two blocks and make sure the chain is valid

@@ -559,7 +559,12 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 	var receipts types.Receipts
 	usedGas := new(uint64)
-	gp := new(GasPool).AddGas(block.GasLimit())
+	gp := new(GasPool)
+	if chainConfig.IsAleut(block.NumberU64()) {
+		gp.AddGas(block.GasLimit() * params.ElasticityMultiplier)
+	} else {
+		gp.AddGas(block.GasLimit())
+	}
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
@@ -592,9 +597,8 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		}
-		//fmt.Printf("Tx Hash: %x, gas used: %d\n", tx.Hash(), receipt.GasUsed)
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
 		}

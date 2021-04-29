@@ -39,6 +39,7 @@ type LmdbOpts struct {
 	exclusive  bool
 	bucketsCfg BucketConfigsFunc
 	mapSize    datasize.ByteSize
+	verbosity  DBVerbosityLvl
 }
 
 func NewLMDB() LmdbOpts {
@@ -64,6 +65,10 @@ func (opts LmdbOpts) InMem() LmdbOpts {
 
 func (opts LmdbOpts) MapSize(sz datasize.ByteSize) LmdbOpts {
 	opts.mapSize = sz
+	return opts
+}
+func (opts LmdbOpts) DBVerbosity(v DBVerbosityLvl) LmdbOpts {
+	opts.verbosity = v
 	return opts
 }
 
@@ -652,6 +657,7 @@ func (tx *lmdbTx) Put(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Put(k, v)
 	}
 
@@ -665,6 +671,7 @@ func (tx *lmdbTx) Delete(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Delete(k, v)
 	}
 	err := tx.tx.Del(lmdb.DBI(b.DBI), k, v)
