@@ -104,7 +104,7 @@ type BlockContext struct {
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
-	// CheckTEMV returns if the contract has TEVM code
+	// CheckTEMV returns true if the contract has TEVM code
 	CheckTEMV func(addr common.Address) (bool, error)
 
 	// Block information
