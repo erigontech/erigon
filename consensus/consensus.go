@@ -60,9 +60,9 @@ type ChainReader interface {
 // given hash, and either extending down (child->parent) for specified number of headers,
 // or until a common ancestor to one of the given header hashes
 type ParentsRequest struct {
-	TopHash   common.Hash   // hash of the heightest header being requested
-	MaxDepth  int           // Maximum number of headers to go down
-	Relatives []common.Hash // Set of header hashes. If a common ancestor is found between TopHash and any of the relatives, no need to go deeper down
+	ResponseId uint64        // Consensus engine temporarily stores the initial `VerifyHeader` or `VerifyHeaders` request under this id. This id needs to be used for further communications
+	TopHash    common.Hash   // Hash of the heightest header being requested
+	Relatives  []common.Hash // Set of header hashes. If a common ancestor is found between TopHash and any of the relatives, no need to go deeper down
 }
 
 // Engine is an algorithm agnostic consensus engine.
