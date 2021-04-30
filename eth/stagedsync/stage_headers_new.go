@@ -179,7 +179,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch, batch); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {

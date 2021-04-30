@@ -410,7 +410,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx LegacyTx) AsMessage(s Signer) (Message, error) {
+func (tx LegacyTx) AsMessage(_ *Header, s Signer) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
