@@ -87,8 +87,8 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, db ethdb.Database, 
 	}
 
 	if err == nil {
-		if err = s.DoneAndUpdate(tx, to); err != nil {
-			return trie.EmptyRoot, err
+		if err1 := s.DoneAndUpdate(tx, to); err1 != nil {
+			return trie.EmptyRoot, err1
 		}
 	} else if to > s.BlockNumber {
 		log.Warn("Unwinding due to error", "to", s.BlockNumber)
@@ -105,7 +105,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, db ethdb.Database, 
 		}
 	}
 
-	return root, nil
+	return root, err
 }
 
 func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
