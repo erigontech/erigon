@@ -637,8 +637,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
 		case params.AleutChainName:
@@ -679,8 +677,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
 		case params.AleutChainName:
@@ -842,8 +838,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.YoloV3ChainName:
-		return filepath.Join(datadir, "yolo-v3")
 	case params.AleutChainName:
 		return filepath.Join(datadir, "aleut")
 	default:
@@ -1210,11 +1204,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.YoloV3ChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("yolov3x")).Uint64() // "yolov3x"
-		}
-		cfg.Genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
@@ -1308,8 +1297,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.YoloV3ChainName:
-		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
 	case params.AleutChainName:
