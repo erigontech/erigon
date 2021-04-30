@@ -46,18 +46,23 @@ type Contract struct {
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
 	CallerAddress common.Address
-	caller        ContractRef
-	self          ContractRef
-	jumpdests     map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                 // Locally cached result of JUMPDEST analysis
-	skipAnalysis  bool
+	caller		  ContractRef
+	self		  ContractRef
+	jumpdests	  map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
+	analysis	  []uint64				   // Locally cached result of JUMPDEST analysis
+	skipAnalysis  bool					   // due to need for blocks this can't be set true
 
-	Code     []byte
+	// code also lazily analyzed to gather info on operations:
+	//	 basic blocks, jump destinations, push constants ...
+	//	 nils will be change to point to info as needed
+	opsInfo		  []OpInfo
+	
+	Code	 []byte
 	CodeHash common.Hash
 	CodeAddr *common.Address
-	Input    []byte
+	Input	 []byte
 
-	Gas   uint64
+	Gas	  uint64
 	value *uint256.Int
 }
 
@@ -79,6 +84,8 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 	c.value = value
 
 	c.skipAnalysis = skipAnalysis
+	
+//	c.opInfo = make([]OpInfo, len(c.Code), len(c.Code))
 
 	return c
 }

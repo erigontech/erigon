@@ -2,7 +2,7 @@
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU Lesser General Public License fas published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
@@ -18,8 +18,6 @@ package vm
 
 import (
 	"hash"
-	"sync/atomic"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
@@ -28,14 +26,14 @@ import (
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Debug                   bool   // Enables debugging
-	Tracer                  Tracer // Opcode logger
-	NoRecursion             bool   // Disables call, callcode, delegate call and create
-	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
-	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
-	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
-	NoReceipts              bool   // Do not calculate receipts
-	ReadOnly                bool   // Do no perform any block finalisation
+	Debug					bool	 // Enables debugging
+	Tracer					Tracer	 // Opcode logger
+	NoRecursion				bool	 // Disables call, callcode, delegate call and create
+	EnablePreimageRecording bool	 // Enables recording of SHA3/keccak preimages
+	SkipAnalysis			bool	 // Whether we can skip jumpdest analysis based on the checked history
+	TraceJumpDest			bool	 // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts				bool	 // Do not calculate receipts
+	ReadOnly				bool	 // Do no perform any block finalisation
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -54,9 +52,9 @@ type Interpreter interface {
 	//
 	// ```golang
 	// for _, interpreter := range interpreters {
-	//   if interpreter.CanRun(contract.code) {
-	//     interpreter.Run(contract.code, input)
-	//   }
+	//	  if interpreter.CanRun(contract.code) {
+	//		 interpreter.Run(contract.code, input)
+	//	  }
 	// }
 	// ```
 	CanRun([]byte) bool
@@ -65,9 +63,10 @@ type Interpreter interface {
 // callCtx contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type callCtx struct {
-	memory   *Memory
-	stack    *stack.Stack
-	contract *Contract
+	memory	    *Memory
+	stack		*stack.Stack
+	contract	*Contract
+	interpreter *EVMInterpreter
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -83,15 +82,15 @@ type EVMInterpreter struct {
 	evm *EVM
 	cfg Config
 
-	jt *JumpTable // EVM instruction table
+	jt *JumpTable			// EVM instruction table
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher	  keccakState	// Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash	// Keccak256 hasher result array shared across opcodes
 
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
+	readOnly   bool			// Whether to throw on stateful modifications
+	returnData []byte		// Last CALL's return data for subsequent reuse
 }
-
+	
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
@@ -126,7 +125,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	return &EVMInterpreter{
 		evm: evm,
 		cfg: cfg,
-		jt:  jt,
+		jt:	 jt,
 	}
 }
 
@@ -158,24 +157,20 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	var (
-		op          OpCode        // current opcode
-		mem         = NewMemory() // bound memory
-		locStack    = stack.New()
+		mem			= NewMemory() // bound memory
+		locStack	= stack.New()
 		callContext = &callCtx{
-			memory:   mem,
-			stack:    locStack,
-			contract: contract,
+			memory:		 mem,
+			stack:		 locStack,
+			contract:	 contract,
+	        interpreter: in,
 		}
+
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost uint64
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		gasCopy uint64 // for Tracer to log gas remaining before execution
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
+		pc  = uint64(0) // program counter
+		res []byte // result of the opcode execution function
 	)
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
@@ -185,116 +180,206 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}()
 	contract.Input = input
 
-	if in.cfg.Debug {
-		defer func() {
-			if err != nil {
-				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
-				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
-				}
-			}
-		}()
-	}
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
+
 	for {
-		steps++
-		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
-			break
-		}
-		if in.cfg.Debug {
-			// Capture pre-execution values for tracing.
-			logged, pcCopy, gasCopy = false, pc, contract.Gas
-		}
+		op := contract.GetOp(pc)
+		
+		// none of the bare ops can resize memory or use dynamic gas
+		switch op {
+		case ADD:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Add(&x, y)
+		case SUB:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Sub(&x, y)
+		case MUL:
+		x, y := locStack.Pop(), locStack.Peek()
+		y.Mul(&x, y)
+		case DIV:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Div(&x, y)
+		case SDIV:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.SDiv(&x, y)
+		case MOD:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Mod(&x, y)
+		case SMOD:
+		x, y := locStack.Pop(), locStack.Peek()
+		y.SMod(&x, y)
+		case SIGNEXTEND:
+			back, num := locStack.Pop(), locStack.Peek()
+			num.ExtendSign(num, &back)
+		case NOT:
+			x := locStack.Peek()
+			x.Not(x)
+		case LT:
+			x, y := locStack.Pop(), locStack.Peek()
+			if x.Lt(y) {
+				y.SetOne()
+			} else {
+				y.Clear()
+			}
+		case GT:
+			x, y := locStack.Pop(), locStack.Peek()
+			if x.Gt(y) {
+				y.SetOne()
+			} else {
+				y.Clear()
+			}
+		case SLT:
+			x, y := locStack.Pop(), locStack.Peek()
+			if x.Slt(y) {
+				y.SetOne()
+			} else {
+				y.Clear()
+			}
+		case SGT:
+			x, y := locStack.Pop(), locStack.Peek()
+			if x.Sgt(y) {
+				y.SetOne()
+			} else {
+				y.Clear()
+			}
+		case EQ:
+		x, y := locStack.Pop(), locStack.Peek()
+			if x.Eq(y) {
+				y.SetOne()
+			} else {
+				y.Clear()
+			}
+		case ISZERO:
+			x := locStack.Peek()
+			if x.IsZero() {
+				x.SetOne()
+			} else {
+				x.Clear()
+			}
+		case AND:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.And(&x, y)
+		case OR:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Or(&x, y)
+		case XOR:
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Xor(&x, y)
+		case BYTE:
+			th, val := locStack.Pop(), locStack.Peek()
+			val.Byte(&th)
+		case ADDMOD:
+			x, y, z := locStack.Pop(), locStack.Pop(), locStack.Peek()
+			if z.IsZero() {
+				z.Clear()
+			} else {
+				z.AddMod(&x, &y, z)
+			}
+		case MULMOD:
+			x, y, z := locStack.Pop(), locStack.Pop(), locStack.Peek()
+			if z.IsZero() {
+				z.Clear()
+			} else {
+				z.MulMod(&x, &y, z)
+			}
+		case SHL:
+			// opSHL implements Shift Left
+			// The SHL instruction (shift left) pops 2 values from the stack, first arg1 and then arg2,
+			// and pushes on the stack arg2 shifted to the left by arg1 number of bits.
+			// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
+			shift, value := locStack.Pop(), locStack.Peek()
+			if shift.LtUint64(256) {
+				value.Lsh(value, uint(shift.Uint64()))
+			} else {
+				value.Clear()
+			}
+		case SHR:
+			// opSHR implements Logical Shift Right
+			// The SHR instruction (logical shift right) pops 2 values from the stack, first arg1 and then arg2,
+			// and pushes on the stack arg2 shifted to the right by arg1 number of bits with zero fill.
+			// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
+			shift, value := locStack.Pop(), locStack.Peek()
+			if shift.LtUint64(256) {
+				value.Rsh(value, uint(shift.Uint64()))
+			} else {
+				value.Clear()
+			}
+		case SAR:
+			// opSAR implements Arithmetic Shift Right
+			// The SAR instruction (arithmetic shift right) pops 2 values from the stack, first arg1 and then arg2,
+			// and pushes on the stack arg2 shifted to the right by arg1 number of bits with sign extension.
+			shift, value := locStack.Pop(), locStack.Peek()
+			if shift.GtUint64(255) {
+				if value.Sign() >= 0 {
+					value.Clear()
+				} else {
+					// Max negative shift: all bits set
+					value.SetAllOne()
+				}
+				return nil, nil
+			}
+			n := uint(shift.Uint64())
+			value.SRsh(value, n)
+		case POP:
+			locStack.Pop()
 
-		// Get the operation from the jump table and validate the stack to ensure there are
-		// enough stack items available to perform the operation.
-		op = contract.GetOp(pc)
-		operation := in.jt[op]
+		case PUSH1:
+            info := callContext.contract.opsInfo[pc].(PushInfo)
+            integer := info.data
+            callContext.stack.Push(&integer)
+		case PUSH2:
+            info := callContext.contract.opsInfo[pc].(PushInfo)
+            integer := info.data
+            callContext.stack.Push(&integer)
 
-		if operation == nil {
-			return nil, &ErrInvalidOpCode{opcode: op}
-		}
-		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.minStack {
-			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}
-		} else if sLen > operation.maxStack {
-			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
-		}
-		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.chainRules.IsByzantium {
-			// If the interpreter is operating in readonly mode, make sure no
-			// state-modifying operation is performed. The 3rd stack item
-			// for a call operation is the value. Transferring value from one
-			// account to the others means the state is modified and should also
-			// return with an error.
-			if operation.writes || (op == CALL && locStack.Back(2).Sign() != 0) {
-				return nil, ErrWriteProtection
+		case JUMP:	
+			dest := locStack.Pop()
+			pc = dest.Uint64()
+		case JUMPI:
+			dest, cond := locStack.Pop(), locStack.Pop()
+			if !cond.IsZero() {
+				pc = dest.Uint64()
+			} else {
+			    pc++
+				err = enterBlock(callContext, pc)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case JUMPDEST:
+			err = enterBlock(callContext, pc)
+			if err != nil {
+				return nil, err
+			}
+
+		default:
+
+            operation, err := op_gas_memory(in, op, contract, locStack, mem)
+            if err != nil {
+                return nil, err
+            }
+
+			// execute the operation
+			res, err = operation.execute(&pc, in, callContext)
+			// if the operation clears the return data (e.g. it has returning data)
+			// set the last return to the result of the operation.
+			if operation.returns {
+				in.returnData = common.CopyBytes(res)
+			}
+			switch {
+			case operation.halts:
+				return res, err
+			case operation.reverts:
+				return res, err
+			case !operation.jumps:
+				pc++
 			}
 		}
-		// Static portion of gas
-		cost = operation.constantGas // For tracing
-		if !contract.UseGas(operation.constantGas) {
-			return nil, ErrOutOfGas
-		}
-
-		var memorySize uint64
-		// calculate the new memory size and expand the memory to fit
-		// the operation
-		// Memory check needs to be done prior to evaluating the dynamic gas portion,
-		// to detect calculation overflows
-		if operation.memorySize != nil {
-			memSize, overflow := operation.memorySize(locStack)
-			if overflow {
-				return nil, ErrGasUintOverflow
-			}
-			// memory is expanded in words of 32 bytes. Gas
-			// is also calculated in words.
-			if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
-				return nil, ErrGasUintOverflow
-			}
-		}
-		// Dynamic portion of gas
-		// consume the gas and return an error if not enough gas is available.
-		// cost is explicitly set so that the capture state defer method can get the proper cost
-		if operation.dynamicGas != nil {
-			var dynamicCost uint64
-			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
-			cost += dynamicCost // total cost, for debug tracing
-			if err != nil || !contract.UseGas(dynamicCost) {
-				return nil, ErrOutOfGas
-			}
-		}
-		if memorySize > 0 {
-			mem.Resize(memorySize)
-		}
-
-		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
-			logged = true
-		}
-
-		// execute the operation
-		res, err = operation.execute(&pc, in, callContext)
-		// if the operation clears the return data (e.g. it has returning data)
-		// set the last return to the result of the operation.
-		if operation.returns {
-			in.returnData = common.CopyBytes(res)
-		}
-
-		switch {
-		case err != nil:
-			return nil, err
-		case operation.reverts:
-			return res, ErrExecutionReverted
-		case operation.halts:
-			return res, nil
-		case !operation.jumps:
-			pc++
+		if err != nil {
+		    return nil, err
 		}
 	}
 	return nil, nil
@@ -304,4 +389,105 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 // run by the current interpreter.
 func (in *EVMInterpreter) CanRun(code []byte) bool {
 	return true
+}
+
+// check block's stack bounds and use constant gas
+func enterBlock(ctx *callCtx, pc uint64) error {
+
+    // block info is created first time block is entered
+	info, err := getBlockInfo(ctx, pc)
+	if info == nil || err != nil {
+		return err
+	}
+	// check stack, gas, and memory usage
+	if sLen := ctx.stack.Len(); sLen < info.minStack {
+		return &ErrStackUnderflow{stackLen: sLen, required: info.minStack}
+	} else if sLen > info.maxStack {
+		return &ErrStackOverflow{stackLen: sLen, limit: info.maxStack}
+	} else if !ctx.contract.UseGas(info.constantGas) {
+		return ErrOutOfGas
+	}
+	return nil
+}
+
+// resize memory and use dynamic portion of gas
+func op_gas_memory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *stack.Stack, mem *Memory)(*operation, error) {
+	
+	var (
+	    operation *operation = in.jt[op]
+		memorySize uint64
+		err error
+	)
+	
+	err = op_Readonly(in, op, operation, locStack)
+	if err != nil {
+		return nil, err
+	}
+	
+	memorySize, err = op_memory(operation, locStack)
+	if err != nil {
+		return nil, err
+	}
+	err = op_dyn_gas(in.evm, operation, contract, locStack, mem, memorySize)
+	if err != nil {
+		return nil, err
+	}
+	if memorySize > 0 {
+		mem.Resize(memorySize)
+	}
+	return operation, nil
+}
+
+func op_Readonly(in *EVMInterpreter, op OpCode, operation *operation, locStack *stack.Stack) (error) {
+
+	// If the operation is valid, enforce and write restrictions
+	if in.readOnly && in.evm.chainRules.IsByzantium {
+		// If the interpreter is operating in readonly mode, make sure no
+		// state-modifying operation is performed. The 3rd stack item
+		// for a call operation is the value. Transferring value from one
+		// account to the others means the state is modified and should also
+		// return with an error.
+		if operation.writes || (op == CALL && locStack.Back(2).Sign() != 0) {
+			return ErrWriteProtection
+		}
+	}
+	return nil
+}
+
+func op_memory(operation *operation, locStack *stack.Stack)(uint64, error) {
+
+	// calculate the new memory size to expand the memory to fit
+	// the operation
+	// Memory check needs to be done prior to evaluating the dynamic gas portion,
+	// to detect calculation overflows
+	if operation.memorySize != nil {
+		memSize, overflow := operation.memorySize(locStack)
+		if overflow {
+			return 0, ErrGasUintOverflow
+		}
+		// memory is expanded in words of 32 bytes. Gas
+		// is also calculated in words.
+		if memSize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
+			return 0, ErrGasUintOverflow
+		}
+		return memSize, nil
+	}
+	return 0, nil
+}
+
+func op_dyn_gas(evm *EVM, operation *operation, contract *Contract, locStack *stack.Stack, mem *Memory, memorySize uint64) (error) {
+
+	// Dynamic portion of gas
+	// consume the gas and return an error if not enough gas is available.
+	// cost is explicitly set so that the capture state defer method can get the proper cost
+	if operation.dynamicGas != nil {
+		dynamicCost, err := operation.dynamicGas(evm, contract, locStack, mem, memorySize)
+		if err != nil || !contract.UseGas(dynamicCost) {
+			return ErrOutOfGas
+		}
+	}
+	if memorySize > 0 {
+		mem.Resize(memorySize)
+	}
+	return nil
 }

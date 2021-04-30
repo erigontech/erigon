@@ -19,6 +19,45 @@ package vm
 import (
 )
 
+// fill in segment of operation information array for a block
+func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
+	info := NewBlockInfo(ctx.contract, pc)
+	code := ctx.contract.Code
+	jumpTable := ctx.interpreter.jt
+	for ; pc < uint64(len(code)); pc++ {
+		op := OpCode(code[pc])
+		operation := jumpTable[op]
+		if operation == nil {
+			return nil, &ErrInvalidOpCode{opcode: op}
+		}
+		info.minStack += operation.minStack
+		info.maxStack += operation.maxStack
+		info.constantGas += operation.constantGas
+		
+		if op >= PUSH1 && op <= PUSH32 {
+
+			// decode push data to PushInfo
+			// ...			
+			continue
+		}
+		if op == JUMP || op == JUMPI {
+			prevOp := OpCode(code[pc-1])
+			if prevOp >= PUSH1 && prevOp <= PUSH32 {
+
+				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
+				// ...
+			}
+			// end block
+			break
+		}
+		if 	op == JUMPDEST || op == STOP || op == RETURN || op == REVERT || op == SELFDESTRUCT {
+			// end block
+			break
+		}
+	}
+	return nil, nil
+}
+
 // codeBitmap collects data locations in code.
 func codeBitmap(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code

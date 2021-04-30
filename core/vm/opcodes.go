@@ -198,11 +198,14 @@ const (
 	LOG4
 )
 
-// unofficial opcodes used for parsing.
+// unofficial opcodes used for parsing and optimization
 const (
 	PUSH OpCode = 0xb0 + iota
 	DUP
 	SWAP
+	JMP
+	JMPI
+	NOOP
 )
 
 // 0xf0 range - closures.

@@ -18,6 +18,7 @@ package vm
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -585,10 +586,6 @@ func opJumpdest(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	return nil, nil
 }
 
-func opBeginSub(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	return nil, ErrInvalidSubroutineEntry
-}
-
 func opPc(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	callContext.stack.Push(new(uint256.Int).SetUint64(*pc))
 	return nil, nil
@@ -603,6 +600,8 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byt
 	callContext.stack.Push(new(uint256.Int).SetUint64(callContext.contract.Gas))
 	return nil, nil
 }
+
+// operation.returns ...
 
 func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	var (
@@ -620,7 +619,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 
 	callContext.contract.UseGas(gas)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, &value)
+	_, addr, returnGas, suberr := interpreter.evm.Create(callContext.contract, input, gas, &value)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -635,9 +634,6 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 	}
 	callContext.contract.Gas += returnGas
 
-	if suberr == ErrExecutionReverted {
-		return res, nil
-	}
 	return nil, nil
 }
 
@@ -655,7 +651,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	callContext.contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, &endowment, &salt)
+	_, addr, returnGas, suberr := interpreter.evm.Create2(callContext.contract, input, gas, &endowment, &salt)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -667,9 +663,6 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 	callContext.stack.Push(&stackValue)
 	callContext.contract.Gas += returnGas
 
-	if suberr == ErrExecutionReverted {
-		return res, nil
-	}
 	return nil, nil
 }
 
@@ -689,7 +682,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, &value, false /* bailout */)
+	res, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, &value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -698,7 +691,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -707,7 +700,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	callContext.contract.Gas += returnGas
 
-	return ret, nil
+	return res, nil
 }
 
 func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -727,7 +720,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, &value)
+	res, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, &value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -735,7 +728,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -744,10 +737,11 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	callContext.contract.Gas += returnGas
 
-	return ret, nil
+	return res, nil
 }
 
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+if false { fmt.Fprintf(os.Stderr,"CALL: %v\n",*pc) }	
 	stack := callContext.stack
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	// We use it as a temporary value
@@ -759,7 +753,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	// Get arguments from the memory.
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.DelegateCall(callContext.contract, toAddr, args, gas)
+	res, returnGas, err := interpreter.evm.DelegateCall(callContext.contract, toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -767,7 +761,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -776,7 +770,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	}
 	callContext.contract.Gas += returnGas
 
-	return ret, nil
+	return res, nil
 }
 
 func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -791,7 +785,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	// Get arguments from the memory.
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := interpreter.evm.StaticCall(callContext.contract, toAddr, args, gas)
+	res, returnGas, err := interpreter.evm.StaticCall(callContext.contract, toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -799,7 +793,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -808,20 +802,25 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	callContext.contract.Gas += returnGas
 
-	return ret, nil
+	return res, nil
+}
+
+// operation.reverts
+// operation.returns
+
+func opRevert(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
+	res := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
+	return res, ErrExecutionReverted
 }
 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
-	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
-	return ret, nil
+	res := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
+	return res, nil
 }
 
-func opRevert(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
-	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
-	return ret, nil
-}
+// operation.halts
 
 func opStop(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	return nil, nil
@@ -869,38 +868,19 @@ func makeLog(size int) executionFunc {
 
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	var (
-		codeLen = uint64(len(callContext.contract.Code))
-		integer = new(uint256.Int)
-	)
+	info := callContext.contract.opsInfo[*pc].(PushInfo)
+	integer := info.data
+	callContext.stack.Push(&integer)
 	*pc++
-	if *pc < codeLen {
-		callContext.stack.Push(integer.SetUint64(uint64(callContext.contract.Code[*pc])))
-	} else {
-		callContext.stack.Push(integer.Clear())
-	}
 	return nil, nil
 }
 
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-		codeLen := len(callContext.contract.Code)
-
-		startMin := int(*pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
-		}
-		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
-		}
-
-		integer := new(uint256.Int)
-		callContext.stack.Push(integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			callContext.contract.Code[startMin:endMin], pushByteSize)))
-
+		info := callContext.contract.opsInfo[*pc].(PushInfo)
+		integer := info.data
+		callContext.stack.Push(&integer)
 		*pc += size
 		return nil, nil
 	}
