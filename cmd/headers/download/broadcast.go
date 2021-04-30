@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
@@ -15,15 +14,10 @@ import (
 
 // Methods of sentry called by Core
 
-func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, hash common.Hash, number uint64) {
+func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announces eth.NewBlockHashesPacket) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
-	data, err := rlp.EncodeToBytes(&eth.NewBlockHashesPacket{
-		{
-			Hash:   hash,
-			Number: number,
-		},
-	})
+	data, err := rlp.EncodeToBytes(&announces)
 	if err != nil {
 		log.Error("propagateNewBlockHashes", "error", err)
 		return

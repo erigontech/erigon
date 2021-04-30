@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -171,7 +172,8 @@ type HeaderDownload struct {
 	stageReadyCh       chan struct{}
 	stageHeight        uint64
 	topSeenHeight      uint64
-	insertList         []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	insertList         []*Link // List of non-persisted links that can be inserted (their parent is persisted)
+	toAnnounce         eth.NewBlockHashesPacket
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests

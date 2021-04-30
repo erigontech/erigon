@@ -100,11 +100,13 @@ type StatusPacket struct {
 	ForkID          forkid.ID
 }
 
-// NewBlockHashesPacket is the network packet for the block announcements.
-type NewBlockHashesPacket []struct {
+type Announce struct {
 	Hash   common.Hash // Hash of one particular block being announced
 	Number uint64      // Number of one particular block being announced
 }
+
+// NewBlockHashesPacket is the network packet for the block announcements.
+type NewBlockHashesPacket []Announce
 
 // Unpack retrieves the block hashes and numbers from the announcement packet
 // and returns them in a split flat format that's more consistent with the

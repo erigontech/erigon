@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -552,6 +553,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
+			hd.toAnnounce = append(hd.toAnnounce, eth.Announce{Hash: link.header.Hash(), Number: link.header.Number.Uint64()})
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err
@@ -570,6 +572,15 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		delete(hd.links, link.hash)
 	}
 	return nil
+}
+
+// GrabAnnounces - returns all available announces and forget them
+func (hd *HeaderDownload) GrabAnnounces() eth.NewBlockHashesPacket {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	res := hd.toAnnounce
+	hd.toAnnounce = eth.NewBlockHashesPacket{}
+	return res
 }
 
 func (hd *HeaderDownload) Progress() uint64 {

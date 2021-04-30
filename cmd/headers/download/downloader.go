@@ -300,6 +300,7 @@ func NewStagedSync(
 			controlServer.hd,
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
 			controlServer.requestWakeUpBodies,
 			batchSize,
 		),
