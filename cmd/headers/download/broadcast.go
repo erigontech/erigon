@@ -14,6 +14,7 @@ import (
 )
 
 // Methods of sentry called by Core
+
 func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
