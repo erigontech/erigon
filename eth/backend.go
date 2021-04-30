@@ -505,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	if eth.config.P2PDisabled {
+	if eth.config.P2PEnabled {
 		stack.RegisterProtocols(eth.Protocols())
 	}
 

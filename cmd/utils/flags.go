@@ -1132,7 +1132,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
-	cfg.P2PDisabled = len(stack.Config().P2P.SentryAddr) > 0
+	cfg.P2PEnabled = len(stack.Config().P2P.SentryAddr) == 0
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)

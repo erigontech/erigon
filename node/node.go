@@ -254,7 +254,7 @@ func (n *Node) doClose(errs []error) error {
 
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
-	if len(n.config.SentryAddr) > 0 {
+	if len(n.config.P2P.SentryAddr) > 0 {
 		return nil
 	}
 
@@ -296,7 +296,7 @@ func (n *Node) stopServices(running []Lifecycle) error {
 		}
 	}
 
-	if len(n.config.SentryAddr) == 0 {
+	if len(n.config.P2P.SentryAddr) == 0 {
 		// Stop p2p networking.
 		n.server.Stop()
 	}
