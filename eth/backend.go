@@ -505,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	if len(eth.config.SentryAddr) > 0 {
+	if len(eth.config.SentryAddr) == 0 {
 		stack.RegisterProtocols(eth.Protocols())
 	}
 
