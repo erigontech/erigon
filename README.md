@@ -196,6 +196,8 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
 
+**gRPC ports**: `9090` TG, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
 **For dual mode**
 
 If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
@@ -212,14 +214,6 @@ Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, 
 docker-compose build
 XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
-
-### gRPC api's ports
-
-9090 TG
-9091 sentry
-9092 consensus engine
-9093 snapshot downloader
-9094 TxPool
 
 ### Grafana dashboard
 
