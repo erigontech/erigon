@@ -254,23 +254,23 @@ func (n *Node) doClose(errs []error) error {
 
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
-	if len(n.config.P2P.SentryAddr) > 0 {
-		return nil
-	}
-
 	// start networking endpoints
 	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-	if err := n.server.Start(); err != nil {
-		return convertFileLockError(err)
+	if len(n.config.P2P.SentryAddr) == 0 {
+		if err := n.server.Start(); err != nil {
+			return convertFileLockError(err)
+		}
 	}
+
 	// start RPC endpoints
-	//err := n.startRPC()
-	//if err != nil {
-	//n.stopRPC()
-	//n.server.Stop()
-	//}
-	//return err
-	return nil
+	err := n.startRPC()
+	if err != nil {
+		n.stopRPC()
+		if len(n.config.P2P.SentryAddr) == 0 {
+			n.server.Stop()
+		}
+	}
+	return err
 }
 
 // containsLifecycle checks if 'lfs' contains 'l'.
