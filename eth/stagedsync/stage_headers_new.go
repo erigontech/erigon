@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -22,7 +21,7 @@ type HeadersCfg struct {
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
-	announceNewHashes func(context.Context, eth.NewBlockHashesPacket)
+	announceNewHashes func(context.Context, []headerdownload.Announce)
 	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
 }
@@ -31,7 +30,7 @@ func StageHeadersCfg(
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
-	announceNewHashes func(context.Context, eth.NewBlockHashesPacket),
+	announceNewHashes func(context.Context, []headerdownload.Announce),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
 ) HeadersCfg {

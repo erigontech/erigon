@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -152,6 +151,11 @@ type HeaderRequest struct {
 	Reverse bool
 }
 
+type Announce struct {
+	Hash   common.Hash
+	Number uint64
+}
+
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
@@ -173,7 +177,7 @@ type HeaderDownload struct {
 	stageHeight        uint64
 	topSeenHeight      uint64
 	insertList         []*Link // List of non-persisted links that can be inserted (their parent is persisted)
-	toAnnounce         eth.NewBlockHashesPacket
+	toAnnounce         []Announce
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
