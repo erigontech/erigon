@@ -213,6 +213,14 @@ docker-compose build
 XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ```
 
+### gRPC api's ports
+
+9090 TG
+9091 sentry
+9092 consensus engine
+9093 snapshot downloader
+9094 TxPool
+
 ### Grafana dashboard
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
