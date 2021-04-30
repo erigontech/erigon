@@ -505,7 +505,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	stack.RegisterProtocols(eth.Protocols())
+	if len(eth.config.SentryAddr) > 0 {
+		stack.RegisterProtocols(eth.Protocols())
+	}
+
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
 	return eth, nil
