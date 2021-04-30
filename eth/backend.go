@@ -405,7 +405,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloadV2 {
 		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
-		if len(eth.config.SentryAddr) == 0 {
+		if len(eth.config.SentryAddr) > 0 {
 			for i := range eth.config.SentryAddr {
 				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, eth.config.SentryAddr[i])
 				if err != nil {
