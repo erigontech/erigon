@@ -256,14 +256,19 @@ func (n *Node) doClose(errs []error) error {
 func (n *Node) openEndpoints() error {
 	// start networking endpoints
 	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-	if err := n.server.Start(); err != nil {
-		return convertFileLockError(err)
+	if len(n.config.P2P.SentryAddr) == 0 {
+		if err := n.server.Start(); err != nil {
+			return convertFileLockError(err)
+		}
 	}
+
 	// start RPC endpoints
 	err := n.startRPC()
 	if err != nil {
 		n.stopRPC()
-		n.server.Stop()
+		if len(n.config.P2P.SentryAddr) == 0 {
+			n.server.Stop()
+		}
 	}
 	return err
 }
@@ -281,7 +286,7 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 // stopServices terminates running services, RPC and p2p networking.
 // It is the inverse of Start.
 func (n *Node) stopServices(running []Lifecycle) error {
-	n.stopRPC()
+	//n.stopRPC()
 
 	// Stop running lifecycles in reverse order.
 	failure := &StopError{Services: make(map[reflect.Type]error)}
@@ -291,8 +296,10 @@ func (n *Node) stopServices(running []Lifecycle) error {
 		}
 	}
 
-	// Stop p2p networking.
-	n.server.Stop()
+	if len(n.config.P2P.SentryAddr) == 0 {
+		// Stop p2p networking.
+		n.server.Stop()
+	}
 
 	if len(failure.Services) > 0 {
 		return failure
