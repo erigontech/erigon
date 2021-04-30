@@ -157,6 +157,7 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		CanTransfer: canTransfer,
 		Transfer:    transfer,
 		GetHash:     vmTestBlockHash,
+		CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
 		Coinbase:    t.json.Env.Coinbase,
 		BlockNumber: t.json.Env.Number,
 		Time:        t.json.Env.Timestamp,

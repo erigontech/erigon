@@ -93,7 +93,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 
 	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Create a new context to be used in the EVM environment
-	context := NewEVMBlockContext(header, getHeader, engine, author, evm.Context.CheckTEMV)
+	context := NewEVMBlockContext(header, getHeader, engine, author, evm.Context.CheckTEVM)
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
@@ -147,13 +147,13 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, checkTEMV func(addr common.Address) (bool, error)) (*types.Receipt, error) {
+func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, checkTEVM func(addr common.Address) (bool, error)) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEMV)
+	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
 	return applyTransaction(msg, config, getHeader, engine, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

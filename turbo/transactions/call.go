@@ -126,6 +126,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			CanTransfer: core.CanTransfer,
 			Transfer:    core.Transfer,
 			GetHash:     getHashGetter(requireCanonical, tx),
+			CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
 			Coinbase:    header.Coinbase,
 			BlockNumber: header.Number.Uint64(),
 			Time:        header.Time,

@@ -56,7 +56,10 @@ type vmContext struct {
 }
 
 func testCtx() *vmContext {
-	return &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+	return &vmContext{blockCtx: vm.BlockContext{
+		BlockNumber: 1,
+		CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
+	}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
 }
 
 func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
@@ -84,7 +87,10 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 func TestTracer(t *testing.T) {
 	execTracer := func(code string) []byte {
 		t.Helper()
-		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		ctx := &vmContext{blockCtx: vm.BlockContext{
+			BlockNumber: 1,
+			CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
+		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
 		tracer, err := New(code, ctx.txCtx)
 		if err != nil {
 			t.Fatal(err)
@@ -154,7 +160,10 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(vm.BlockContext{BlockNumber: 1}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	env := vm.NewEVM(vm.BlockContext{
+		BlockNumber: 1,
+		CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
+	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(), 0, false, false)
 
 	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck

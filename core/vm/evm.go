@@ -104,8 +104,8 @@ type BlockContext struct {
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
-	// CheckTEMV returns true if the contract has TEVM code
-	CheckTEMV func(addr common.Address) (bool, error)
+	// checkTEVM returns true if the contract has TEVM code
+	CheckTEVM func(addr common.Address) (bool, error)
 
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
@@ -267,7 +267,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			codehash := evm.IntraBlockState.GetCodeHash(addrCopy)
 
 			var isTEVM bool
-			isTEVM, err = evm.Context.CheckTEMV(addrCopy)
+			isTEVM, err = evm.Context.CheckTEVM(addrCopy)
 
 			if err == nil {
 				contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
@@ -337,7 +337,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 
 		var isTEVM bool
 		contractAddress := caller.Address()
-		isTEVM, err = evm.Context.CheckTEMV(contractAddress)
+		isTEVM, err = evm.Context.CheckTEVM(contractAddress)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
@@ -388,7 +388,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 
 		var isTEVM bool
 		contractAddress := caller.Address()
-		isTEVM, err = evm.Context.CheckTEMV(contractAddress)
+		isTEVM, err = evm.Context.CheckTEVM(contractAddress)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis, isTEVM).AsDelegate()
@@ -450,7 +450,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var isTEVM bool
-		isTEVM, err = evm.Context.CheckTEMV(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(addrCopy)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.vmConfig.SkipAnalysis, isTEVM)

@@ -551,7 +551,7 @@ func ExecuteBlockEphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	checkTEMV func(addr common.Address) (bool, error),
+	checkTEVM func(addr common.Address) (bool, error),
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 	block.Uncles()
@@ -580,7 +580,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, checkTEMV)
+		receipt, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, checkTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {
