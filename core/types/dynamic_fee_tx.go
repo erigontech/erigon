@@ -445,6 +445,9 @@ func (tx DynamicFeeTransaction) AsMessage(header *Header, s Signer) (Message, er
 	}
 	msg.gasPrice.SetFromBig(header.BaseFee)
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	if msg.gasPrice.Gt(tx.FeeCap) {
+		msg.gasPrice.Set(tx.FeeCap)
+	}
 
 	var err error
 	msg.from, err = tx.Sender(s)
