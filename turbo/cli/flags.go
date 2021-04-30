@@ -54,10 +54,6 @@ var (
 		Name:  "download.v2",
 		Usage: "enable experimental downloader v2",
 	}
-	SentryAddrFlag = cli.StringSliceFlag{
-		Name:  "sentry.api.addr",
-		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
-	}
 
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
@@ -123,7 +119,6 @@ var (
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
-	cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
 
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {

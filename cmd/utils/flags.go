@@ -467,6 +467,10 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	SentryAddrFlag = cli.StringSliceFlag{
+		Name:  "sentry.api.addr",
+		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
@@ -724,6 +728,9 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
 	}
+	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
+		cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
+	}
 }
 
 // setNAT creates a port mapper from command line flags.
@@ -815,6 +822,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 }
+
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	flags := cmd.Flags()
 	//SetP2PConfig(ctx, &cfg.P2P)
@@ -1123,6 +1131,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
+
+	cfg.P2PDisabled = len(stack.Config().P2P.SentryAddr) > 0
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)

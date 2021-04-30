@@ -405,9 +405,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloadV2 {
 		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
-		if len(eth.config.SentryAddr) > 0 {
-			for i := range eth.config.SentryAddr {
-				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, eth.config.SentryAddr[i])
+		if len(stack.Config().P2P.SentryAddr) > 0 {
+			for _, addr := range stack.Config().P2P.SentryAddr {
+				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, addr)
 				if err != nil {
 					return nil, err
 				}
@@ -505,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	if len(eth.config.SentryAddr) == 0 {
+	if eth.config.P2PDisabled {
 		stack.RegisterProtocols(eth.Protocols())
 	}
 
