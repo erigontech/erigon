@@ -96,7 +96,7 @@ func init() {
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(h common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		pc             = uint64(0)
@@ -197,7 +197,7 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(h common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -286,7 +286,7 @@ func TestJsonTestcases(t *testing.T) {
 func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(h common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
@@ -522,7 +522,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 func TestOpMstore(t *testing.T) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(h common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
@@ -548,7 +548,7 @@ func TestOpMstore(t *testing.T) {
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(h common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
@@ -571,7 +571,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 func BenchmarkOpSHA3(bench *testing.B) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+			CheckTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()

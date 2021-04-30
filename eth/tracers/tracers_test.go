@@ -156,7 +156,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Coinbase:    common.Address{},
-		CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
+		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
@@ -252,7 +252,7 @@ func TestCallTracer(t *testing.T) {
 				Time:        uint64(test.Context.Time),
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
-				CheckTEVM:   func(addr common.Address) (bool, error) { return false, nil },
+				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 			}
 			statedb, _ := tests.MakePreState2(ctx, ethdb.NewMemoryDatabase(), test.Genesis.Alloc, uint64(test.Context.Number))
 

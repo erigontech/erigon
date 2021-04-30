@@ -1,11 +1,9 @@
 package stagedsync
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -41,13 +39,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	checkTEVM := func(addr common.Address) (bool, error) {
-		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, err
-		}
-		return ok, nil
-	}
+	checkTEVM := ethdb.GetCheckTEVM(tx)
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
@@ -119,7 +111,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(addr common.Address) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(hash common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)

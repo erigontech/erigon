@@ -50,7 +50,7 @@ type Config struct {
 	r         state.StateReader
 	w         state.StateWriter
 	GetHashFn func(n uint64) common.Hash
-	CheckTEVM func(address common.Address) (bool, error)
+	CheckTEVM func(hash common.Hash) (bool, error)
 }
 
 // sets defaults on the config
@@ -99,7 +99,7 @@ func setDefaults(cfg *Config) {
 		}
 	}
 	if cfg.CheckTEVM == nil {
-		cfg.CheckTEVM = func(address common.Address) (bool, error) {
+		cfg.CheckTEVM = func(hash common.Hash) (bool, error) {
 			return false, nil
 		}
 	}

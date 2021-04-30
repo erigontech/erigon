@@ -2,9 +2,12 @@ package ethdb
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -124,4 +127,26 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 		bucketStart = bucketEnd
 	}
 	return nil
+}
+
+func GetCheckTEVMStatus(db KVGetter) func(codeHash common.Hash) (bool, error) {
+	return func(codeHash common.Hash) (bool, error) {
+		ok, err := db.Has(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes())
+		if !errors.Is(err, ErrKeyNotFound) {
+			return false, err
+		}
+		return ok, nil
+	}
+}
+
+func GetCheckTEVM(db KVGetter) func(codeHash common.Hash) (bool, error) {
+	return func(codeHash common.Hash) (bool, error) {
+		ok, err := db.Has(dbutils.ContractTEVMCodeBucket, codeHash.Bytes())
+		if !errors.Is(err, ErrKeyNotFound) {
+			return false, err
+		}
+
+		// todo return TEVM code and use it
+		return ok, nil
+	}
 }

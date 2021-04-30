@@ -2,12 +2,10 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -67,13 +65,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	checkTEVM := func(addr common.Address) (bool, error) {
-		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, err
-		}
-		return ok, nil
-	}
+	checkTEVM := ethdb.GetCheckTEVM(tx)
 	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -229,13 +221,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := func(addr common.Address) (bool, error) {
-		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, err
-		}
-		return ok, nil
-	}
+	checkTEVM := ethdb.GetCheckTEVM(tx)
 	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err

@@ -92,10 +92,20 @@ const (
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
 
+	//TEVMCodeStatusBucket -
+	//key - contract code hash
+	//value - contract TEVM code status
+	ContractTEVMCodeStatusBucket = "TEVM-code-status"
+
 	//TEVMCodeBucket -
 	//key - contract code hash
 	//value - contract EVTM code
 	ContractTEVMCodeBucket = "TEVM-code"
+)
+
+const (
+	TEVMScheduled = 0
+	TEVMDone      = 1
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket

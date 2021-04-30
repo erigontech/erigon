@@ -346,13 +346,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := func(addr common.Address) (bool, error) {
-		ok, err := tx.Has(dbutils.ContractTEVMCodeBucket, addr.Bytes())
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, err
-		}
-		return ok, nil
-	}
+	checkTEVM := ethdb.GetCheckTEVM(tx)
 	for i, txOrBlockHash := range filteredHashes {
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash

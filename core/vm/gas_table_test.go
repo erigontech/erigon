@@ -99,7 +99,7 @@ func TestEIP2200(t *testing.T) {
 			vmctx := BlockContext{
 				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
 				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
-				CheckTEVM: func(addr common.Address) (bool, error) { return false, nil },
+				CheckTEVM: func(common.Hash) (bool, error) { return false, nil },
 			}
 			vmenv := NewEVM(vmctx, TxContext{}, s, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 
