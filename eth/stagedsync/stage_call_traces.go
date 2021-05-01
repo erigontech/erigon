@@ -79,7 +79,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg
 		return nil
 	}
 
-	if s.BlockNumber > 3000000 && endBlock > s.BlockNumber+100000 {
+	if endBlock > s.BlockNumber+100000 {
 		endBlock = s.BlockNumber + 100000
 	}
 
