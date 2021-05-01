@@ -1213,6 +1213,45 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
+func dumpAddresses(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	f, err := os.Create("addresses")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	stAccounts := 0
+	stStorage := 0
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		k, _, e := c.First()
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if len(k) > 28 {
+				stStorage++
+			} else {
+				stAccounts++
+				if _, err1 := w.Write(k[:20]); err1 != nil {
+					return err1
+				}
+			}
+			if (stStorage+stAccounts)%100000 == 0 {
+				fmt.Printf("State records: %d\n", stStorage+stAccounts)
+			}
+		}
+		return e
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
+	return nil
+}
+
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1919,6 +1958,9 @@ func main() {
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
+
+	case "dumpAddresses":
+		err = dumpAddresses(*chaindata)
 
 	}
 
