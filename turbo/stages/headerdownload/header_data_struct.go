@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"sync"
 
+	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -176,7 +177,8 @@ type HeaderDownload struct {
 	stageReadyCh       chan struct{}
 	stageHeight        uint64
 	topSeenHeight      uint64
-	insertList         []*Link // List of non-persisted links that can be inserted (their parent is persisted)
+	insertList         []*Link    // List of non-persisted links that can be inserted (their parent is persisted)
+	seenAnnounces      mapset.Set // Save external announcement hashes, after header verification if hash is in this set - will broadcast it further
 	toAnnounce         []Announce
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
@@ -207,6 +209,7 @@ func NewHeaderDownload(
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
+		seenAnnounces:      mapset.NewThreadUnsafeSet(),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)

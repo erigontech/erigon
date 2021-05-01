@@ -436,6 +436,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
+		cs.hd.SaveExternalAnnounce(announce.Hash)
 		if cs.hd.HasLink(announce.Hash) {
 			continue
 		}
