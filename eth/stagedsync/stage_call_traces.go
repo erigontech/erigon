@@ -304,6 +304,12 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}
+
+		coinbase := block.Coinbase()
+		tos[string(coinbase[:])] = struct{}{}
+		for _, uncle := range block.Uncles() {
+			tos[string(uncle.Coinbase[:])] = struct{}{}
+		}
 	}
 	for addr := range tracer.froms {
 		a := addr // To copy addr
