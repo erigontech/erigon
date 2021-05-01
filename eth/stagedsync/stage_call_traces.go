@@ -79,6 +79,10 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg
 		return nil
 	}
 
+	if s.BlockNumber > 3000000 && endBlock > s.BlockNumber+100000 {
+		endBlock = s.BlockNumber + 100000
+	}
+
 	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg); err != nil {
 		return err
 	}
