@@ -42,7 +42,7 @@ func testHandshake(t *testing.T, protocol uint) {
 	db := backend.chain.ChainDb()
 	var (
 		genesis = backend.chain.Genesis()
-		head    = rawdb.ReadCurrentBlock(db)
+		head    = rawdb.ReadCurrentBlockDeprecated(db)
 		td, _   = rawdb.ReadTd(db, head.Hash(), head.NumberU64())
 		forkID  = forkid.NewID(backend.chain.Config(), backend.chain.Genesis().Hash(), backend.headBlock.NumberU64())
 	)

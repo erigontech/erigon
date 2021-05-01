@@ -456,7 +456,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 
 	} else {
-		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
+		genesisBlock, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, 0)
 		if genesisBlock == nil {
 			return nil, core.ErrNoGenesis
 		}

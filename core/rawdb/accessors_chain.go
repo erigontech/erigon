@@ -171,7 +171,18 @@ func ReadCurrentHeader(db ethdb.KVGetter) *types.Header {
 	}
 	return ReadHeader(db, headHash, *headNumber)
 }
-func ReadCurrentBlock(db ethdb.Getter) *types.Block {
+
+// Deprecated, use ReadCurrentBlock
+func ReadCurrentBlockDeprecated(db ethdb.Getter) *types.Block {
+	headHash := ReadHeadBlockHash(db)
+	headNumber := ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	return ReadBlockDeprecated(db, headHash, *headNumber)
+}
+
+func ReadCurrentBlock(db ethdb.Tx) *types.Block {
 	headHash := ReadHeadBlockHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
@@ -180,33 +191,39 @@ func ReadCurrentBlock(db ethdb.Getter) *types.Block {
 	return ReadBlock(db, headHash, *headNumber)
 }
 
-// ReadHeadersByNumber retrieves all the block header corresponding to the number.
-func ReadHeadersByNumber(db ethdb.Getter, number uint64) ([]*types.Header, error) {
+func ReadHeadersByNumber(db ethdb.Tx, number uint64) ([]*types.Header, error) {
 	var res []*types.Header
-	if err := db.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(number), 8*8, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(dbutils.HeadersBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	prefix := dbutils.EncodeBlockNumber(number)
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+
 		header := new(types.Header)
 		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			return false, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 	return res, nil
 }
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(ctx context.Context, db ethdb.Putter, header *types.Header) {
+func WriteHeader(db ethdb.Putter, header *types.Header) {
 	var (
 		hash    = header.Hash()
 		number  = header.Number.Uint64()
 		encoded = dbutils.EncodeBlockNumber(number)
 	)
-	if common.IsCanceled(ctx) {
-		return
-	}
 	if err := db.Put(dbutils.HeaderNumberBucket, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
@@ -231,7 +248,7 @@ func DeleteHeader(db ethdb.Deleter, hash common.Hash, number uint64) {
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db ethdb.Getter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadBodyRLP(db ethdb.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	body := ReadBody(db, hash, number)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
@@ -248,7 +265,8 @@ func ReadStorageBodyRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.
 	return bodyRlp
 }
 
-func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+// Deprecated, use ReadTransactions
+func ReadTransactionsDeprecated(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
@@ -275,7 +293,42 @@ func ReadTransactions(db ethdb.Getter, baseTxId uint64, amount uint32) ([]types.
 	return txs, nil
 }
 
-func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
+func ReadTransactions(db ethdb.Tx, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+	if amount == 0 {
+		return []types.Transaction{}, nil
+	}
+	txIdKey := make([]byte, 8)
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	txs := make([]types.Transaction, amount)
+	binary.BigEndian.PutUint64(txIdKey, baseTxId)
+	i := uint32(0)
+	c, err := db.Cursor(dbutils.EthTx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	var decodeErr error
+	for k, v, err := c.Seek(txIdKey); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		reader.Reset(v)
+		stream.Reset(reader, 0)
+		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+			return nil, decodeErr
+		}
+		i++
+		if i >= amount {
+			break
+		}
+	}
+	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
+	return txs, nil
+}
+
+func WriteTransactionsDeprecated(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
@@ -290,6 +343,33 @@ func WriteTransactions(db ethdb.Database, txs []types.Transaction, baseTxId uint
 
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(dbutils.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func WriteTransactions(db ethdb.RwTx, txs []types.Transaction, baseTxId uint64) error {
+	txId := baseTxId
+	buf := bytes.NewBuffer(nil)
+	c, err := db.RwCursor(dbutils.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for _, tx := range txs {
+		txIdKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(txIdKey, txId)
+		txId++
+
+		buf.Reset()
+		if err := rlp.Encode(buf, tx); err != nil {
+			return fmt.Errorf("broken tx rlp: %w", err)
+		}
+
+		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+		if err := c.Append(txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
 			return err
 		}
 	}
@@ -311,8 +391,23 @@ func HasBody(db ethdb.Has, hash common.Hash, number uint64) bool {
 	return true
 }
 
-// ReadBody retrieves the block body corresponding to the hash.
-func ReadBody(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
+// ReadBodyDeprecated retrieves the block body corresponding to the hash.
+// Deprecated, use ReadBody
+func ReadBodyDeprecated(db ethdb.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+	body.Transactions, err = ReadTransactionsDeprecated(db, baseTxId, txAmount)
+	if err != nil {
+		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
+}
+
+func ReadBody(db ethdb.Tx, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
@@ -354,8 +449,31 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 	return senders, nil
 }
 
-// WriteBody - writes body in Network format, later staged sync will convert it into Storage format
-func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.Body) error {
+// WriteBodyDeprecated - writes body in Network format, later staged sync will convert it into Storage format
+func WriteBodyDeprecated(db ethdb.Database, hash common.Hash, number uint64, body *types.Body) error {
+	// Pre-processing
+	body.SendersFromTxs()
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
+	if err != nil {
+		return err
+	}
+	data, err := rlp.EncodeToBytes(types.BodyForStorage{
+		BaseTxId: baseTxId,
+		TxAmount: uint32(len(body.Transactions)),
+		Uncles:   body.Uncles,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to RLP encode body: %w", err)
+	}
+	WriteBodyRLP(db, hash, number, data)
+	err = WriteTransactionsDeprecated(db, body.Transactions, baseTxId)
+	if err != nil {
+		return fmt.Errorf("failed to WriteTransactions: %w", err)
+	}
+	return nil
+}
+
+func WriteBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Body) error {
 	// Pre-processing
 	body.SendersFromTxs()
 	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
@@ -378,10 +496,7 @@ func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.B
 	return nil
 }
 
-func WriteSenders(ctx context.Context, db ethdb.Putter, hash common.Hash, number uint64, senders []common.Address) error {
-	if common.IsCanceled(ctx) {
-		return ctx.Err()
-	}
+func WriteSenders(db ethdb.RwTx, hash common.Hash, number uint64, senders []common.Address) error {
 	data := make([]byte, common.AddressLength*len(senders))
 	for i, sender := range senders {
 		copy(data[i*common.AddressLength:], sender[:])
@@ -455,7 +570,43 @@ func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receipts {
+func ReadRawReceipts(db ethdb.Tx, hash common.Hash, number uint64) types.Receipts {
+	// Retrieve the flattened receipt slice
+	data, err := db.GetOne(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number))
+	if err != nil {
+		log.Error("ReadRawReceipts failed", "err", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var receipts types.Receipts
+	if err := cbor.Unmarshal(&receipts, bytes.NewReader(data)); err != nil {
+		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
+		return nil
+	}
+
+	c, err := db.Cursor(dbutils.Log)
+	if err != nil {
+		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
+		return nil
+	}
+	defer c.Close()
+	if err := ethdb.Walk(c, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+		var logs types.Logs
+		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+			return false, fmt.Errorf("receipt unmarshal failed: %x, %w", hash, err)
+		}
+
+		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
+		return true, nil
+	}); err != nil {
+		log.Error("logs fetching failed", "hash", hash, "err", err)
+		return nil
+	}
+
+	return receipts
+}
+func ReadRawReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
 	data, err := db.GetOne(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number))
 	if err != nil {
@@ -493,7 +644,7 @@ func ReadRawReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Rec
 // The current implementation populates these metadata fields by reading the receipts'
 // corresponding block body, so if the block body is not found it will return nil even
 // if the receipt itself is stored.
-func ReadReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receipts {
+func ReadReceipts(db ethdb.Tx, hash common.Hash, number uint64) types.Receipts {
 	// We're deriving many fields from the block body, retrieve beside the receipt
 	receipts := ReadRawReceipts(db, hash, number)
 	if receipts == nil {
@@ -518,12 +669,37 @@ func ReadReceipts(db ethdb.Getter, hash common.Hash, number uint64) types.Receip
 	}
 	return receipts
 }
+func ReadReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64) types.Receipts {
+	// We're deriving many fields from the block body, retrieve beside the receipt
+	receipts := ReadRawReceiptsDeprecated(db, hash, number)
+	if receipts == nil {
+		return nil
+	}
+	body := ReadBodyDeprecated(db, hash, number)
+	if body == nil {
+		log.Error("Missing body but have receipt", "hash", hash, "number", number)
+		return nil
+	}
+	senders, err := ReadSenders(db, hash, number)
+	if err != nil {
+		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
+		return nil
+	}
+	if senders == nil {
+		return nil
+	}
+	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
+		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
+		return nil
+	}
+	return receipts
+}
 func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil
 	}
-	receipts := ReadReceipts(db, hash, *number)
+	receipts := ReadReceiptsDeprecated(db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -532,7 +708,7 @@ func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
 
 func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
 	h, _ := ReadCanonicalHash(db, number)
-	return ReadReceipts(db, h, number)
+	return ReadReceiptsDeprecated(db, h, number)
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
@@ -610,12 +786,18 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 }
 
 // DeleteReceipts removes all receipt data associated with a block hash.
-func DeleteReceipts(db ethdb.Database, number uint64) error {
+func DeleteReceipts(db ethdb.RwTx, number uint64) error {
 	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), nil); err != nil {
 		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
 	}
 
-	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := ethdb.Walk(c, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
 		if err := db.Delete(dbutils.Log, k, nil); err != nil {
 			return false, err
 		}
@@ -668,13 +850,26 @@ func DeleteNewerReceipts(db ethdb.RwTx, number uint64) error {
 	return nil
 }
 
-// ReadBlock retrieves an entire block corresponding to the hash, assembling it
+// ReadBlockDeprecated retrieves an entire block corresponding to the hash, assembling it
 // back from the stored header and body. If either the header or body could not
 // be retrieved nil is returned.
 //
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
+// Deprecated
+func ReadBlockDeprecated(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
+	header := ReadHeader(db, hash, number)
+	if header == nil {
+		return nil
+	}
+	body := ReadBodyDeprecated(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+}
+
+func ReadBlock(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil
@@ -686,7 +881,7 @@ func ReadBlock(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint64) *types.Block {
+func ReadBlockWithoutTransactions(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil
@@ -698,7 +893,7 @@ func ReadBlockWithoutTransactions(db ethdb.Getter, hash common.Hash, number uint
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
+func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
@@ -715,11 +910,20 @@ func ReadBlockWithSenders(db ethdb.Getter, hash common.Hash, number uint64) (*ty
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
-func WriteBlock(ctx context.Context, db ethdb.Database, block *types.Block) error {
+func WriteBlockDeprecated(ctx context.Context, db ethdb.Database, block *types.Block) error {
+	if err := WriteBodyDeprecated(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+		return err
+	}
+	WriteHeader(db, block.Header())
+	return nil
+}
+
+// WriteBlock serializes a block into the database, header and body separately.
+func WriteBlock(db ethdb.RwTx, block *types.Block) error {
 	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		return err
 	}
-	WriteHeader(ctx, db, block.Header())
+	WriteHeader(db, block.Header())
 	return nil
 }
 
@@ -757,7 +961,7 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 */
 
 // DeleteBlock removes all block data associated with a hash.
-func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
+func DeleteBlock(db ethdb.RwTx, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
 		return err
 	}
@@ -893,7 +1097,18 @@ func FindCommonAncestor(db ethdb.DatabaseReader, a, b *types.Header) *types.Head
 	return a
 }
 
-func ReadBlockByNumber(db ethdb.Getter, number uint64) (*types.Block, error) {
+func ReadBlockByNumberDeprecated(db ethdb.Getter, number uint64) (*types.Block, error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+
+	return ReadBlockDeprecated(db, hash, number), nil
+}
+func ReadBlockByNumber(db ethdb.Tx, number uint64) (*types.Block, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
@@ -905,7 +1120,7 @@ func ReadBlockByNumber(db ethdb.Getter, number uint64) (*types.Block, error) {
 	return ReadBlock(db, hash, number), nil
 }
 
-func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block, []common.Address, error) {
+func ReadBlockByNumberWithSenders(db ethdb.Tx, number uint64) (*types.Block, []common.Address, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
@@ -917,7 +1132,15 @@ func ReadBlockByNumberWithSenders(db ethdb.Getter, number uint64) (*types.Block,
 	return ReadBlockWithSenders(db, hash, number)
 }
 
-func ReadBlockByHash(db ethdb.Getter, hash common.Hash) (*types.Block, error) {
+func ReadBlockByHashDeprecated(db ethdb.Getter, hash common.Hash) (*types.Block, error) {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	return ReadBlockDeprecated(db, hash, *number), nil
+}
+
+func ReadBlockByHash(db ethdb.Tx, hash common.Hash) (*types.Block, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
@@ -931,7 +1154,7 @@ func ReadBlocksByHash(db ethdb.Getter, hash common.Hash, n int) (blocks []*types
 		return nil, nil
 	}
 	for i := 0; i < n; i++ {
-		block := ReadBlock(db, hash, *number)
+		block := ReadBlockDeprecated(db, hash, *number)
 		if block == nil {
 			break
 		}

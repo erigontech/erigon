@@ -25,7 +25,7 @@ func TestBlockHashStage(t *testing.T) {
 	if err := rawdb.WriteTd(tx, origin.Hash(), 0, origin.Difficulty); err != nil {
 		panic(err)
 	}
-	rawdb.WriteHeader(context.TODO(), tx, origin)
+	rawdb.WriteHeader(tx, origin)
 	if err := rawdb.WriteHeadHeaderHash(tx, origin.Hash()); err != nil {
 		t.Fatalf("failed to write head header hash: %v", err)
 	}

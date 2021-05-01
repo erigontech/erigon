@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -20,7 +19,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), hash)
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
@@ -36,7 +35,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +65,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

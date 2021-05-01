@@ -142,7 +142,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	statedb := state.New(state.NewPlainDBState(tx, rawdb.ReadCurrentBlock(sim.database).NumberU64()))
+	statedb := state.New(state.NewPlainDBState(tx, rawdb.ReadCurrentBlockDeprecated(sim.database).NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

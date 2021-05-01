@@ -194,7 +194,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	if err != nil {
 		return nil, err
 	}
-	bc.genesisBlock, _ = rawdb.ReadBlockByNumber(db, 0)
+	bc.genesisBlock = bc.GetBlockByNumber(0)
 	if bc.genesisBlock == nil {
 		return nil, ErrNoGenesis
 	}
@@ -238,7 +238,7 @@ func (bc *BlockChain) loadLastState() error {
 		return fmt.Errorf("empty or corrupt database")
 	}
 	// Make sure the entire head block is available
-	currentBlock, err := rawdb.ReadBlockByHash(bc.db, head)
+	currentBlock, err := rawdb.ReadBlockByHashDeprecated(bc.db, head)
 	if err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func (bc *BlockChain) loadLastState() error {
 func (bc *BlockChain) CurrentBlock() *types.Block {
 	headHash := rawdb.ReadHeadBlockHash(bc.db)
 	headNumber := rawdb.ReadHeaderNumber(bc.db, headHash)
-	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
+	return rawdb.ReadBlockDeprecated(bc.db, headHash, *headNumber)
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -285,14 +285,55 @@ func (bc *BlockChain) Genesis() *types.Block {
 
 // GetBlock retrieves a block from the database by hash and number,
 // caching it if found.
-//func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
-// Short circuit if the block's already in the cache, retrieve otherwise
-//block := rawdb.ReadBlock(bc.db, hash, number)
-//if block == nil {
-//	return nil
-//}
-//return block
-//}
+func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
+	// Short circuit if the block's already in the cache, retrieve otherwise
+	block := rawdb.ReadBlockDeprecated(bc.db, hash, number)
+	if block == nil {
+		return nil
+	}
+	return block
+}
+
+// GetBlockByHash retrieves a block from the database by hash, caching it if found.
+func (bc *BlockChain) GetBlockByHash(hash common.Hash) *types.Block {
+	number := bc.hc.GetBlockNumber(bc.db, hash)
+	if number == nil {
+		return nil
+	}
+	return bc.GetBlock(hash, *number)
+}
+
+// GetBlockByNumber retrieves a block from the database by number, caching it
+// (associated with its hash) if found.
+func (bc *BlockChain) GetBlockByNumber(number uint64) *types.Block {
+	hash, err := rawdb.ReadCanonicalHash(bc.db, number)
+	if err != nil {
+		log.Warn("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
+
+	if hash == (common.Hash{}) {
+		return nil
+	}
+	return bc.GetBlock(hash, number)
+}
+
+// GetReceiptsByHash retrieves the receipts for all transactions in a given block.
+func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
+	if receipts, ok := bc.receiptsCache.Get(hash); ok {
+		return receipts.(types.Receipts)
+	}
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil
+	}
+	receipts := rawdb.ReadReceiptsDeprecated(bc.db, hash, *number)
+	if receipts == nil {
+		return nil
+	}
+	bc.receiptsCache.Add(hash, receipts)
+	return receipts
+}
 
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
