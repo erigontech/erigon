@@ -14,7 +14,7 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 	if executionAt, err = s.ExecutionAt(db); err != nil {
 		return err
 	}
-	if executionAt == s.BlockNumber {
+	if executionAt <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
