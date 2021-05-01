@@ -22,6 +22,11 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
 		Value: "lmdb",
 	}
+	DatabaseVerbosityFlag = cli.IntFlag{
+		Name:  "database.verbosity",
+		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db.",
+		Value: -1,
+	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
@@ -114,6 +119,7 @@ var (
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
+
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -187,6 +193,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	setPrivateApi(ctx, cfg)
+	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
 
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.MDBX = strings.EqualFold(databaseFlag, "mdbx") //case insensitive

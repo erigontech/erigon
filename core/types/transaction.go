@@ -57,7 +57,7 @@ type Transaction interface {
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
-	AsMessage(s Signer) (Message, error)
+	AsMessage(h *Header, s Signer) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash

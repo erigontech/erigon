@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -104,7 +103,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, stageTrieCfg, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX, stageTrieCfg, world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -220,52 +219,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 	}
 }
 
-// Emulates the effect of blockchain.SetHead() in go-ethereum
-func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, newHead uint64, checkRoot bool) error {
-	newHeadHash, err := rawdb.ReadCanonicalHash(db, newHead)
-	if err != nil {
-		return err
-	}
-	rawdb.WriteHeadBlockHash(db, newHeadHash)
-	if writeErr := rawdb.WriteHeadHeaderHash(db, newHeadHash); writeErr != nil {
-		return writeErr
-	}
-	if err = stages.SaveStageProgress(db, stages.Headers, newHead); err != nil {
-		return err
-	}
-	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
-	syncState, err1 := stagedSync.Prepare(
-		nil,
-		config,
-		engine,
-		vmConfig,
-		db,
-		db,
-		"1",
-		ethdb.DefaultStorageMode,
-		"",
-		8*1024,
-		nil,
-		nil,
-		nil,
-		nil,
-		false,
-		nil,
-		StageSendersCfg(config),
-	)
-	if err1 != nil {
-		return err1
-	}
-	if err = syncState.UnwindTo(newHead, db); err != nil {
-		return err
-	}
-	if err = syncState.Run(db, db); err != nil {
-		return err
-	}
-	return nil
-}
-
 func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
@@ -344,7 +297,6 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		nil,
-		nil,
 		false,
 		nil,
 		StageSendersCfg(config),
@@ -354,7 +306,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	}
 
 	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
+		if err = syncState.UnwindTo(forkblocknumber, tx, tx); err != nil {
 			return false, err
 		}
 	}

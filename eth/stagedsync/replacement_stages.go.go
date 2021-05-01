@@ -19,6 +19,7 @@ func ReplacementStages(ctx context.Context,
 	logIndex LogIndexCfg,
 	callTraces CallTracesCfg,
 	txLookup TxLookupCfg,
+	txPool TxPoolCfg,
 ) StageBuilders {
 	return []StageBuilder{
 		{
@@ -118,7 +119,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, trieCfg, ctx.Done())
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX, trieCfg, ctx.Done())
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -214,15 +215,14 @@ func ReplacementStages(ctx context.Context,
 		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
-				txPoolCfg := StageTxPoolCfg(world.txPool, world.poolStart)
 				return &Stage{
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return SpawnTxPool(s, world.TX, txPoolCfg, ctx.Done())
+						return SpawnTxPool(s, world.TX, txPool, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxPool(u, s, world.TX, txPoolCfg, ctx.Done())
+						return UnwindTxPool(u, s, world.TX, txPool, ctx.Done())
 					},
 				}
 			},

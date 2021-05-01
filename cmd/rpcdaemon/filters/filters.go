@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -123,7 +122,8 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_HEADER:
 		payload := event.Data
 		var header types.Header
-		err := json.Unmarshal(payload, &header)
+
+		err := rlp.Decode(bytes.NewReader(payload), &header)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
@@ -135,7 +135,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_LOGS:
 		payload := event.Data
 		var logs types.Logs
-		err := json.Unmarshal(payload, &logs)
+		err := rlp.Decode(bytes.NewReader(payload), &logs)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)
@@ -147,7 +147,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	case remote.Event_PENDING_BLOCK:
 		payload := event.Data
 		var block types.Block
-		err := json.Unmarshal(payload, &block)
+		err := rlp.Decode(bytes.NewReader(payload), &block)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("rpc filters, unprocessable payload", "err", err)

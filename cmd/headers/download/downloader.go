@@ -38,7 +38,7 @@ import (
 
 // Methods of Core called by sentry
 
-func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
@@ -64,7 +64,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
 	sentries := make([]proto_sentry.SentryClient, len(sentryAddrs))
 	for i, addr := range sentryAddrs {
-		sentry, err := grpcSentryClient(ctx, addr)
+		sentry, err := GrpcSentryClient(ctx, addr)
 		if err != nil {
 			return err
 		}
@@ -123,6 +123,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		timeout,
 		controlServer,
 		tmpdir,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -164,7 +165,7 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("Handling incoming message", "error", err)
+			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
 		}
 	}
 }
@@ -192,7 +193,7 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("Handling incoming message", "error", err)
+			log.Error("RecvMessage: Handling incoming message", "error", err)
 		}
 	}
 }
@@ -205,7 +206,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window)
+	sentries := []proto_sentry.SentryClient{sentry}
+	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -224,7 +226,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return err
 	}
 
-	if err = SetSentryStatus(ctx, sentry, controlServer); err != nil {
+	if err = SetSentryStatus(ctx, sentries, controlServer); err != nil {
 		log.Error("failed to set sentry status", "error", err)
 		return nil
 	}
@@ -236,6 +238,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		timeout,
 		controlServer,
 		tmpdir,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -269,9 +272,11 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 
 }
 
-func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
-	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
-		return err
+func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
+	for i := range sentries {
+		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -283,6 +288,7 @@ func NewStagedSync(
 	bodyDownloadTimeout int,
 	controlServer *ControlServerImpl,
 	tmpdir string,
+	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -294,6 +300,7 @@ func NewStagedSync(
 			controlServer.hd,
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
 			controlServer.requestWakeUpBodies,
 			batchSize,
 		),
@@ -326,6 +333,7 @@ func NewStagedSync(
 		stagedsync.StageLogIndexCfg(tmpdir),
 		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(tmpdir),
+		stagedsync.StageTxPoolCfg(txPool),
 	), nil
 }
 
@@ -428,6 +436,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
+		cs.hd.SaveExternalAnnounce(announce.Hash)
 		if cs.hd.HasLink(announce.Hash) {
 			continue
 		}

@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -239,7 +238,10 @@ func (bc *BlockChain) loadLastState() error {
 		return fmt.Errorf("empty or corrupt database")
 	}
 	// Make sure the entire head block is available
-	currentBlock := bc.GetBlockByHash(head)
+	currentBlock, err := rawdb.ReadBlockByHashDeprecated(bc.db, head)
+	if err != nil {
+		return err
+	}
 	if currentBlock == nil {
 		// Corrupt or empty database, init from scratch
 		return fmt.Errorf("head block missing, hash %x", head)
@@ -252,62 +254,19 @@ func (bc *BlockChain) loadLastState() error {
 	// Restore the last known head header
 	currentHeader := currentBlock.Header()
 	if head := rawdb.ReadHeadHeaderHash(bc.db); head != (common.Hash{}) {
-		if header := bc.GetHeaderByHash(head); header != nil {
+		if header, _ := rawdb.ReadHeaderByHash(bc.db, head); header != nil {
 			currentHeader = header
 		}
 	}
 	bc.hc.SetCurrentHeader(bc.db, currentHeader)
 	// Issue a status log for the user
 
-	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
-	blockTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
+	headerTd, _ := rawdb.ReadTd(bc.db, currentHeader.Hash(), currentHeader.Number.Uint64())
+	blockTd, _ := rawdb.ReadTd(bc.db, currentBlock.Hash(), currentBlock.NumberU64())
 
 	log.Info("Most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
 	log.Info("Most recent local block", "number", currentBlock.Number(), "hash", currentBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
 
-	return nil
-}
-
-func SetHead(db ethdb.Database, head uint64) error {
-	log.Warn("Rewinding blockchain", "target", head)
-
-	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
-		// Rewind the block chain, ensuring we don't end up with a stateless head block
-		if currentBlock := rawdb.ReadCurrentBlock(db); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
-			newHeadBlock := rawdb.ReadBlock(db, header.Hash(), header.Number.Uint64())
-			if newHeadBlock == nil {
-				log.Error("Gap in the chain, rewinding to genesis", "number", header.Number, "hash", header.Hash())
-			} else {
-				rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
-			}
-		}
-
-		return rawdb.ReadCurrentBlock(db).NumberU64(), false /* we have nothing to wipe in turbo-geth */
-	}
-
-	// Rewind the header chain, deleting all block bodies until then
-	delFn := func(db ethdb.Database, hash common.Hash, num uint64) {
-		// Remove relative body and receipts from the active store.
-		// The header, total difficulty and canonical hash will be
-		// removed in the hc.SetHead function.
-		rawdb.DeleteBody(db, hash, num)
-		if err := rawdb.DeleteReceipts(db, num); err != nil {
-			panic(err)
-		}
-	}
-
-	// If SetHead was only called as a chain reparation method, try to skip
-	// touching the header chain altogether, unless the freezer is broken
-	if block := rawdb.ReadCurrentBlock(db); block.NumberU64() == head {
-		if target, force := updateFn(db, block.Header()); force {
-			SetHeaderHead(db, target, updateFn, delFn)
-		}
-	} else {
-		// Rewind the chain to the requested head and keep going backwards until a
-		// block with a state is found or fast sync pivot is passed
-		log.Warn("Rewinding blockchain", "target", head)
-		SetHeaderHead(db, head, updateFn, delFn)
-	}
 	return nil
 }
 
@@ -316,7 +275,7 @@ func SetHead(db ethdb.Database, head uint64) error {
 func (bc *BlockChain) CurrentBlock() *types.Block {
 	headHash := rawdb.ReadHeadBlockHash(bc.db)
 	headNumber := rawdb.ReadHeaderNumber(bc.db, headHash)
-	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
+	return rawdb.ReadBlockDeprecated(bc.db, headHash, *headNumber)
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -328,7 +287,7 @@ func (bc *BlockChain) Genesis() *types.Block {
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	// Short circuit if the block's already in the cache, retrieve otherwise
-	block := rawdb.ReadBlock(bc.db, hash, number)
+	block := rawdb.ReadBlockDeprecated(bc.db, hash, number)
 	if block == nil {
 		return nil
 	}
@@ -368,42 +327,12 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	if number == nil {
 		return nil
 	}
-	receipts := rawdb.ReadReceipts(bc.db, hash, *number)
+	receipts := rawdb.ReadReceiptsDeprecated(bc.db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
 	bc.receiptsCache.Add(hash, receipts)
 	return receipts
-}
-
-// GetBlocksFromHash returns the block corresponding to hash and up to n-1 ancestors.
-// [deprecated by eth/62]
-func (bc *BlockChain) GetBlocksFromHash(hash common.Hash, n int) (blocks []*types.Block) {
-	number := bc.hc.GetBlockNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	for i := 0; i < n; i++ {
-		block := bc.GetBlock(hash, *number)
-		if block == nil {
-			break
-		}
-		blocks = append(blocks, block)
-		hash = block.ParentHash()
-		*number--
-	}
-	return
-}
-
-// GetUnclesInChain retrieves all the uncles from a given block backwards until
-// a specific distance is reached.
-func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.Header {
-	uncles := []*types.Header{}
-	for i := 0; block != nil && i < length; i++ {
-		uncles = append(uncles, block.Uncles()...)
-		block = bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
-	}
-	return uncles
 }
 
 // Stop stops the blockchain service. If any imports are currently in progress
@@ -504,26 +433,10 @@ Callers: %v
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err, debug.Callers(20)))
 }
 
-func (bc *BlockChain) HeaderChain() *HeaderChain {
-	return bc.hc
-}
-
 // CurrentHeader retrieves the current head header of the canonical chain. The
 // header is retrieved from the HeaderChain's internal cache.
 func (bc *BlockChain) CurrentHeader() *types.Header {
 	return bc.hc.CurrentHeader()
-}
-
-// GetTd retrieves a block's total difficulty in the canonical chain from the
-// database by hash and number, caching it if found.
-func (bc *BlockChain) GetTd(hash common.Hash, number uint64) *big.Int {
-	return bc.hc.GetTd(bc.db, hash, number)
-}
-
-// GetTdByHash retrieves a block's total difficulty in the canonical chain from the
-// database by hash, caching it if found.
-func (bc *BlockChain) GetTdByHash(hash common.Hash) *big.Int {
-	return bc.hc.GetTdByHash(hash)
 }
 
 // GetHeader retrieves a block header from the database by hash and number,
@@ -536,12 +449,6 @@ func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
 // found.
 func (bc *BlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
 	return bc.hc.GetHeaderByHash(hash)
-}
-
-// HasHeader checks if a block header is present in the database or not, caching
-// it if present.
-func (bc *BlockChain) HasHeader(hash common.Hash, number uint64) bool {
-	return bc.hc.HasHeader(hash, number)
 }
 
 // GetCanonicalHash returns the canonical hash for a given block number
@@ -632,7 +539,12 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 	var receipts types.Receipts
 	usedGas := new(uint64)
-	gp := new(GasPool).AddGas(block.GasLimit())
+	gp := new(GasPool)
+	if chainConfig.IsAleut(block.NumberU64()) {
+		gp.AddGas(block.GasLimit() * params.ElasticityMultiplier)
+	} else {
+		gp.AddGas(block.GasLimit())
+	}
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
@@ -663,9 +575,8 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		}
-		//fmt.Printf("Tx Hash: %x, gas used: %d\n", tx.Hash(), receipt.GasUsed)
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
 		}

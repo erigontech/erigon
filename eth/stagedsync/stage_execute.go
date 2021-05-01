@@ -83,7 +83,7 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
+func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -191,8 +191,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				return err
 			}
 		} else {
+			txn := tx.(ethdb.HasTx).Tx()
 			var block *types.Block
-			if block, err = readBlock(blockNum, tx); err != nil {
+			if block, err = readBlock(blockNum, txn); err != nil {
 				return err
 			}
 			if block == nil {
@@ -227,6 +228,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		default:
 		case <-logEvery.C:
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
+			if hasTx, ok := tx.(ethdb.HasTx); ok {
+				hasTx.Tx().CollectMetrics()
+			}
 		}
 		stageExecutionGauge.Update(int64(blockNum))
 	}

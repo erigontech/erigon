@@ -25,11 +25,11 @@ import (
 )
 
 func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(ethdb.NewRoTxDb(tx), hash, number); cached != nil {
+	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
 		return cached, nil
 	}
 
-	block := rawdb.ReadBlock(ethdb.NewRoTxDb(tx), hash, number)
+	block := rawdb.ReadBlock(tx, hash, number)
 
 	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -206,7 +206,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	defer tx.Rollback()
 
 	// Retrieve the transaction and assemble its EVM context
-	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), hash)
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
@@ -245,7 +245,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 		return nil, nil
 	}
 
-	block := rawdb.ReadBlock(ethdb.NewRoTxDb(tx), hash, blockNum)
+	block := rawdb.ReadBlock(tx, hash, blockNum)
 	if block == nil {
 		return nil, nil
 	}

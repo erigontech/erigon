@@ -33,9 +33,10 @@ func NewStagedSync(
 	logIndex stagedsync.LogIndexCfg,
 	callTraces stagedsync.CallTracesCfg,
 	txLookup stagedsync.TxLookupCfg,
+	txPool stagedsync.TxPoolCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup),
+		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{Notifier: remotedbserver.NewEvents()},
 	)
@@ -86,7 +87,7 @@ func StageLoop(
 			writeDB = db
 		}
 
-		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, make(chan struct{}), nil, nil, func() error { return nil }, initialCycle, nil, stagedsync.StageSendersCfg(chainConfig))
+		st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, make(chan struct{}), nil, nil, initialCycle, nil, stagedsync.StageSendersCfg(chainConfig))
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}

@@ -50,12 +50,12 @@ func TestReimportMirroredState(t *testing.T) {
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &core.Genesis{
-		ExtraData: make([]byte, extraVanity+common.AddressLength+extraSeal),
+		ExtraData: make([]byte, ExtraVanity+common.AddressLength+ExtraSeal),
 		Alloc: map[common.Address]core.GenesisAccount{
 			addr: {Balance: big.NewInt(1)},
 		},
 	}
-	copy(genspec.ExtraData[extraVanity:], addr[:])
+	copy(genspec.ExtraData[ExtraVanity:], addr[:])
 	genesis := genspec.MustCommit(db)
 
 	defer cliqueDB.Close()
@@ -88,11 +88,11 @@ func TestReimportMirroredState(t *testing.T) {
 		if i > 0 {
 			header.ParentHash = blocks[i-1].Hash()
 		}
-		header.Extra = make([]byte, extraVanity+extraSeal)
+		header.Extra = make([]byte, ExtraVanity+ExtraSeal)
 		header.Difficulty = diffInTurn
 
 		sig, _ := crypto.Sign(SealHash(header).Bytes(), key)
-		copy(header.Extra[len(header.Extra)-extraSeal:], sig)
+		copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
 		blocks[i] = block.WithSeal(header)
 	}
 	// Insert the first two blocks and make sure the chain is valid
@@ -102,7 +102,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
 		t.Errorf("could not read chain head: %v", err1)
 	} else if head.NumberU64() != 2 {
 		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
@@ -118,7 +118,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
 		t.Errorf("could not read chain head: %v", err1)
 	} else if head.NumberU64() != 3 {
 		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)

@@ -41,7 +41,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	if err := rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty()); err != nil {
 		panic(err)
 	}
-	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
+	if err := rawdb.WriteBlockDeprecated(context.Background(), tester.db, testGenesis); err != nil {
 		panic(err)
 	}
 	tester.downloader = New(tester.db, params.TestChainConfig, ethash.NewFaker(), &vm.Config{}, tester.dropPeer, ethdb.DefaultStorageMode)
@@ -122,7 +122,7 @@ func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
 		log.Error("ReadCanonicalHash failed", "err", err)
 		return nil
 	}
-	return rawdb.ReadBlock(st.db, hash, number)
+	return rawdb.ReadBlockDeprecated(st.db, hash, number)
 }
 
 // GetHeaderByHash is part of the implementation of BlockChain interface defined in downloader.go
@@ -157,7 +157,7 @@ func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, db ethd
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	for _, block := range blocks {
-		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
 			panic(err)
 		}
 	}
@@ -204,7 +204,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, number, nil, func() error { return nil })
+	err := st.downloader.synchronise(id, hash, number, nil)
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle

@@ -23,10 +23,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -85,7 +82,7 @@ func BenchmarkFilters(b *testing.B) {
 		b.Fatalf("generate chain: %v", err)
 	}
 	for i, block := range chain {
-		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
 			panic(err)
 		}
 		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
@@ -105,141 +102,5 @@ func BenchmarkFilters(b *testing.B) {
 		if len(logs) != 4 {
 			b.Fatal("expected 4 logs, got", len(logs))
 		}
-	}
-}
-
-func TestFilters(t *testing.T) {
-	t.Skip("Log filter not used in turbo-get, please see implementation of eth_getLogs in RPCDaemon for more details")
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	var (
-		backend = &testBackend{db: db}
-		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr    = crypto.PubkeyToAddress(key1.PublicKey)
-
-		hash1 = common.BytesToHash([]byte("topic1"))
-		hash2 = common.BytesToHash([]byte("topic2"))
-		hash3 = common.BytesToHash([]byte("topic3"))
-		hash4 = common.BytesToHash([]byte("topic4"))
-	)
-
-	genesis := core.GenesisBlockForTesting(db, addr, big.NewInt(1000000))
-	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 1000, func(i int, gen *core.BlockGen) {
-		switch i {
-		case 1:
-			receipt := types.NewReceipt(false, 0)
-			receipt.Logs = []*types.Log{
-				{
-					Address: addr,
-					Topics:  []common.Hash{hash1},
-				},
-			}
-			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil))
-		case 2:
-			receipt := types.NewReceipt(false, 0)
-			receipt.Logs = []*types.Log{
-				{
-					Address: addr,
-					Topics:  []common.Hash{hash2},
-				},
-			}
-			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil))
-
-		case 998:
-			receipt := types.NewReceipt(false, 0)
-			receipt.Logs = []*types.Log{
-				{
-					Address: addr,
-					Topics:  []common.Hash{hash3},
-				},
-			}
-			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(998, common.HexToAddress("0x998"), uint256.NewInt().SetUint64(998), 998, uint256.NewInt().SetUint64(998), nil))
-		case 999:
-			receipt := types.NewReceipt(false, 0)
-			receipt.Logs = []*types.Log{
-				{
-					Address: addr,
-					Topics:  []common.Hash{hash4},
-				},
-			}
-			gen.AddUncheckedReceipt(receipt)
-			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), uint256.NewInt().SetUint64(999), 999, uint256.NewInt().SetUint64(999), nil))
-		}
-	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate chain: %v", err)
-	}
-	for i, block := range chain {
-		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
-			panic(err)
-		}
-		if err := rawdb.WriteSenders(context.Background(), db, block.Hash(), 0, block.Body().SendersFromTxs()); err != nil {
-			t.Fatal(err)
-		}
-		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
-			panic(err)
-		}
-		rawdb.WriteHeadBlockHash(db, block.Hash())
-		if err := rawdb.WriteReceipts(db, block.NumberU64(), receipts[i]); err != nil {
-			panic(err)
-		}
-	}
-
-	filter := NewRangeFilter(backend, 0, -1, []common.Address{addr}, [][]common.Hash{{hash1, hash2, hash3, hash4}})
-
-	logs, _ := filter.Logs(context.Background())
-	if len(logs) != 4 {
-		t.Error("expected 4 log, got", len(logs))
-	}
-
-	filter = NewRangeFilter(backend, 900, 999, []common.Address{addr}, [][]common.Hash{{hash3}})
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 1 {
-		t.Error("expected 1 log, got", len(logs))
-	}
-	if len(logs) > 0 && logs[0].Topics[0] != hash3 {
-		t.Errorf("expected log[0].Topics[0] to be %x, got %x", hash3, logs[0].Topics[0])
-	}
-
-	filter = NewRangeFilter(backend, 990, -1, []common.Address{addr}, [][]common.Hash{{hash3}})
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 1 {
-		t.Error("expected 1 log, got", len(logs))
-	}
-	if len(logs) > 0 && logs[0].Topics[0] != hash3 {
-		t.Errorf("expected log[0].Topics[0] to be %x, got %x", hash3, logs[0].Topics[0])
-	}
-
-	filter = NewRangeFilter(backend, 1, 10, nil, [][]common.Hash{{hash1, hash2}})
-
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 2 {
-		t.Error("expected 2 log, got", len(logs))
-	}
-
-	failHash := common.BytesToHash([]byte("fail"))
-	filter = NewRangeFilter(backend, 0, -1, nil, [][]common.Hash{{failHash}})
-
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 0 {
-		t.Error("expected 0 log, got", len(logs))
-	}
-
-	failAddr := common.BytesToAddress([]byte("failmenow"))
-	filter = NewRangeFilter(backend, 0, -1, []common.Address{failAddr}, nil)
-
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 0 {
-		t.Error("expected 0 log, got", len(logs))
-	}
-
-	filter = NewRangeFilter(backend, 0, -1, nil, [][]common.Hash{{failHash}, {hash1}})
-
-	logs, _ = filter.Logs(context.Background())
-	if len(logs) != 0 {
-		t.Error("expected 0 log, got", len(logs))
 	}
 }

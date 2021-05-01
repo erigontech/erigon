@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
@@ -83,7 +82,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
 		panic(err)
 	}
-	rawdb.WriteHeader(context.TODO(), db, origin)
+	rawdb.WriteHeader(db, origin)
 	if err := rawdb.WriteHeadHeaderHash(db, origin.Hash()); err != nil {
 		panic(err)
 	}

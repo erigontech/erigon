@@ -3,7 +3,8 @@ GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GOBUILD = env GO111MODULE=on go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
+GOBUILD = env GO111MODULE=on CGO_CFLAGS='-DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
+GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx,debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
@@ -31,6 +32,10 @@ docker:
 
 docker-compose:
 	docker-compose up
+
+# debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+dbg: mdbx-dbg
+	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 geth:
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
@@ -79,6 +84,11 @@ headers:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 
+cons:
+	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
+
 db-tools: mdbx
 	@echo "Building bb-tools"
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_drop mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_drop $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
@@ -98,11 +108,15 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
-		&& echo '#define MDBX_ENABLE_MADVISE 1' >> config.h \
-        && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
-        && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
-        && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
+
+mdbx-dbg:
+	@echo "Building mdbx"
+	@cd ethdb/mdbx/dist/ \
+		&& make clean && make config.h \
+		&& echo '#define MDBX_DEBUG 1' >> config.h \
+		&& echo '#define MDBX_FORCE_ASSERTIONS 1' >> config.h \
+        && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test: mdbx
 	TEST_DB=mdbx $(GOTEST) --timeout 15m
@@ -114,7 +128,8 @@ test-lmdb:
 test-mdbx: mdbx
 	TEST_DB=mdbx $(GOTEST)
 
-lint: lintci
+lint:
+	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
 
 lintci: mdbx
 	@echo "--> Running linter for code"
@@ -169,6 +184,7 @@ grpc:
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
+		consensus_engine/consensus.proto \
 		testing/testing.proto
 
 prometheus:

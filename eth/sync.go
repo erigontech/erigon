@@ -277,7 +277,7 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 func (h *handler) doSync(op *chainSyncOp) error {
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
 	txPool, _ := h.txpool.(*core.TxPool)
-	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, txPool, func() error { return nil })
+	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, txPool)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (h *handler) doSync(op *chainSyncOp) error {
 	headHash := rawdb.ReadHeadHeaderHash(h.database)
 	headNumber := rawdb.ReadHeaderNumber(h.database, headHash)
 	atomic.StoreUint64(&h.currentHeight, *headNumber) // this will be read by the block fetcher when required
-	head := rawdb.ReadBlock(h.database, headHash, *headNumber)
+	head := rawdb.ReadBlockDeprecated(h.database, headHash, *headNumber)
 	if head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
 		// for non-checkpointed (number = 0) private networks.

@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -74,18 +73,18 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		engine:  engine,
 	}
 
-	hc.genesisHeader = hc.GetHeaderByNumber(0)
+	hc.genesisHeader = rawdb.ReadHeaderByNumber(chainDb, 0)
 	if hc.genesisHeader == nil {
 		return nil, ErrNoGenesis
 	}
 
 	hc.currentHeader.Store(hc.genesisHeader)
 	if head := rawdb.ReadHeadBlockHash(chainDb); head != (common.Hash{}) {
-		if chead := hc.GetHeaderByHash(head); chead != nil {
+		if chead, _ := rawdb.ReadHeaderByHash(chainDb, head); chead != nil {
 			hc.currentHeader.Store(chead)
 		}
 	}
-	hc.currentHeaderHash = hc.CurrentHeader().Hash()
+	hc.currentHeaderHash = rawdb.ReadCurrentHeader(chainDb).Hash()
 	//headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
 
 	return hc, nil
@@ -121,23 +120,6 @@ func (hc *HeaderChain) GetBlockHashesFromHash(hash common.Hash, max uint64) []co
 	return chain
 }
 
-// GetTd retrieves a block's total difficulty in the canonical chain from the
-// database by hash and number, caching it if found.
-func (hc *HeaderChain) GetTd(dbr ethdb.Getter, hash common.Hash, number uint64) *big.Int {
-	td, _ := rawdb.ReadTd(dbr, hash, number)
-	return td
-}
-
-// GetTdByHash retrieves a block's total difficulty in the canonical chain from the
-// database by hash, caching it if found.
-func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
-	number := hc.GetBlockNumber(hc.chainDb, hash)
-	if number == nil {
-		return nil
-	}
-	return hc.GetTd(hc.chainDb, hash, *number)
-}
-
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -156,13 +138,6 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 		return nil
 	}
 	return hc.GetHeader(hash, *number)
-}
-
-// HasHeader checks if a block header is present in the database or not.
-// In theory, if header is present in the database, all relative components
-// like td and hash->number should be present too.
-func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
-	return rawdb.HasHeader(hc.chainDb, hash, number)
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number,
@@ -213,68 +188,6 @@ type (
 	// before each header is deleted.
 	DeleteBlockContentCallback func(ethdb.Database, common.Hash, uint64)
 )
-
-func SetHeaderHead(db ethdb.Database, head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
-	var (
-		parentHash common.Hash
-		batch      = db.NewBatch()
-	)
-	for hdr := rawdb.ReadCurrentHeader(db); hdr != nil && hdr.Number.Uint64() > head; hdr = rawdb.ReadCurrentHeader(db) {
-		num := hdr.Number.Uint64()
-
-		// Rewind block chain to new head.
-		parent := rawdb.ReadHeader(db, hdr.ParentHash, num-1)
-		if parent == nil {
-			genesisHeader := rawdb.ReadHeaderByNumber(db, 0)
-			if genesisHeader == nil {
-				log.Crit("rewind header chain", "error", ErrNoGenesis)
-			}
-
-			parent = genesisHeader
-		}
-		parentHash = hdr.ParentHash
-
-		// Notably, since geth has the possibility for setting the head to a low
-		// height which is even lower than ancient head.
-		// In order to ensure that the head is always no higher than the data in
-		// the database (ancient store or active store), we need to update head
-		// first then remove the relative data from the database.
-		//
-		// Update head first(head fast block, head full block) before deleting the data.
-		markerBatch := db.NewBatch()
-		if updateFn != nil {
-			newHead, force := updateFn(markerBatch, parent)
-			if force && newHead < head {
-				log.Warn("Force rewinding till ancient limit", "head", newHead)
-				head = newHead
-			}
-		}
-		// Update head header then.
-		rawdb.WriteHeadHeaderHash(markerBatch, parentHash)
-		if err := markerBatch.Commit(); err != nil {
-			log.Crit("Failed to update chain markers", "error", err)
-		}
-
-		// Remove the related data from the database on all sidechains
-		// Gather all the side fork hashes
-		hash := hdr.Hash()
-		if delFn != nil {
-			delFn(batch, hash, num)
-		}
-		rawdb.DeleteHeader(batch, hash, num)
-		if err := rawdb.DeleteTd(batch, hash, num); err != nil {
-			panic(err)
-		}
-
-		if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
-			panic(err)
-		}
-	}
-	if err := batch.Commit(); err != nil {
-		panic(err)
-	}
-
-}
 
 // Config retrieves the header chain's chain configuration.
 func (hc *HeaderChain) Config() *params.ChainConfig { return hc.config }

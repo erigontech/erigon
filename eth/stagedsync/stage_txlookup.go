@@ -76,7 +76,7 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blocknum)
+		body := rawdb.ReadBody(tx, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
@@ -160,7 +160,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, _ := rawdb.ReadTransactions(ethdb.NewRoTxDb(tx), body.BaseTxId, body.TxAmount)
+		txs, _ := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
 		for _, txn := range txs {
 			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
 				return false, err

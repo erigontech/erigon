@@ -784,7 +784,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 
 	// Not present in the trie, try the database
 	var a accounts.Account
-	if ok, err := rawdb.ReadAccount(tds.db, addrHash, &a); err != nil {
+	if ok, err := rawdb.ReadAccountDeprecated(tds.db, addrHash, &a); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, nil

@@ -48,8 +48,8 @@ import (
 
 const (
 	epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
-	extraVanity          = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
-	extraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+	ExtraVanity          = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
 	warmupCacheSnapshots = 20
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
@@ -150,10 +150,10 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	}
 
 	// Retrieve the signature from the header extra-data
-	if len(header.Extra) < extraSeal {
+	if len(header.Extra) < ExtraSeal {
 		return common.Address{}, errMissingSignature
 	}
-	signature := header.Extra[len(header.Extra)-extraSeal:]
+	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
@@ -252,34 +252,16 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
-
-	abort := make(chan struct{})
-	results := make(chan error, len(headers))
-
-	cancel := func() {
-		close(abort)
-	}
-
+func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 	if len(headers) == 0 {
-		close(results)
-		return cancel, results
+		return nil
 	}
-
-	go func() {
-		for i, header := range headers {
-			err := c.verifyHeader(chain, header, headers[:i])
-
-			select {
-			case <-abort:
-				return
-			case results <- err:
-			}
+	for i, header := range headers {
+		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
+			return err
 		}
-		close(results)
-	}()
-
-	return cancel, results
+	}
+	return nil
 }
 
 type VerifyHeaderResponse struct {
@@ -350,17 +332,17 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Difficulty = calcDifficulty(snap, c.signer)
 
 	// Ensure the extra data has all its components
-	if len(header.Extra) < extraVanity {
-		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
+	if len(header.Extra) < ExtraVanity {
+		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, ExtraVanity-len(header.Extra))...)
 	}
-	header.Extra = header.Extra[:extraVanity]
+	header.Extra = header.Extra[:ExtraVanity]
 
 	if number%c.config.Epoch == 0 {
 		for _, signer := range snap.signers() {
 			header.Extra = append(header.Extra, signer[:]...)
 		}
 	}
-	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+	header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)
 
 	// Mix digest is reserved for now, set to empty
 	header.MixDigest = common.Hash{}
@@ -460,7 +442,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+	copy(header.Extra[len(header.Extra)-ExtraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
@@ -514,12 +496,14 @@ func (c *Clique) Close() error {
 // APIs implements consensus.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
 func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
-	return []rpc.API{{
-		Namespace: "clique",
-		Version:   "1.0",
-		Service:   &API{chain: chain, clique: c},
-		Public:    false,
-	}}
+	return []rpc.API{
+		//{
+		//Namespace: "clique",
+		//Version:   "1.0",
+		//Service:   &API{chain: chain, clique: c},
+		//Public:    false,
+		//}
+	}
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -561,7 +545,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 		header.MixDigest,
 		header.Nonce,
 	}
-	if header.BaseFee != nil {
+	if header.Eip1559 {
 		enc = append(enc, header.BaseFee)
 	}
 	if err := rlp.Encode(w, enc); err != nil {

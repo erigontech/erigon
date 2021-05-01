@@ -293,7 +293,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 	if err != nil {
 		return err
 	}

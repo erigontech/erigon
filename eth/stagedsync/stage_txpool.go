@@ -15,14 +15,12 @@ import (
 )
 
 type TxPoolCfg struct {
-	pool      *core.TxPool
-	poolStart func() error
+	pool *core.TxPool
 }
 
-func StageTxPoolCfg(pool *core.TxPool, poolStart func() error) TxPoolCfg {
+func StageTxPoolCfg(pool *core.TxPool) TxPoolCfg {
 	return TxPoolCfg{
-		pool:      pool,
-		poolStart: poolStart,
+		pool: pool,
 	}
 }
 
@@ -44,6 +42,11 @@ func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan 
 	if err != nil {
 		return err
 	}
+	if to == s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	logPrefix := s.state.LogPrefix()
 	if to < s.BlockNumber {
 		return fmt.Errorf("%s: to (%d) < from (%d)", logPrefix, to, s.BlockNumber)
@@ -57,9 +60,6 @@ func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan 
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
-		}
-		if err := cfg.poolStart(); err != nil {
-			return fmt.Errorf("%s: start pool phase 2: %w", logPrefix, err)
 		}
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {
@@ -138,7 +138,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 			continue
 		}
 
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 		for _, tx := range body.Transactions {
 			pool.RemoveTx(tx.Hash(), true /* outofbound */)
 		}
@@ -270,7 +270,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 			continue
 		}
 
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 		body.SendersToTxs(senders[blockNumber-from-1])
 		txsToInject = append(txsToInject, body.Transactions...)
 	}
