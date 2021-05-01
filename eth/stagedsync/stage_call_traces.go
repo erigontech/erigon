@@ -163,6 +163,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if _, err := core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
+
+		tracer.tos[block.Coinbase()] = struct{}{}
+		for _, uncle := range block.Uncles() {
+			tracer.tos[uncle.Coinbase] = struct{}{}
+		}
+
 		for addr := range tracer.froms {
 			m, ok := froms[string(addr[:])]
 			if !ok {
