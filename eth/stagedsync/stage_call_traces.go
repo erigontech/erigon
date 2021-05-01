@@ -247,7 +247,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 }
 
 func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}, cfg CallTracesCfg) error {
-	if s.BlockNumber < u.UnwindPoint {
+	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
 	var tx ethdb.RwTx

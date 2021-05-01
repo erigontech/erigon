@@ -99,6 +99,9 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 }
 
 func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+	if s.BlockNumber <= u.UnwindPoint {
+		return nil
+	}
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
