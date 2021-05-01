@@ -552,6 +552,9 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
+			if hd.seenAnnounces.Pop(link.hash) {
+				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+			}
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err
@@ -572,6 +575,15 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	return nil
 }
 
+// GrabAnnounces - returns all available announces and forget them
+func (hd *HeaderDownload) GrabAnnounces() []Announce {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	res := hd.toAnnounce
+	hd.toAnnounce = []Announce{}
+	return res
+}
+
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
@@ -585,6 +597,14 @@ func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 		return true
 	}
 	return false
+}
+
+// SaveExternalAnnounce - does mark hash as seen in external announcement
+// only such hashes will broadcast further after
+func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.seenAnnounces.Add(hash)
 }
 
 func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {

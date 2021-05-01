@@ -18,26 +18,29 @@ import (
 )
 
 type HeadersCfg struct {
-	hd            *headerdownload.HeaderDownload
-	chainConfig   params.ChainConfig
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte
-	wakeUpChan    chan struct{}
-	batchSize     datasize.ByteSize
+	hd                *headerdownload.HeaderDownload
+	chainConfig       params.ChainConfig
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
+	announceNewHashes func(context.Context, []headerdownload.Announce)
+	wakeUpChan        chan struct{}
+	batchSize         datasize.ByteSize
 }
 
 func StageHeadersCfg(
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	announceNewHashes func(context.Context, []headerdownload.Announce),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
 ) HeadersCfg {
 	return HeadersCfg{
-		hd:            headerDownload,
-		chainConfig:   chainConfig,
-		headerReqSend: headerReqSend,
-		wakeUpChan:    wakeUpChan,
-		batchSize:     batchSize,
+		hd:                headerDownload,
+		chainConfig:       chainConfig,
+		headerReqSend:     headerReqSend,
+		announceNewHashes: announceNewHashes,
+		wakeUpChan:        wakeUpChan,
+		batchSize:         batchSize,
 	}
 }
 
@@ -128,6 +131,7 @@ func HeadersForward(
 			}
 			maxRequests--
 		}
+
 		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
 		if req != nil {
@@ -151,6 +155,10 @@ func HeadersForward(
 			}
 		}
 		timer.Stop()
+		announces := cfg.hd.GrabAnnounces()
+		if len(announces) > 0 {
+			cfg.announceNewHashes(ctx, announces)
+		}
 		if !initialCycle && headerInserter.AnythingDone() {
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
