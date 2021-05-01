@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"math/rand"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -120,6 +122,9 @@ func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 func testGetBlockHeaders(t *testing.T, protocol uint) {
 	backend := newTestBackend(maxHeadersServe + 15)
 	defer backend.close()
+	tx, err := backend.db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
@@ -130,7 +135,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		unknown[i] = byte(i)
 	}
 	getBlockHash := func(n uint64) common.Hash {
-		b, _ := rawdb.ReadBlockByNumber(backend.db, n)
+		b, _ := rawdb.ReadBlockByNumber(tx, n)
 		return b.Hash()
 
 	}
@@ -185,20 +190,20 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 0}, Amount: 1},
 			[]common.Hash{getBlockHash(0)},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(backend.db).NumberU64()}, Amount: 1},
-			[]common.Hash{rawdb.ReadCurrentBlock(backend.db).Hash()},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(tx).NumberU64()}, Amount: 1},
+			[]common.Hash{rawdb.ReadCurrentBlock(tx).Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(backend.db).NumberU64() - 1}, Amount: limit + 10, Reverse: true},
-			backend.chain.GetBlockHashesFromHash(rawdb.ReadCurrentBlock(backend.db).Hash(), limit),
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(tx).NumberU64() - 1}, Amount: limit + 10, Reverse: true},
+			backend.chain.GetBlockHashesFromHash(rawdb.ReadCurrentBlock(tx).Hash(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(backend.db).NumberU64() - 4}, Skip: 3, Amount: 3},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(tx).NumberU64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
-				getBlockHash(rawdb.ReadCurrentBlock(backend.db).NumberU64() - 4),
-				getBlockHash(rawdb.ReadCurrentBlock(backend.db).NumberU64()),
+				getBlockHash(rawdb.ReadCurrentBlock(tx).NumberU64() - 4),
+				getBlockHash(rawdb.ReadCurrentBlock(tx).NumberU64()),
 			},
 		}, {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
@@ -209,10 +214,10 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(backend.db).NumberU64() - 4}, Skip: 2, Amount: 3},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(tx).NumberU64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
-				getBlockHash(rawdb.ReadCurrentBlock(backend.db).NumberU64() - 4),
-				getBlockHash(rawdb.ReadCurrentBlock(backend.db).NumberU64() - 1),
+				getBlockHash(rawdb.ReadCurrentBlock(tx).NumberU64() - 4),
+				getBlockHash(rawdb.ReadCurrentBlock(tx).NumberU64() - 1),
 			},
 		}, {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
@@ -249,7 +254,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(backend.db).NumberU64() + 1}, Amount: 1},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentBlock(tx).NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}
@@ -271,7 +276,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		}
 		// If the test used number origins, repeat with hashes as the too
 		if tt.query.Origin.Hash == (common.Hash{}) {
-			if origin, _ := rawdb.ReadBlockByNumber(backend.db, tt.query.Origin.Number); origin != nil {
+			if origin, _ := rawdb.ReadBlockByNumber(tx, tt.query.Origin.Number); origin != nil {
 				tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
 
 				if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
@@ -292,13 +297,16 @@ func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 func testGetBlockBodies(t *testing.T, protocol uint) {
 	backend := newTestBackend(maxBodiesServe + 15)
 	defer backend.close()
+	tx, err := backend.db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
 
-	block1, _ := rawdb.ReadBlockByNumber(backend.db, 1)
-	block10, _ := rawdb.ReadBlockByNumber(backend.db, 10)
-	block100, _ := rawdb.ReadBlockByNumber(backend.db, 100)
+	block1, _ := rawdb.ReadBlockByNumber(tx, 1)
+	block10, _ := rawdb.ReadBlockByNumber(tx, 10)
+	block100, _ := rawdb.ReadBlockByNumber(tx, 100)
 
 	// Create a batch of tests for various scenarios
 	limit := maxBodiesServe
@@ -312,9 +320,9 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		{10, nil, nil, 10},           // Multiple random blocks should be retrievable
 		{limit, nil, nil, limit},     // The maximum possible blocks should be retrievable
 		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
-		{0, []common.Hash{backend.chain.Genesis().Hash()}, []bool{true}, 1},            // The genesis block should be retrievable
-		{0, []common.Hash{rawdb.ReadCurrentBlock(backend.db).Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
-		{0, []common.Hash{{}}, []bool{false}, 0},                                       // A non existent block should not be returned
+		{0, []common.Hash{backend.chain.Genesis().Hash()}, []bool{true}, 1},    // The genesis block should be retrievable
+		{0, []common.Hash{rawdb.ReadCurrentBlock(tx).Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
+		{0, []common.Hash{{}}, []bool{false}, 0},                               // A non existent block should not be returned
 
 		// Existing and non-existing blocks interleaved should not cause problems
 		{0, []common.Hash{
@@ -337,11 +345,11 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		)
 		for j := 0; j < tt.random; j++ {
 			for {
-				num := rand.Int63n(int64(rawdb.ReadCurrentBlock(backend.db).NumberU64()))
+				num := rand.Int63n(int64(rawdb.ReadCurrentBlock(tx).NumberU64()))
 				if !seen[num] {
 					seen[num] = true
 
-					block, _ := rawdb.ReadBlockByNumber(backend.db, uint64(num))
+					block, _ := rawdb.ReadBlockByNumber(tx, uint64(num))
 					hashes = append(hashes, block.Hash())
 					if len(bodies) < tt.expected {
 						bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
@@ -353,7 +361,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		for j, hash := range tt.explicit {
 			hashes = append(hashes, hash)
 			if tt.available[j] && len(bodies) < tt.expected {
-				block, _ := rawdb.ReadBlockByHash(backend.db, hash)
+				block, _ := rawdb.ReadBlockByHashDeprecated(backend.db, hash)
 				bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
 			}
 		}
@@ -410,6 +418,9 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 	// Assemble the test environment
 	backend := newTestBackendWithGenerator(4, generator)
 	defer backend.close()
+	tx, err := backend.db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
@@ -419,8 +430,8 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		hashes   []common.Hash
 		receipts []types.Receipts
 	)
-	for i := uint64(0); i <= rawdb.ReadCurrentBlock(backend.db).NumberU64(); i++ {
-		block, _ := rawdb.ReadBlockByNumber(backend.db, i)
+	for i := uint64(0); i <= rawdb.ReadCurrentBlock(tx).NumberU64(); i++ {
+		block, _ := rawdb.ReadBlockByNumber(tx, i)
 
 		hashes = append(hashes, block.Hash())
 		receipts = append(receipts, rawdb.ReadReceiptsByHash(backend.db, block.Hash()))

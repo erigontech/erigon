@@ -15,18 +15,23 @@ contract Token {
     function transfer(address _to, uint256 _value) public returns (bool) {
         uint256 fromBalance = balanceOf[msg.sender];
         uint256 toBalance = balanceOf[_to];
-        require(fromBalance >= _value);                // Check if the sender has enough
-        require(toBalance + _value >= toBalance);      // Check for overflows
-        balanceOf[msg.sender] = fromBalance - _value;  // Subtract from the sender
+        require(fromBalance >= _value);
+        // Check if the sender has enough
+        require(toBalance + _value >= toBalance);
+        // Check for overflows
+        balanceOf[msg.sender] = fromBalance - _value;
+        // Subtract from the sender
         balanceOf[_to] = toBalance + _value;
         return true;
     }
 
     /* Allows the owner to mint more tokens */
     function mint(address _to, uint256 _value) public returns (bool) {
-        require(msg.sender == minter);                       // Only the minter is allowed to mint
+        require(msg.sender == minter);
+        // Only the minter is allowed to mint
         uint256 toBalance = balanceOf[_to];
-        require(toBalance + _value >= toBalance);  // Check for overflows
+        require(toBalance + _value >= toBalance);
+        // Check for overflows
         balanceOf[_to] = toBalance + _value;
         totalSupply += _value;
         return true;

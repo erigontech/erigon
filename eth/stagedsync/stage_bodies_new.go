@@ -138,7 +138,7 @@ func BodiesForward(
 		}
 		d := cfg.bd.GetDeliveries()
 		for _, block := range d {
-			if err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+			if err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
 			blockHeight := block.NumberU64()

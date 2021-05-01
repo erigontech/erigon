@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
 )
@@ -26,7 +25,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +70,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]interface{})
 
-	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +108,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +127,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}

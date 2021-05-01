@@ -30,7 +30,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 	defer tx.Rollback()
 
-	txn, _, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txHash)
+	txn, _, blockNumber, txIndex := rawdb.ReadTransaction(tx, txHash)
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
@@ -42,7 +42,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	block, senders, sendersErr := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), hash, uint64(bn))
+	block, senders, sendersErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
 	if sendersErr != nil {
 		return nil, sendersErr
 	}
@@ -120,23 +120,23 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
-	dbtx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer dbtx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, dbtx)
+	defer tx.Rollback()
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	hash, hashErr := rawdb.ReadCanonicalHash(dbtx, blockNum)
+	hash, hashErr := rawdb.ReadCanonicalHash(tx, blockNum)
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	block, senders, sendersErr := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(dbtx), hash, uint64(bn))
+	block, senders, sendersErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
 	if sendersErr != nil {
 		return nil, sendersErr
 	}
@@ -163,7 +163,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		baseBn -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, dbtx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			}
 
 			for _, num := range blockNumbers {
-				block, senders, err := rawdb.ReadBlockByNumberWithSenders(ethdb.NewRoTxDb(tx), num)
+				block, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, num)
 				if err != nil {
 					return nil, err
 				}
@@ -304,7 +304,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
 
 		for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
-			block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+			block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
@@ -350,7 +350,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
 			// Because Geth does not return blockReward or uncleReward traces, we must create them here
-			block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), txOrBlockHash)
+			block, err := rawdb.ReadBlockByHash(tx, txOrBlockHash)
 			if err != nil {
 				return nil, err
 			}
@@ -383,7 +383,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			}
 		} else {
 			// In this case, we're processing a transaction hash
-			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(ethdb.NewRoTxDb(tx), txOrBlockHash)
+			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, txOrBlockHash)
 			msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, engine, tx, blockHash, txIndex)
 			if err != nil {
 				return nil, err

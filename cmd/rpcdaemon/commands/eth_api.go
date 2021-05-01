@@ -112,7 +112,7 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 		return api._chainConfig, api._genesis, nil
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), 0)
+	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}

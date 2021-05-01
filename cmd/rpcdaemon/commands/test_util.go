@@ -49,7 +49,7 @@ func createTestDb() (ethdb.Database, error) {
 	if err != nil {
 		return nil, err
 	}
-	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 
 	engine := ethash.NewFaker()
 

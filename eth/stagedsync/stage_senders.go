@@ -177,7 +177,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, db ethdb.Database, 
 			// non-canonical case
 			continue
 		}
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 
 		select {
 		case err := <-errCh:
