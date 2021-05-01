@@ -325,7 +325,7 @@ var (
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "", false /* mdbx */)
 
 	TestChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(1337),
+		ChainID:             big.NewInt(1),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
