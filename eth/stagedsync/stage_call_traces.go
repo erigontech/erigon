@@ -330,11 +330,11 @@ func NewCallTracer() *CallTracer {
 }
 
 func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
 	return nil
 }
 func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	ct.froms[contract.Caller()] = struct{}{}
-	ct.tos[contract.Address()] = struct{}{}
 	return nil
 }
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
@@ -344,6 +344,8 @@ func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t tim
 	return nil
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
 }
 func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil
