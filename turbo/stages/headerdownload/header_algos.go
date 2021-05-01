@@ -552,9 +552,8 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				// skip this link and its children
 				continue
 			}
-			if hd.seenAnnounces.Contains(link.hash) {
+			if hd.seenAnnounces.Pop(link.hash) {
 				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
-				hd.seenAnnounces.Remove(link.hash)
 			}
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
@@ -605,10 +604,6 @@ func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	const maxSawAnnouncesSetSize = 16 * 1024
-	if hd.seenAnnounces.Cardinality() >= maxSawAnnouncesSetSize {
-		hd.seenAnnounces.Pop()
-	}
 	hd.seenAnnounces.Add(hash)
 }
 

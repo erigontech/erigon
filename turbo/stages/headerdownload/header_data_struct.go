@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"sync"
 
-	mapset "github.com/deckarep/golang-set"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -177,8 +177,8 @@ type HeaderDownload struct {
 	stageReadyCh       chan struct{}
 	stageHeight        uint64
 	topSeenHeight      uint64
-	insertList         []*Link    // List of non-persisted links that can be inserted (their parent is persisted)
-	seenAnnounces      mapset.Set // Save external announcement hashes, after header verification if hash is in this set - will broadcast it further
+	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
+	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	toAnnounce         []Announce
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
@@ -209,7 +209,7 @@ func NewHeaderDownload(
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
-		seenAnnounces:      mapset.NewThreadUnsafeSet(),
+		seenAnnounces:      NewSeenAnnounces(),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)
@@ -267,4 +267,29 @@ func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, loc
 		headerProgress: headerProgress,
 		unwindPoint:    headerProgress,
 	}
+}
+
+// SeenAnnounces - external announcement hashes, after header verification if hash is in this set - will broadcast it further
+type SeenAnnounces struct {
+	hashes *lru.Cache
+}
+
+func NewSeenAnnounces() *SeenAnnounces {
+	cache, err := lru.New(1000)
+	if err != nil {
+		panic("error creating prefetching cache for blocks")
+	}
+	return &SeenAnnounces{hashes: cache}
+}
+
+func (s *SeenAnnounces) Pop(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
+	if ok {
+		s.hashes.Remove(hash)
+	}
+	return ok
+}
+
+func (s *SeenAnnounces) Add(b common.Hash) {
+	s.hashes.ContainsOrAdd(b, struct{}{})
 }
