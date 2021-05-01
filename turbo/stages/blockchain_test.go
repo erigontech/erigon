@@ -433,6 +433,7 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		t.Fatalf("failed to create pristine chain: %v", err)
 	}
 	defer db.Close()
+
 	// Insert an easy and a difficult chain afterwards
 	easyBlocks, _, err := core.GenerateChain(params.TestChainConfig, rawdb.ReadCurrentBlockDeprecated(db), ethash.NewFaker(), db, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
@@ -446,15 +447,11 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	tx, err := db.RwKV().BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
 	if full {
-		if _, err = stagedsync.InsertBlocksInStages(ethdb.WrapIntoTxDB(tx), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), easyBlocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), easyBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, err = stagedsync.InsertBlocksInStages(ethdb.WrapIntoTxDB(tx), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), diffBlocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), diffBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	} else {
@@ -466,17 +463,17 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		for i, block := range diffBlocks {
 			diffHeaders[i] = block.Header()
 		}
-		if _, _, _, err = stagedsync.InsertHeadersInStages(ethdb.WrapIntoTxDB(tx), params.TestChainConfig, ethash.NewFaker(), easyHeaders); err != nil {
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), easyHeaders); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, _, _, err = stagedsync.InsertHeadersInStages(ethdb.WrapIntoTxDB(tx), params.TestChainConfig, ethash.NewFaker(), diffHeaders); err != nil {
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), diffHeaders); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	}
 	// Check that the chain is valid number and link wise
 	if full {
-		prev := rawdb.ReadCurrentBlock(tx)
-		block, err := rawdb.ReadBlockByNumber(tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
+		prev := rawdb.ReadCurrentBlockDeprecated(db)
+		block, err := rawdb.ReadBlockByNumberDeprecated(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,25 +482,25 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 				t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 			}
 			prev = block
-			block, err = rawdb.ReadBlockByNumber(tx, block.NumberU64()-1)
+			block, err = rawdb.ReadBlockByNumberDeprecated(db, block.NumberU64()-1)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 	} else {
-		prev := rawdb.ReadCurrentHeader(tx)
-		for header := rawdb.ReadHeaderByNumber(tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1); header != nil && header.Number.Uint64() != 0; {
+		prev := rawdb.ReadCurrentHeader(db)
+		for header := rawdb.ReadHeaderByNumber(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1); header != nil && header.Number.Uint64() != 0; {
 			if prev.ParentHash != header.Hash() {
 				t.Errorf("parent header hash mismatch: have %x, want %x", prev.ParentHash, header.Hash())
 			}
-			prev, header = header, rawdb.ReadHeaderByNumber(tx, header.Number.Uint64()-1)
+			prev, header = header, rawdb.ReadHeaderByNumber(db, header.Number.Uint64()-1)
 
 		}
 	}
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(genesis.Difficulty(), big.NewInt(td))
 	if full {
-		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+		have, err := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -511,7 +508,7 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 		}
 	} else {
-		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+		have, err := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash())
 		if err != nil {
 			t.Fatal(err)
 		}
