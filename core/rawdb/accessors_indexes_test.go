@@ -92,8 +92,8 @@ func TestLookupStorage(t *testing.T) {
 				if err := DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
 					t.Fatal(err)
 				}
-				if txn, _, _, _ := ReadTransaction(tx, txn.Hash()); txn != nil {
-					t.Fatalf("txn #%d [%x]: deleted transaction returned: %v", i, txn.Hash(), txn)
+				if txn2, _, _, _ := ReadTransaction(tx, txn.Hash()); txn2 != nil {
+					t.Fatalf("txn #%d [%x]: deleted transaction returned: %v", i, txn.Hash(), txn2)
 				}
 			}
 		})
