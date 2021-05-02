@@ -519,6 +519,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	msg := args.ToMessage(api.gasCap)
 
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	//blockCtx.BlockNumber++
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
@@ -531,6 +532,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	var execResult *core.ExecutionResult
+	ibs.Prepare(common.Hash{}, common.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -567,10 +569,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	}
 	defer dbtx.Rollback()
 
-	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash, common.Hash{})
+	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash, nil)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, blockHash common.Hash) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -595,9 +597,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
-	if header == nil {
-		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+	parentHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -669,8 +671,10 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
+		if header == nil {
+			header = parentHeader
+		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
-		blockCtx.BlockNumber++
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
@@ -684,7 +688,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
-		ibs.Prepare(common.Hash{}, blockHash, txIndex)
+		ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)

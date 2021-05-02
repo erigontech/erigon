@@ -71,7 +71,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Hash())
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		parentNr -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Hash())
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ type TransactionWithSender struct {
 	sender common.Address
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, parentHash common.Hash, parentNo rpc.BlockNumber, blockHash common.Hash) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
 	toExecute := []interface{}{}
 
 	for _, txWithSender := range txs {
@@ -473,7 +473,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, blockHash)
+	}, header)
 
 	if cmErr != nil {
 		return nil, cmErr
