@@ -519,6 +519,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	msg := args.ToMessage(api.gasCap)
 
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx.BlockNumber++
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
@@ -567,25 +568,25 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	}
 	defer dbtx.Rollback()
 
-	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash)
+	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash, common.Hash{})
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, blockHash common.Hash) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}
 
-	if blockNrOrHash == nil {
+	if parentNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
-		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.pending)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
-	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+	if num, ok := parentNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
 		stateReader = state.NewPlainKvState(dbtx, blockNumber)
@@ -669,7 +670,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
+		blockCtx.BlockNumber++
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
@@ -683,7 +685,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
-		ibs.Prepare(common.Hash{}, common.Hash{}, txIndex)
+		ibs.Prepare(common.Hash{}, blockHash, txIndex)
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
