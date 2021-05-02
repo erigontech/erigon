@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,10 +52,29 @@ func TestTrieLayout(t *testing.T) {
 	loc3 := common.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00000")
 	loc4 := common.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00001")
 
-	val1 := common.Hex2Bytes("0x42")
-	val2 := common.Hex2Bytes("0x01")
-	val3 := common.Hex2Bytes("0x127a89")
-	val4 := common.Hex2Bytes("0x05")
+	val1 := common.FromHex("0x42")
+	val2 := common.FromHex("0x01")
+	val3 := common.FromHex("0x127a89")
+	val4 := common.FromHex("0x05")
+
+	valbuf := new(bytes.Buffer)
+	testTrie := trie.NewTestRLPTrie(common.Hash{})
+	valbuf.Reset()
+	rlp.Encode(valbuf, val1)
+	testTrie.Update(common.CopyBytes(loc1.Bytes()), common.CopyBytes(valbuf.Bytes()))
+	valbuf.Reset()
+	rlp.Encode(valbuf, val2)
+	testTrie.Update(common.CopyBytes(loc2.Bytes()), common.CopyBytes(valbuf.Bytes()))
+	valbuf.Reset()
+	rlp.Encode(valbuf, val3)
+	testTrie.Update(common.CopyBytes(loc3.Bytes()), common.CopyBytes(valbuf.Bytes()))
+	valbuf.Reset()
+	rlp.Encode(valbuf, val4)
+	testTrie.Update(common.CopyBytes(loc4.Bytes()), common.CopyBytes(valbuf.Bytes()))
+
+	storageRoot := testTrie.Hash()
+	fmt.Println("storageRoot")
+	fmt.Println(common.Bytes2Hex(storageRoot.Bytes()))
 
 	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc1), val1))
 	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc2), val2))
@@ -88,6 +109,7 @@ func TestTrieLayout(t *testing.T) {
 	assert.Equal(t, uint16(0b1001), hasHash1)
 	assert.Equal(t, 2*common.HashLength, len(hashes1))
 	assert.Equal(t, 0, len(rootHash1))
+	fmt.Println("hashes1")
 	fmt.Println(common.Bytes2Hex(hashes1[0:common.HashLength]))
 	fmt.Println(common.Bytes2Hex(hashes1[common.HashLength : 2*common.HashLength]))
 
@@ -97,6 +119,7 @@ func TestTrieLayout(t *testing.T) {
 	assert.Equal(t, uint16(0b10000), hasHash2)
 	assert.Equal(t, 1*common.HashLength, len(hashes2))
 	assert.Equal(t, 0, len(rootHash2))
+	fmt.Println("hashes2")
 	fmt.Println(common.Bytes2Hex(hashes2[0:common.HashLength]))
 
 	storageTrie := make(map[string][]byte)
@@ -119,5 +142,8 @@ func TestTrieLayout(t *testing.T) {
 	assert.Equal(t, uint16(0b0010), hasHash3)
 	assert.Equal(t, 1*common.HashLength, len(hashes3))
 	assert.Equal(t, common.HashLength, len(rootHash3))
+	fmt.Println("hashes3")
 	fmt.Println(common.Bytes2Hex(hashes3[0:common.HashLength]))
+	fmt.Println("rootHash3")
+	fmt.Println(common.Bytes2Hex(rootHash3))
 }
