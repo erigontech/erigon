@@ -694,11 +694,6 @@ func (tx *MdbxTx) closeCursors() {
 	tx.cursors = []*mdbx.Cursor{}
 }
 
-func (c *MdbxCursor) Prefetch(v uint) Cursor {
-	//c.cursorOpts.PrefetchSize = int(v)
-	return c
-}
-
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
