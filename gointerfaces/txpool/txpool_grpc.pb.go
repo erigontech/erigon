@@ -20,7 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 type TxpoolClient interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
-	// preserves incoming order and amount
+	// Expecting signed transactions. Preserves incoming order and amount
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
@@ -101,7 +101,7 @@ func (x *txpoolOnAddClient) Recv() (*OnAddReply, error) {
 type TxpoolServer interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(context.Context, *TxHashes) (*TxHashes, error)
-	// preserves incoming order and amount
+	// Expecting signed transactions. Preserves incoming order and amount
 	Add(context.Context, *AddRequest) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)
