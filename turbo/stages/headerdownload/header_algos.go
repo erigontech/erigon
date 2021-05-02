@@ -416,7 +416,7 @@ func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
-		log.Error("Preverified hashes not found for", "chain", chain)
+		log.Warn("Preverified hashes not found for", "chain", chain)
 		return nil, 0
 	}
 	return DecodeHashes(encodings), height
@@ -548,7 +548,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		}
 		if !link.preverified {
 			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
-				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
+				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				// skip this link and its children
 				continue
 			}
@@ -649,7 +649,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	// Load parent header
 	parent := rawdb.ReadHeader(hi.batch, header.ParentHash, blockHeight-1)
 	if parent == nil {
-		log.Error(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
+		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
 		// Skip headers without parents
 		return nil
 	}
@@ -760,14 +760,14 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (
 		if foundTip {
 			// Connect
 			if err := hd.connect(segment, start, end); err != nil {
-				log.Error("Connect failed", "error", err)
+				log.Debug("Connect failed", "error", err)
 				return
 			}
 			log.Debug("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			if err := hd.extendDown(segment, start, end); err != nil {
-				log.Error("ExtendDown failed", "error", err)
+				log.Debug("ExtendDown failed", "error", err)
 				return
 			}
 			requestMore = true
@@ -777,7 +777,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (
 		if end > 0 {
 			// ExtendUp
 			if err := hd.extendUp(segment, start, end); err != nil {
-				log.Error("ExtendUp failed", "error", err)
+				log.Debug("ExtendUp failed", "error", err)
 				return
 			}
 			log.Debug("Extended Up", "start", startNum, "end", endNum)
@@ -785,7 +785,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (
 	} else {
 		// NewAnchor
 		if err := hd.newAnchor(segment, start, end); err != nil {
-			log.Error("NewAnchor failed", "error", err)
+			log.Debug("NewAnchor failed", "error", err)
 			return
 		}
 		requestMore = true
