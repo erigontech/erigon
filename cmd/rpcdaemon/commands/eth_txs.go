@@ -35,7 +35,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}

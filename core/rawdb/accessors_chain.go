@@ -1148,6 +1148,14 @@ func ReadBlockByHash(db ethdb.Tx, hash common.Hash) (*types.Block, error) {
 	return ReadBlock(db, hash, *number), nil
 }
 
+func ReadBlockByHashWithSenders(db ethdb.Tx, hash common.Hash) (*types.Block, []common.Address, error) {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil, nil
+	}
+	return ReadBlockWithSenders(db, hash, *number)
+}
+
 func ReadBlocksByHash(db ethdb.Getter, hash common.Hash, n int) (blocks []*types.Block, err error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
