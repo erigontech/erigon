@@ -370,7 +370,6 @@ type MdbxCursor struct {
 	bucketName string
 	dbi        mdbx.DBI
 	bucketCfg  dbutils.BucketConfigItem
-	prefix     []byte
 
 	c *mdbx.Cursor
 }
@@ -695,11 +694,6 @@ func (tx *MdbxTx) closeCursors() {
 	tx.cursors = []*mdbx.Cursor{}
 }
 
-func (c *MdbxCursor) Prefix(v []byte) Cursor {
-	c.prefix = v
-	return c
-}
-
 func (c *MdbxCursor) Prefetch(v uint) Cursor {
 	//c.cursorOpts.PrefetchSize = int(v)
 	return c
@@ -962,14 +956,10 @@ func (c *MdbxCursor) Count() (uint64, error) {
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
-	return c.Seek(c.prefix)
+	return c.Seek(nil)
 }
 
 func (c *MdbxCursor) Last() ([]byte, []byte, error) {
-	if c.prefix != nil {
-		return []byte{}, nil, fmt.Errorf(".Last doesn't support c.prefix yet")
-	}
-
 	k, v, err := c.last()
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1006,9 +996,6 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		err = fmt.Errorf("failed MdbxKV cursor.Seek(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
 		return []byte{}, nil, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 
 	return k, v, nil
 }
@@ -1023,9 +1010,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 				return nil, nil, nil
 			}
 			return []byte{}, nil, err
-		}
-		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-			k, v = nil, nil
 		}
 
 		if len(k) == to {
@@ -1073,9 +1057,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		k = k2
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 	return k, v, nil
 }
 
@@ -1093,10 +1074,6 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil
@@ -1118,10 +1095,6 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 		v = v[keyPart:]
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
-
 	return k, v, nil
 }
 
@@ -1140,10 +1113,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil
