@@ -24,6 +24,8 @@ type TxpoolClient interface {
 	ImportTransactions(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	GetTransactions(ctx context.Context, in *GetTransactionsRequest, opts ...grpc.CallOption) (*GetTransactionsReply, error)
+	// pending transactions stream
+	Pending(ctx context.Context, in *PendingRequest, opts ...grpc.CallOption) (Txpool_PendingClient, error)
 }
 
 type txpoolClient struct {
@@ -61,6 +63,38 @@ func (c *txpoolClient) GetTransactions(ctx context.Context, in *GetTransactionsR
 	return out, nil
 }
 
+func (c *txpoolClient) Pending(ctx context.Context, in *PendingRequest, opts ...grpc.CallOption) (Txpool_PendingClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Txpool_ServiceDesc.Streams[0], "/txpool.Txpool/Pending", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &txpoolPendingClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Txpool_PendingClient interface {
+	Recv() (*PendingReply, error)
+	grpc.ClientStream
+}
+
+type txpoolPendingClient struct {
+	grpc.ClientStream
+}
+
+func (x *txpoolPendingClient) Recv() (*PendingReply, error) {
+	m := new(PendingReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // TxpoolServer is the server API for Txpool service.
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility
@@ -71,6 +105,8 @@ type TxpoolServer interface {
 	ImportTransactions(context.Context, *ImportRequest) (*ImportReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	GetTransactions(context.Context, *GetTransactionsRequest) (*GetTransactionsReply, error)
+	// pending transactions stream
+	Pending(*PendingRequest, Txpool_PendingServer) error
 	mustEmbedUnimplementedTxpoolServer()
 }
 
@@ -86,6 +122,9 @@ func (UnimplementedTxpoolServer) ImportTransactions(context.Context, *ImportRequ
 }
 func (UnimplementedTxpoolServer) GetTransactions(context.Context, *GetTransactionsRequest) (*GetTransactionsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTransactions not implemented")
+}
+func (UnimplementedTxpoolServer) Pending(*PendingRequest, Txpool_PendingServer) error {
+	return status.Errorf(codes.Unimplemented, "method Pending not implemented")
 }
 func (UnimplementedTxpoolServer) mustEmbedUnimplementedTxpoolServer() {}
 
@@ -154,6 +193,27 @@ func _Txpool_GetTransactions_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Txpool_Pending_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PendingRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TxpoolServer).Pending(m, &txpoolPendingServer{stream})
+}
+
+type Txpool_PendingServer interface {
+	Send(*PendingReply) error
+	grpc.ServerStream
+}
+
+type txpoolPendingServer struct {
+	grpc.ServerStream
+}
+
+func (x *txpoolPendingServer) Send(m *PendingReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Txpool_ServiceDesc is the grpc.ServiceDesc for Txpool service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -174,6 +234,12 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Txpool_GetTransactions_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Pending",
+			Handler:       _Txpool_Pending_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "txpool/txpool.proto",
 }

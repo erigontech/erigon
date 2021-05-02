@@ -7,7 +7,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -20,12 +19,8 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConsensusEngineClient interface {
 	GetAuthor(ctx context.Context, in *GetAuthorRequest, opts ...grpc.CallOption) (*GetAuthorResponse, error)
-	ChainSpec(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ChainSpecMessage, error)
-	// Core requests verifications from the Consensus Engine via this function
+	VerifyHeader(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyHeaderClient, error)
 	VerifyHeaders(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyHeadersClient, error)
-	// Consensis Engine may ask for extra informaton (more headers) from the core, and these requests are coming through the stream
-	// returned by the ProvideHeaders function
-	ProvideHeaders(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_ProvideHeadersClient, error)
 	VerifyUncles(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyUnclesClient, error)
 	Prepare(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_PrepareClient, error)
 	Finalize(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_FinalizeClient, error)
@@ -49,17 +44,39 @@ func (c *consensusEngineClient) GetAuthor(ctx context.Context, in *GetAuthorRequ
 	return out, nil
 }
 
-func (c *consensusEngineClient) ChainSpec(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ChainSpecMessage, error) {
-	out := new(ChainSpecMessage)
-	err := c.cc.Invoke(ctx, "/consensus.ConsensusEngine/ChainSpec", in, out, opts...)
+func (c *consensusEngineClient) VerifyHeader(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyHeaderClient, error) {
+	stream, err := c.cc.NewStream(ctx, &ConsensusEngine_ServiceDesc.Streams[0], "/consensus.ConsensusEngine/VerifyHeader", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &consensusEngineVerifyHeaderClient{stream}
+	return x, nil
+}
+
+type ConsensusEngine_VerifyHeaderClient interface {
+	Send(*VerifyHeaderRequest) error
+	Recv() (*VerifyHeaderResponse, error)
+	grpc.ClientStream
+}
+
+type consensusEngineVerifyHeaderClient struct {
+	grpc.ClientStream
+}
+
+func (x *consensusEngineVerifyHeaderClient) Send(m *VerifyHeaderRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *consensusEngineVerifyHeaderClient) Recv() (*VerifyHeaderResponse, error) {
+	m := new(VerifyHeaderResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *consensusEngineClient) VerifyHeaders(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_VerifyHeadersClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ConsensusEngine_ServiceDesc.Streams[0], "/consensus.ConsensusEngine/VerifyHeaders", opts...)
+	stream, err := c.cc.NewStream(ctx, &ConsensusEngine_ServiceDesc.Streams[1], "/consensus.ConsensusEngine/VerifyHeaders", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -68,8 +85,8 @@ func (c *consensusEngineClient) VerifyHeaders(ctx context.Context, opts ...grpc.
 }
 
 type ConsensusEngine_VerifyHeadersClient interface {
-	Send(*VerifyHeaderRequest) error
-	Recv() (*VerifyHeaderResponse, error)
+	Send(*VerifyHeadersRequest) error
+	Recv() (*VerifyHeadersResponse, error)
 	grpc.ClientStream
 }
 
@@ -77,43 +94,12 @@ type consensusEngineVerifyHeadersClient struct {
 	grpc.ClientStream
 }
 
-func (x *consensusEngineVerifyHeadersClient) Send(m *VerifyHeaderRequest) error {
+func (x *consensusEngineVerifyHeadersClient) Send(m *VerifyHeadersRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *consensusEngineVerifyHeadersClient) Recv() (*VerifyHeaderResponse, error) {
-	m := new(VerifyHeaderResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *consensusEngineClient) ProvideHeaders(ctx context.Context, opts ...grpc.CallOption) (ConsensusEngine_ProvideHeadersClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ConsensusEngine_ServiceDesc.Streams[1], "/consensus.ConsensusEngine/ProvideHeaders", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &consensusEngineProvideHeadersClient{stream}
-	return x, nil
-}
-
-type ConsensusEngine_ProvideHeadersClient interface {
-	Send(*HeadersResponse) error
-	Recv() (*HeadersRequest, error)
-	grpc.ClientStream
-}
-
-type consensusEngineProvideHeadersClient struct {
-	grpc.ClientStream
-}
-
-func (x *consensusEngineProvideHeadersClient) Send(m *HeadersResponse) error {
-	return x.ClientStream.SendMsg(m)
-}
-
-func (x *consensusEngineProvideHeadersClient) Recv() (*HeadersRequest, error) {
-	m := new(HeadersRequest)
+func (x *consensusEngineVerifyHeadersClient) Recv() (*VerifyHeadersResponse, error) {
+	m := new(VerifyHeadersResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -250,12 +236,8 @@ func (x *consensusEngineSealClient) Recv() (*SealBlockResponse, error) {
 // for forward compatibility
 type ConsensusEngineServer interface {
 	GetAuthor(context.Context, *GetAuthorRequest) (*GetAuthorResponse, error)
-	ChainSpec(context.Context, *emptypb.Empty) (*ChainSpecMessage, error)
-	// Core requests verifications from the Consensus Engine via this function
+	VerifyHeader(ConsensusEngine_VerifyHeaderServer) error
 	VerifyHeaders(ConsensusEngine_VerifyHeadersServer) error
-	// Consensis Engine may ask for extra informaton (more headers) from the core, and these requests are coming through the stream
-	// returned by the ProvideHeaders function
-	ProvideHeaders(ConsensusEngine_ProvideHeadersServer) error
 	VerifyUncles(ConsensusEngine_VerifyUnclesServer) error
 	Prepare(ConsensusEngine_PrepareServer) error
 	Finalize(ConsensusEngine_FinalizeServer) error
@@ -270,14 +252,11 @@ type UnimplementedConsensusEngineServer struct {
 func (UnimplementedConsensusEngineServer) GetAuthor(context.Context, *GetAuthorRequest) (*GetAuthorResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAuthor not implemented")
 }
-func (UnimplementedConsensusEngineServer) ChainSpec(context.Context, *emptypb.Empty) (*ChainSpecMessage, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ChainSpec not implemented")
+func (UnimplementedConsensusEngineServer) VerifyHeader(ConsensusEngine_VerifyHeaderServer) error {
+	return status.Errorf(codes.Unimplemented, "method VerifyHeader not implemented")
 }
 func (UnimplementedConsensusEngineServer) VerifyHeaders(ConsensusEngine_VerifyHeadersServer) error {
 	return status.Errorf(codes.Unimplemented, "method VerifyHeaders not implemented")
-}
-func (UnimplementedConsensusEngineServer) ProvideHeaders(ConsensusEngine_ProvideHeadersServer) error {
-	return status.Errorf(codes.Unimplemented, "method ProvideHeaders not implemented")
 }
 func (UnimplementedConsensusEngineServer) VerifyUncles(ConsensusEngine_VerifyUnclesServer) error {
 	return status.Errorf(codes.Unimplemented, "method VerifyUncles not implemented")
@@ -322,43 +301,25 @@ func _ConsensusEngine_GetAuthor_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ConsensusEngine_ChainSpec_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ConsensusEngineServer).ChainSpec(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/consensus.ConsensusEngine/ChainSpec",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConsensusEngineServer).ChainSpec(ctx, req.(*emptypb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
+func _ConsensusEngine_VerifyHeader_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ConsensusEngineServer).VerifyHeader(&consensusEngineVerifyHeaderServer{stream})
 }
 
-func _ConsensusEngine_VerifyHeaders_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ConsensusEngineServer).VerifyHeaders(&consensusEngineVerifyHeadersServer{stream})
-}
-
-type ConsensusEngine_VerifyHeadersServer interface {
+type ConsensusEngine_VerifyHeaderServer interface {
 	Send(*VerifyHeaderResponse) error
 	Recv() (*VerifyHeaderRequest, error)
 	grpc.ServerStream
 }
 
-type consensusEngineVerifyHeadersServer struct {
+type consensusEngineVerifyHeaderServer struct {
 	grpc.ServerStream
 }
 
-func (x *consensusEngineVerifyHeadersServer) Send(m *VerifyHeaderResponse) error {
+func (x *consensusEngineVerifyHeaderServer) Send(m *VerifyHeaderResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *consensusEngineVerifyHeadersServer) Recv() (*VerifyHeaderRequest, error) {
+func (x *consensusEngineVerifyHeaderServer) Recv() (*VerifyHeaderRequest, error) {
 	m := new(VerifyHeaderRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -366,26 +327,26 @@ func (x *consensusEngineVerifyHeadersServer) Recv() (*VerifyHeaderRequest, error
 	return m, nil
 }
 
-func _ConsensusEngine_ProvideHeaders_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ConsensusEngineServer).ProvideHeaders(&consensusEngineProvideHeadersServer{stream})
+func _ConsensusEngine_VerifyHeaders_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ConsensusEngineServer).VerifyHeaders(&consensusEngineVerifyHeadersServer{stream})
 }
 
-type ConsensusEngine_ProvideHeadersServer interface {
-	Send(*HeadersRequest) error
-	Recv() (*HeadersResponse, error)
+type ConsensusEngine_VerifyHeadersServer interface {
+	Send(*VerifyHeadersResponse) error
+	Recv() (*VerifyHeadersRequest, error)
 	grpc.ServerStream
 }
 
-type consensusEngineProvideHeadersServer struct {
+type consensusEngineVerifyHeadersServer struct {
 	grpc.ServerStream
 }
 
-func (x *consensusEngineProvideHeadersServer) Send(m *HeadersRequest) error {
+func (x *consensusEngineVerifyHeadersServer) Send(m *VerifyHeadersResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *consensusEngineProvideHeadersServer) Recv() (*HeadersResponse, error) {
-	m := new(HeadersResponse)
+func (x *consensusEngineVerifyHeadersServer) Recv() (*VerifyHeadersRequest, error) {
+	m := new(VerifyHeadersRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -502,21 +463,17 @@ var ConsensusEngine_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetAuthor",
 			Handler:    _ConsensusEngine_GetAuthor_Handler,
 		},
-		{
-			MethodName: "ChainSpec",
-			Handler:    _ConsensusEngine_ChainSpec_Handler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "VerifyHeaders",
-			Handler:       _ConsensusEngine_VerifyHeaders_Handler,
+			StreamName:    "VerifyHeader",
+			Handler:       _ConsensusEngine_VerifyHeader_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "ProvideHeaders",
-			Handler:       _ConsensusEngine_ProvideHeaders_Handler,
+			StreamName:    "VerifyHeaders",
+			Handler:       _ConsensusEngine_VerifyHeaders_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
@@ -544,91 +501,5 @@ var ConsensusEngine_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "consensus_engine/consensus.proto",
-}
-
-// TestClient is the client API for Test service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type TestClient interface {
-	StartTestCase(ctx context.Context, in *StartTestCaseMessage, opts ...grpc.CallOption) (*emptypb.Empty, error)
-}
-
-type testClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewTestClient(cc grpc.ClientConnInterface) TestClient {
-	return &testClient{cc}
-}
-
-func (c *testClient) StartTestCase(ctx context.Context, in *StartTestCaseMessage, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, "/consensus.Test/StartTestCase", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// TestServer is the server API for Test service.
-// All implementations must embed UnimplementedTestServer
-// for forward compatibility
-type TestServer interface {
-	StartTestCase(context.Context, *StartTestCaseMessage) (*emptypb.Empty, error)
-	mustEmbedUnimplementedTestServer()
-}
-
-// UnimplementedTestServer must be embedded to have forward compatible implementations.
-type UnimplementedTestServer struct {
-}
-
-func (UnimplementedTestServer) StartTestCase(context.Context, *StartTestCaseMessage) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StartTestCase not implemented")
-}
-func (UnimplementedTestServer) mustEmbedUnimplementedTestServer() {}
-
-// UnsafeTestServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to TestServer will
-// result in compilation errors.
-type UnsafeTestServer interface {
-	mustEmbedUnimplementedTestServer()
-}
-
-func RegisterTestServer(s grpc.ServiceRegistrar, srv TestServer) {
-	s.RegisterService(&Test_ServiceDesc, srv)
-}
-
-func _Test_StartTestCase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartTestCaseMessage)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TestServer).StartTestCase(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/consensus.Test/StartTestCase",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TestServer).StartTestCase(ctx, req.(*StartTestCaseMessage))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// Test_ServiceDesc is the grpc.ServiceDesc for Test service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var Test_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "consensus.Test",
-	HandlerType: (*TestServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "StartTestCase",
-			Handler:    _Test_StartTestCase_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "consensus_engine/consensus.proto",
 }
