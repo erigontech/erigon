@@ -8,7 +8,7 @@ option go_package = "./txpool;txpool";
 
 message TxHashes { repeated types.H256 hashes = 1; }
 
-message ImportRequest { repeated bytes txs = 1; }
+message AddRequest { repeated bytes rlpTxs = 1; bool isLocal = 2; }
 
 enum ImportResult {
   SUCCESS = 0;
@@ -19,23 +19,23 @@ enum ImportResult {
   INTERNAL_ERROR = 5;
 }
 
-message ImportReply { repeated ImportResult imported = 1; }
+message AddReply { repeated ImportResult imported = 1; }
 
-message GetTransactionsRequest { repeated types.H256 hashes = 1; }
-message GetTransactionsReply { repeated bytes txs = 1; }
+message TransactionsRequest { repeated types.H256 hashes = 1; }
+message TransactionsReply { repeated bytes rlpTxs = 1; }
 
-message PendingRequest {}
-message PendingReply {
-  repeated bytes rplTx = 1;
+message OnAddRequest {}
+message OnAddReply {
+  repeated bytes rplTxs = 1;
 }
 
 service Txpool {
   // preserves incoming order, changes amount, unknown hashes will be omitted
-  rpc FindUnknownTransactions(TxHashes) returns (TxHashes);
-  // preserves incoming order and amount
-  rpc ImportTransactions(ImportRequest) returns (ImportReply);
+  rpc FindUnknown(TxHashes) returns (TxHashes);
+  // Expecting signed transactions. Preserves incoming order and amount
+  rpc Add(AddRequest) returns (AddReply);
   // preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
-  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsReply);
-  // pending transactions stream
-  rpc Pending(PendingRequest) returns (stream PendingReply);
+  rpc Transactions(TransactionsRequest) returns (TransactionsReply);
+  // subscribe to new transactions add event
+  rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
 }
