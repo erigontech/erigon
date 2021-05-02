@@ -500,6 +500,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// check whether the max code size has been exceeded
 	maxCodeSizeExceeded := evm.chainRules.IsEIP158 && len(ret) > params.MaxCodeSize
+
+	// Reject code starting with 0xEF if EIP-3541 is enabled.
+	if err == nil && !maxCodeSizeExceeded {
+		if evm.chainRules.IsBaikal && len(ret) >= 1 && ret[0] == 0xEF {
+			err = ErrInvalidCode
+		}
+	}
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
 	// be stored due to not enough gas set an error and let it be handled
