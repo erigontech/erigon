@@ -72,7 +72,7 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 }
 
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
-	subscription, err := txPool.Pending(ctx, &txpool.PendingRequest{}, grpc.WaitForReady(true))
+	subscription, err := txPool.OnAdd(ctx, &txpool.OnAddRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return errors.New(s.Message())
@@ -198,17 +198,17 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	}
 }
 
-func (ff *Filters) OnNewTx(reply *txpool.PendingReply) {
+func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 
-	txs := make([]types.Transaction, len(reply.RplTx))
+	txs := make([]types.Transaction, len(reply.RplTxs))
 	reader := bytes.NewReader(nil)
 	stream := rlp.NewStream(reader, 0)
 
-	for i := range reply.RplTx {
-		reader.Reset(reply.RplTx[i])
-		stream.Reset(reader, uint64(len(reply.RplTx[i])))
+	for i := range reply.RplTxs {
+		reader.Reset(reply.RplTxs[i])
+		stream.Reset(reader, uint64(len(reply.RplTxs[i])))
 		var decodeErr error
 		txs[i], decodeErr = types.DecodeTransaction(stream)
 		if decodeErr != nil {

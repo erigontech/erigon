@@ -31,7 +31,7 @@ func main() {
 			log.Info("filters are not supported in chaindata mode")
 		}
 
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, ff, *cfg, nil)); err != nil {
+		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, ff, *cfg, nil)); err != nil {
 			log.Error(err.Error())
 			return nil
 		}

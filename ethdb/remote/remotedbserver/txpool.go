@@ -24,14 +24,14 @@ func NewTxPoolServer(ctx context.Context, txPool *core.TxPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
 
-func (s *TxPoolServer) FindUnknownTransactions(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
+func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FindUnknownTransactions not implemented")
 }
-func (s *TxPoolServer) ImportTransactions(ctx context.Context, in *proto_txpool.ImportRequest) (*proto_txpool.ImportReply, error) {
+func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*proto_txpool.AddReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ImportTransactions not implemented")
 }
 
-func (s *TxPoolServer) Pending(req *proto_txpool.PendingRequest, stream proto_txpool.Txpool_PendingServer) error {
+func (s *TxPoolServer) OnAdd(req *proto_txpool.OnAddRequest, stream proto_txpool.Txpool_OnAddServer) error {
 	txsCh := make(chan core.NewTxsEvent, 1024)
 	defer close(txsCh)
 	sub := s.txPool.SubscribeNewTxsEvent(txsCh)
@@ -44,27 +44,27 @@ func (s *TxPoolServer) Pending(req *proto_txpool.PendingRequest, stream proto_tx
 			log.Warn("error while marshaling a pending transaction", "err", err)
 			return err
 		}
-		if err := stream.Send(&proto_txpool.PendingReply{RplTx: [][]byte{common.CopyBytes(buf.Bytes())}}); err != nil {
+		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: [][]byte{common.CopyBytes(buf.Bytes())}}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *TxPoolServer) GetTransactions(ctx context.Context, in *proto_txpool.GetTransactionsRequest) (*proto_txpool.GetTransactionsReply, error) {
+func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.TransactionsRequest) (*proto_txpool.TransactionsReply, error) {
 	buf := bytes.NewBuffer(nil)
-	reply := &proto_txpool.GetTransactionsReply{Txs: make([][]byte, len(in.Hashes))}
+	reply := &proto_txpool.TransactionsReply{RlpTxs: make([][]byte, len(in.Hashes))}
 	for i := range in.Hashes {
 		txn := s.txPool.Get(gointerfaces.ConvertH256ToHash(in.Hashes[i]))
 		if txn == nil {
-			reply.Txs[i] = nil
+			reply.RlpTxs[i] = nil
 			continue
 		}
 		buf.Reset()
 		if err := rlp.Encode(buf, txn); err != nil {
 			return nil, err
 		}
-		reply.Txs[i] = common.CopyBytes(buf.Bytes())
+		reply.RlpTxs[i] = common.CopyBytes(buf.Bytes())
 	}
 
 	return reply, nil
