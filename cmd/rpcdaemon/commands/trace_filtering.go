@@ -186,7 +186,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, err
 	}
 	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	fmt.Printf("%v\n", minerReward)
 	var tr ParityTrace
 	var rewardAction = &RewardTraceAction{}
 	rewardAction.Author = block.Coinbase()
@@ -201,7 +200,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	tr.TraceAddress = []int{}
 	out = append(out, tr)
 	for i, uncle := range block.Uncles() {
-		fmt.Printf("%v\n", uncle)
 		if i < len(uncleRewards) {
 			var tr ParityTrace
 			rewardAction = &RewardTraceAction{}
