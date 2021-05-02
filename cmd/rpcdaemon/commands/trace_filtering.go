@@ -71,7 +71,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		baseBn -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(baseBn))
 	if err != nil {
 		return nil, err
 	}
