@@ -507,9 +507,22 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			var canRequestMore bool
 			for _, segment := range segments {
-				cs.hd.ProcessSegment(segment, false /* newBlock */)
+				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */)
+				canRequestMore = canRequestMore || requestMore
 			}
+
+			if canRequestMore {
+				currentTime := uint64(time.Now().Unix())
+				if req := cs.hd.RequestMoreHeaders(currentTime); req != nil {
+					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
+						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
+						log.Debug("Sent request", "height", req.Number)
+					}
+				}
+			}
+
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  req.PeerId,

@@ -677,7 +677,7 @@ func (txn *Txn) DCmp(dbi DBI, a []byte, b []byte) int {
 }
 
 func (txn *Txn) Sequence(dbi DBI, increment uint64) (uint64, error) {
-	var res C.uint64_t
+	var res C.ubint64_t
 	ret := C.mdbx_dbi_sequence(txn._txn, C.MDBX_dbi(dbi), &res, C.uint64_t(increment))
 	if ret != 0 {
 		return uint64(res), operrno("mdbx_dbi_sequence", ret)
