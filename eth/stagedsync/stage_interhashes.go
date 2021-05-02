@@ -35,7 +35,7 @@ func StageTrieCfg(checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, db ethdb.Database, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -78,15 +78,24 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg,
 	var root common.Hash
 	if s.BlockNumber == 0 {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
-			return trie.EmptyRoot, err
+			log.Error("Regeneration failed", "error", err)
 		}
 	} else {
 		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, quit); err != nil {
-			return trie.EmptyRoot, err
+			log.Error("Increment  failed", "error", err)
 		}
 	}
 
-	if err = s.DoneAndUpdate(tx, to); err != nil {
+	if err == nil {
+		if err1 := s.DoneAndUpdate(tx, to); err1 != nil {
+			return trie.EmptyRoot, err1
+		}
+	} else if to > s.BlockNumber {
+		log.Warn("Unwinding due to error", "to", s.BlockNumber)
+		if err1 := u.UnwindTo(s.BlockNumber, tx, tx); err1 != nil {
+			return trie.EmptyRoot, err1
+		}
+	} else {
 		return trie.EmptyRoot, err
 	}
 
@@ -96,7 +105,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg,
 		}
 	}
 
-	return root, nil
+	return root, err
 }
 
 func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {

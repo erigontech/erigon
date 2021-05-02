@@ -252,8 +252,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.YoloV3GenesisHash:
-		return params.YoloV3ChainConfig
 	case ghash == params.TurboMineGenesisHash:
 		return params.TurboMineChainConfig
 	default:
@@ -381,7 +379,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteBlock(context.Background(), tx, block); err != nil {
+	if err := rawdb.WriteBlockDeprecated(context.Background(), tx, block); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
@@ -484,18 +482,6 @@ func DefaultGoerliGenesisBlock() *Genesis {
 		GasLimit:   10485760,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/goerli.json"),
-	}
-}
-
-func DefaultYoloV3GenesisBlock() *Genesis {
-	// Full genesis: https://gist.github.com/holiman/c6ed9269dce28304ad176314caa75e97
-	return &Genesis{
-		Config:     params.YoloV3ChainConfig,
-		Timestamp:  0x6027dd2e,
-		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001041afbcb359d5a8dc58c15b2ff51354ff8a217d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x47b760,
-		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/yolov3.json"),
 	}
 }
 

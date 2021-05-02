@@ -58,8 +58,12 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	db := ethdb.NewObjectDatabase(kv)
 	snDB := ethdb.NewObjectDatabase(snKV)
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	t := time.Now()
 	chunkFile := 30000
@@ -71,11 +75,11 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 			return common.ErrStopped
 		}
 
-		hash, err = rawdb.ReadCanonicalHash(db, i)
+		hash, err = rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 		}
-		body := rawdb.ReadBodyRLP(db, hash, i)
+		body := rawdb.ReadBodyRLP(tx, hash, i)
 		tuples = append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)

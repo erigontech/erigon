@@ -204,7 +204,7 @@ func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
-	// Find attachement anchor again
+	// Find attachment anchor again
 	anchorHeader := segment.Headers[start]
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
 		anchorPreverified := false
@@ -416,7 +416,7 @@ func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
-		log.Error("Preverified hashes not found for", "chain", chain)
+		log.Warn("Preverified hashes not found for", "chain", chain)
 		return nil, 0
 	}
 	return DecodeHashes(encodings), height
@@ -548,9 +548,12 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		}
 		if !link.preverified {
 			if _, err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
-				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
+				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				// skip this link and its children
 				continue
+			}
+			if hd.seenAnnounces.Pop(link.hash) {
+				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
 			}
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
@@ -572,6 +575,15 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	return nil
 }
 
+// GrabAnnounces - returns all available announces and forget them
+func (hd *HeaderDownload) GrabAnnounces() []Announce {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	res := hd.toAnnounce
+	hd.toAnnounce = []Announce{}
+	return res
+}
+
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
@@ -585,6 +597,14 @@ func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 		return true
 	}
 	return false
+}
+
+// SaveExternalAnnounce - does mark hash as seen in external announcement
+// only such hashes will broadcast further after
+func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.seenAnnounces.Add(hash)
 }
 
 func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
@@ -629,7 +649,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	// Load parent header
 	parent := rawdb.ReadHeader(hi.batch, header.ParentHash, blockHeight-1)
 	if parent == nil {
-		log.Error(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
+		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
 		// Skip headers without parents
 		return nil
 	}
@@ -713,8 +733,11 @@ func (hi *HeaderInserter) AnythingDone() bool {
 	return hi.newCanonical
 }
 
-//nolint:interfacer
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
+// ProcessSegment - handling single segment.
+// If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
+// it allows higher-level algo immediately request more headers without waiting all stages precessing,
+// speeds up visibility of new blocks
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (requestMore bool) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -737,23 +760,24 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 		if foundTip {
 			// Connect
 			if err := hd.connect(segment, start, end); err != nil {
-				log.Error("Connect failed", "error", err)
+				log.Debug("Connect failed", "error", err)
 				return
 			}
 			log.Debug("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			if err := hd.extendDown(segment, start, end); err != nil {
-				log.Error("ExtendDown failed", "error", err)
+				log.Debug("ExtendDown failed", "error", err)
 				return
 			}
+			requestMore = true
 			log.Debug("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
 		if end > 0 {
 			// ExtendUp
 			if err := hd.extendUp(segment, start, end); err != nil {
-				log.Error("ExtendUp failed", "error", err)
+				log.Debug("ExtendUp failed", "error", err)
 				return
 			}
 			log.Debug("Extended Up", "start", startNum, "end", endNum)
@@ -761,9 +785,10 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 	} else {
 		// NewAnchor
 		if err := hd.newAnchor(segment, start, end); err != nil {
-			log.Error("NewAnchor failed", "error", err)
+			log.Debug("NewAnchor failed", "error", err)
 			return
 		}
+		requestMore = true
 		log.Debug("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
@@ -799,6 +824,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 			}
 		}
 	}
+
+	return requestMore
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {

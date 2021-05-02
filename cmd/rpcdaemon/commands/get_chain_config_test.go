@@ -22,7 +22,7 @@ func TestGetChainConfig(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	api := (&BaseAPI{})
+	api := &BaseAPI{}
 	config1, err1 := api.chainConfig(tx)
 	if err1 != nil {
 		t.Fatalf("reading chain config: %v", err1)

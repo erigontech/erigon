@@ -155,7 +155,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if err2 != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		if err != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(db), blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
 		if err != nil {
 			return err
 		}

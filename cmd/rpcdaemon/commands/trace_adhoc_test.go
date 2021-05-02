@@ -18,7 +18,7 @@ func TestEmptyQuery(t *testing.T) {
 	defer db.Close()
 	api := NewTraceAPI(db, nil, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest rpc.BlockNumber = rpc.LatestBlockNumber
+	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
@@ -38,7 +38,7 @@ func TestCoinbaseBalance(t *testing.T) {
 	defer db.Close()
 	api := NewTraceAPI(db, nil, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest rpc.BlockNumber = rpc.LatestBlockNumber
+	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]],

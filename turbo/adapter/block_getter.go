@@ -16,9 +16,9 @@ type blockGetter struct {
 }
 
 func (g *blockGetter) GetBlockByHash(hash common.Hash) (*types.Block, error) {
-	return rawdb.ReadBlockByHash(ethdb.NewRoTxDb(g.tx), hash)
+	return rawdb.ReadBlockByHash(g.tx, hash)
 }
 
 func (g *blockGetter) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(ethdb.NewRoTxDb(g.tx), hash, number)
+	return rawdb.ReadBlock(g.tx, hash, number)
 }

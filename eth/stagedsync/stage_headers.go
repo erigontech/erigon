@@ -70,7 +70,7 @@ func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 
 // GetBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.Db, hash, number)
+	return rawdb.ReadBlockDeprecated(cr.Db, hash, number)
 }
 
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {

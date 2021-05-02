@@ -50,9 +50,9 @@ func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentBlock(b.db), nil
+		return rawdb.ReadCurrentBlockDeprecated(b.db), nil
 	}
-	return rawdb.ReadBlockByNumber(b.db, uint64(number))
+	return rawdb.ReadBlockByNumberDeprecated(b.db, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *params.ChainConfig {
@@ -100,7 +100,7 @@ func (b *testBackend) CurrentHeader() *types.Header {
 }
 
 func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	r, _ := rawdb.ReadBlockByNumber(b.db, number)
+	r, _ := rawdb.ReadBlockByNumberDeprecated(b.db, number)
 	return r
 }
 

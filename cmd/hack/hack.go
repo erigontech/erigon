@@ -701,18 +701,23 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer ethDb.Close()
-	for b := uint64(0); b < uint64(100000); b++ {
-		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
-		tool.Check(err)
-		block := rawdb.ReadBlock(ethDb, hash, b)
-		if block == nil {
-			break
+	db := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata").RwKV()
+	defer db.Close()
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		for b := uint64(0); b < uint64(100000); b++ {
+			hash, err := rawdb.ReadCanonicalHash(tx, b)
+			tool.Check(err)
+			block := rawdb.ReadBlock(tx, hash, b)
+			if block == nil {
+				break
+			}
+			for _, tx := range block.Transactions() {
+				fmt.Printf("%x\n", tx.Hash())
+			}
 		}
-		for _, tx := range block.Transactions() {
-			fmt.Printf("%x\n", tx.Hash())
-		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
 }
 
@@ -800,21 +805,6 @@ func readAccount(chaindata string, account common.Address) error {
 		return err
 	}
 	return nil
-}
-
-func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	var a accounts.Account
-	if ok, err := rawdb.ReadAccount(ethDb, addrHash, &a); err != nil {
-		panic(err)
-	} else if !ok {
-		panic("acc not found")
-	}
-	a.Root = storageRoot
-	if err := rawdb.WriteAccount(ethDb, addrHash, a); err != nil {
-		panic(err)
-	}
 }
 
 func nextIncarnation(chaindata string, addrHash common.Hash) {
@@ -934,15 +924,20 @@ func ValidateTxLookups2(chaindata string) {
 }
 
 func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan bool) {
+	tx, err := db.(ethdb.HasRwKV).RwKV().BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
 	blockNum := startBlock
 	iterations := 0
 	var interrupt bool
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		tool.Check(err)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
+		body := rawdb.ReadBody(tx, blockHash, blockNum)
 
 		if body == nil {
 			break
@@ -956,8 +951,8 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 		blockBytes.SetUint64(blockNum)
 		bn := blockBytes.Bytes()
 
-		for _, tx := range body.Transactions {
-			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
+		for _, txn := range body.Transactions {
+			val, err := tx.GetOne(dbutils.TxLookupPrefix, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)
@@ -1053,20 +1048,20 @@ func regenerate(chaindata string) error {
 	defer tx.Rollback()
 
 	tool.Check(stagedsync.ResetIH(tx))
-	to, err := stages.GetStageProgress(ethdb.NewRoTxDb(tx), stages.HashState)
+	to, err := stages.GetStageProgress(tx, stages.HashState)
 	if err != nil {
 		return err
 	}
-	hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), to)
+	hash, err := rawdb.ReadCanonicalHash(tx, to)
 	if err != nil {
 		return err
 	}
-	syncHeadHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, to)
+	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(true, true, ""), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
-	return nil
+	return tx.Commit()
 }
 
 func testGetProof(chaindata string, address common.Address, rewind int, regen bool) error {
@@ -1215,6 +1210,45 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed trie",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
+	return nil
+}
+
+func dumpAddresses(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	f, err := os.Create("addresses")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	stAccounts := 0
+	stStorage := 0
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		k, _, e := c.First()
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if len(k) > 28 {
+				stStorage++
+			} else {
+				stAccounts++
+				if _, err1 := w.Write(k[:20]); err1 != nil {
+					return err1
+				}
+			}
+			if (stStorage+stAccounts)%100000 == 0 {
+				fmt.Printf("State records: %d\n", stStorage+stAccounts)
+			}
+		}
+		return e
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
 	return nil
 }
 
@@ -1438,87 +1472,87 @@ func mint(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpen(chaindata).RwKV()
 	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	//chiTokenAddr = common.HexToAddress("0x0000000000004946c0e9F43F4Dee607b0eF1fA1c")
 	//mintFuncPrefix = common.FromHex("0xa0712d68")
 	var gwei uint256.Int
 	gwei.SetUint64(1000000000)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	canonical := make(map[common.Hash]struct{})
-	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
-		if err != nil {
-			return err
-		}
-
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			// Skip non relevant records
-			canonical[common.BytesToHash(v)] = struct{}{}
-			if len(canonical)%100_000 == 0 {
-				log.Info("Read canonical hashes", "count", len(canonical))
-			}
-		}
-		log.Info("Read canonical hashes", "count", len(canonical))
-		c, err = tx.Cursor(dbutils.BlockBodyPrefix)
-		if err != nil {
-			return err
-		}
-		var prevBlock uint64
-		var burntGas uint64
-		for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			blockNumber := binary.BigEndian.Uint64(k[:8])
-			blockHash := common.BytesToHash(k[8:])
-			if _, isCanonical := canonical[blockHash]; !isCanonical {
-				continue
-			}
-			if blockNumber != prevBlock && blockNumber != prevBlock+1 {
-				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
-			}
-			prevBlock = blockNumber
-			body := rawdb.ReadBody(db, blockHash, blockNumber)
-			header := rawdb.ReadHeader(db, blockHash, blockNumber)
-			senders, errSenders := rawdb.ReadSenders(db, blockHash, blockNumber)
-			if errSenders != nil {
-				return errSenders
-			}
-			var ethSpent uint256.Int
-			var ethSpentTotal uint256.Int
-			var totalGas uint256.Int
-			count := 0
-			for i, tx := range body.Transactions {
-				ethSpent.SetUint64(tx.GetGas())
-				totalGas.Add(&totalGas, &ethSpent)
-				if senders[i] == header.Coinbase {
-					continue // Mining pool sending payout potentially with abnormally low fee, skip
-				}
-				ethSpent.Mul(&ethSpent, tx.GetPrice())
-				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
-				count++
-			}
-			if count > 0 {
-				ethSpentTotal.Div(&ethSpentTotal, &totalGas)
-				ethSpentTotal.Div(&ethSpentTotal, &gwei)
-				gasPrice := ethSpentTotal.Uint64()
-				burntGas += header.GasUsed
-				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
-			}
-			if blockNumber%100_000 == 0 {
-				log.Info("Processed", "blocks", blockNumber)
-			}
-		}
-		return nil
-	}); err1 != nil {
-		return err1
+	c, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	// This is a mapping of contractAddress + incarnation => CodeHash
+	for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		// Skip non relevant records
+		canonical[common.BytesToHash(v)] = struct{}{}
+		if len(canonical)%100_000 == 0 {
+			log.Info("Read canonical hashes", "count", len(canonical))
+		}
+	}
+	log.Info("Read canonical hashes", "count", len(canonical))
+	c, err = tx.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		return err
+	}
+	var prevBlock uint64
+	var burntGas uint64
+	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		if _, isCanonical := canonical[blockHash]; !isCanonical {
+			continue
+		}
+		if blockNumber != prevBlock && blockNumber != prevBlock+1 {
+			fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
+		}
+		prevBlock = blockNumber
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
+		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
+		if errSenders != nil {
+			return errSenders
+		}
+		var ethSpent uint256.Int
+		var ethSpentTotal uint256.Int
+		var totalGas uint256.Int
+		count := 0
+		for i, tx := range body.Transactions {
+			ethSpent.SetUint64(tx.GetGas())
+			totalGas.Add(&totalGas, &ethSpent)
+			if senders[i] == header.Coinbase {
+				continue // Mining pool sending payout potentially with abnormally low fee, skip
+			}
+			ethSpent.Mul(&ethSpent, tx.GetPrice())
+			ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
+			count++
+		}
+		if count > 0 {
+			ethSpentTotal.Div(&ethSpentTotal, &totalGas)
+			ethSpentTotal.Div(&ethSpentTotal, &gwei)
+			gasPrice := ethSpentTotal.Uint64()
+			burntGas += header.GasUsed
+			fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
+		}
+		if blockNumber%100_000 == 0 {
+			log.Info("Processed", "blocks", blockNumber)
+		}
+	}
+	return tx.Commit()
 }
 
 func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
@@ -1626,9 +1660,9 @@ func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name 
 }
 
 func extractBodies(chaindata string, block uint64) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpen(chaindata).RwKV()
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RO)
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1645,13 +1679,13 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		body := rawdb.ReadBody(db, blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 		b, err := rlp.EncodeToBytes(body)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
-		header := rawdb.ReadHeader(db, blockHash, blockNumber)
+		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
 		b, err = rlp.EncodeToBytes(header)
 		if err != nil {
 			return err
@@ -1829,9 +1863,6 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 
-	case "fixAccount":
-		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
-
 	case "nextIncarnation":
 		nextIncarnation(*chaindata, common.HexToHash(*account))
 
@@ -1927,6 +1958,9 @@ func main() {
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
+
+	case "dumpAddresses":
+		err = dumpAddresses(*chaindata)
 
 	}
 

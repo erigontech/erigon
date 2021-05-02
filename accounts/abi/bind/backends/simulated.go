@@ -268,7 +268,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if tx != nil {
 		return tx, true, nil
 	}
-	tx, _, _, _ = rawdb.ReadTransaction(b.database, txHash)
+	tx, _, _, _ = rawdb.ReadTransactionDeprecated(b.database, txHash)
 	if tx != nil {
 		return tx, false, nil
 	}
@@ -284,7 +284,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 		return b.pendingBlock, nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, hash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlock(b.database, hash, number.Uint64())
+	block := rawdb.ReadBlockDeprecated(b.database, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -370,7 +370,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +395,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 		return transactions[index], nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -830,7 +830,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number), nil
+	return rawdb.ReadReceiptsDeprecated(fb.db, hash, *number), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -838,7 +838,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
+	receipts := rawdb.ReadReceiptsDeprecated(fb.db, hash, *number)
 	if receipts == nil {
 		return nil, nil
 	}

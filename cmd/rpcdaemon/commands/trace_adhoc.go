@@ -363,7 +363,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 		exist := ibs.Exist(addr)
 		if initialExist {
 			if exist {
-				var allEqual bool = len(accountDiff.Storage) == 0
+				var allEqual = len(accountDiff.Storage) == 0
 				fromBalance := initialIbs.GetBalance(addr).ToBig()
 				toBalance := ibs.GetBalance(addr).ToBig()
 				if fromBalance.Cmp(toBalance) == 0 {

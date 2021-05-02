@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -177,7 +178,13 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		return 0, err
 	}
 
-	getBlockByHash := func(hash common.Hash) *types.Block { b, _ := rawdb.ReadBlockByHash(h.database, hash); return b }
+	getBlockByHash := func(hash common.Hash) (b *types.Block) {
+		_ = h.database.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+			b, err = rawdb.ReadBlockByHash(tx, hash)
+			return err
+		})
+		return b
+	}
 	h.blockFetcher = fetcher.NewBlockFetcher(nil, getBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {

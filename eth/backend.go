@@ -404,18 +404,28 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloadV2 {
-		eth.sentryServer = download.NewSentryServer(context.Background())
-		sentry := &download.SentryClientDirect{}
-		eth.sentryServer.P2pServer = eth.p2pServer
-		sentry.SetServer(eth.sentryServer)
-		eth.sentries = []proto_sentry.SentryClient{sentry}
-		blockDownloaderWindow := 65536
 		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
+		if len(stack.Config().P2P.SentryAddr) > 0 {
+			for _, addr := range stack.Config().P2P.SentryAddr {
+				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, addr)
+				if err != nil {
+					return nil, err
+				}
+				eth.sentries = append(eth.sentries, sentry)
+			}
+		} else {
+			eth.sentryServer = download.NewSentryServer(eth.downloadV2Ctx)
+			sentry := &download.SentryClientDirect{}
+			eth.sentryServer.P2pServer = eth.p2pServer
+			sentry.SetServer(eth.sentryServer)
+			eth.sentries = []proto_sentry.SentryClient{sentry}
+		}
+		blockDownloaderWindow := 65536
 		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
-		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
+		if err = download.SetSentryStatus(eth.downloadV2Ctx, eth.sentries, eth.downloadServer); err != nil {
 			return nil, err
 		}
 		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
@@ -430,6 +440,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
 		eth.txPoolServer.TxFetcher.Start()
+		eth.txPool.Start(0, 0)           // Start tx pool to avoid deadlocks in the initial stages (before TxPool stage starts working)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
@@ -446,7 +457,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 
 	} else {
-		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
+		genesisBlock, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, 0)
 		if genesisBlock == nil {
 			return nil, core.ErrNoGenesis
 		}
@@ -495,7 +506,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	stack.RegisterProtocols(eth.Protocols())
+	if eth.config.P2PEnabled {
+		stack.RegisterProtocols(eth.Protocols())
+	}
+
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
 	return eth, nil

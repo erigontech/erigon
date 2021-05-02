@@ -102,7 +102,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
 		t.Errorf("could not read chain head: %v", err1)
 	} else if head.NumberU64() != 2 {
 		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
@@ -118,7 +118,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
 		t.Errorf("could not read chain head: %v", err1)
 	} else if head.NumberU64() != 3 {
 		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
