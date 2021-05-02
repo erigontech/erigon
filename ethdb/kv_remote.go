@@ -313,12 +313,11 @@ func (tx *remoteTx) Cursor(bucket string) (Cursor, error) {
 	return c, nil
 }
 
-func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
-func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
-func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
-func (c *remoteCursor) Delete(k, v []byte) error                      { panic("not supported") }
-func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
-func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
+func (c *remoteCursor) Put(key []byte, value []byte) error    { panic("not supported") }
+func (c *remoteCursor) Append(key []byte, value []byte) error { panic("not supported") }
+func (c *remoteCursor) Delete(k, v []byte) error              { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                  { panic("not supported") }
+func (c *remoteCursor) Count() (uint64, error)                { panic("not supported") }
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {

@@ -1157,18 +1157,6 @@ func (c *LmdbCursor) deleteDupSort(key []byte) error {
 	return c.delCurrent()
 }
 
-func (c *LmdbCursor) PutNoOverwrite(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		panic("not implemented")
-	}
-
-	return c.putNoOverwrite(key, value)
-}
-
 func (c *LmdbCursor) Put(key []byte, value []byte) error {
 	if len(key) == 0 {
 		return fmt.Errorf("lmdb doesn't support empty keys. bucket: %s", c.bucketName)
