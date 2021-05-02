@@ -181,6 +181,37 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 			out = append(out, *pt)
 		}
 	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	fmt.Printf("%v\n", minerReward)
+	var tr ParityTrace
+	//tr.Action.Author = strings.ToLower(block.Coinbase().String())
+	//tr.Action.RewardType = "block" // goconst
+	//tr.Action.Value = minerReward.String()
+	tr.BlockHash = &common.Hash{}
+	copy(tr.BlockHash[:], block.Hash().Bytes())
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = block.NumberU64()
+	tr.Type = "reward" // nolint: goconst
+	out = append(out, tr)
+	for i, uncle := range block.Uncles() {
+		fmt.Printf("%v\n", uncle)
+		if i < len(uncleRewards) {
+			var tr ParityTrace
+			//tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
+			//tr.Action.RewardType = "uncle" // goconst
+			//tr.Action.Value = uncleRewards[i].String()
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
+			tr.Type = "reward" // nolint: goconst
+			out = append(out, tr)
+		}
+	}
 
 	return out, err
 }

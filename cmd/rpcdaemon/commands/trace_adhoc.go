@@ -34,6 +34,7 @@ const (
 	STATICCALL         = "staticcall"
 	CREATE             = "create"
 	SUICIDE            = "suicide"
+	REWARD             = "reward"
 	TraceTypeTrace     = "trace"
 	TraceTypeStateDiff = "stateDiff"
 	TraceTypeVmTrace   = "vmTrace"
