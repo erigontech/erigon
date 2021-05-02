@@ -733,7 +733,10 @@ func (hi *HeaderInserter) AnythingDone() bool {
 	return hi.newCanonical
 }
 
-//nolint:interfacer
+// ProcessSegment - handling single segment.
+// If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
+// it allows higher-level algo immediately request more headers without waiting all stages precessing,
+// speeds up visibility of new blocks
 func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (requestMore bool) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
