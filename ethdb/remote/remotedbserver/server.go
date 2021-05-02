@@ -46,7 +46,7 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashAp
 
 	kv2Srv := NewKvServer(kv)
 	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
-	txPoolServer := NewTxPoolServer(context.Background(), eth.TxPool())
+	txPoolServer := NewTxPoolServer(context.Background(), txPool)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
