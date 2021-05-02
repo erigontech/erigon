@@ -163,6 +163,11 @@ func ReadHeader(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Heade
 	return header
 }
 
+func ReadCurrentBlockNumber(db ethdb.KVGetter) *uint64 {
+	headHash := ReadHeadHeaderHash(db)
+	return ReadHeaderNumber(db, headHash)
+}
+
 func ReadCurrentHeader(db ethdb.KVGetter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
