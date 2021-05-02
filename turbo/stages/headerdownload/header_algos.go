@@ -204,7 +204,7 @@ func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
-	// Find attachement anchor again
+	// Find attachment anchor again
 	anchorHeader := segment.Headers[start]
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
 		anchorPreverified := false
@@ -733,8 +733,11 @@ func (hi *HeaderInserter) AnythingDone() bool {
 	return hi.newCanonical
 }
 
-//nolint:interfacer
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
+// ProcessSegment - handling single segment.
+// If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
+// it allows higher-level algo immediately request more headers without waiting all stages precessing,
+// speeds up visibility of new blocks
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (requestMore bool) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -767,6 +770,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 				log.Error("ExtendDown failed", "error", err)
 				return
 			}
+			requestMore = true
 			log.Debug("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
@@ -784,6 +788,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 			log.Error("NewAnchor failed", "error", err)
 			return
 		}
+		requestMore = true
 		log.Debug("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
@@ -819,6 +824,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 			}
 		}
 	}
+
+	return requestMore
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
