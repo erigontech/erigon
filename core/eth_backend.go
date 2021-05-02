@@ -8,10 +8,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
 
@@ -19,7 +19,6 @@ import (
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
 // this is reason why all methods are accepting context and returning error
 type ApiBackend interface {
-	AddLocal(context.Context, []byte) ([]byte, error)
 	Etherbase(ctx context.Context) (common.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
 	ProtocolVersion(ctx context.Context) (uint64, error)
@@ -44,22 +43,11 @@ type RemoteBackend struct {
 	log              log.Logger
 }
 
-func NewRemoteBackend(kv ethdb.RoKV) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
-		remoteEthBackend: remote.NewETHBACKENDClient(kv.(*ethdb.RemoteKV).GrpcConn()),
+		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		log:              log.New("remote_db"),
 	}
-}
-
-func (back *RemoteBackend) AddLocal(ctx context.Context, signedTx []byte) ([]byte, error) {
-	res, err := back.remoteEthBackend.Add(ctx, &remote.TxRequest{Signedtx: signedTx})
-	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return common.Hash{}.Bytes(), errors.New(s.Message())
-		}
-		return common.Hash{}.Bytes(), err
-	}
-	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
 }
 
 func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {
@@ -111,7 +99,7 @@ func (back *RemoteBackend) ClientVersion(ctx context.Context) (string, error) {
 }
 
 func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remote.SubscribeReply)) error {
-	subscription, err := back.remoteEthBackend.Subscribe(ctx, &remote.SubscribeRequest{})
+	subscription, err := back.remoteEthBackend.Subscribe(ctx, &remote.SubscribeRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return errors.New(s.Message())

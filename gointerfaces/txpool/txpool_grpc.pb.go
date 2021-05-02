@@ -19,13 +19,13 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TxpoolClient interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
-	FindUnknownTransactions(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
+	FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
 	// preserves incoming order and amount
-	ImportTransactions(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error)
+	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
-	GetTransactions(ctx context.Context, in *GetTransactionsRequest, opts ...grpc.CallOption) (*GetTransactionsReply, error)
-	// pending transactions stream
-	Pending(ctx context.Context, in *PendingRequest, opts ...grpc.CallOption) (Txpool_PendingClient, error)
+	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
+	// subscribe to new transactions add event
+	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error)
 }
 
 type txpoolClient struct {
@@ -36,39 +36,39 @@ func NewTxpoolClient(cc grpc.ClientConnInterface) TxpoolClient {
 	return &txpoolClient{cc}
 }
 
-func (c *txpoolClient) FindUnknownTransactions(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error) {
+func (c *txpoolClient) FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error) {
 	out := new(TxHashes)
-	err := c.cc.Invoke(ctx, "/txpool.Txpool/FindUnknownTransactions", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/FindUnknown", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *txpoolClient) ImportTransactions(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportReply, error) {
-	out := new(ImportReply)
-	err := c.cc.Invoke(ctx, "/txpool.Txpool/ImportTransactions", in, out, opts...)
+func (c *txpoolClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddReply, error) {
+	out := new(AddReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/Add", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *txpoolClient) GetTransactions(ctx context.Context, in *GetTransactionsRequest, opts ...grpc.CallOption) (*GetTransactionsReply, error) {
-	out := new(GetTransactionsReply)
-	err := c.cc.Invoke(ctx, "/txpool.Txpool/GetTransactions", in, out, opts...)
+func (c *txpoolClient) Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error) {
+	out := new(TransactionsReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/Transactions", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *txpoolClient) Pending(ctx context.Context, in *PendingRequest, opts ...grpc.CallOption) (Txpool_PendingClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Txpool_ServiceDesc.Streams[0], "/txpool.Txpool/Pending", opts...)
+func (c *txpoolClient) OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Txpool_ServiceDesc.Streams[0], "/txpool.Txpool/OnAdd", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &txpoolPendingClient{stream}
+	x := &txpoolOnAddClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -78,17 +78,17 @@ func (c *txpoolClient) Pending(ctx context.Context, in *PendingRequest, opts ...
 	return x, nil
 }
 
-type Txpool_PendingClient interface {
-	Recv() (*PendingReply, error)
+type Txpool_OnAddClient interface {
+	Recv() (*OnAddReply, error)
 	grpc.ClientStream
 }
 
-type txpoolPendingClient struct {
+type txpoolOnAddClient struct {
 	grpc.ClientStream
 }
 
-func (x *txpoolPendingClient) Recv() (*PendingReply, error) {
-	m := new(PendingReply)
+func (x *txpoolOnAddClient) Recv() (*OnAddReply, error) {
+	m := new(OnAddReply)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -100,13 +100,13 @@ func (x *txpoolPendingClient) Recv() (*PendingReply, error) {
 // for forward compatibility
 type TxpoolServer interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
-	FindUnknownTransactions(context.Context, *TxHashes) (*TxHashes, error)
+	FindUnknown(context.Context, *TxHashes) (*TxHashes, error)
 	// preserves incoming order and amount
-	ImportTransactions(context.Context, *ImportRequest) (*ImportReply, error)
+	Add(context.Context, *AddRequest) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
-	GetTransactions(context.Context, *GetTransactionsRequest) (*GetTransactionsReply, error)
-	// pending transactions stream
-	Pending(*PendingRequest, Txpool_PendingServer) error
+	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)
+	// subscribe to new transactions add event
+	OnAdd(*OnAddRequest, Txpool_OnAddServer) error
 	mustEmbedUnimplementedTxpoolServer()
 }
 
@@ -114,17 +114,17 @@ type TxpoolServer interface {
 type UnimplementedTxpoolServer struct {
 }
 
-func (UnimplementedTxpoolServer) FindUnknownTransactions(context.Context, *TxHashes) (*TxHashes, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FindUnknownTransactions not implemented")
+func (UnimplementedTxpoolServer) FindUnknown(context.Context, *TxHashes) (*TxHashes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindUnknown not implemented")
 }
-func (UnimplementedTxpoolServer) ImportTransactions(context.Context, *ImportRequest) (*ImportReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ImportTransactions not implemented")
+func (UnimplementedTxpoolServer) Add(context.Context, *AddRequest) (*AddReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
 }
-func (UnimplementedTxpoolServer) GetTransactions(context.Context, *GetTransactionsRequest) (*GetTransactionsReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTransactions not implemented")
+func (UnimplementedTxpoolServer) Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Transactions not implemented")
 }
-func (UnimplementedTxpoolServer) Pending(*PendingRequest, Txpool_PendingServer) error {
-	return status.Errorf(codes.Unimplemented, "method Pending not implemented")
+func (UnimplementedTxpoolServer) OnAdd(*OnAddRequest, Txpool_OnAddServer) error {
+	return status.Errorf(codes.Unimplemented, "method OnAdd not implemented")
 }
 func (UnimplementedTxpoolServer) mustEmbedUnimplementedTxpoolServer() {}
 
@@ -139,78 +139,78 @@ func RegisterTxpoolServer(s grpc.ServiceRegistrar, srv TxpoolServer) {
 	s.RegisterService(&Txpool_ServiceDesc, srv)
 }
 
-func _Txpool_FindUnknownTransactions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Txpool_FindUnknown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TxHashes)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TxpoolServer).FindUnknownTransactions(ctx, in)
+		return srv.(TxpoolServer).FindUnknown(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/txpool.Txpool/FindUnknownTransactions",
+		FullMethod: "/txpool.Txpool/FindUnknown",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TxpoolServer).FindUnknownTransactions(ctx, req.(*TxHashes))
+		return srv.(TxpoolServer).FindUnknown(ctx, req.(*TxHashes))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Txpool_ImportTransactions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ImportRequest)
+func _Txpool_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TxpoolServer).ImportTransactions(ctx, in)
+		return srv.(TxpoolServer).Add(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/txpool.Txpool/ImportTransactions",
+		FullMethod: "/txpool.Txpool/Add",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TxpoolServer).ImportTransactions(ctx, req.(*ImportRequest))
+		return srv.(TxpoolServer).Add(ctx, req.(*AddRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Txpool_GetTransactions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTransactionsRequest)
+func _Txpool_Transactions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransactionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TxpoolServer).GetTransactions(ctx, in)
+		return srv.(TxpoolServer).Transactions(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/txpool.Txpool/GetTransactions",
+		FullMethod: "/txpool.Txpool/Transactions",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TxpoolServer).GetTransactions(ctx, req.(*GetTransactionsRequest))
+		return srv.(TxpoolServer).Transactions(ctx, req.(*TransactionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Txpool_Pending_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(PendingRequest)
+func _Txpool_OnAdd_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(OnAddRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(TxpoolServer).Pending(m, &txpoolPendingServer{stream})
+	return srv.(TxpoolServer).OnAdd(m, &txpoolOnAddServer{stream})
 }
 
-type Txpool_PendingServer interface {
-	Send(*PendingReply) error
+type Txpool_OnAddServer interface {
+	Send(*OnAddReply) error
 	grpc.ServerStream
 }
 
-type txpoolPendingServer struct {
+type txpoolOnAddServer struct {
 	grpc.ServerStream
 }
 
-func (x *txpoolPendingServer) Send(m *PendingReply) error {
+func (x *txpoolOnAddServer) Send(m *OnAddReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -222,22 +222,22 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*TxpoolServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "FindUnknownTransactions",
-			Handler:    _Txpool_FindUnknownTransactions_Handler,
+			MethodName: "FindUnknown",
+			Handler:    _Txpool_FindUnknown_Handler,
 		},
 		{
-			MethodName: "ImportTransactions",
-			Handler:    _Txpool_ImportTransactions_Handler,
+			MethodName: "Add",
+			Handler:    _Txpool_Add_Handler,
 		},
 		{
-			MethodName: "GetTransactions",
-			Handler:    _Txpool_GetTransactions_Handler,
+			MethodName: "Transactions",
+			Handler:    _Txpool_Transactions_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Pending",
-			Handler:       _Txpool_Pending_Handler,
+			StreamName:    "OnAdd",
+			Handler:       _Txpool_OnAdd_Handler,
 			ServerStreams: true,
 		},
 	},

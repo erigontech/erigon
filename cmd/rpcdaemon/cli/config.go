@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -118,7 +119,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RwKV) error {
+func checkDbCompatibility(db ethdb.RoKV) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
@@ -154,58 +155,56 @@ func checkDbCompatibility(db ethdb.RwKV) error {
 	return nil
 }
 
-func OpenDB(cfg Flags, rootCancel context.CancelFunc) (ethdb.RoKV, core.ApiBackend, error) {
-	var kv ethdb.RwKV
-	var ethBackend core.ApiBackend
-	var err error
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
+		return nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
-		fmt.Printf("a\n")
+		var rwKv ethdb.RwKV
 		if cfg.Database == "mdbx" {
-			kv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
+			rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		} else {
-			kv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
+			rwKv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
-		if compatErr := checkDbCompatibility(kv); compatErr != nil {
-			return nil, nil, compatErr
+		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
+			return nil, nil, nil, compatErr
 		}
+		kv = rwKv
 		if cfg.SnapshotMode != "" {
 			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
 			if innerErr != nil {
-				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+				return nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
-			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(kv, cfg.SnapshotDir, mode)
+			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
 			if innerErr != nil {
-				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+				return nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}
 			kv = snapKv
 		}
 	}
 	if cfg.PrivateApiAddr != "" {
-		var remoteKv ethdb.RwKV
-		remoteKv, err = ethdb.NewRemote(
+		remoteKv, err := ethdb.NewRemote(
 			remotedbserver.KvServiceAPIVersion.Major,
 			remotedbserver.KvServiceAPIVersion.Minor,
 			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+			return nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		ethBackend = core.NewRemoteBackend(remoteKv)
+		eth = core.NewRemoteBackend(remoteKv.GrpcConn())
+		txPool = txpool.NewTxpoolClient(remoteKv.GrpcConn())
 		if kv == nil {
 			kv = remoteKv
 		}
 	}
-	return kv, ethBackend, err
+	return kv, eth, txPool, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

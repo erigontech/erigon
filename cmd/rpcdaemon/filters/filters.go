@@ -13,8 +13,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 type (
@@ -34,7 +37,7 @@ type Filters struct {
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
-func New(ethBackend core.ApiBackend) *Filters {
+func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolClient) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
 	ff := &Filters{
@@ -45,17 +48,50 @@ func New(ethBackend core.ApiBackend) *Filters {
 	}
 
 	go func() {
-		var err error
-		for i := 0; i < 10; i++ {
-			err = ethBackend.Subscribe(context.Background(), ff.OnNewEvent)
-			if err != nil {
-				log.Warn("rpc filters: error subscribing to events", "err", err)
-				time.Sleep(time.Second)
-			}
+		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
+			log.Warn("rpc filters: error subscribing to events", "err", err)
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
+			log.Warn("rpc filters: error subscribing to events", "err", err)
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
+			log.Warn("rpc filters: error subscribing to events", "err", err)
+			time.Sleep(time.Second)
 		}
 	}()
 
 	return ff
+}
+
+func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
+	subscription, err := txPool.Pending(ctx, &txpool.PendingRequest{}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	for {
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			log.Info("rpcdaemon: the subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		ff.OnNewTx(event)
+	}
+	return nil
 }
 
 func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
@@ -156,26 +192,33 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 				v <- &block
 			}
 		}
-	case remote.Event_PENDING_TRANSACTIONS:
-		payload := event.Data
-		var txs []types.Transaction
-		s := rlp.NewStream(bytes.NewReader(payload), uint64(len(payload)))
-		var tx types.Transaction
-		var err error
-		for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
-			txs = append(txs, tx)
-		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
-		} else {
-			for _, v := range ff.pendingTxsSubs {
-				v <- txs
-			}
-		}
 	default:
 		log.Warn("rpc filters: unsupported event type", "type", event.Type)
 		return
+	}
+}
+
+func (ff *Filters) OnNewTx(reply *txpool.PendingReply) {
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+
+	txs := make([]types.Transaction, len(reply.RplTx))
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+
+	for i := range reply.RplTx {
+		reader.Reset(reply.RplTx[i])
+		stream.Reset(reader, uint64(len(reply.RplTx[i])))
+		var decodeErr error
+		txs[i], decodeErr = types.DecodeTransaction(stream)
+		if decodeErr != nil {
+			// ignoring what we can't unmarshal
+			log.Warn("rpc filters, unprocessable payload", "err", decodeErr)
+			break
+		}
+	}
+	for _, v := range ff.pendingTxsSubs {
+		v <- txs
 	}
 }
 

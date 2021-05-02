@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -133,6 +134,7 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 type APIImpl struct {
 	*BaseAPI
 	ethBackend core.ApiBackend
+	txPool     txpool.TxpoolClient
 	db         ethdb.RoKV
 	GasCap     uint64
 	filters    *rpcfilters.Filters
@@ -140,7 +142,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -149,6 +151,7 @@ func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, gascap uint64, filters *rpcfi
 		BaseAPI:    &BaseAPI{},
 		db:         db,
 		ethBackend: eth,
+		txPool:     txPool,
 		GasCap:     gascap,
 		filters:    filters,
 		pending:    pending,
