@@ -34,7 +34,6 @@ type ApiBackend interface {
 }
 
 type EthBackend interface {
-	TxPool() *TxPool
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	IsMining() bool

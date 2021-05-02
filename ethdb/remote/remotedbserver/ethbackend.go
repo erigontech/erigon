@@ -30,20 +30,6 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
-func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	signedTx, err := types.UnmarshalTransactionFromBinary(in.Signedtx)
-	if err != nil {
-		return nil, err
-	}
-	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
-		return out, err
-	}
-
-	out.Hash = gointerfaces.ConvertHashToH256(signedTx.Hash())
-	return out, nil
-}
-
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
 	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 

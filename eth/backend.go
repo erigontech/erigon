@@ -377,6 +377,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
 				eth,
+				eth.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
@@ -390,6 +391,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
 				eth,
+				eth.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,

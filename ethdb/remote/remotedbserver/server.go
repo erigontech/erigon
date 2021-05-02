@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -36,7 +37,7 @@ type KvServer struct {
 	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -45,6 +46,7 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 
 	kv2Srv := NewKvServer(kv)
 	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
+	txPoolServer := NewTxPoolServer(context.Background(), eth.TxPool())
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -78,6 +80,7 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 	}
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
 	remote.RegisterKVServer(grpcServer, kv2Srv)
 
 	if metrics.Enabled {
