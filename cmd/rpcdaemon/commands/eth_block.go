@@ -25,7 +25,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

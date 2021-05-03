@@ -65,13 +65,13 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		}
 	}
 
-	baseBn := bn
-	if baseBn > 0 {
-		baseBn -= 1
+	parentNr := bn
+	if parentNr > 0 {
+		parentNr -= 1
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +158,12 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		})
 	}
 
-	baseBn := bn
-	if baseBn > 0 {
-		baseBn -= 1
+	parentNr := bn
+	if parentNr > 0 {
+		parentNr -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, txs, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +179,41 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 			pt.TransactionHash = &txhash
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
+		}
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	var tr ParityTrace
+	var rewardAction = &RewardTraceAction{}
+	rewardAction.Author = block.Coinbase()
+	rewardAction.RewardType = "block" // nolint: goconst
+	rewardAction.Value.ToInt().Set(minerReward.ToBig())
+	tr.Action = rewardAction
+	tr.BlockHash = &common.Hash{}
+	copy(tr.BlockHash[:], block.Hash().Bytes())
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = block.NumberU64()
+	tr.Type = "reward" // nolint: goconst
+	tr.TraceAddress = []int{}
+	out = append(out, tr)
+	for i, uncle := range block.Uncles() {
+		if i < len(uncleRewards) {
+			var tr ParityTrace
+			rewardAction = &RewardTraceAction{}
+			rewardAction.Author = uncle.Coinbase
+			rewardAction.RewardType = "uncle" // nolint: goconst
+			rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
+			tr.Action = rewardAction
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
+			tr.Type = "reward" // nolint: goconst
+			tr.TraceAddress = []int{}
+			out = append(out, tr)
 		}
 	}
 
@@ -411,7 +446,7 @@ type TransactionWithSender struct {
 	sender common.Address
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
 	toExecute := []interface{}{}
 
 	for _, txWithSender := range txs {
@@ -435,10 +470,10 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		return nil, callsErr
 	}
 	traces, cmErr := api.doCallMany(ctx, dbtx, calls, &rpc.BlockNumberOrHash{
-		BlockNumber:      &blockNo,
-		BlockHash:        &blockHash,
+		BlockNumber:      &parentNo,
+		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	})
+	}, header)
 
 	if cmErr != nil {
 		return nil, cmErr
