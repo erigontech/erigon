@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	storageTable       = dbutils.PlainStorageChangeSetBucket
 	defaultIncarnation = 1
 )
 
@@ -45,17 +46,17 @@ func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []by
 }
 
 func TestEncodingStorageNewWithRandomIncarnationPlain(t *testing.T) {
-	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	m := Mapper[storageTable]
 	doTestEncodingStorageNew(t, plainKeyGenerator, getRandomIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationPlain(t *testing.T) {
-	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	m := Mapper[storageTable]
 	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValuePlain(t *testing.T) {
-	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	m := Mapper[storageTable]
 	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, emptyValueGenerator, m.New, m.Encode, m.Decode)
 }
 
@@ -146,23 +147,14 @@ func doTestEncodingStorageNew(
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
-	m := Mapper[dbutils.PlainStorageChangeSetBucket]
-	doTestWalk(t, plainKeyGenerator, m.New, m.Encode, m.Decode)
-}
+	m := Mapper[storageTable]
 
-func doTestWalk(
-	t *testing.T,
-	generator func(common.Address, uint64, common.Hash) []byte,
-	newfunc func() *ChangeSet,
-	encodeFunc Encoder,
-	decodeFunc Decoder,
-) {
-	ch := newfunc()
+	ch := m.New()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
 				val := hashValueGenerator(j)
-				key := getTestDataAtIndex(i, j, defaultIncarnation, generator)
+				key := getTestDataAtIndex(i, j, defaultIncarnation, plainKeyGenerator)
 				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
@@ -171,8 +163,8 @@ func doTestWalk(
 		}
 
 		i := 0
-		err := encodeFunc(0, ch, func(k, v []byte) error {
-			_, k, v = decodeFunc(k, v)
+		err := m.Encode(0, ch, func(k, v []byte) error {
+			_, k, v = m.Decode(k, v)
 			if !bytes.Equal(k, ch.Changes[i].Key) {
 				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
 				t.Log(common.Bytes2Hex(k))
@@ -214,20 +206,19 @@ func doTestWalk(
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
-	bkt := dbutils.PlainStorageChangeSetBucket
-	m := Mapper[bkt]
+	m := Mapper[storageTable]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tx, err := db.RwKV().BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	c, err := tx.CursorDupSort(bkt)
+	c, err := tx.CursorDupSort(storageTable)
 	require.NoError(t, err)
 	cs := m.WalkerAdapter(c).(StorageChangeSetPlain)
 
 	clear := func() {
-		c, err := tx.RwCursor(bkt)
+		c, err := tx.RwCursor(storageTable)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
@@ -241,11 +232,11 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 		}
 	}
 
-	doTestFind(t, tx, bkt, plainKeyGenerator, m.New, m.Encode, m.Decode, cs.FindWithIncarnation, clear)
+	doTestFind(t, tx, plainKeyGenerator, m.New, m.Encode, m.Decode, cs.FindWithIncarnation, clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPlain(t *testing.T) {
-	bkt := dbutils.PlainStorageChangeSetBucket
+	bkt := storageTable
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -272,7 +263,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 		}
 	}
 
-	doTestFind(t, tx, bkt, plainKeyGenerator, m.New, m.Encode, m.Decode, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
+	doTestFind(t, tx, plainKeyGenerator, m.New, m.Encode, m.Decode, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
 }
 
 func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error)) func(blockN uint64, k []byte) ([]byte, error) {
@@ -288,7 +279,6 @@ func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte
 func doTestFind(
 	t *testing.T,
 	tx ethdb.RwTx,
-	bucket string,
 	generator func(common.Address, uint64, common.Hash) []byte,
 	newFunc func() *ChangeSet,
 	encodeFunc Encoder,
@@ -311,7 +301,7 @@ func doTestFind(
 			}
 		}
 
-		c, err := tx.RwCursor(bucket)
+		c, err := tx.RwCursor(storageTable)
 		require.NoError(t, err)
 
 		err = encodeFunc(1, ch, func(k, v []byte) error {
