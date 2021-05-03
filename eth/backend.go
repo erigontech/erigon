@@ -295,10 +295,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	sm, err := ethdb.GetStorageModeFromDB(chainDb)
-	if err != nil {
-		return nil, err
-	}
+	//sm, err := ethdb.GetStorageModeFromDB(chainDb)
+	//if err != nil {
+	//	return nil, err
+	//}
 	//if !reflect.DeepEqual(sm, config.StorageMode) {
 	//	return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 	//}
