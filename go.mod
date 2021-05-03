@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
-	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
+	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
