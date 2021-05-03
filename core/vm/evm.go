@@ -189,7 +189,6 @@ func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
 // Cancel cancels any running EVM operation. This may be called concurrently and
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() {
-	atomic.StoreInt32(&evm.abort, 1)
 }
 
 // Cancelled returns true if Cancel has been called
@@ -493,8 +492,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, nil
 	}
 
-	start := time.Now()
-
 	ret, err = run(evm, contract, nil, false)
 
 	// check whether the max code size has been exceeded
@@ -531,9 +528,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Assign err if contract code size exceeds the max while the err is still empty.
 	if maxCodeSizeExceeded && err == nil {
 		err = ErrMaxCodeSizeExceeded
-	}
-	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
 	}
 	return ret, address, contract.Gas, err
 

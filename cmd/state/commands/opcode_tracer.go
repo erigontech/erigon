@@ -350,13 +350,9 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
+func (ot *opcodeTracer) CaptureFault(env *vm.EVM, contract *vm.Contract, opDepth int, err error) error {
 	// CaptureFault sees the system as it is after the fault happens
-
-	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	e := ot.CaptureState(env, pc, op, gas, cost, memory, stack, nil, contract, opDepth, err)
-
-	return e
+	return nil
 }
 
 func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
