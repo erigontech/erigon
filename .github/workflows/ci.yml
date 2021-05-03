@@ -45,7 +45,7 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
       - name: Test (non-windows)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2019'
         run: make test
   docker:
     runs-on: ubuntu-latest
