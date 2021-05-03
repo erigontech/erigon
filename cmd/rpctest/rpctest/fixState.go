@@ -24,11 +24,11 @@ func FixState(chaindata string, url string) {
 		panic(err1)
 	}
 	defer tx.Rollback()
-	currentBlock := rawdb.ReadCurrentBlock(tx)
-	blockNum := currentBlock.NumberU64()
-	blockHash := currentBlock.Hash()
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	blockNum := currentHeader.Number.Uint64()
+	blockHash := currentHeader.Hash()
 	fmt.Printf("Block number: %d\n", blockNum)
-	fmt.Printf("Block root hash: %x\n", currentBlock.Root())
+	fmt.Printf("Block root hash: %x\n", currentHeader.Root)
 	reqID := 0
 	roots := make(map[common.Hash]*accounts.Account)
 	var client = &http.Client{
