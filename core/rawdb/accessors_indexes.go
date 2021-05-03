@@ -89,6 +89,12 @@ func ReadTransaction(db ethdb.Tx, hash common.Hash) (types.Transaction, common.H
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0
 	}
+	senders, err1 := ReadSenders(db, blockHash, *blockNumber)
+	if err1 != nil {
+		log.Error("ReadSenders failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
+	body.SendersToTxs(senders)
 	for txIndex, tx := range body.Transactions {
 		if tx.Hash() == hash {
 			return tx, blockHash, *blockNumber, uint64(txIndex)

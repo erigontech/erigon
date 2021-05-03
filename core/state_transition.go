@@ -271,6 +271,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	sender := vm.AccountRef(msg.From())
 	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
 	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
+	baikal := st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber)
 	contractCreation := msg.To() == nil
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -313,7 +314,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
 	}
 	if refunds {
-		st.refundGas()
+		if baikal {
+			// After EIP-2539: refunds are capped to gasUsed / 5
+			st.refundGas(5)
+		} else {
+			// Before EIP-2539: refunds were capped to gasUsed / 2
+			st.refundGas(2)
+		}
 	}
 	price := st.gasPrice
 	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
@@ -332,9 +339,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}, nil
 }
 
-func (st *StateTransition) refundGas() {
+func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Apply refund counter, capped to half of the used gas.
-	refund := st.gasUsed() / 2
+	refund := st.gasUsed() / refundQuotient
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}

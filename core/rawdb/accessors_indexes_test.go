@@ -73,6 +73,9 @@ func TestLookupStorage(t *testing.T) {
 			if err := WriteBlock(tx, block); err != nil {
 				t.Fatal(err)
 			}
+			if err := WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
+				t.Fatal(err)
+			}
 			tc.writeTxLookupEntries(tx, block)
 
 			for i, txn := range txs {

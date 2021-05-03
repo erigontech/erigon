@@ -113,7 +113,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		if err != nil {
 			return err
 		}
-		block := rawdb.ReadBlockDeprecated(ethdb.NewRoTxDb(rwtx), blockHash, blockNum)
+		block := rawdb.ReadBlock(rwtx, blockHash, blockNum)
 		if block == nil {
 			break
 		}

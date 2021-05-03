@@ -1250,22 +1250,22 @@ func TestEIP161AccountRemoval(t *testing.T) {
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 3, func(i int, block *core.BlockGen) {
 		var (
-			tx     types.Transaction
+			txn    types.Transaction
 			err    error
 			signer = types.LatestSigner(gspec.Config)
 		)
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, key)
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		block.AddTx(tx)
+		block.AddTx(txn)
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -1274,7 +1274,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewDbStateReader(db)); !st.Exist(theAddr) {
+	if st := state.New(state.NewPlainStateReader(db)); !st.Exist(theAddr) {
 		t.Error("expected account to exist")
 	}
 
@@ -1282,7 +1282,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewDbStateReader(db)); st.Exist(theAddr) {
+	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
 		t.Error("account should not exist")
 	}
 
@@ -1290,7 +1290,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewDbStateReader(db)); st.Exist(theAddr) {
+	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
 		t.Error("account should not exist")
 	}
 }
@@ -1328,18 +1328,18 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			block.AddTx(tx)
 			theAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(txn)
 
 			// sending kill messsage to an already suicided account
-			tx, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
+			txn, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
 			assert.NoError(t, err)
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -2309,7 +2309,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
-			Config: params.YoloV3ChainConfig,
+			Config: params.AllEthashProtocolChanges,
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2364,7 +2364,8 @@ func TestEIP2718Transition(t *testing.T) {
 	block, _ := rawdb.ReadBlockByNumberDeprecated(diskdb, 1)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
-	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + vm.WarmStorageReadCostEIP2929 + vm.ColdSloadCostEIP2929
+	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
+		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expected {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
 
@@ -2462,7 +2463,7 @@ func TestEIP1559Transition(t *testing.T) {
 	block := blocks[10]
 
 	// 1+2: Ensure EIP-1559 access lists are accounted for via gas usage.
-	expectedGas := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + vm.WarmStorageReadCostEIP2929 + vm.ColdSloadCostEIP2929
+	expectedGas := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas + vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expectedGas {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}

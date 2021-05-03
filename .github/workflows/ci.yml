@@ -4,7 +4,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15, windows-2019 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,10 +25,10 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Build (non-windows)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2019'
         run: make all
       - name: Build (windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2019'
         run: |
           go build -trimpath -o bin/tg.exe ./cmd/tg
           go build -trimpath -o bin/rpcdaemon.exe ./cmd/rpcdaemon
@@ -45,10 +45,10 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
       - name: Test (non-windows)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2019'
         run: make test
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
         with:

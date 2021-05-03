@@ -273,14 +273,6 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
-func (c *remoteCursor) Prefix(v []byte) Cursor {
-	return c
-}
-
-func (c *remoteCursor) Prefetch(v uint) Cursor {
-	return c
-}
-
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	c, _ := tx.Cursor(bucket)
 	defer c.Close()

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -37,36 +38,21 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	block, senders, sendersErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
-	if sendersErr != nil {
-		return nil, sendersErr
+	block, _, bErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
+	if bErr != nil {
+		return nil, bErr
 	}
 	if block == nil {
-		return nil, nil
+		return nil, fmt.Errorf("could not find block %x %d", hash, uint64(bn))
 	}
 
-	blockTxs := block.Transactions()
-	if len(blockTxs) != len(senders) {
-		return nil, errors.New("block txs len != senders len")
-	}
-
-	txs := make([]TransactionWithSender, 0, len(senders))
-	for n, tx := range blockTxs {
-		if uint64(n) <= txIndex {
-			txs = append(txs, TransactionWithSender{
-				tx:     tx,
-				sender: senders[n],
-			})
-		}
-	}
-
-	baseBn := bn
-	if baseBn > 0 {
-		baseBn -= 1
+	parentNr := bn
+	if parentNr > 0 {
+		parentNr -= 1
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +60,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	out := make([]ParityTrace, 0, len(traces))
 	blockno := uint64(bn)
 	for txno, trace := range traces {
-		txhash := txs[txno].tx.Hash()
+		txhash := block.Transactions()[txno].Hash()
 		txpos := uint64(txno)
 		// We're only looking for a specific transaction
 		if txpos == txIndex {
@@ -131,34 +117,20 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	block, senders, sendersErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
-	if sendersErr != nil {
-		return nil, sendersErr
+	block, _, bErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
+	if bErr != nil {
+		return nil, bErr
 	}
 	if block == nil {
-		return nil, nil
+		return nil, fmt.Errorf("could not find block %x %d", hash, uint64(bn))
 	}
 
-	blockTxs := block.Transactions()
-
-	if len(blockTxs) != len(senders) {
-		return nil, errors.New("block txs len != senders len")
+	parentNr := bn
+	if parentNr > 0 {
+		parentNr -= 1
 	}
 
-	txs := make([]TransactionWithSender, 0, len(senders))
-	for n, tx := range blockTxs {
-		txs = append(txs, TransactionWithSender{
-			tx:     tx,
-			sender: senders[n],
-		})
-	}
-
-	baseBn := bn
-	if baseBn > 0 {
-		baseBn -= 1
-	}
-
-	traces, err := api.callManyTransactions(ctx, tx, txs, hash, rpc.BlockNumber(baseBn))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +138,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	out := make([]ParityTrace, 0, len(traces))
 	blockno := uint64(bn)
 	for txno, trace := range traces {
-		txhash := txs[txno].tx.Hash()
+		txhash := block.Transactions()[txno].Hash()
 		txpos := uint64(txno)
 		for _, pt := range trace.Trace {
 			pt.BlockHash = &hash
@@ -174,6 +146,41 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 			pt.TransactionHash = &txhash
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
+		}
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	var tr ParityTrace
+	var rewardAction = &RewardTraceAction{}
+	rewardAction.Author = block.Coinbase()
+	rewardAction.RewardType = "block" // nolint: goconst
+	rewardAction.Value.ToInt().Set(minerReward.ToBig())
+	tr.Action = rewardAction
+	tr.BlockHash = &common.Hash{}
+	copy(tr.BlockHash[:], block.Hash().Bytes())
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = block.NumberU64()
+	tr.Type = "reward" // nolint: goconst
+	tr.TraceAddress = []int{}
+	out = append(out, tr)
+	for i, uncle := range block.Uncles() {
+		if i < len(uncleRewards) {
+			var tr ParityTrace
+			rewardAction = &RewardTraceAction{}
+			rewardAction.Author = uncle.Coinbase
+			rewardAction.RewardType = "uncle" // nolint: goconst
+			rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
+			tr.Action = rewardAction
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
+			tr.Type = "reward" // nolint: goconst
+			tr.TraceAddress = []int{}
+			out = append(out, tr)
 		}
 	}
 
@@ -258,13 +265,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 	sort.Ints(blockSet)
 
-	type blk struct {
-		blockNr   int
-		blockHash common.Hash
-		txs       []TransactionWithSender
-	}
-
-	blocks := make([]blk, 0, len(blocksMap))
+	blocks := make([]*types.Block, 0, len(blocksMap))
 	for _, b := range blockSet {
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, uint64(b))
@@ -272,23 +273,22 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			return nil, hashErr
 		}
 
-		t, tErr := getBlockTransactions(dbtx, hash, uint64(b))
-		if tErr != nil {
-			return nil, tErr
+		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, uint64(b))
+		if bErr != nil {
+			return nil, bErr
+		}
+		if block == nil {
+			return nil, fmt.Errorf("could not find block %x %d", hash, uint64(b))
 		}
 
-		blocks = append(blocks, blk{
-			blockNr:   b,
-			blockHash: hash,
-			txs:       t,
-		})
+		blocks = append(blocks, block)
 	}
 
 	traces := []ParityTrace{}
 
 	// Execute all transactions in picked blocks
-	for _, s := range blocks {
-		t, tErr := api.callManyTransactions(ctx, dbtx, s.txs, s.blockHash, rpc.BlockNumber(s.blockNr))
+	for _, block := range blocks {
+		t, tErr := api.callManyTransactions(ctx, dbtx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
 		if tErr != nil {
 			return nil, tErr
 		}
@@ -372,12 +372,11 @@ func getBlockTransactions(dbtx ethdb.Tx, blockHash common.Hash, blockNo uint64) 
 	return txs, nil
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []TransactionWithSender, blockHash common.Hash, blockNo rpc.BlockNumber) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
 	toExecute := []interface{}{}
 
-	for _, txWithSender := range txs {
-		tx := txWithSender.tx
-		sender := txWithSender.sender
+	for _, tx := range txs {
+		sender, _ := tx.GetSender()
 		gas := hexutil.Uint64(tx.GetGas())
 		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
 		value := hexutil.Big(*tx.GetValue().ToBig())
@@ -396,10 +395,10 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		return nil, callsErr
 	}
 	traces, cmErr := api.doCallMany(ctx, dbtx, calls, &rpc.BlockNumberOrHash{
-		BlockNumber:      &blockNo,
-		BlockHash:        &blockHash,
+		BlockNumber:      &parentNo,
+		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	})
+	}, header)
 
 	if cmErr != nil {
 		return nil, cmErr

@@ -440,6 +440,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
 		eth.txPoolServer.TxFetcher.Start()
+		eth.txPool.Start(0, 0)           // Start tx pool to avoid deadlocks in the initial stages (before TxPool stage starts working)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
