@@ -15,11 +15,13 @@ import (
 )
 
 type TxPoolCfg struct {
+	db   ethdb.RwKV
 	pool *core.TxPool
 }
 
-func StageTxPoolCfg(pool *core.TxPool) TxPoolCfg {
+func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool) TxPoolCfg {
 	return TxPoolCfg{
+		db:   db,
 		pool: pool,
 	}
 }

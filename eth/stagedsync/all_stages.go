@@ -51,11 +51,12 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Senders,
 			Build: func(world StageParameters) *Stage {
+				sendersCfg := StageSendersCfg(world.DB.RwKV(), world.ChainConfig)
 				return &Stage{
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnRecoverSendersStage(world.senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(sendersCfg, s, world.TX, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -66,7 +67,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
-				execCfg := StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig, world.TmpDir)
+				execCfg := StageExecuteBlocksCfg(world.DB.RwKV(), world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig, world.TmpDir)
 				return &Stage{
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
@@ -82,15 +83,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
-				hashStateCfg := StageHashStateCfg(world.TmpDir)
+				hashStateCfg := StageHashStateCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, hashStateCfg, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), hashStateCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, hashStateCfg, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), hashStateCfg, world.QuitCh)
 					},
 				}
 			},
@@ -98,16 +99,16 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.IntermediateHashes,
 			Build: func(world StageParameters) *Stage {
-				stageTrieCfg := StageTrieCfg(checkRoot, true, world.TmpDir)
+				stageTrieCfg := StageTrieCfg(world.DB.RwKV(), checkRoot, true, world.TmpDir)
 				return &Stage{
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, u, world.TX, stageTrieCfg, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), stageTrieCfg, world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, stageTrieCfg, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), stageTrieCfg, world.QuitCh)
 					},
 				}
 			},
@@ -115,7 +116,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.AccountHistoryIndex,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHistoryCfg(world.TmpDir)
+				cfg := StageHistoryCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.AccountHistoryIndex,
 					Description:         "Generate account history index",
@@ -133,7 +134,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.StorageHistoryIndex,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHistoryCfg(world.TmpDir)
+				cfg := StageHistoryCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.StorageHistoryIndex,
 					Description:         "Generate storage history index",
@@ -151,7 +152,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.LogIndex,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageLogIndexCfg(world.TmpDir)
+				cfg := StageLogIndexCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.LogIndex,
 					Description:         "Generate receipt logs index",
@@ -169,7 +170,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.CallTraces,
 			Build: func(world StageParameters) *Stage {
-				callTracesCfg := StageCallTracesCfg(0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
+				callTracesCfg := StageCallTracesCfg(world.DB.RwKV(), 0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
 
 				return &Stage{
 					ID:                  stages.CallTraces,
@@ -188,7 +189,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
-				txLookupCfg := StageTxLookupCfg(world.TmpDir)
+				txLookupCfg := StageTxLookupCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.TxLookup,
 					Description:         "Generate tx lookup index",
@@ -301,7 +302,6 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		false,
 		nil,
-		StageSendersCfg(config),
 	)
 	if err2 != nil {
 		return false, err2

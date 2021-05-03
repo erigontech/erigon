@@ -22,13 +22,15 @@ import (
 )
 
 type HistoryCfg struct {
+	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(tmpDir string) HistoryCfg {
+func StageHistoryCfg(db ethdb.RwKV, tmpDir string) HistoryCfg {
 	return HistoryCfg{
+		db:         db,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,

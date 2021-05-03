@@ -17,13 +17,16 @@ import (
 )
 
 type TxLookupCfg struct {
+	db     ethdb.RwKV
 	tmpdir string
 }
 
 func StageTxLookupCfg(
+	db ethdb.RwKV,
 	tmpdir string,
 ) TxLookupCfg {
 	return TxLookupCfg{
+		db:     db,
 		tmpdir: tmpdir,
 	}
 }

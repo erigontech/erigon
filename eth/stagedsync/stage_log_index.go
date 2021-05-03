@@ -27,13 +27,15 @@ const (
 )
 
 type LogIndexCfg struct {
+	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageLogIndexCfg(tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
 	return LogIndexCfg{
+		db:         db,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,

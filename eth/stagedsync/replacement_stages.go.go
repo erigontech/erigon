@@ -104,10 +104,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, hashState, ctx.Done())
+						return SpawnHashStateStage(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), hashState, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, hashState, ctx.Done())
+						return UnwindHashStateStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), hashState, ctx.Done())
 					},
 				}
 			},
@@ -119,11 +119,11 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, u, world.TX, trieCfg, ctx.Done())
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), trieCfg, ctx.Done())
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, trieCfg, ctx.Done())
+						return UnwindIntermediateHashesStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), trieCfg, ctx.Done())
 					},
 				}
 			},

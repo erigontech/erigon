@@ -21,6 +21,7 @@ import (
 )
 
 type SendersCfg struct {
+	db              ethdb.RwKV
 	batchSize       int
 	blockSize       int
 	bufferSize      int
@@ -30,11 +31,12 @@ type SendersCfg struct {
 	chainConfig *params.ChainConfig
 }
 
-func StageSendersCfg(chainCfg *params.ChainConfig) SendersCfg {
+func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
 	return SendersCfg{
+		db:              db,
 		batchSize:       sendersBatchSize,
 		blockSize:       sendersBlockSize,
 		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096

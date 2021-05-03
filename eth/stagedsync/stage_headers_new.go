@@ -18,6 +18,7 @@ import (
 )
 
 type HeadersCfg struct {
+	db                ethdb.RwKV
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
@@ -27,6 +28,7 @@ type HeadersCfg struct {
 }
 
 func StageHeadersCfg(
+	db ethdb.RwKV,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
@@ -35,6 +37,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 ) HeadersCfg {
 	return HeadersCfg{
+		db:                db,
 		hd:                headerDownload,
 		chainConfig:       chainConfig,
 		headerReqSend:     headerReqSend,
