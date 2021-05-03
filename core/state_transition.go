@@ -193,7 +193,7 @@ func (st *StateTransition) to() common.Address {
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
 	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
 		// price = min(tip, feeCap - baseFee) + baseFee
 		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
 	}
@@ -229,7 +229,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
 		if st.feeCap.Cmp(st.evm.Context.BaseFee) < 0 {
 			return fmt.Errorf("%w: address %v, feeCap: %d baseFee: %d", ErrFeeCapTooLow,
 				st.msg.From().Hex(), st.feeCap.Uint64(), st.evm.Context.BaseFee.Uint64())
@@ -323,7 +323,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		}
 	}
 	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
 		var feeDiff uint256.Int
 		if st.evm.Context.BaseFee.Lt(st.feeCap) {
 			feeDiff.Sub(st.feeCap, st.evm.Context.BaseFee)
@@ -349,7 +349,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
 		// price = min(tip, feeCap - baseFee) + baseFee
 		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
 	}

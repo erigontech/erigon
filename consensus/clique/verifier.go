@@ -106,8 +106,8 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return consensus.ErrUnknownAncestor
 	}
 	// Verify the header's EIP-1559 attributes.
-	if chain.Config().IsAleut(header.Number.Uint64()) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+	if chain.Config().IsAleut(header.Number.Uint64()) || chain.Config().IsBaikal(header.Number.Uint64()) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64()) || chain.Config().IsBaikal(parent.Number.Uint64())); err != nil {
 			return err
 		}
 	}
