@@ -233,21 +233,25 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ot.lastTop = topTrace
 	if err != nil {
-		switch err {
-		case vm.ErrInvalidJump:
-			topTrace.Error = "Bad jump destination"
-		case vm.ErrOutOfGas:
-			topTrace.Error = "Out of gas"
-		case vm.ErrExecutionReverted:
-			topTrace.Error = "Reverted"
-		default:
-			switch err.(type) {
-			case *vm.ErrStackUnderflow:
-				topTrace.Error = "Stack underflow"
-			case *vm.ErrInvalidOpCode:
-				topTrace.Error = "Bad instruction"
+		if topTrace.Type == CREATE {
+			topTrace.Error = "Out of gas" // Only to be compatible with OE
+		} else {
+			switch err {
+			case vm.ErrInvalidJump:
+				topTrace.Error = "Bad jump destination"
+			case vm.ErrOutOfGas:
+				topTrace.Error = "Out of gas"
+			case vm.ErrExecutionReverted:
+				topTrace.Error = "Reverted"
 			default:
-				topTrace.Error = err.Error()
+				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
+				case *vm.ErrInvalidOpCode:
+					topTrace.Error = "Bad instruction"
+				default:
+					topTrace.Error = err.Error()
+				}
 			}
 		}
 		topTrace.Result = nil
@@ -281,32 +285,34 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, contract *vm.Contract, opDepth int, err error) error {
-	fmt.Printf("CaptureFault depth %d, err %v\n", opDepth, err)
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	if err != nil {
-		switch err {
-		case vm.ErrInvalidJump:
-			topTrace.Error = "Bad jump destination"
-		case vm.ErrOutOfGas:
-			topTrace.Error = "Out of gas"
-		case vm.ErrExecutionReverted:
-			if opDepth == 0 {
-				topTrace.Error = "Reverted"
-			} else {
-				topTrace.Error = "Out of gas" // Only to be compatible with OE
-			}
-		default:
-			switch err.(type) {
-			case *vm.ErrStackUnderflow:
-				topTrace.Error = "Stack underflow"
-			case *vm.ErrInvalidOpCode:
-				topTrace.Error = "Bad instruction"
+	/*
+		fmt.Printf("CaptureFault depth %d, err %v\n", opDepth, err)
+		topTrace := ot.traceStack[len(ot.traceStack)-1]
+		if err != nil {
+			switch err {
+			case vm.ErrInvalidJump:
+				topTrace.Error = "Bad jump destination"
+			case vm.ErrOutOfGas:
+				topTrace.Error = "Out of gas"
+			case vm.ErrExecutionReverted:
+				if opDepth == 0 {
+					topTrace.Error = "Reverted"
+				} else {
+					topTrace.Error = "Out of gas" // Only to be compatible with OE
+				}
 			default:
-				topTrace.Error = err.Error()
+				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
+				case *vm.ErrInvalidOpCode:
+					topTrace.Error = "Bad instruction"
+				default:
+					topTrace.Error = err.Error()
+				}
 			}
+			topTrace.Result = nil
 		}
-		topTrace.Result = nil
-	}
+	*/
 	return nil
 }
 
