@@ -1384,6 +1384,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	defer db.Close()
 	genesis := (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
 
+	diskdb := ethdb.NewMemDatabase()
+	defer diskdb.Close()
+	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
+
 	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -1406,30 +1410,21 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		}
 		forks[i] = fork[len(fork)-1]
 	}
-	diskdb := ethdb.NewMemKV()
-	defer diskdb.Close()
-
-	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(ethdb.NewObjectDatabase(diskdb))
-
-	tx, err := diskdb.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
 	for i := 0; i < len(blocks); i++ {
-		if _, err := stagedsync.InsertBlocksInStages(ethdb.WrapIntoTxDB(tx), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 
-		b, h := rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+		b, h := rawdb.ReadCurrentBlockDeprecated(diskdb), rawdb.ReadCurrentHeader(diskdb)
 		if b.Hash() != h.Hash() {
 			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
-		if _, err := stagedsync.InsertBlocksInStages(ethdb.WrapIntoTxDB(tx), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, forks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, forks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 		}
-		b, h = rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+		b, h = rawdb.ReadCurrentBlockDeprecated(diskdb), rawdb.ReadCurrentHeader(diskdb)
 		if b.Hash() != h.Hash() {
 			t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
