@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -16,15 +17,16 @@ import (
 
 type TxPoolServer struct {
 	proto_txpool.UnimplementedTxpoolServer
-	ctx    context.Context
-	txPool *core.TxPool
+	ctx     context.Context
+	txPool  *core.TxPool
+	fetcher *fetcher.TxFetcher
 }
 
 func NewTxPoolServer(ctx context.Context, txPool *core.TxPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
-	reply := &proto_txpool.TxHashes{}
+	return nil, fmt.Errorf("unimplemented")
 	/*
 		var underpriced int
 		for i := range in.Hashes {
@@ -42,7 +44,6 @@ func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashe
 		txAnnounceKnownMeter.Mark(int64(len(in.Hashes) - len(reply.Hashes)))
 		txAnnounceUnderpricedMeter.Mark(int64(underpriced))
 	*/
-	return reply, nil
 }
 
 func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*proto_txpool.AddReply, error) {
