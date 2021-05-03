@@ -19,7 +19,7 @@ enum ImportResult {
   INTERNAL_ERROR = 5;
 }
 
-message AddReply { repeated ImportResult imported = 1; }
+message AddReply { repeated ImportResult imported = 1; repeated string errors = 2; }
 
 message TransactionsRequest { repeated types.H256 hashes = 1; }
 message TransactionsReply { repeated bytes rlpTxs = 1; }
