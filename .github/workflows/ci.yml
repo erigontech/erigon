@@ -25,10 +25,10 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Build (non-windows)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2019'
         run: make all
       - name: Build (windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2019'
         run: |
           go build -trimpath -o bin/tg.exe ./cmd/tg
           go build -trimpath -o bin/rpcdaemon.exe ./cmd/rpcdaemon
