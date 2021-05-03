@@ -21,6 +21,7 @@ type TxpoolClient interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
 	// Expecting signed transactions. Preserves incoming order and amount
+	// Adding txs as local (use P2P to add remote txs)
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
@@ -102,6 +103,7 @@ type TxpoolServer interface {
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(context.Context, *TxHashes) (*TxHashes, error)
 	// Expecting signed transactions. Preserves incoming order and amount
+	// Adding txs as local (use P2P to add remote txs)
 	Add(context.Context, *AddRequest) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)

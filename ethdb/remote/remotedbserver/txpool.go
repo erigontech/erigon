@@ -47,9 +47,6 @@ func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashe
 }
 
 func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*proto_txpool.AddReply, error) {
-	if !in.IsLocal {
-		return nil, fmt.Errorf("not expected to add remote Tx's by RPC, use p2p instead")
-	}
 	reply := &proto_txpool.AddReply{Imported: make([]proto_txpool.ImportResult, len(in.RlpTxs))}
 	txs, err := UnmarshalTxs(in.RlpTxs)
 	if err != nil {
