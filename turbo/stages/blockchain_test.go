@@ -1271,12 +1271,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	tx, err := db.RwKV().BeginRw(context.Background())
-	if err != nil {
-		t.Fatalf("read only db tx to read state: %v", err)
-	}
-	defer tx.Rollback()
-
 	// account must exist pre eip 161
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
