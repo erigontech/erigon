@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -17,9 +16,8 @@ import (
 
 type TxPoolServer struct {
 	proto_txpool.UnimplementedTxpoolServer
-	ctx     context.Context
-	txPool  *core.TxPool
-	fetcher *fetcher.TxFetcher
+	ctx    context.Context
+	txPool *core.TxPool
 }
 
 func NewTxPoolServer(ctx context.Context, txPool *core.TxPool) *TxPoolServer {
