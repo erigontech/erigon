@@ -344,7 +344,7 @@ func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 	//TODO: Populate froms and tos if it is any call opcode
 	return nil
 }
-func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (ct *CallTracer) CaptureFault(env *vm.EVM, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {

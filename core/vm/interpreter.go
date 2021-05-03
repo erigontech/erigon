@@ -192,8 +192,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil {
 				if !logged {
 					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
-				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
 				}
 			}
 		}()

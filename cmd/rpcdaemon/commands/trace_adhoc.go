@@ -147,6 +147,7 @@ type OeTracer struct {
 	r          *TraceCallResult
 	traceAddr  []int
 	traceStack []*ParityTrace
+	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 }
 
@@ -158,7 +159,7 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
-	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
+	fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
 	if create {
 		trResult := &CreateTraceResult{}
@@ -225,11 +226,12 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
+	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	ot.lastTop = topTrace
 	if err != nil {
 		switch err {
 		case vm.ErrInvalidJump:
@@ -278,8 +280,8 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	return nil
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
-	//fmt.Printf("CaptureFault depth %d, err %v %s\n", opDepth, err, debug.Stack())
+func (ot *OeTracer) CaptureFault(env *vm.EVM, contract *vm.Contract, opDepth int, err error) error {
+	fmt.Printf("CaptureFault depth %d, err %v\n", opDepth, err)
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if err != nil {
 		switch err {
@@ -288,7 +290,11 @@ func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		case vm.ErrOutOfGas:
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
-			topTrace.Error = "Out of gas" // Only to be compatible with OE
+			if opDepth == 0 {
+				topTrace.Error = "Reverted"
+			} else {
+				topTrace.Error = "Out of gas" // Only to be compatible with OE
+			}
 		default:
 			switch err.(type) {
 			case *vm.ErrStackUnderflow:
@@ -300,10 +306,6 @@ func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			}
 		}
 		topTrace.Result = nil
-	}
-	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
-	if opDepth > 0 {
-		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	}
 	return nil
 }
