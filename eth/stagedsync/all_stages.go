@@ -172,8 +172,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 				callTracesCfg := StageCallTracesCfg(0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
 
 				return &Stage{
-					ID:          stages.CallTraces,
-					Description: "Generate call traces index",
+					ID:                  stages.CallTraces,
+					Description:         "Generate call traces index",
+					Disabled:            !world.storageMode.CallTraces,
+					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.QuitCh, callTracesCfg)
 					},

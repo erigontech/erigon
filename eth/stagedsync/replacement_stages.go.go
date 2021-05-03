@@ -186,6 +186,7 @@ func ReplacementStages(ctx context.Context,
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
 					DisabledDescription: "Work In Progress",
+					Disabled:            !sm.CallTraces,
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, ctx.Done(), callTraces)
 					},
