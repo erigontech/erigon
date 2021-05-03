@@ -227,7 +227,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 		}
 	}
 
-	doTestFind(t, tx, plainKeyGenerator, m.New, m.Encode, m.Decode, cs.FindWithIncarnation, clear)
+	doTestFind(t, tx, cs.FindWithIncarnation, clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPlain(t *testing.T) {
@@ -258,7 +258,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 		}
 	}
 
-	doTestFind(t, tx, plainKeyGenerator, m.New, m.Encode, m.Decode, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
+	doTestFind(t, tx, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
 }
 
 func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error)) func(blockN uint64, k []byte) ([]byte, error) {
@@ -274,21 +274,18 @@ func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte
 func doTestFind(
 	t *testing.T,
 	tx ethdb.RwTx,
-	generator func(common.Address, uint64, common.Hash) []byte,
-	newFunc func() *ChangeSet,
-	encodeFunc Encoder,
-	_ Decoder,
 	findFunc func(uint64, []byte) ([]byte, error),
 	clear func(),
 ) {
+	m := Mapper[storageTable]
 	t.Helper()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		defer clear()
-		ch := newFunc()
+		ch := m.New()
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
 				val := hashValueGenerator(j)
-				key := getTestDataAtIndex(i, j, defaultIncarnation, generator)
+				key := getTestDataAtIndex(i, j, defaultIncarnation, plainKeyGenerator)
 				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
@@ -299,7 +296,7 @@ func doTestFind(
 		c, err := tx.RwCursor(storageTable)
 		require.NoError(t, err)
 
-		err = encodeFunc(1, ch, func(k, v []byte) error {
+		err = m.Encode(1, ch, func(k, v []byte) error {
 			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
 				return err2
 			}
