@@ -48,6 +48,9 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	}
 
 	go func() {
+		if ethBackend == nil {
+			return
+		}
 		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
 			log.Warn("rpc filters: error subscribing to events", "err", err)
 			time.Sleep(time.Second)
@@ -55,6 +58,9 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	}()
 
 	go func() {
+		if ethBackend == nil {
+			return
+		}
 		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
 			log.Warn("rpc filters: error subscribing to events", "err", err)
 			time.Sleep(time.Second)
@@ -62,6 +68,9 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	}()
 
 	go func() {
+		if txPool == nil {
+			return
+		}
 		if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
 			log.Warn("rpc filters: error subscribing to events", "err", err)
 			time.Sleep(time.Second)

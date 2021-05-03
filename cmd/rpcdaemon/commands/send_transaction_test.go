@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -22,8 +23,9 @@ func TestSendRawTransaction(t *testing.T) {
 	defer db.Close()
 	conn := createTestGrpcConn()
 	defer conn.Close()
-
-	api := NewEthAPI(db, nil, txpool.NewTxpoolClient(conn), 5000000, nil, nil)
+	txPool := txpool.NewTxpoolClient(conn)
+	ff := filters.New(context.Background(), nil, txPool)
+	api := NewEthAPI(db, nil, txPool, 5000000, ff, nil)
 
 	// Call GetTransactionReceipt for un-protected transaction
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -31,8 +33,20 @@ func TestSendRawTransaction(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = tx.MarshalBinary(buf)
 	require.NoError(t, err)
+
+	txsCh := make(chan []types.Transaction, 1)
+	defer close(txsCh)
+	id := api.filters.SubscribePendingTxs(txsCh)
+	defer api.filters.UnsubscribePendingTxs(id)
+
 	_, err = api.SendRawTransaction(context.Background(), buf.Bytes())
 	require.NoError(t, err)
+	select {
+	case <-txsCh:
+	default:
+		t.Fatalf("expected notification")
+
+	}
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
