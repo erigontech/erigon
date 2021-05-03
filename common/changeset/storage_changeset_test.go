@@ -46,36 +46,31 @@ func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []by
 }
 
 func TestEncodingStorageNewWithRandomIncarnationPlain(t *testing.T) {
-	m := Mapper[storageTable]
-	doTestEncodingStorageNew(t, plainKeyGenerator, getRandomIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
+	doTestEncodingStorageNew(t, getRandomIncarnation, hashValueGenerator)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationPlain(t *testing.T) {
-	m := Mapper[storageTable]
-	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
+	doTestEncodingStorageNew(t, getDefaultIncarnation, hashValueGenerator)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValuePlain(t *testing.T) {
-	m := Mapper[storageTable]
-	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, emptyValueGenerator, m.New, m.Encode, m.Decode)
+	doTestEncodingStorageNew(t, getDefaultIncarnation, emptyValueGenerator)
 }
 
 func doTestEncodingStorageNew(
 	t *testing.T,
-	keyGen func(common.Address, uint64, common.Hash) []byte,
 	incarnationGenerator func() uint64,
 	valueGenerator func(int) []byte,
-	newFunc func() *ChangeSet,
-	encodeFunc Encoder,
-	decodeFunc Decoder,
 ) {
+	m := Mapper[storageTable]
+
 	f := func(t *testing.T, numOfElements int, numOfKeys int) {
 		var err error
-		ch := newFunc()
+		ch := m.New()
 		for i := 0; i < numOfElements; i++ {
 			inc := incarnationGenerator()
 			for j := 0; j < numOfKeys; j++ {
-				key := getTestDataAtIndex(i, j, inc, keyGen)
+				key := getTestDataAtIndex(i, j, inc, plainKeyGenerator)
 				val := valueGenerator(j)
 				err = ch.Add(key, val)
 				if err != nil {
@@ -84,9 +79,9 @@ func doTestEncodingStorageNew(
 
 			}
 		}
-		ch2 := newFunc()
-		err = encodeFunc(0, ch, func(k, v []byte) error {
-			_, k, v = decodeFunc(k, v)
+		ch2 := m.New()
+		err = m.Encode(0, ch, func(k, v []byte) error {
+			_, k, v = m.Decode(k, v)
 			return ch2.Add(k, v)
 		})
 		if err != nil {
