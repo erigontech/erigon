@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/mock"
 
 	"github.com/holiman/uint256"
 )
@@ -105,7 +106,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      NewTestTxPool(),
+			TxPool:      mock.NewTestTxPool(),
 			Network:     1,
 			BloomCache:  1,
 		})
@@ -115,7 +116,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			genesis:     (&core.Genesis{Config: configProFork}).MustCommit(dbProFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      NewTestTxPool(),
+			TxPool:      mock.NewTestTxPool(),
 			Network:     1,
 			BloomCache:  1,
 		})

@@ -202,7 +202,7 @@ func createTestKV() (ethdb.RwKV, error) {
 	return db.(ethdb.HasRwKV).RwKV(), nil
 }
 
-func createTestGrpcConn() *grpc.ClientConn {
+func createTestGrpcConn() *grpc.ClientConn { //nolint
 	ctx := context.Background()
 
 	server := grpc.NewServer()
