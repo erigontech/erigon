@@ -258,17 +258,15 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 		}
 	}
 
-	doTestFind(t, tx, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
-}
-
-func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error)) func(blockN uint64, k []byte) ([]byte, error) {
-	return func(blockN uint64, k []byte) ([]byte, error) {
+	findFunc := func(blockN uint64, k []byte) ([]byte, error) {
 		addr, _, key := dbutils.PlainParseCompositeStorageKey(k)
 		addrBytes := addr[:]
 		keyBytes := key[:]
 
-		return f(blockN, addrBytes, keyBytes)
+		return cs.FindWithoutIncarnation(blockN, addrBytes, keyBytes)
 	}
+
+	doTestFind(t, tx, findFunc, clear)
 }
 
 func doTestFind(
