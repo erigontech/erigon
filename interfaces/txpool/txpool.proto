@@ -8,7 +8,7 @@ option go_package = "./txpool;txpool";
 
 message TxHashes { repeated types.H256 hashes = 1; }
 
-message AddRequest { repeated bytes rlpTxs = 1; bool isLocal = 2; }
+message AddRequest { repeated bytes rlpTxs = 1; }
 
 enum ImportResult {
   SUCCESS = 0;
@@ -33,6 +33,7 @@ service Txpool {
   // preserves incoming order, changes amount, unknown hashes will be omitted
   rpc FindUnknown(TxHashes) returns (TxHashes);
   // Expecting signed transactions. Preserves incoming order and amount
+  // Adding txs as local (use P2P to add remote txs)
   rpc Add(AddRequest) returns (AddReply);
   // preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
   rpc Transactions(TransactionsRequest) returns (TransactionsReply);
