@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -339,37 +338,6 @@ func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struc
 	}
 
 	return false
-}
-
-type TransactionWithSender struct {
-	tx     types.Transaction
-	sender common.Address
-}
-
-func getBlockTransactions(dbtx ethdb.Tx, blockHash common.Hash, blockNo uint64) ([]TransactionWithSender, error) {
-	block, senders, sendersErr := rawdb.ReadBlockWithSenders(dbtx, blockHash, blockNo)
-	if sendersErr != nil {
-		return nil, sendersErr
-	}
-	if block == nil {
-		return nil, nil
-	}
-
-	blockTxs := block.Transactions()
-
-	if len(blockTxs) != len(senders) {
-		return nil, errors.New("block txs len != senders len")
-	}
-
-	txs := make([]TransactionWithSender, 0, len(senders))
-	for n, tx := range blockTxs {
-		txs = append(txs, TransactionWithSender{
-			tx:     tx,
-			sender: senders[n],
-		})
-	}
-
-	return txs, nil
 }
 
 func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
