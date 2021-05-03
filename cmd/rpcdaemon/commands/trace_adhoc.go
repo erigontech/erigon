@@ -233,39 +233,21 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ot.lastTop = topTrace
 	if err != nil {
-		if topTrace.Type == CREATE {
-			switch err {
-			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
-				topTrace.Error = "Out of gas" // Only to be compatible with OE
-			case vm.ErrExecutionReverted:
-				topTrace.Error = "Reverted"
+		switch err {
+		case vm.ErrInvalidJump:
+			topTrace.Error = "Bad jump destination"
+		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
+			topTrace.Error = "Out of gas"
+		case vm.ErrExecutionReverted:
+			topTrace.Error = "Reverted"
+		default:
+			switch err.(type) {
+			case *vm.ErrStackUnderflow:
+				topTrace.Error = "Stack underflow"
+			case *vm.ErrInvalidOpCode:
+				topTrace.Error = "Bad instruction"
 			default:
-				switch err.(type) {
-				case *vm.ErrStackUnderflow:
-					topTrace.Error = "Stack underflow"
-				case *vm.ErrInvalidOpCode:
-					topTrace.Error = "Bad instruction"
-				default:
-					topTrace.Error = err.Error()
-				}
-			}
-		} else {
-			switch err {
-			case vm.ErrInvalidJump:
-				topTrace.Error = "Bad jump destination"
-			case vm.ErrOutOfGas:
-				topTrace.Error = "Out of gas"
-			case vm.ErrExecutionReverted:
-				topTrace.Error = "Reverted"
-			default:
-				switch err.(type) {
-				case *vm.ErrStackUnderflow:
-					topTrace.Error = "Stack underflow"
-				case *vm.ErrInvalidOpCode:
-					topTrace.Error = "Bad instruction"
-				default:
-					topTrace.Error = err.Error()
-				}
+				topTrace.Error = err.Error()
 			}
 		}
 		topTrace.Result = nil
