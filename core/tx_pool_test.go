@@ -39,14 +39,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-// testTxPoolConfig is a transaction pool configuration without stateful disk
+// TestTxPoolConfig is a transaction pool configuration without stateful disk
 // sideeffects used during testing.
-var testTxPoolConfig TxPoolConfig
+var TestTxPoolConfig TxPoolConfig
 
 func init() {
-	testTxPoolConfig = DefaultTxPoolConfig
-	testTxPoolConfig.Journal = ""
-	testTxPoolConfig.StartOnInit = true
+	TestTxPoolConfig = DefaultTxPoolConfig
+	TestTxPoolConfig.Journal = ""
+	TestTxPoolConfig.StartOnInit = true
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
@@ -72,7 +72,7 @@ func setupTxPool() (*TxPool, *ecdsa.PrivateKey, func()) {
 
 	key, _ := crypto.GenerateKey()
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
 	//nolint:errcheck
 	pool.Start(1000000000, 0)
 
@@ -171,7 +171,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	tx1 := transaction(1, 100000, key)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("start tx pool: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestTransactionPostponing(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestTransactionGapFilling(t *testing.T) {
 	pool.currentState.AddBalance(account, uint256.NewInt().SetUint64(1000000))
 
 	// Keep track of transaction events to ensure all executables get announced
-	events := make(chan NewTxsEvent, testTxPoolConfig.AccountQueue+5)
+	events := make(chan NewTxsEvent, TestTxPoolConfig.AccountQueue+5)
 	sub := pool.txFeed.Subscribe(events)
 	defer sub.Unsubscribe()
 
@@ -715,25 +715,25 @@ func TestTransactionQueueAccountLimiting(t *testing.T) {
 	pool.currentState.AddBalance(account, uint256.NewInt().SetUint64(1000000))
 
 	// Keep queuing up transactions and make sure all above a limit are dropped
-	for i := uint64(1); i <= testTxPoolConfig.AccountQueue+5; i++ {
+	for i := uint64(1); i <= TestTxPoolConfig.AccountQueue+5; i++ {
 		if err := pool.addRemoteSync(transaction(i, 100000, key)); err != nil {
 			t.Fatalf("tx %d: failed to add transaction: %v", i, err)
 		}
 		if len(pool.pending) != 0 {
 			t.Errorf("tx %d: pending pool size mismatch: have %d, want %d", i, len(pool.pending), 0)
 		}
-		if i <= testTxPoolConfig.AccountQueue {
+		if i <= TestTxPoolConfig.AccountQueue {
 			if pool.queue[account].Len() != int(i) {
 				t.Errorf("tx %d: queue size mismatch: have %d, want %d", i, pool.queue[account].Len(), i)
 			}
 		} else {
-			if pool.queue[account].Len() != int(testTxPoolConfig.AccountQueue) {
-				t.Errorf("tx %d: queue limit mismatch: have %d, want %d", i, pool.queue[account].Len(), testTxPoolConfig.AccountQueue)
+			if pool.queue[account].Len() != int(TestTxPoolConfig.AccountQueue) {
+				t.Errorf("tx %d: queue limit mismatch: have %d, want %d", i, pool.queue[account].Len(), TestTxPoolConfig.AccountQueue)
 			}
 		}
 	}
-	if pool.all.Count() != int(testTxPoolConfig.AccountQueue) {
-		t.Errorf("total transaction mismatch: have %d, want %d", pool.all.Count(), testTxPoolConfig.AccountQueue)
+	if pool.all.Count() != int(TestTxPoolConfig.AccountQueue) {
+		t.Errorf("total transaction mismatch: have %d, want %d", pool.all.Count(), TestTxPoolConfig.AccountQueue)
 	}
 }
 
@@ -754,7 +754,7 @@ func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.NoLocals = nolocals
 	config.GlobalQueue = config.AccountQueue*3 - 1 // reduce the queue limits to shorten test time (-1 to make it non divisible)
 
@@ -851,7 +851,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.Lifetime = time.Second
 	config.NoLocals = nolocals
 
@@ -937,12 +937,12 @@ func TestTransactionPendingLimiting(t *testing.T) {
 	pool.currentState.AddBalance(account, uint256.NewInt().SetUint64(1000000))
 
 	// Keep track of transaction events to ensure all executables get announced
-	events := make(chan NewTxsEvent, testTxPoolConfig.AccountQueue+5)
+	events := make(chan NewTxsEvent, TestTxPoolConfig.AccountQueue+5)
 	sub := pool.txFeed.Subscribe(events)
 	defer sub.Unsubscribe()
 
 	// Keep queuing up transactions and make sure all above a limit are dropped
-	for i := uint64(0); i < testTxPoolConfig.AccountQueue+5; i++ {
+	for i := uint64(0); i < TestTxPoolConfig.AccountQueue+5; i++ {
 		if err := pool.addRemoteSync(transaction(i, 100000, key)); err != nil {
 			t.Fatalf("tx %d: failed to add transaction: %v", i, err)
 		}
@@ -953,10 +953,10 @@ func TestTransactionPendingLimiting(t *testing.T) {
 			t.Errorf("tx %d: queue size mismatch: have %d, want %d", i, pool.queue[account].Len(), 0)
 		}
 	}
-	if pool.all.Count() != int(testTxPoolConfig.AccountQueue+5) {
-		t.Errorf("total transaction mismatch: have %d, want %d", pool.all.Count(), testTxPoolConfig.AccountQueue+5)
+	if pool.all.Count() != int(TestTxPoolConfig.AccountQueue+5) {
+		t.Errorf("total transaction mismatch: have %d, want %d", pool.all.Count(), TestTxPoolConfig.AccountQueue+5)
 	}
-	if err := validateEvents(events, int(testTxPoolConfig.AccountQueue+5)); err != nil {
+	if err := validateEvents(events, int(TestTxPoolConfig.AccountQueue+5)); err != nil {
 		t.Fatalf("event firing failed: %v", err)
 	}
 	if err := validateTxPoolInternals(pool); err != nil {
@@ -972,7 +972,7 @@ func TestTransactionPendingGlobalLimiting(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.GlobalSlots = config.AccountSlots * 10
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
@@ -1076,7 +1076,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.AccountSlots = 2
 	config.AccountQueue = 2
 	config.GlobalSlots = 8
@@ -1115,7 +1115,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.GlobalSlots = 1
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
@@ -1170,7 +1170,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1296,7 +1296,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1362,7 +1362,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.GlobalSlots = 2
 	config.GlobalQueue = 2
 
@@ -1473,7 +1473,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.GlobalSlots = 128
 	config.GlobalQueue = 0
 
@@ -1543,7 +1543,7 @@ func TestTransactionDeduplication(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1614,7 +1614,7 @@ func TestTransactionReplacement(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1634,7 +1634,7 @@ func TestTransactionReplacement(t *testing.T) {
 
 	// Add pending transactions, ensuring the minimum price bump is enforced for replacement (for ultra low prices too)
 	price := uint64(100)
-	threshold := (price * (100 + testTxPoolConfig.PriceBump)) / 100
+	threshold := (price * (100 + TestTxPoolConfig.PriceBump)) / 100
 
 	if err := pool.addRemoteSync(pricedTransaction(0, 100000, u256.Num1, key)); err != nil {
 		t.Fatalf("failed to add original cheap pending transaction: %v", err)
@@ -1713,7 +1713,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config := testTxPoolConfig
+	config := TestTxPoolConfig
 	config.NoLocals = nolocals
 	config.Journal = journal
 	config.Rejournal = time.Second
@@ -1850,7 +1850,7 @@ func TestTransactionStatusCheck(t *testing.T) {
 	defer db.Close()
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(testTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}

@@ -105,7 +105,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			genesis:     (&core.Genesis{Config: configNoFork}).MustCommit(dbNoFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      newTestTxPool(),
+			TxPool:      NewTestTxPool(),
 			Network:     1,
 			BloomCache:  1,
 		})
@@ -115,7 +115,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			genesis:     (&core.Genesis{Config: configProFork}).MustCommit(dbProFork),
 			vmConfig:    &vm.Config{},
 			engine:      engine,
-			TxPool:      newTestTxPool(),
+			TxPool:      NewTestTxPool(),
 			Network:     1,
 			BloomCache:  1,
 		})

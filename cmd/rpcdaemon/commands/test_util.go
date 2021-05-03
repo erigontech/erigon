@@ -18,12 +18,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/mock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -202,20 +202,15 @@ func createTestKV() (ethdb.RwKV, error) {
 	return db.(ethdb.HasRwKV).RwKV(), nil
 }
 
-func createTestGrpcConn(db ethdb.RwKV) *grpc.ClientConn {
+func createTestGrpcConn() *grpc.ClientConn {
 	ctx := context.Background()
 
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, params.TestChainConfig, ethdb.NewObjectDatabase(db), nil)
-	if err := txPool.Start(1000000000, 0); err != nil {
-		panic(err)
-	}
 	server := grpc.NewServer()
-	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(context.Background(), txPool))
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
 		go func() {
-			defer txPool.Stop()
 			if err := server.Serve(listener); err != nil {
 				log.Fatal(err)
 			}

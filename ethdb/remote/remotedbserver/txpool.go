@@ -8,21 +8,26 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-type TxPoolServer struct {
-	proto_txpool.UnimplementedTxpoolServer
-	ctx     context.Context
-	txPool  *core.TxPool
-	fetcher *fetcher.TxFetcher
+type txPool interface {
+	Get(hash common.Hash) types.Transaction
+	AddLocals(txs []types.Transaction) []error
+	SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
 }
 
-func NewTxPoolServer(ctx context.Context, txPool *core.TxPool) *TxPoolServer {
+type TxPoolServer struct {
+	proto_txpool.UnimplementedTxpoolServer
+	ctx    context.Context
+	txPool txPool
+}
+
+func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {

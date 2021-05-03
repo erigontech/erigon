@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -30,9 +31,9 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
 		return common.Hash{}, err
 	}
-	//if !txn.Protected() {
-	//	return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-	//}
+	if !txn.Protected() {
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
 	hash := txn.Hash()
 	res, err := api.txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
