@@ -279,7 +279,32 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
-	//fmt.Printf("CaptureFault depth %d\n", opDepth)
+	//fmt.Printf("CaptureFault depth %d, err %v %s\n", opDepth, err, debug.Stack())
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	if err != nil {
+		switch err {
+		case vm.ErrInvalidJump:
+			topTrace.Error = "Bad jump destination"
+		case vm.ErrOutOfGas:
+			topTrace.Error = "Out of gas"
+		case vm.ErrExecutionReverted:
+			topTrace.Error = "Out of gas" // Only to be compatible with OE
+		default:
+			switch err.(type) {
+			case *vm.ErrStackUnderflow:
+				topTrace.Error = "Stack underflow"
+			case *vm.ErrInvalidOpCode:
+				topTrace.Error = "Bad instruction"
+			default:
+				topTrace.Error = err.Error()
+			}
+		}
+		topTrace.Result = nil
+	}
+	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
+	if opDepth > 0 {
+		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
+	}
 	return nil
 }
 
