@@ -35,13 +35,9 @@ func emptyValueGenerator(j int) []byte {
 	return nil
 }
 
-func getTestDataAtIndex(i, j int, inc uint64, generator func(common.Address, uint64, common.Hash) []byte) []byte {
+func getTestDataAtIndex(i, j int, inc uint64) []byte {
 	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-	return generator(address, inc, key)
-}
-
-func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []byte {
 	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
 }
 
@@ -70,7 +66,7 @@ func doTestEncodingStorageNew(
 		for i := 0; i < numOfElements; i++ {
 			inc := incarnationGenerator()
 			for j := 0; j < numOfKeys; j++ {
-				key := getTestDataAtIndex(i, j, inc, plainKeyGenerator)
+				key := getTestDataAtIndex(i, j, inc)
 				val := valueGenerator(j)
 				err = ch.Add(key, val)
 				if err != nil {
@@ -149,7 +145,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
 				val := hashValueGenerator(j)
-				key := getTestDataAtIndex(i, j, defaultIncarnation, plainKeyGenerator)
+				key := getTestDataAtIndex(i, j, defaultIncarnation)
 				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
@@ -283,7 +279,7 @@ func doTestFind(
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
 				val := hashValueGenerator(j)
-				key := getTestDataAtIndex(i, j, defaultIncarnation, plainKeyGenerator)
+				key := getTestDataAtIndex(i, j, defaultIncarnation)
 				err := ch.Add(key, val)
 				if err != nil {
 					t.Fatal(err)
