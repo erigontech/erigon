@@ -189,6 +189,7 @@ func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
 // Cancel cancels any running EVM operation. This may be called concurrently and
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() {
+	atomic.StoreInt32(&evm.abort, 1)
 }
 
 // Cancelled returns true if Cancel has been called
@@ -255,9 +256,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.vmConfig.SkipAnalysis)
 			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), code)
 			ret, err = run(evm, contract, input, false)
-			if err != nil {
-				_ = evm.vmConfig.Tracer.CaptureFault(evm, contract, evm.depth, err)
-			}
 			gas = contract.Gas
 		}
 	}
@@ -320,9 +318,6 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis)
 		contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
 		ret, err = run(evm, contract, input, false)
-		if err != nil {
-			_ = evm.vmConfig.Tracer.CaptureFault(evm, contract, evm.depth, err)
-		}
 		gas = contract.Gas
 	}
 	if err != nil {
@@ -366,9 +361,6 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis).AsDelegate()
 		contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
 		ret, err = run(evm, contract, input, false)
-		if err != nil {
-			_ = evm.vmConfig.Tracer.CaptureFault(evm, contract, evm.depth, err)
-		}
 		gas = contract.Gas
 	}
 	if err != nil {
@@ -428,9 +420,6 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		// above we revert to the snapshot and consume any gas remaining. Additionally
 		// when we're in Homestead this also counts for code storage gas errors.
 		ret, err = run(evm, contract, input, true)
-		if err != nil {
-			_ = evm.vmConfig.Tracer.CaptureFault(evm, contract, evm.depth, err)
-		}
 		gas = contract.Gas
 	}
 	if err != nil {
@@ -497,11 +486,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.vmConfig.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-	defer func() {
-		if err != nil {
-			_ = evm.vmConfig.Tracer.CaptureFault(evm, contract, evm.depth, err)
-		}
-	}()
 
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil

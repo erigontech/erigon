@@ -294,7 +294,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	return nil
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, contract *vm.Contract, opDepth int, err error) error {
+func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
 	return nil
 }
 
