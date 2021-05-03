@@ -2,8 +2,8 @@ package debug
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -11,18 +11,31 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"os"
 	"testing"
+	"time"
 )
 
+const (
+	AccountDiff = "accdiff"
+	StorageDiff = "stdiff"
+	ContractDiff = "contractdiff"
+	Deleted = "it is deleted"
+)
+
+func WithBlock(block uint64, key []byte) []byte  {
+	b:=make([]byte, 8)
+	binary.BigEndian.PutUint64(b, block)
+	return append(b, key...)
+}
 func TestName(t *testing.T) {
 	chaindataDir:="/media/b00ris/nvme/fresh_sync/tg/chaindata"
-	tmpDbDir:="/media/b00ris/nvme/tmp/debug2"
-	tmpDbDir2:="/media/b00ris/nvme/tmp/debug3"
+	tmpDbDir:="/home/b00ris/event_stream"
 
 	chaindata,err:=ethdb.Open(chaindataDir, true)
 	if err!=nil {
@@ -30,48 +43,128 @@ func TestName(t *testing.T) {
 	}
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
-	os.RemoveAll(tmpDbDir2)
-	tmpDb,err:=ethdb.Open(tmpDbDir, false)
+
+	kv, err := ethdb.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		defaultBuckets[AccountDiff] = dbutils.BucketConfigItem{}
+		defaultBuckets[StorageDiff] = dbutils.BucketConfigItem{}
+		defaultBuckets[ContractDiff] = dbutils.BucketConfigItem{}
+		return defaultBuckets
+	}).Open()
 	if err!=nil {
 		t.Fatal(err)
 	}
+
+	tmpDb:=ethdb.NewObjectDatabase(kv)
+	chainConfig, _, genesisErr := core.SetupGenesisBlockWithOverride(tmpDb, core.DefaultGenesisBlock(), nil, true, false /* overwrite */)
+	if genesisErr!=nil {
+		t.Fatal(err)
+	}
+	tmpDb.ClearBuckets(dbutils.HeadHeaderKey)
+
 	snkv:=ethdb.NewSnapshotKV().DB(tmpDb.RwKV()).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
 	db:=ethdb.NewObjectDatabase(snkv)
+
 
 	tx,err:=db.Begin(context.Background(), ethdb.RW)
 	if err!=nil {
 		t.Fatal(err)
 	}
-	blockNum:=uint64(0)
-	limit:=uint64(10)
-	blockchain, err := core.NewBlockChain(tx, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{
+
+	i:=5
+	err=tx.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		fmt.Println(common.Bytes2Hex(k),)
+		i--
+		if i==0 {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+
+	currentBlock:=rawdb.ReadCurrentHeader(tx)
+	fmt.Println("currentBlock", currentBlock.Number.Uint64())
+	blockNum:=uint64(1)
+	limit:=currentBlock.Number.Uint64()
+	blockchain, err := core.NewBlockChain(tx, nil, chainConfig, ethash.NewFaker(), vm.Config{
 		NoReceipts: true,
 	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
 	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx,blockNum))
-	for i:=blockNum; i<blockNum+limit; i++ {
-		fmt.Println("exsecuted", i)
-		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(tx, tx, i))
-
-		block, err:=rawdb.ReadBlockByNumber(chaindata, i)
+	tt:=time.Now()
+	ttt:=time.Now()
+	for currentBlock:=blockNum; currentBlock<blockNum+limit; currentBlock++ {
+		//fmt.Println("exsecuted", currentBlock)
+		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(tx, tx, currentBlock))
+		block, err:=rawdb.ReadBlockByNumber(chaindata, currentBlock)
 		if err!=nil {
-			t.Fatal(err)
+			t.Fatal(err, currentBlock)
 		}
-		_, err = core.ExecuteBlockEphemerally(blockchain.Config(), blockchain.GetVMConfig(), nil, ethash.NewFaker(),  block, stateReaderWriter, stateReaderWriter)
+		_, err = core.ExecuteBlockEphemerally(blockchain.Config(), blockchain.GetVMConfig(), getHeader, ethash.NewFaker(),  block, stateReaderWriter, stateReaderWriter)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(err, currentBlock)
+		}
+		cs:=stateReaderWriter.UpdatedAccouts()
+		accDiffLen:=len(cs)
+		for i:=range cs {
+			if len(cs[i].Value) == 0 {
+				cs[i].Value=[]byte(Deleted)
+			}
+			err = tx.Put(AccountDiff, WithBlock(currentBlock, cs[i].Key), cs[i].Value)
+			if err!=nil {
+				t.Fatal(err, cs[i].Key, currentBlock)
+			}
+		}
+		cs=stateReaderWriter.UpdatedStorage()
+		stDiffLen:=len(cs)
+		for i:=range cs {
+			if len(cs[i].Value) == 0 {
+				cs[i].Value=[]byte(Deleted)
+			}
+			err = tx.Put(StorageDiff, WithBlock(currentBlock, cs[i].Key), cs[i].Value)
+			if err!=nil {
+				t.Fatal(err, cs[i].Key, currentBlock)
+			}
+		}
+		cs=stateReaderWriter.UpdatedCodes()
+		codesDiffLen:=len(cs)
+		for i:=range cs {
+			if len(cs[i].Value) == 0 {
+				cs[i].Value=[]byte(Deleted)
+			}
+			err = tx.Put(ContractDiff, WithBlock(currentBlock, cs[i].Key), cs[i].Value)
+			if err!=nil {
+				t.Fatal(err, cs[i].Key, currentBlock)
+			}
 		}
 
+		stateReaderWriter.Reset()
+		if currentBlock%10000 == 0 {
+			err = tx.CommitAndBegin(context.Background())
+			if err!=nil {
+				t.Fatal(err, currentBlock)
+			}
+			dr:=time.Since(ttt)
+			fmt.Println(currentBlock, "finished","acc-", accDiffLen,"st-", stDiffLen,"codes - ", codesDiffLen, "all -",time.Since(tt), "chunk - ",dr, "blocks/s",10000/dr.Seconds())
+			ttt=time.Now()
+		}
 	}
-	tx.Rollback()
+	err = tx.Commit()
+	if err!=nil {
+		t.Fatal(err)
+	}
+
 	fmt.Println("End")
-	spew.Dump("readAcc",len(stateReaderWriter.readAcc))
-	spew.Dump("readStr",len(stateReaderWriter.readStorage))
-	spew.Dump("createdContracts", len(stateReaderWriter.createdContracts))
-	spew.Dump("deleted",len(stateReaderWriter.deletedAcc))
+	//spew.Dump("readAcc",len(stateReaderWriter.readAcc))
+	//spew.Dump("readStr",len(stateReaderWriter.readStorage))
+	//spew.Dump("createdContracts", len(stateReaderWriter.createdContracts))
+	//spew.Dump("deleted",len(stateReaderWriter.deletedAcc))
 
 }
 
@@ -83,16 +176,16 @@ func NewDebugReaderWriter(r state.StateReader, w state.WriterWithChangeSets) *De
 	return &DebugReaderWriter{
 		r:   r,
 		w: w,
-		readAcc: make(map[common.Address]struct{}),
-		readStorage: make(map[string]struct{}),
-		readCodes: make(map[common.Hash]struct{}),
-		readIncarnations: make(map[common.Address]struct{}),
+		//readAcc: make(map[common.Address]struct{}),
+		//readStorage: make(map[string]struct{}),
+		//readCodes: make(map[common.Hash]struct{}),
+		//readIncarnations: make(map[common.Address]struct{}),
 
-		updatedAcc: make(map[common.Address]struct{}),
-		updatedStorage:make(map[string]struct{}),
-		updatedCodes: make(map[common.Hash]struct{}),
-		deletedAcc: make(map[common.Address]struct{}),
-		createdContracts: make(map[common.Address]struct{}),
+		updatedAcc: make(map[common.Address][]byte),
+		updatedStorage:make(map[string][]byte),
+		updatedCodes: make(map[common.Hash][]byte),
+		//deletedAcc: make(map[common.Address]struct{}),
+		//createdContracts: make(map[common.Address]struct{}),
 
 
 	}
@@ -100,32 +193,38 @@ func NewDebugReaderWriter(r state.StateReader, w state.WriterWithChangeSets) *De
 type DebugReaderWriter struct {
 	r state.StateReader
 	w state.WriterWithChangeSets
-	readAcc map[common.Address]struct{}
-	readStorage map[string]struct{}
-	readCodes map[common.Hash] struct{}
-	readIncarnations map[common.Address] struct{}
-	updatedAcc map[common.Address]struct{}
-	updatedStorage map[string]struct{}
-	updatedCodes map[common.Hash]struct{}
-	deletedAcc map[common.Address]struct{}
-	createdContracts map[common.Address]struct{}
+	//readAcc map[common.Address]struct{}
+	//readStorage map[string]struct{}
+	//readCodes map[common.Hash] struct{}
+	//readIncarnations map[common.Address] struct{}
+	updatedAcc map[common.Address][]byte
+	updatedStorage map[string][]byte
+	updatedCodes map[common.Hash][]byte
+	//deletedAcc map[common.Address]struct{}
+	//createdContracts map[common.Address]struct{}
+}
+
+func (d *DebugReaderWriter) Reset() {
+	d.updatedAcc = map[common.Address][]byte{}
+	d.updatedStorage =  map[string][]byte{}
+	d.updatedCodes = map[common.Hash][]byte{}
 }
 func (d *DebugReaderWriter) UpdateWriter(w state.WriterWithChangeSets) {
 	d.w = w
 }
 
 func (d *DebugReaderWriter) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	d.readAcc[address] = struct{}{}
+	//d.readAcc[address] = struct{}{}
 	return d.r.ReadAccountData(address)
 }
 
 func (d *DebugReaderWriter) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	d.readStorage[string(dbutils.PlainGenerateCompositeStorageKey(address.Bytes(),incarnation, key.Bytes()))] = struct{}{}
+	//d.readStorage[string(dbutils.PlainGenerateCompositeStorageKey(address.Bytes(),incarnation, key.Bytes()))] = struct{}{}
 	return d.r.ReadAccountStorage(address, incarnation, key)
 }
 
 func (d *DebugReaderWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	d.readCodes[codeHash] = struct{}{}
+	//d.readCodes[codeHash] = struct{}{}
 	return d.r.ReadAccountCode(address, incarnation, codeHash)
 }
 
@@ -134,7 +233,7 @@ func (d *DebugReaderWriter) ReadAccountCodeSize(address common.Address, incarnat
 }
 
 func (d *DebugReaderWriter) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	d.readIncarnations[address] = struct{}{}
+	//d.readIncarnations[address] = struct{}{}
 	return d.r.ReadAccountIncarnation(address)
 }
 
@@ -147,66 +246,108 @@ func (d *DebugReaderWriter) WriteHistory() error {
 }
 
 func (d *DebugReaderWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	d.updatedAcc[address] = struct{}{}
+	b,err:=rlp.EncodeToBytes(account)
+	if err!=nil {
+		return err
+	}
+	d.updatedAcc[address] = b
 	return d.w.UpdateAccountData(ctx, address, original, account)
 }
 
 func (d *DebugReaderWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	d.updatedCodes[codeHash] = struct{}{}
+	d.updatedCodes[codeHash] = code
 	return d.w.UpdateAccountCode(address, incarnation, codeHash, code)
 }
 
 func (d *DebugReaderWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	d.deletedAcc[address]= struct{}{}
+	d.updatedAcc[address]= nil
+	//d.deletedAcc[address]= struct{}{}
 	return d.w.DeleteAccount(ctx, address, original)
 }
 
 func (d *DebugReaderWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	d.updatedStorage[string(dbutils.PlainGenerateCompositeStorageKey(address.Bytes(),incarnation, key.Bytes()))] = struct{}{}
+	d.updatedStorage[string(dbutils.PlainGenerateCompositeStorageKey(address.Bytes(),incarnation, key.Bytes()))] = value.Bytes()
 	return d.w.WriteAccountStorage(ctx, address, incarnation, key, original, value)
 }
 
 func (d *DebugReaderWriter) CreateContract(address common.Address) error {
-	d.createdContracts[address] = struct{}{}
+	//d.createdContracts[address] = struct{}{}
 	return d.w.CreateContract(address)
 }
 
-func (d *DebugReaderWriter) AllAccounts() map[common.Address]struct{}  {
-	accs:=make(map[common.Address]struct{})
-	for i:=range d.readAcc {
-		accs[i]=struct{}{}
-	}
-	for i:=range d.updatedAcc {
-		accs[i]=struct{}{}
-	}
-	for i:=range d.readIncarnations {
-		accs[i]=struct{}{}
-	}
-	for i:=range d.deletedAcc {
-		accs[i]=struct{}{}
-	}
-	for i:=range d.createdContracts {
-		accs[i]=struct{}{}
-	}
-	return accs
+type Change struct {
+	Key []byte
+	Value []byte
 }
-func (d *DebugReaderWriter) AllStorage() map[string]struct{}  {
-	st:=make(map[string]struct{})
-	for i:=range d.readStorage {
-		st[i]=struct{}{}
+
+func (d *DebugReaderWriter) UpdatedAccouts() []Change   {
+	ch:=make([]Change, 0, len(d.updatedAcc))
+	for k,v:=range d.updatedAcc {
+		ch=append(ch, Change{
+			Key: common.CopyBytes(k.Bytes()),
+			Value: common.CopyBytes(v),
+		})
 	}
-	for i:=range d.updatedStorage {
-		st[i]=struct{}{}
-	}
-	return st
+	return ch
 }
-func (d *DebugReaderWriter) AllCodes() map[common.Hash]struct{}  {
-	c:=make(map[common.Hash]struct{})
-	for i:=range d.readCodes {
-		c[i]=struct{}{}
+func (d *DebugReaderWriter) UpdatedStorage() []Change   {
+	ch:=make([]Change, 0, len(d.updatedStorage))
+	for k,v:=range d.updatedStorage {
+		ch=append(ch, Change{
+			Key: common.CopyBytes([]byte(k)),
+			Value: common.CopyBytes(v),
+		})
 	}
-	for i:=range d.updatedCodes {
-		c[i]=struct{}{}
-	}
-	return c
+	return ch
+
 }
+func (d *DebugReaderWriter) UpdatedCodes() []Change   {
+	ch:=make([]Change, 0, len(d.updatedCodes))
+	for k,v:=range d.updatedCodes {
+		ch=append(ch, Change{
+			Key: common.CopyBytes(k.Bytes()),
+			Value: common.CopyBytes(v),
+		})
+	}
+	return ch
+}
+
+//func (d *DebugReaderWriter) AllAccounts() map[common.Address]struct{}  {
+//	accs:=make(map[common.Address]struct{})
+//	for i:=range d.readAcc {
+//		accs[i]=struct{}{}
+//	}
+//	for i:=range d.updatedAcc {
+//		accs[i]=struct{}{}
+//	}
+//	for i:=range d.readIncarnations {
+//		accs[i]=struct{}{}
+//	}
+//	for i:=range d.deletedAcc {
+//		accs[i]=struct{}{}
+//	}
+//	for i:=range d.createdContracts {
+//		accs[i]=struct{}{}
+//	}
+//	return accs
+//}
+//func (d *DebugReaderWriter) AllStorage() map[string]struct{}  {
+//	st:=make(map[string]struct{})
+//	for i:=range d.readStorage {
+//		st[i]=struct{}{}
+//	}
+//	for i:=range d.updatedStorage {
+//		st[i]=struct{}{}
+//	}
+//	return st
+//}
+//func (d *DebugReaderWriter) AllCodes() map[common.Hash]struct{}  {
+//	c:=make(map[common.Hash]struct{})
+//	for i:=range d.readCodes {
+//		c[i]=struct{}{}
+//	}
+//	for i:=range d.updatedCodes {
+//		c[i]=struct{}{}
+//	}
+//	return c
+//}
