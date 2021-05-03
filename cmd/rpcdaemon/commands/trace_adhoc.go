@@ -51,6 +51,7 @@ type TraceCallParam struct {
 	Value      *hexutil.Big      `json:"value"`
 	Data       hexutil.Bytes     `json:"data"`
 	AccessList *types.AccessList `json:"accessList"`
+	traceTypes []string
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -570,10 +571,50 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	}
 	defer dbtx.Rollback()
 
-	return api.doCallMany(ctx, dbtx, calls, blockNrOrHash, nil)
+	var callParams []TraceCallParam
+	dec := json.NewDecoder(bytes.NewReader(calls))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim('[') {
+		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
+	}
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim('[') {
+			return nil, fmt.Errorf("expected [callparam, tracetypes]")
+		}
+		callParams = append(callParams, TraceCallParam{})
+		args := &callParams[len(callParams)-1]
+		if err = dec.Decode(args); err != nil {
+			return nil, err
+		}
+		if err = dec.Decode(&args.traceTypes); err != nil {
+			return nil, err
+		}
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim(']') {
+			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
+		}
+	}
+	tok, err = dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim(']') {
+		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
+	}
+	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -617,41 +658,10 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 	defer cancel()
 	results := []*TraceCallResult{}
 
-	dec := json.NewDecoder(bytes.NewReader(calls))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, err
-	}
-	if tok != json.Delim('[') {
-		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
-	}
-	txIndex := 0
-	for dec.More() {
-		tok, err = dec.Token()
-		if err != nil {
-			return nil, err
-		}
-		if tok != json.Delim('[') {
-			return nil, fmt.Errorf("expected [callparam, tracetypes]")
-		}
-		var args TraceCallParam
-		if err = dec.Decode(&args); err != nil {
-			return nil, err
-		}
-		var traceTypes []string
-		if err = dec.Decode(&traceTypes); err != nil {
-			return nil, err
-		}
-		tok, err = dec.Token()
-		if err != nil {
-			return nil, err
-		}
-		if tok != json.Delim(']') {
-			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
-		}
+	for txIndex, args := range callParams {
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-		for _, traceType := range traceTypes {
+		for _, traceType := range args.traceTypes {
 			switch traceType {
 			case TraceTypeTrace:
 				traceTypeTrace = true
@@ -721,13 +731,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, calls js
 		}
 		results = append(results, traceResult)
 		txIndex++
-	}
-	tok, err = dec.Token()
-	if err != nil {
-		return nil, err
-	}
-	if tok != json.Delim(']') {
-		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
 	return results, nil
 }

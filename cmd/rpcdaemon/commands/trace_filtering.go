@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -341,28 +340,25 @@ func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struc
 }
 
 func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
-	toExecute := []interface{}{}
+	var toExecute []TraceCallParam
 
 	for _, tx := range txs {
 		sender, _ := tx.GetSender()
 		gas := hexutil.Uint64(tx.GetGas())
 		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
 		value := hexutil.Big(*tx.GetValue().ToBig())
-		toExecute = append(toExecute, []interface{}{TraceCallParam{
-			From:     &sender,
-			To:       tx.GetTo(),
-			Gas:      &gas,
-			GasPrice: &gasPrice,
-			Value:    &value,
-			Data:     tx.GetData(),
-		}, []string{TraceTypeTrace, TraceTypeStateDiff}})
+		toExecute = append(toExecute, TraceCallParam{
+			From:       &sender,
+			To:         tx.GetTo(),
+			Gas:        &gas,
+			GasPrice:   &gasPrice,
+			Value:      &value,
+			Data:       tx.GetData(),
+			traceTypes: []string{TraceTypeTrace, TraceTypeStateDiff},
+		})
 	}
 
-	calls, callsErr := json.Marshal(toExecute)
-	if callsErr != nil {
-		return nil, callsErr
-	}
-	traces, cmErr := api.doCallMany(ctx, dbtx, calls, &rpc.BlockNumberOrHash{
+	traces, cmErr := api.doCallMany(ctx, dbtx, toExecute, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
@@ -373,23 +369,6 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 	}
 
 	return traces, nil
-}
-
-func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
-	blocks, err := bitmapdb.Get(tx, dbutils.AccountsHistoryBucket, addr.Bytes(), uint32(fromBlock), uint32(toBlock+1))
-	if err != nil {
-		return nil, err
-	}
-	blocks.RemoveRange(fromBlock, toBlock+1)
-	return toU64(blocks.ToArray()), nil
-}
-
-func toU64(in []uint32) []uint64 {
-	out := make([]uint64, len(in))
-	for i := range in {
-		out[i] = uint64(in[i])
-	}
-	return out
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
