@@ -245,6 +245,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 				}
 			default:
 				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
 				case *vm.ErrInvalidOpCode:
 					topTrace.Error = "Bad instruction"
 				default:
