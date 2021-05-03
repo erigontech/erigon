@@ -235,8 +235,14 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	if err != nil {
 		if topTrace.Type == CREATE {
 			switch err {
-			case vm.ErrContractAddressCollision, vm.ErrExecutionReverted, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
+			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
 				topTrace.Error = "Out of gas" // Only to be compatible with OE
+			case vm.ErrExecutionReverted:
+				if depth == 0 {
+					topTrace.Error = "Reverted"
+				} else {
+					topTrace.Error = "Out of gas"
+				}
 			default:
 				switch err.(type) {
 				case *vm.ErrInvalidOpCode:
