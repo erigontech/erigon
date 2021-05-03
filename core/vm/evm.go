@@ -525,10 +525,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			contract.UseGas(contract.Gas)
 		}
 	}
+	gas -= contract.Gas // For the CaptureEnd to work corrently with gasUsed
 	// Assign err if contract code size exceeds the max while the err is still empty.
 	if maxCodeSizeExceeded && err == nil {
 		err = ErrMaxCodeSizeExceeded
 	}
+
 	return ret, address, contract.Gas, err
 
 }
