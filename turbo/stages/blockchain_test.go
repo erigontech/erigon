@@ -1270,7 +1270,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
-
 	// account must exist pre eip 161
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1314,6 +1313,10 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		genesis = gspec.MustCommit(db)
 	)
 
+	txCacher := core.NewTxSenderCacher(1)
+	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	defer blockchain.Stop()
+
 	var theAddr common.Address
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 3, func(i int, block *core.BlockGen) {
@@ -1343,28 +1346,27 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	tx, err := db.RwKV().BeginRw(context.Background())
-	if err != nil {
-		t.Fatalf("read only db tx to read state: %v", err)
-	}
-	defer tx.Rollback()
-
-	_, err = stagedsync.InsertBlocksInStages(ethdb.WrapIntoTxDB(tx), ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
+	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
 	assert.NoError(t, err)
 
-	st := state.New(state.NewPlainKvState(tx, 0))
+	st := state.New(state.NewDbStateReader(db))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
-	st = state.New(state.NewPlainKvState(tx, 0))
+	dbTx, err := db.RwKV().BeginRo(context.Background())
+	if err != nil {
+		t.Fatalf("read only db tx to read state: %v", err)
+	}
+	defer dbTx.Rollback()
+	st = state.New(state.NewPlainKvState(dbTx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainKvState(tx, 1))
+	st = state.New(state.NewPlainKvState(dbTx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainKvState(tx, 2))
+	st = state.New(state.NewPlainKvState(dbTx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
