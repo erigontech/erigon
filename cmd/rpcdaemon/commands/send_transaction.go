@@ -40,7 +40,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	if res.Imported[0] != txpool.ImportResult_SUCCESS {
-		return hash, fmt.Errorf("error: %s, %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+		return hash, fmt.Errorf("%s: %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
 	}
 
 	tx, err := api.db.BeginRo(ctx)
