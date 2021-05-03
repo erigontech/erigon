@@ -57,6 +57,9 @@ func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*p
 		if err == nil {
 			continue
 		}
+
+		reply.Errors[i] = err.Error()
+
 		// Track a few interesting failure types
 		switch err {
 		case nil: // Noop, but need to handle to not count these

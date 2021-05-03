@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -31,17 +30,17 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
 		return common.Hash{}, err
 	}
-	if !txn.Protected() {
-		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-	}
+	//if !txn.Protected() {
+	//	return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	//}
 	hash := txn.Hash()
-	res, err := api.txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{encodedTx}, IsLocal: true})
+	res, err := api.txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
 		return common.Hash{}, err
 	}
 
 	if res.Imported[0] != txpool.ImportResult_SUCCESS {
-		return hash, fmt.Errorf("error: %s", txpool.ImportResult_name[int32(res.Imported[0])])
+		return hash, fmt.Errorf("error: %s, %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
 	}
 
 	tx, err := api.db.BeginRo(ctx)

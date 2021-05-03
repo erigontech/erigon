@@ -205,12 +205,17 @@ func createTestKV() (ethdb.RwKV, error) {
 func createTestGrpcConn(db ethdb.RwKV) *grpc.ClientConn {
 	ctx := context.Background()
 
+	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, params.TestChainConfig, ethdb.NewObjectDatabase(db), nil)
+	if err := txPool.Start(1000000000, 0); err != nil {
+		panic(err)
+	}
+	server := grpc.NewServer()
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(context.Background(), txPool))
+	listener := bufconn.Listen(1024 * 1024)
+
 	dialer := func() func(context.Context, string) (net.Conn, error) {
-		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer()
-		txPool := core.NewTxPool(ethconfig.Defaults.TxPool, params.TestChainConfig, ethdb.NewObjectDatabase(db), nil)
-		txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(context.Background(), txPool))
 		go func() {
+			defer txPool.Stop()
 			if err := server.Serve(listener); err != nil {
 				log.Fatal(err)
 			}
