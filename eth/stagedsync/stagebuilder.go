@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"strings"
 	"unsafe"
 
@@ -14,6 +13,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 

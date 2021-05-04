@@ -150,7 +150,7 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 	}
 	log.Info("PostProcessNoBlocksSync", "blocknum", blockNum, "hash", blockHash.String())
 
-	tx,err:=db.Begin(context.Background(), ethdb.RW)
+	tx,err:=db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
 	if err != nil {
 		return err
 	}

@@ -478,7 +478,7 @@ func WriteBodyDeprecated(db ethdb.Database, hash common.Hash, number uint64, bod
 	return nil
 }
 
-func WriteBody(db ethdb.StatelessWriteTx, hash common.Hash, number uint64, body *types.Body) error {
+func WriteBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Body) error {
 	// Pre-processing
 	body.SendersFromTxs()
 	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))

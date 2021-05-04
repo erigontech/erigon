@@ -30,6 +30,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"errors"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"

@@ -38,7 +38,6 @@ type KVGetter interface {
 type Putter interface {
 	// Put inserts or updates a single entry.
 	Put(bucket string, key, value []byte) error
-
 }
 
 // Deleter wraps the database delete operations.
