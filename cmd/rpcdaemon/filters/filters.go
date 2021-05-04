@@ -171,7 +171,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &header)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (header), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.headsSubs {
 				v <- &header
@@ -183,7 +183,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &logs)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (pending logs), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.pendingLogsSubs {
 				v <- logs
@@ -195,14 +195,14 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &block)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (pending txs), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.pendingBlockSubs {
 				v <- &block
 			}
 		}
 	default:
-		log.Warn("rpc filters: unsupported event type", "type", event.Type)
+		log.Warn("OnNewEvent rpc filters: unsupported event type", "type", event.Type)
 		return
 	}
 }
@@ -211,7 +211,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 
-	txs := make([]types.Transaction, len(reply.RplTxs))
+	txs := make([]types.Transaction, len(reply.RplTxs[0]))
 	reader := bytes.NewReader(nil)
 	stream := rlp.NewStream(reader, 0)
 
@@ -222,7 +222,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 		txs[i], decodeErr = types.DecodeTransaction(stream)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", decodeErr)
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr)
 			break
 		}
 	}
