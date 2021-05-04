@@ -35,9 +35,9 @@ func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error)
 	return nil
 }
 
-type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
+type AccountChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSetPlain) Find(blockNumber uint64, key []byte) ([]byte, error) {
+func (b AccountChangeSet) Find(blockNumber uint64, key []byte) ([]byte, error) {
 	fromDBFormat := FromDBFormat(common.AddressLength)
 	k := dbutils.EncodeBlockNumber(blockNumber)
 	v, err := b.c.SeekBothRange(k, key)

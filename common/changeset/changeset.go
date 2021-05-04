@@ -199,7 +199,7 @@ var Mapper = map[string]struct {
 	dbutils.PlainAccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return AccountChangeSetPlain{c: c}
+			return AccountChangeSet{c: c}
 		},
 		KeySize:  common.AddressLength,
 		Template: "acc-ind-",
