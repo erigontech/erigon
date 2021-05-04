@@ -111,7 +111,7 @@ func InsertBodies(
 			return true, ctx.Err()
 		}
 
-		err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
+		err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body())
 		if err != nil {
 			return true, err
 		}

@@ -79,6 +79,10 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, quit <-chan struct{}, cfg
 		return nil
 	}
 
+	if endBlock > s.BlockNumber+100000 {
+		endBlock = s.BlockNumber + 100000
+	}
+
 	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg); err != nil {
 		return err
 	}
@@ -116,20 +120,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallFromIndex)
-			if err != nil {
-				return err
-			}
-			sz2, err := tx.(ethdb.HasStats).BucketSize(dbutils.CallToIndex)
-			if err != nil {
-				return err
-			}
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
 				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
@@ -155,12 +151,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if err2 != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(tx), blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
 		if block == nil {
-			break
+			return fmt.Errorf("no block: %d", blockNum)
 		}
 
 		stateReader := state.NewPlainKvState(tx, blockNum-1)
@@ -171,6 +167,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if _, err := core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
+
+		tracer.tos[block.Coinbase()] = struct{}{}
+		for _, uncle := range block.Uncles() {
+			tracer.tos[uncle.Coinbase] = struct{}{}
+		}
+
 		for addr := range tracer.froms {
 			m, ok := froms[string(addr[:])]
 			if !ok {
@@ -234,17 +236,20 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		return nil
 	}
 
-	if err := collectorFrom.Load(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := collectorTo.Load(logPrefix, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	return nil
 }
 
 func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}, cfg CallTracesCfg) error {
+	if s.BlockNumber <= u.UnwindPoint {
+		return nil
+	}
 	var tx ethdb.RwTx
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -283,7 +288,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
-	for blockNum := to + 1; blockNum <= from; blockNum++ {
+	for blockNum := from; blockNum > to; blockNum-- {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
@@ -292,12 +297,12 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		if err != nil {
 			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
 		}
-		block, _, err := rawdb.ReadBlockWithSenders(ethdb.NewRoTxDb(db), blockHash, blockNum)
+		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
 		if block == nil {
-			break
+			return fmt.Errorf("no block %d", blockNum)
 		}
 
 		stateReader := state.NewPlainKvState(db, blockNum-1)
@@ -305,6 +310,12 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
 		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
+		}
+
+		coinbase := block.Coinbase()
+		tos[string(coinbase[:])] = struct{}{}
+		for _, uncle := range block.Uncles() {
+			tos[string(uncle.Coinbase[:])] = struct{}{}
 		}
 	}
 	for addr := range tracer.froms {
@@ -316,10 +327,10 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		tos[string(a[:])] = struct{}{}
 	}
 
-	if err := truncateBitmaps(db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallFromIndex, froms, to); err != nil {
+	if err := truncateBitmaps(db, dbutils.CallFromIndex, froms, to); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.CallToIndex, tos, to); err != nil {
+	if err := truncateBitmaps(db, dbutils.CallToIndex, tos, to); err != nil {
 		return err
 	}
 	return nil
@@ -338,10 +349,11 @@ func NewCallTracer() *CallTracer {
 }
 
 func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
 	return nil
 }
 func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	//TODO: Populate froms and tos if it is any call opcode
 	return nil
 }
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
@@ -351,6 +363,8 @@ func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t tim
 	return nil
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
 }
 func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil

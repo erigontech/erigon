@@ -83,7 +83,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		return false, fmt.Errorf("%s: walking over headers: %w", logPrefix, err)
 	}
 	if missingHeader != 0 {
-		if err1 := u.UnwindTo(missingHeader, d.stateDB); err1 != nil {
+		if err1 := u.UnwindTo(missingHeader, d.stateDB, d.stateDB); err1 != nil {
 			return false, fmt.Errorf("%s: resetting SyncStage Headers to missing header: %w", logPrefix, err1)
 		}
 		// This will cause the sync return to the header stage

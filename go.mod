@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
-	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
+	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
@@ -44,6 +44,7 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.7
 	github.com/mattn/go-isatty v0.0.12
+	github.com/pelletier/go-toml v1.9.0
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/prometheus/client_golang v1.9.0
 	github.com/prometheus/tsdb v0.10.0

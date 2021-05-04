@@ -42,6 +42,11 @@ func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan 
 	if err != nil {
 		return err
 	}
+	if to == s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	logPrefix := s.state.LogPrefix()
 	if to < s.BlockNumber {
 		return fmt.Errorf("%s: to (%d) < from (%d)", logPrefix, to, s.BlockNumber)
@@ -133,7 +138,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 			continue
 		}
 
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 		for _, tx := range body.Transactions {
 			pool.RemoveTx(tx.Hash(), true /* outofbound */)
 		}
@@ -265,7 +270,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 			continue
 		}
 
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNumber)
+		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 		body.SendersToTxs(senders[blockNumber-from-1])
 		txsToInject = append(txsToInject, body.Transactions...)
 	}

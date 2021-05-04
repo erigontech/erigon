@@ -41,11 +41,11 @@ type ParityTrace struct {
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              interface{}  `json:"result,omitempty"`
+	Result              interface{}  `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
-	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
-	TransactionPosition *uint64      `json:"transactionPosition,omitempty"`
+	TransactionHash     *common.Hash `json:"transactionHash"`
+	TransactionPosition *uint64      `json:"transactionPosition"`
 	Type                string       `json:"type"`
 }
 
@@ -71,10 +71,10 @@ type TraceAction struct {
 
 type CallTraceAction struct {
 	From     common.Address `json:"from"`
-	To       common.Address `json:"to"`
 	CallType string         `json:"callType"`
 	Gas      hexutil.Big    `json:"gas"`
 	Input    hexutil.Bytes  `json:"input"`
+	To       common.Address `json:"to"`
 	Value    hexutil.Big    `json:"value"`
 }
 
@@ -89,6 +89,12 @@ type SuicideTraceAction struct {
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
 	Balance       hexutil.Big    `json:"balance"`
+}
+
+type RewardTraceAction struct {
+	Author     common.Address `json:"author"`
+	RewardType string         `json:"rewardType"`
+	Value      hexutil.Big    `json:"value"`
 }
 
 type CreateTraceResult struct {

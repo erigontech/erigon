@@ -119,7 +119,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, trieCfg, ctx.Done())
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX, trieCfg, ctx.Done())
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -185,8 +185,8 @@ func ReplacementStages(ctx context.Context,
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
-					Disabled:            !sm.CallTraces,
 					DisabledDescription: "Work In Progress",
+					Disabled:            !sm.CallTraces,
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, ctx.Done(), callTraces)
 					},

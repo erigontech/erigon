@@ -109,9 +109,9 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
 // concurrently. The method returns a quit channel to abort the operations and
 // a results channel to retrieve the async verifications.
-func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	if len(headers) == 0 {
-		return func() {}, make(chan error)
+		return nil
 	}
 
 	// Spawn as many workers as allowed threads
@@ -122,16 +122,10 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	// Create a task channel and spawn the verifiers
 	var (
-		done   = make(chan int, workers)
 		errors = make([]error, len(headers))
-		abort  = make(chan struct{})
 	)
 
 	wg := sync.WaitGroup{}
-	cancel := func() {
-		close(abort)
-		wg.Wait()
-	}
 
 	input := new(int64)
 
@@ -145,41 +139,22 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 				if int(index) > len(headers)-1 {
 					return
 				}
-
 				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
-
-				select {
-				case done <- int(index):
-				case <-abort:
+				if errors[index] != nil {
 					return
 				}
 			}
 		}()
 	}
 
-	errorsOut := make(chan error, len(headers))
-	go func() {
-		var (
-			out     = 0
-			checked = make([]bool, len(headers))
-		)
-		for {
-			select {
-			case index := <-done:
-				for checked[index] = true; checked[out]; out++ {
-					errorsOut <- errors[out]
-					if out == len(headers)-1 {
-						close(errorsOut)
-						return
-					}
-				}
-			case <-abort:
-				return
-			}
+	wg.Wait()
+	for _, err := range errors {
+		if err != nil {
+			return err
 		}
-	}()
+	}
 
-	return cancel, errorsOut
+	return nil
 }
 
 func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int) error {
@@ -295,8 +270,8 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
 	}
 	// Verify the block's gas usage and (if applicable) verify the base fee.
-	if chain.Config().IsAleut(header.Number.Uint64()) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64())); err != nil {
+	if chain.Config().IsAleut(header.Number.Uint64()) || chain.Config().IsBaikal(header.Number.Uint64()) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64()) || chain.Config().IsBaikal(parent.Number.Uint64())); err != nil {
 			return err
 		}
 	} else {

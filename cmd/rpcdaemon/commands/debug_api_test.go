@@ -64,7 +64,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	defer db.Close()
 	api := NewPrivateDebugAPI(db, 0, nil)
 	for _, tt := range debugTraceTransactionNoRefundTests {
-		var norefunds bool = true
+		var norefunds = true
 		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds})
 		if err1 != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)

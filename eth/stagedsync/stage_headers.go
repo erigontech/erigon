@@ -70,7 +70,7 @@ func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 
 // GetBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.Db, hash, number)
+	return rawdb.ReadBlockDeprecated(cr.Db, hash, number)
 }
 
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
@@ -89,17 +89,7 @@ func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.Chai
 		seals[len(seals)-1] = true
 	}
 
-	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
-	defer cancel()
-
-	// Iterate over the headers and ensure they all check out
-	for i := 0; i < len(headers); i++ {
-		// Otherwise wait for headers checks and ensure they pass
-		if err := <-results; err != nil {
-			return err
-		}
-	}
-	return nil
+	return engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
 }
 
 func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {

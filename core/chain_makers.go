@@ -363,10 +363,10 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Time:     time,
 	}
 
-	if chain.Config().IsAleut(parent.Number().Uint64()) {
+	if chain.Config().IsAleut(parent.Number().Uint64()) || chain.Config().IsBaikal(parent.Number().Uint64()) {
 		header.BaseFee = misc.CalcBaseFee(parent.Header())
 		header.Eip1559 = true
-	} else if chain.Config().IsAleut(header.Number.Uint64()) {
+	} else if chain.Config().IsAleut(header.Number.Uint64()) || chain.Config().IsBaikal(header.Number.Uint64()) {
 		header.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		header.Eip1559 = true
 	}

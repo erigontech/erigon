@@ -55,51 +55,19 @@ func newFakeEth(mode Mode) Ethash {
 	}
 }
 
-func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	fakeSeals := make([]bool, len(seals))
-	fn, results := f.Ethash.VerifyHeaders(chain, headers, fakeSeals)
-
-	errs := make(chan error, cap(results))
-	isClosed := make(chan struct{})
-
-	go func() {
-		var i int
-		var sealErr error
-		for {
-			select {
-			case <-isClosed:
-				return
-			case res := <-results:
-				if seals[i] {
-					sealErr = f.VerifySeal(chain, headers[i])
-				}
-
-				if res == nil {
-					res = sealErr
-				}
-
-				select {
-				case <-isClosed:
-					close(errs)
-					return
-				case errs <- res:
-					// nothing to do
-				}
-
-				i++
-				if len(headers) == i {
-					return
-				}
+	if err := f.Ethash.VerifyHeaders(chain, headers, fakeSeals); err != nil {
+		return err
+	}
+	for i, header := range headers {
+		if seals[i] {
+			if err := f.VerifySeal(chain, header); err != nil {
+				return err
 			}
 		}
-	}()
-
-	closeFn := func() {
-		close(isClosed)
-		fn()
 	}
-
-	return closeFn, errs
+	return nil
 }
 
 func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
@@ -193,12 +161,8 @@ func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.He
 }
 
 // If we're running a full engine faking, accept any input as valid
-func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
-	results := make(chan error, len(headers))
-	for i := 0; i < len(headers); i++ {
-		results <- nil
-	}
-	return func() {}, results
+func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
+	return nil
 }
 
 func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Block) error {

@@ -85,6 +85,10 @@ type TxDb struct {
 	len     uint64
 }
 
+func WrapIntoTxDB(tx RwTx) *TxDb {
+	return &TxDb{tx: tx, cursors: map[string]Cursor{}}
+}
+
 func (m *TxDb) Close() {
 	panic("don't call me")
 }

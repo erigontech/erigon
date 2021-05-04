@@ -30,7 +30,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {

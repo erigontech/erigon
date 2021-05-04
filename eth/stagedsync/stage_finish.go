@@ -10,12 +10,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier) error {
+func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.Database, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator ) error {
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(db); err != nil {
 		return err
 	}
+	if executionAt <= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
@@ -24,6 +29,10 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 		return err
 	}
 
+	err = MigrateSnapshot(s.BlockNumber+1, tx, db, btClient, snBuilder)
+	if err != nil {
+		return err
+	}
 	return s.DoneAndUpdate(db, executionAt)
 }
 

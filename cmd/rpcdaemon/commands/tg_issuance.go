@@ -74,7 +74,7 @@ func (api *TgImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*t
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	return rawdb.ReadBlockByNumber(tx, blockNum)
 }
 
 // Issuance structure to return information about issuance

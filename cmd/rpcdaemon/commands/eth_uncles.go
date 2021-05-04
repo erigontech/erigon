@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
@@ -25,7 +24,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
-	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +96,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return &n, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +116,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
 	if err != nil {
 		return &n, err
 	}

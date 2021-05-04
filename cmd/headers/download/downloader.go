@@ -38,7 +38,7 @@ import (
 
 // Methods of Core called by sentry
 
-func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
@@ -64,7 +64,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
 	sentries := make([]proto_sentry.SentryClient, len(sentryAddrs))
 	for i, addr := range sentryAddrs {
-		sentry, err := grpcSentryClient(ctx, addr)
+		sentry, err := GrpcSentryClient(ctx, addr)
 		if err != nil {
 			return err
 		}
@@ -206,7 +206,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window)
+	sentries := []proto_sentry.SentryClient{sentry}
+	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -225,7 +226,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return err
 	}
 
-	if err = SetSentryStatus(ctx, sentry, controlServer); err != nil {
+	if err = SetSentryStatus(ctx, sentries, controlServer); err != nil {
 		log.Error("failed to set sentry status", "error", err)
 		return nil
 	}
@@ -271,9 +272,11 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 
 }
 
-func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
-	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
-		return err
+func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
+	for i := range sentries {
+		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -297,6 +300,7 @@ func NewStagedSync(
 			controlServer.hd,
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
 			controlServer.requestWakeUpBodies,
 			batchSize,
 		),
@@ -432,6 +436,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
+		cs.hd.SaveExternalAnnounce(announce.Hash)
 		if cs.hd.HasLink(announce.Hash) {
 			continue
 		}
@@ -502,9 +507,22 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			var canRequestMore bool
 			for _, segment := range segments {
-				cs.hd.ProcessSegment(segment, false /* newBlock */)
+				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */)
+				canRequestMore = canRequestMore || requestMore
 			}
+
+			if canRequestMore {
+				currentTime := uint64(time.Now().Unix())
+				if req := cs.hd.RequestMoreHeaders(currentTime); req != nil {
+					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
+						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
+						log.Debug("Sent request", "height", req.Number)
+					}
+				}
+			}
+
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  req.PeerId,

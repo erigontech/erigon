@@ -30,20 +30,6 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
-func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
-	if err != nil {
-		return nil, err
-	}
-	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
-		return out, err
-	}
-
-	out.Hash = gointerfaces.ConvertHashToH256(signedTx.Hash())
-	return out, nil
-}
-
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
 	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 
@@ -82,38 +68,6 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 
 		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_HEADER,
-			Data: payload,
-		})
-
-		// we only close the wg on error because if we successfully sent an event,
-		// that means that the channel wasn't closed and is ready to
-		// receive more events.
-		// if rpcdaemon disconnects, we will receive an error here
-		// next time we try to send an event
-		if err != nil {
-			log.Info("event subscription channel was closed", "reason", err)
-		}
-		return err
-	})
-
-	s.events.AddPendingTxsSubscription(func(txs []types.Transaction) error {
-		select {
-		case <-subscribeServer.Context().Done():
-			return subscribeServer.Context().Err()
-		default:
-		}
-
-		var buf bytes.Buffer
-		for _, tx := range txs {
-			if err := rlp.Encode(&buf, tx); err != nil {
-				log.Warn("error while marshaling a pending transaction", "err", err)
-				return err
-			}
-		}
-		payload := buf.Bytes()
-
-		err := subscribeServer.Send(&remote.SubscribeReply{
-			Type: remote.Event_PENDING_TRANSACTIONS,
 			Data: payload,
 		})
 

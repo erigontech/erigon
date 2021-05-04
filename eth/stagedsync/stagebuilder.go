@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
@@ -226,7 +225,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, u, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -348,31 +347,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						logPrefix := s.state.LogPrefix()
-						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
-
-						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.DB)
-						if err != nil {
-							return err
-						}
-						err = MigrateSnapshot(s.BlockNumber+1, world.TX, world.DB, world.btClient, world.SnapshotBuilder)
-						if err != nil {
-							return err
-						}
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return FinishForward(s, world.DB, world.notifier, world.TX, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return UnwindFinish(u, s, world.DB)
 					},
 				}
 			},
@@ -447,7 +425,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(false, true, world.TmpDir), world.QuitCh)
+						stateRoot, err := SpawnIntermediateHashesStage(s, u, world.TX, StageTrieCfg(false, true, world.TmpDir), world.QuitCh)
 						if err != nil {
 							return err
 						}
@@ -533,7 +511,6 @@ func WithSnapshotsStages() StageBuilders {
 	}
 	if blockHashesStageIndex < 0 || sendersStageIndex < 0 ||  hashedStateStageIndex < 0{
 		log.Error("Unrecognized block hashes stage", "blockHashesStageIndex < 0", blockHashesStageIndex < 0, "sendersStageIndex < 0", sendersStageIndex < 0, "hashedStateStageIndex < 0", hashedStateStageIndex < 0)
-		panic("sda")
 		return DefaultStages()
 	}
 

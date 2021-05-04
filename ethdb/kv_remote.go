@@ -86,7 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (RwKV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (*RemoteKV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -271,14 +271,6 @@ func (tx *remoteTx) Rollback() {
 		c.Close()
 	}
 	tx.closeGrpcStream()
-}
-
-func (c *remoteCursor) Prefix(v []byte) Cursor {
-	return c
-}
-
-func (c *remoteCursor) Prefetch(v uint) Cursor {
-	return c
 }
 
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {

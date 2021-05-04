@@ -522,7 +522,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
 	for !interrupt {
-		block, _ := rawdb.ReadBlockByNumber(chainDb, blockNum)
+		block, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, blockNum)
 		if block == nil {
 			break
 		}

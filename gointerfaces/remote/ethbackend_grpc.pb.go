@@ -18,7 +18,6 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ETHBACKENDClient interface {
-	Add(ctx context.Context, in *TxRequest, opts ...grpc.CallOption) (*AddReply, error)
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
@@ -57,15 +56,6 @@ type eTHBACKENDClient struct {
 
 func NewETHBACKENDClient(cc grpc.ClientConnInterface) ETHBACKENDClient {
 	return &eTHBACKENDClient{cc}
-}
-
-func (c *eTHBACKENDClient) Add(ctx context.Context, in *TxRequest, opts ...grpc.CallOption) (*AddReply, error) {
-	out := new(AddReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Add", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *eTHBACKENDClient) Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error) {
@@ -185,7 +175,6 @@ func (c *eTHBACKENDClient) Mining(ctx context.Context, in *MiningRequest, opts .
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
 type ETHBACKENDServer interface {
-	Add(context.Context, *TxRequest) (*AddReply, error)
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
@@ -223,9 +212,6 @@ type ETHBACKENDServer interface {
 type UnimplementedETHBACKENDServer struct {
 }
 
-func (UnimplementedETHBACKENDServer) Add(context.Context, *TxRequest) (*AddReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
-}
 func (UnimplementedETHBACKENDServer) Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Etherbase not implemented")
 }
@@ -267,24 +253,6 @@ type UnsafeETHBACKENDServer interface {
 
 func RegisterETHBACKENDServer(s grpc.ServiceRegistrar, srv ETHBACKENDServer) {
 	s.RegisterService(&ETHBACKEND_ServiceDesc, srv)
-}
-
-func _ETHBACKEND_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TxRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).Add(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/Add",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).Add(ctx, req.(*TxRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _ETHBACKEND_Etherbase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -477,10 +445,6 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "remote.ETHBACKEND",
 	HandlerType: (*ETHBACKENDServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "Add",
-			Handler:    _ETHBACKEND_Add_Handler,
-		},
 		{
 			MethodName: "Etherbase",
 			Handler:    _ETHBACKEND_Etherbase_Handler,

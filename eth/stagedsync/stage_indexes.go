@@ -55,7 +55,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, cfg HistoryCfg, 
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
-	if executionAt == s.BlockNumber {
+	if executionAt <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
@@ -102,7 +102,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, cfg HistoryCfg, 
 	if err != nil {
 		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
 	}
-	if executionAt == s.BlockNumber {
+	if executionAt <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
