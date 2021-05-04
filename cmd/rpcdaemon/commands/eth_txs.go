@@ -28,7 +28,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
-	if tx != nil {
+	if txn != nil {
 		return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 	}
 
@@ -62,7 +62,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if txn == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
 	}
-	if tx != nil {
+	if txn != nil {
 		var buf bytes.Buffer
 		err = txn.MarshalBinary(&buf)
 		return buf.Bytes(), err
