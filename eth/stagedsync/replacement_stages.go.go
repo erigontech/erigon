@@ -205,10 +205,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, txLookup, ctx.Done())
+						return SpawnTxLookup(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookup, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, txLookup, ctx.Done())
+						return UnwindTxLookup(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookup, ctx.Done())
 					},
 				}
 			},
@@ -220,10 +220,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return SpawnTxPool(s, world.TX, txPool, ctx.Done())
+						return SpawnTxPool(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txPool, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxPool(u, s, world.TX, txPool, ctx.Done())
+						return UnwindTxPool(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txPool, ctx.Done())
 					},
 				}
 			},

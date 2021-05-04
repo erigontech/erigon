@@ -196,10 +196,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, txLookupCfg, world.QuitCh)
+						return SpawnTxLookup(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookupCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, txLookupCfg, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookupCfg, world.QuitCh)
 					},
 				}
 			},
