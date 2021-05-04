@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -96,7 +97,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
@@ -119,7 +120,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	h.startCallProc(func(cp *callProc) {
 		answers := make([]*jsonrpcMessage, 0, len(msgs))
 		for _, msg := range calls {
-			if answer := h.handleCallMsg(cp, msg); answer != nil {
+			if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
 				answers = append(answers, answer)
 			}
 		}
@@ -134,12 +135,12 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		answer := h.handleCallMsg(cp, msg)
+		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
 			h.conn.writeJSON(cp.ctx, answer)
@@ -290,15 +291,15 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 }
 
 // handleCallMsg executes a call message and returns the answer.
-func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	start := time.Now()
 	switch {
 	case msg.isNotification():
-		h.handleCall(ctx, msg)
+		h.handleCall(ctx, msg, stream)
 		h.log.Debug("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		return nil
 	case msg.isCall():
-		resp := h.handleCall(ctx, msg)
+		resp := h.handleCall(ctx, msg, stream)
 		var ctx []interface{}
 		ctx = append(ctx, "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start))
 		if resp.Error != nil {
@@ -326,9 +327,9 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	if msg.isSubscribe() {
-		return h.handleSubscribe(cp, msg)
+		return h.handleSubscribe(cp, msg, stream)
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
@@ -344,7 +345,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 		return msg.errorResponse(&invalidParamsError{err.Error()})
 	}
 	start := time.Now()
-	answer := h.runMethod(cp.ctx, msg, callb, args)
+	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
 
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
@@ -362,7 +363,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	if !h.allowSubscribe {
 		return msg.errorResponse(ErrNotificationsUnsupported)
 	}
@@ -391,12 +392,12 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage) *jsonrpcMes
 	cp.notifiers = append(cp.notifiers, n)
 	ctx := context.WithValue(cp.ctx, notifierKey{}, n)
 
-	return h.runMethod(ctx, msg, callb, args)
+	return h.runMethod(ctx, msg, callb, args, stream)
 }
 
 // runMethod runs the Go callback for an RPC method.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value) *jsonrpcMessage {
-	result, err := callb.call(ctx, msg.Method, args)
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
+	result, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
 		return msg.errorResponse(err)
 	}

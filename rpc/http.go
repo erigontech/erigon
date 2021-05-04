@@ -29,6 +29,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
 
 const (
@@ -251,7 +253,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.close()
-	s.serveSingleRequest(ctx, codec)
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+	defer stream.Flush()
+	s.serveSingleRequest(ctx, codec, stream)
 }
 
 // validateRequest returns a non-zero response code and error message if the
