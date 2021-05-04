@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1619598881043,
+  "iteration": 1620103980605,
   "links": [],
   "panels": [
     {
@@ -602,6 +602,117 @@
       "timeRegions": [],
       "timeShift": null,
       "title": "DB Size",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:117",
+          "format": "decbytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:118",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "hiddenSeries": false,
+      "id": 169,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "db_gc_leaf{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "leaf: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "db_gc_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "overflow: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "db_gc_pages{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "(Leaf + Overflow) * pageSize / 8: {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "GC",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4346,7 +4457,7 @@
       "type": "row"
     }
   ],
-  "refresh": false,
+  "refresh": "30s",
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4416,8 +4527,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "0.95",
-          "value": "0.95"
+          "text": "0.99",
+          "value": "0.99"
         },
         "description": null,
         "error": null,
@@ -4438,12 +4549,12 @@
             "value": "0.75"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.95",
             "value": "0.95"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "0.99",
             "value": "0.99"
           },
@@ -4466,13 +4577,12 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "tags": [],
+          "selected": false,
           "text": [
-            "turbogeth16c.weblogix.it:6060"
+            "All"
           ],
           "value": [
-            "turbogeth16c.weblogix.it:6060"
+            "$__all"
           ]
         },
         "datasource": "Prometheus",
@@ -4502,7 +4612,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {
@@ -4532,5 +4642,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 85
+  "version": 88
 }
