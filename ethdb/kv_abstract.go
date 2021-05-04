@@ -20,6 +20,13 @@ var (
 	txUnspill = metrics.GetOrRegisterGauge("tx/unspill", metrics.DefaultRegistry) //nolint
 	txDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
 
+	dbCommitPreparation = metrics.GetOrRegisterTimer("db/commit/preparation", metrics.DefaultRegistry) //nolint
+	dbCommitGc          = metrics.GetOrRegisterTimer("db/commit/gc", metrics.DefaultRegistry)          //nolint
+	dbCommitAudit       = metrics.GetOrRegisterTimer("db/commit/audit", metrics.DefaultRegistry)       //nolint
+	dbCommitWrite       = metrics.GetOrRegisterTimer("db/commit/write", metrics.DefaultRegistry)       //nolint
+	dbCommitSync        = metrics.GetOrRegisterTimer("db/commit/sync", metrics.DefaultRegistry)        //nolint
+	dbCommitEnding      = metrics.GetOrRegisterTimer("db/commit/ending", metrics.DefaultRegistry)      //nolint
+
 	dbPgopsNewly   = metrics.GetOrRegisterGauge("db/pgops/newly", metrics.DefaultRegistry)   //nolint
 	dbPgopsCow     = metrics.GetOrRegisterGauge("db/pgops/cow", metrics.DefaultRegistry)     //nolint
 	dbPgopsClone   = metrics.GetOrRegisterGauge("db/pgops/clone", metrics.DefaultRegistry)   //nolint
