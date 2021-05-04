@@ -30,6 +30,7 @@ func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) 
 		sentries: sentries,
 		txPool:   txPool,
 	}
+
 	return cs, nil
 }
 

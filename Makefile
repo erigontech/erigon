@@ -185,7 +185,8 @@ grpc:
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
 		consensus_engine/consensus.proto \
-		testing/testing.proto
+		testing/testing.proto \
+		txpool/txpool.proto
 
 prometheus:
 	docker-compose up prometheus grafana
