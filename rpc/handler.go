@@ -91,7 +91,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
 	}
-	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe))
+	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe")
 	return h
 }
 
