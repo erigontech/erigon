@@ -41,15 +41,15 @@ func getTestDataAtIndex(i, j int, inc uint64) []byte {
 	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
 }
 
-func TestEncodingStorageNewWithRandomIncarnationPlain(t *testing.T) {
+func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
 	doTestEncodingStorageNew(t, getRandomIncarnation, hashValueGenerator)
 }
 
-func TestEncodingStorageNewWithDefaultIncarnationPlain(t *testing.T) {
+func TestEncodingStorageNewWithDefaultIncarnation(t *testing.T) {
 	doTestEncodingStorageNew(t, getDefaultIncarnation, hashValueGenerator)
 }
 
-func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValuePlain(t *testing.T) {
+func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValue(t *testing.T) {
 	doTestEncodingStorageNew(t, getDefaultIncarnation, emptyValueGenerator)
 }
 
@@ -137,7 +137,7 @@ func doTestEncodingStorageNew(
 	})
 }
 
-func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
+func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 	m := Mapper[storageTable]
 
 	ch := m.New()
@@ -196,7 +196,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
 	})
 }
 
-func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 	m := Mapper[storageTable]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -226,7 +226,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 	doTestFind(t, tx, cs.FindWithIncarnation, clear)
 }
 
-func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPlain(t *testing.T) {
+func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t *testing.T) {
 	bkt := storageTable
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
