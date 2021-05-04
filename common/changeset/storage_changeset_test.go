@@ -345,7 +345,7 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 	t.ResetTimer()
 	var ch2 *ChangeSet
 	for i := 0; i < t.N; i++ {
-		err := EncodeStoragePlain(1, ch, func(k, v []byte) error {
+		err := EncodeStorage(1, ch, func(k, v []byte) error {
 			_, _, _ = dec(k, v)
 			return nil
 		})
@@ -373,7 +373,7 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
-		err := EncodeStoragePlain(1, ch, func(k, v []byte) error {
+		err := EncodeStorage(1, ch, func(k, v []byte) error {
 			return nil
 		})
 		if err != nil {
@@ -432,7 +432,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes()), val4))
 
-	assert.NoError(t, EncodeStoragePlain(1, ch, func(k, v []byte) error {
+	assert.NoError(t, EncodeStorage(1, ch, func(k, v []byte) error {
 		return c.Put(k, v)
 	}))
 

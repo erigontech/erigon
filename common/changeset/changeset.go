@@ -215,7 +215,7 @@ var Mapper = map[string]struct {
 		KeySize:  common.AddressLength,
 		Template: "st-ind-",
 		New:      NewStorageChangeSet,
-		Encode:   EncodeStoragePlain,
+		Encode:   EncodeStorage,
 		Decode:   FromDBFormat(common.AddressLength),
 	},
 }

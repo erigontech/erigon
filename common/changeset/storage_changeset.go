@@ -30,7 +30,7 @@ func NewStorageChangeSet() *ChangeSet {
 	}
 }
 
-func EncodeStoragePlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
 	return encodeStorage2(blockN, s, common.AddressLength, f)
 }
 
