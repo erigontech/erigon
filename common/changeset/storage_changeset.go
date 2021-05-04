@@ -21,8 +21,6 @@ var (
 	ErrFindValue = errors.New("find value error")
 )
 
-/* Plain changesets (key is a common.Address) */
-
 func NewStorageChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
