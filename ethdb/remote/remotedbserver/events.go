@@ -13,7 +13,7 @@ type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
 
-// Events manages event subscriptions. Not thread-safe
+// Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
 	headerSubscriptions       map[int]HeaderSubscription
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
