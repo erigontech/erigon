@@ -31,7 +31,19 @@ func NewStorageChangeSet() *ChangeSet {
 }
 
 func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
-	return encodeStorage2(blockN, s, common.AddressLength, f)
+	sort.Sort(s)
+	keyPart := common.AddressLength + common.IncarnationLength
+	for _, cs := range s.Changes {
+		newK := make([]byte, common.BlockNumberLength+keyPart)
+		binary.BigEndian.PutUint64(newK, blockN)
+		copy(newK[8:], cs.Key[:keyPart])
+		newV := make([]byte, 0, common.HashLength+len(cs.Value))
+		newV = append(append(newV, cs.Key[keyPart:]...), cs.Value...)
+		if err := f(newK, newV); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type StorageChangeSet struct{ c ethdb.CursorDupSort }
@@ -106,22 +118,6 @@ func doSearch2(
 	}
 	_, _, v = fromDBFormat(k, v)
 	return v, nil
-}
-
-func encodeStorage2(blockN uint64, s *ChangeSet, keyPrefixLen uint32, f func(k, v []byte) error) error {
-	sort.Sort(s)
-	keyPart := keyPrefixLen + common.IncarnationLength
-	for _, cs := range s.Changes {
-		newK := make([]byte, 8+keyPart)
-		binary.BigEndian.PutUint64(newK, blockN)
-		copy(newK[8:], cs.Key[:keyPart])
-		newV := make([]byte, 0, common.HashLength+len(cs.Value))
-		newV = append(append(newV, cs.Key[keyPart:]...), cs.Value...)
-		if err := f(newK, newV); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp
