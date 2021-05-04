@@ -446,7 +446,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		eth.stagedSync2, err = download.NewStagedSync(
 			eth.downloadV2Ctx,
 			eth.chainKV,
-			sm,
+			eth.config.StorageMode,
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,
