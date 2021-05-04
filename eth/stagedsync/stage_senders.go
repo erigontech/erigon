@@ -274,9 +274,11 @@ func UnwindSendersStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Sender
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
 	}
 	return nil
 }
