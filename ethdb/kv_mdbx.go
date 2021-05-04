@@ -124,14 +124,14 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
-
+	const pageSize = 4 * 1024
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
 			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.MB), 0, 4*1024); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
 				return nil, err
 			}
 		}
@@ -167,11 +167,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	}
 
 	db := &MdbxKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		wg:      &sync.WaitGroup{},
-		buckets: dbutils.BucketsCfg{},
+		opts:     opts,
+		env:      env,
+		log:      logger,
+		wg:       &sync.WaitGroup{},
+		buckets:  dbutils.BucketsCfg{},
+		pageSize: pageSize,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -263,11 +264,12 @@ func (opts MdbxOpts) MustOpen() RwKV {
 }
 
 type MdbxKV struct {
-	opts    MdbxOpts
-	env     *mdbx.Env
-	log     log.Logger
-	buckets dbutils.BucketsCfg
-	wg      *sync.WaitGroup
+	opts     MdbxOpts
+	pageSize uint64
+	env      *mdbx.Env
+	log      log.Logger
+	buckets  dbutils.BucketsCfg
+	wg       *sync.WaitGroup
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -404,12 +406,20 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 func (tx *MdbxTx) CollectMetrics() {
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
-		panic(err)
+		return
 	}
 
 	txDirty.Update(int64(txInfo.SpaceDirty))
 	txSpill.Update(int64(txInfo.Spill))
 	txUnspill.Update(int64(txInfo.Unspill))
+
+	gc, err := tx.BucketStat("gc")
+	if err != nil {
+		return
+	}
+	gcLeafMetric.Update(int64(gc.LeafPages))
+	gcOverflowMetric.Update(int64(gc.OverflowPages))
+	gcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {

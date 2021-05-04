@@ -28,6 +28,10 @@ var (
 	dbPgopsSpill   = metrics.GetOrRegisterGauge("db/pgops/spill", metrics.DefaultRegistry)   //nolint
 	dbPgopsUnspill = metrics.GetOrRegisterGauge("db/pgops/unspill", metrics.DefaultRegistry) //nolint
 	dbPgopsWops    = metrics.GetOrRegisterGauge("db/pgops/wops", metrics.DefaultRegistry)    //nolint
+
+	gcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
+	gcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
+	gcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
 )
 
 type DBVerbosityLvl int8
