@@ -83,7 +83,7 @@ func runTurboGeth(ctx *cli.Context) {
 				// put your custom caching code here
 				return state.NewPlainStateReader(db)
 			},
-			StateWriterBuilder: func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets {
+			StateWriterBuilder: func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) state.WriterWithChangeSets {
 				// put your custom cache update code here
 				return state.NewPlainStateWriter(db, changeSetsDB, blockNumber)
 			},
