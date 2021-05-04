@@ -1,6 +1,9 @@
 package changeset
 
 import (
+	"bytes"
+	"sort"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -19,13 +22,33 @@ func NewAccountChangeSetPlain() *ChangeSet {
 }
 
 func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
-	return encodeAccounts2(blockN, s, f)
+	sort.Sort(s)
+	newK := dbutils.EncodeBlockNumber(blockN)
+	for _, cs := range s.Changes {
+		newV := make([]byte, len(cs.Key)+len(cs.Value))
+		copy(newV, cs.Key)
+		copy(newV[len(cs.Key):], cs.Value)
+		if err := f(newK, newV); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
-	return findInAccountChangeSet(b.c, blockNumber, k, common.AddressLength)
+func (b AccountChangeSetPlain) Find(blockNumber uint64, key []byte) ([]byte, error) {
+	fromDBFormat := FromDBFormat(common.AddressLength)
+	k := dbutils.EncodeBlockNumber(blockNumber)
+	v, err := b.c.SeekBothRange(k, key)
+	if err != nil {
+		return nil, err
+	}
+	_, k, v = fromDBFormat(k, v)
+	if !bytes.HasPrefix(k, key) {
+		return nil, nil
+	}
+	return v, nil
 }
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
