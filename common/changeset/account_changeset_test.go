@@ -11,16 +11,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEncodingAccountPlain(t *testing.T) {
+func TestEncodingAccount(t *testing.T) {
 	bkt := dbutils.PlainAccountChangeSetBucket
 	m := Mapper[bkt]
-	runTestAccountEncoding(t, m.New, m.Encode, m.Decode)
-}
 
-func runTestAccountEncoding(t *testing.T, New func() *ChangeSet, enc Encoder, dec Decoder) {
-	ch := New()
+	ch := m.New()
 	// empty StorageChangeSset first
-	err := enc(1, ch, func(k, v []byte) error {
+	err := m.Encode(1, ch, func(k, v []byte) error {
 		return fmt.Errorf("must never call")
 	})
 	assert.NoError(t, err)
@@ -39,9 +36,9 @@ func runTestAccountEncoding(t *testing.T, New func() *ChangeSet, enc Encoder, de
 		}
 	}
 
-	ch2 := New()
-	err = enc(1, ch, func(k, v []byte) error {
-		_, k, v = dec(k, v)
+	ch2 := m.New()
+	err = m.Encode(1, ch, func(k, v []byte) error {
+		_, k, v = m.Decode(k, v)
 		return ch2.Add(k, v)
 	})
 	if err != nil {
