@@ -1,13 +1,10 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -17,18 +14,16 @@ import (
 var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
 
 type PlainStateWriter struct {
-	db           ethdb.Database
-	changeSetsDB ethdb.Database
-	csw          *ChangeSetWriter
-	blockNumber  uint64
+	db          ethdb.Database
+	csw         *ChangeSetWriter
+	blockNumber uint64
 }
 
-func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) *PlainStateWriter {
+func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
-		db:           db,
-		changeSetsDB: changeSetsDB,
-		csw:          NewChangeSetWriterPlain(changeSetsDB, blockNumber),
-		blockNumber:  blockNumber,
+		db:          db,
+		csw:         NewChangeSetWriterPlain(changeSetsDB, blockNumber),
+		blockNumber: blockNumber,
 	}
 }
 
@@ -92,95 +87,11 @@ func (w *PlainStateWriter) CreateContract(address common.Address) error {
 }
 
 func (w *PlainStateWriter) WriteChangeSets() error {
-	db := w.db
-	if w.changeSetsDB != nil {
-		db = w.changeSetsDB
-	}
-	accountChanges, err := w.csw.GetAccountChanges()
-	if err != nil {
-		return err
-	}
-	var prevK []byte
-	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
-		if bytes.Equal(k, prevK) {
-			if err = db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		} else {
-			if err = db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		}
-		prevK = k
-		return nil
-	}); err != nil {
-		return err
-	}
-	prevK = nil
-
-	storageChanges, err := w.csw.GetStorageChanges()
-	if err != nil {
-		return err
-	}
-	if storageChanges.Len() == 0 {
-		return nil
-	}
-	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
-		if bytes.Equal(k, prevK) {
-			if err = db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		} else {
-			if err = db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		}
-		prevK = k
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	return w.csw.WriteChangeSets()
 }
 
 func (w *PlainStateWriter) WriteHistory() error {
-	db := w.db
-	if w.changeSetsDB != nil {
-		db = w.changeSetsDB
-	}
-	accountChanges, err := w.csw.GetAccountChanges()
-	if err != nil {
-		return err
-	}
-	dbtx, externalTx := db.(ethdb.HasTx)
-	if !externalTx {
-		dbtx1, txErr := db.Begin(context.Background(), ethdb.RW)
-		if txErr != nil {
-			return txErr
-		}
-		defer dbtx1.Rollback()
-		dbtx = dbtx1.(ethdb.HasTx)
-	}
-	tx := dbtx.Tx().(ethdb.RwTx)
-	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, tx)
-	if err != nil {
-		return err
-	}
-
-	storageChanges, err := w.csw.GetStorageChanges()
-	if err != nil {
-		return err
-	}
-	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, tx)
-	if err != nil {
-		return err
-	}
-
-	if !externalTx {
-		tx.Commit()
-	}
-
-	return nil
+	return w.csw.WriteHistory()
 }
 
 func (w *PlainStateWriter) ChangeSetWriter() *ChangeSetWriter {

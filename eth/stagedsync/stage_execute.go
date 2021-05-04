@@ -109,7 +109,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	if params.writerBuilder != nil {
 		stateWriter = params.writerBuilder(batch, tx, blockNum)
 	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+		stateWriter = state.NewPlainStateWriter(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
 	}
 
 	// where the magic happens
