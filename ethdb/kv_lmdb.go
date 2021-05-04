@@ -16,7 +16,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/prometheus/tsdb/fileutil"
 )
@@ -303,7 +302,7 @@ func (db *LmdbKV) Close() {
 		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
-			db.log.Info("database closed (LMDB)", "trace", debug.Callers(7))
+			db.log.Info("database closed (LMDB)")
 		}
 	}
 
