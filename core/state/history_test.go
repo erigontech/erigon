@@ -197,7 +197,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal("incorrect changeset")
 	}
 
-	cs := changeset.NewStorageChangeSetPlain()
+	cs := changeset.NewStorageChangeSet()
 	err = changeset.Walk(tx, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err2 := cs.Add(k, v); err2 != nil {
 			return false, err2
@@ -212,7 +212,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Errorf("Length does not match, got %d, expected %d", cs.Len(), numOfAccounts*numOfStateKeys)
 	}
 
-	expectedChangeSet = changeset.NewStorageChangeSetPlain()
+	expectedChangeSet = changeset.NewStorageChangeSet()
 	for i, addr := range addrs {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}

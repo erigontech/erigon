@@ -23,7 +23,7 @@ var (
 
 /* Plain changesets (key is a common.Address) */
 
-func NewStorageChangeSetPlain() *ChangeSet {
+func NewStorageChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
 		keyLen:  common.AddressLength + common.HashLength + common.IncarnationLength,

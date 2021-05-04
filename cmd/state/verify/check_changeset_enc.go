@@ -47,7 +47,7 @@ func CheckEnc(chaindata string) error {
 				select {
 				case v := <-ch:
 					blockNum, kk, vv := chainDataStorageDecoder(v.k, v.v)
-					cs := changeset.NewStorageChangeSetPlain()
+					cs := changeset.NewStorageChangeSet()
 					_ = cs.Add(v.k, v.v)
 					atomic.AddUint64(&currentSize, uint64(len(v.v)))
 					innerErr := testStorageEncoder(blockNum, cs, func(k, v []byte) error {

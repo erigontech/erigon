@@ -328,7 +328,7 @@ func doTestFind(
 func BenchmarkDecodeNewStorage(t *testing.B) {
 	numOfElements := 10
 	// empty StorageChangeSet first
-	ch := NewStorageChangeSetPlain()
+	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
@@ -359,7 +359,7 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 func BenchmarkEncodeNewStorage(t *testing.B) {
 	numOfElements := 10
 	// empty StorageChangeSet first
-	ch := NewStorageChangeSetPlain()
+	ch := NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
@@ -422,7 +422,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	c, err := tx.RwCursorDupSort(bkt)
 	require.NoError(t, err)
 
-	ch := NewStorageChangeSetPlain()
+	ch := NewStorageChangeSet()
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()), val1))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()), val5))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key6.Bytes()), val6))
