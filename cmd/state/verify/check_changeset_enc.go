@@ -30,7 +30,7 @@ func CheckEnc(chaindata string) error {
 
 	//set test methods
 	chainDataStorageDecoder := changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Decode
-	testStorageEncoder := changeset.EncodeStorage
+	testStorageEncoder := changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Encode
 	testStorageDecoder := changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Decode
 
 	startTime := time.Now()

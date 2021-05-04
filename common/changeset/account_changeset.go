@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"bytes"
+	"encoding/binary"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,16 +34,23 @@ func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) erro
 	return nil
 }
 
+func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+	blockN := binary.BigEndian.Uint64(dbKey)
+	k := dbValue[:common.AddressLength]
+	v := dbValue[common.AddressLength:]
+
+	return blockN, k, v
+}
+
 type AccountChangeSet struct{ c ethdb.CursorDupSort }
 
 func (b AccountChangeSet) Find(blockNumber uint64, key []byte) ([]byte, error) {
-	fromDBFormat := FromDBFormat(common.AddressLength)
 	k := dbutils.EncodeBlockNumber(blockNumber)
 	v, err := b.c.SeekBothRange(k, key)
 	if err != nil {
 		return nil, err
 	}
-	_, k, v = fromDBFormat(k, v)
+	_, k, v = DecodeAccounts(k, v)
 	if !bytes.HasPrefix(k, key) {
 		return nil, nil
 	}

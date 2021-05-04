@@ -340,13 +340,11 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 		}
 	}
 
-	dec := FromDBFormat(common.AddressLength)
-
 	t.ResetTimer()
 	var ch2 *ChangeSet
 	for i := 0; i < t.N; i++ {
 		err := EncodeStorage(1, ch, func(k, v []byte) error {
-			_, _, _ = dec(k, v)
+			_, _, _ = DecodeStorage(k, v)
 			return nil
 		})
 		if err != nil {
