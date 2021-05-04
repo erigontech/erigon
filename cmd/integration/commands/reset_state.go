@@ -151,10 +151,10 @@ func resetExec(tx ethdb.RwTx) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainStateBucket); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainAccountChangeSetBucket); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.AccountChangeSetBucket); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainStorageChangeSetBucket); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.StorageChangeSetBucket); err != nil {
 		return err
 	}
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainContractCodeBucket); err != nil {
