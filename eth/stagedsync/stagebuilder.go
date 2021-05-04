@@ -52,11 +52,11 @@ type StageParameters struct {
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
 	mining                *MiningCfg
-	senders SendersCfg
+	senders               SendersCfg
 
-	snapshotsDir		 string
-	btClient			 *snapshotsync.Client
-	SnapshotBuilder		 *snapshotsync.SnapshotMigrator
+	snapshotsDir    string
+	btClient        *snapshotsync.Client
+	SnapshotBuilder *snapshotsync.SnapshotMigrator
 }
 
 type MiningCfg struct {
@@ -476,46 +476,27 @@ func DefaultUnwindOrder() UnwindOrder {
 }
 
 func WithSnapshotsStages() StageBuilders {
-	defaultStages :=DefaultStages()
-	//final:= defaultStages[len(defaultStages)-1]
-	//defaultStages = defaultStages[:1]
-	//defaultStages = append(defaultStages, StageBuilder{
-	//	ID: stages.CreateHeadersSnapshot,
-	//	Build: func(world StageParameters) *Stage {
-	//		return &Stage{
-	//			ID:          stages.CreateHeadersSnapshot,
-	//			Description: "Create headers snapshot",
-	//			ExecFunc: func(s *StageState, u Unwinder) error {
-	//				return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
-	//			},
-	//			UnwindFunc: func(u *UnwindState, s *StageState) error {
-	//				return u.Done(world.DB)
-	//			},
-	//		}
-	//	},
-	//})
-	//defaultStages = append(defaultStages, final)
-
-	blockHashesStageIndex:=-1
-	sendersStageIndex:=-1
-	hashedStateStageIndex:=-1
-	for i:=range defaultStages {
-		if defaultStages[i].ID==stages.Bodies {
+	defaultStages := DefaultStages()
+	blockHashesStageIndex := -1
+	sendersStageIndex := -1
+	hashedStateStageIndex := -1
+	for i := range defaultStages {
+		if defaultStages[i].ID == stages.Bodies {
 			blockHashesStageIndex = i
 		}
-		if defaultStages[i].ID==stages.Senders {
+		if defaultStages[i].ID == stages.Senders {
 			sendersStageIndex = i
 		}
-		if defaultStages[i].ID==stages.HashState {
+		if defaultStages[i].ID == stages.HashState {
 			hashedStateStageIndex = i
 		}
 	}
-	if blockHashesStageIndex < 0 || sendersStageIndex < 0 ||  hashedStateStageIndex < 0{
+	if blockHashesStageIndex < 0 || sendersStageIndex < 0 || hashedStateStageIndex < 0 {
 		log.Error("Unrecognized block hashes stage", "blockHashesStageIndex < 0", blockHashesStageIndex < 0, "sendersStageIndex < 0", sendersStageIndex < 0, "hashedStateStageIndex < 0", hashedStateStageIndex < 0)
 		return DefaultStages()
 	}
 
-	stagesWithSnapshots:=make(StageBuilders, 0, len(defaultStages)+1)
+	stagesWithSnapshots := make(StageBuilders, 0, len(defaultStages)+1)
 	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[:blockHashesStageIndex]...)
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
 		ID: stages.CreateHeadersSnapshot,
@@ -524,7 +505,7 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateHeadersSnapshot,
 				Description: "Create headers snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir,  world.btClient, world.QuitCh)
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState) error {
 					return u.Done(world.DB)
@@ -540,14 +521,13 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateBodiesSnapshot,
 				Description: "Create bodies snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnBodiesSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+					return SpawnBodiesSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState) error {
 					return u.Done(world.DB)
 				},
 			}
 		},
-
 	})
 	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[sendersStageIndex:hashedStateStageIndex]...)
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
@@ -557,61 +537,29 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateStateSnapshot,
 				Description: "Create state snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnStateSnapshotGenerationStage(s, world.DB,world.snapshotsDir,  world.btClient, world.QuitCh)
+					return SpawnStateSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState) error {
 					return u.Done(world.DB)
 				},
 			}
 		},
-
 	})
 	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[hashedStateStageIndex:]...)
-	fmt.Println("stages")
-	for i:=range stagesWithSnapshots {
-		fmt.Println(stagesWithSnapshots[i].ID)
-	}
-	fmt.Println("==================default=========================")
-	defaultStages2 := DefaultStages()
-	for i:=range defaultStages2 {
-		fmt.Println(defaultStages2[i].ID)
-	}
-
-	fmt.Println("===============unwind=======================")
-	unwindOrder:=UnwindOrderWithSnapshots()
-	for _,i:=range unwindOrder {
-		fmt.Println(i,len(stagesWithSnapshots)-i-2, stagesWithSnapshots[len(stagesWithSnapshots)-i-2].ID)
-	}
-
-	fmt.Println("==================default unwind=========================")
-	unwindOrder=DefaultUnwindOrder()
-	for _,i:=range unwindOrder {
-		fmt.Println(i,len(defaultStages2)-i-2,  defaultStages2[len(defaultStages2)-i-2].ID)
-	}
-	fmt.Println("====================================================")
-
-	panic("fsad")
 	return stagesWithSnapshots
 }
 
 func UnwindOrderWithSnapshots() UnwindOrder {
-	//todo fix unwind order
 	return []int{
-		0, 1, 2, 3,
+		0, 1, 2,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		13,
-		4, 5,
+		15,
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		6, 7,
-		8, 9, 10, 11, 12, 13, 14,
+		3, 4, 6, 5,
+		7, 9, 10, 12, 14,
 	}
 }
-
-
-
-
-
 
 func MiningUnwindOrder() UnwindOrder {
 	return []int{0, 1, 2, 3, 4}

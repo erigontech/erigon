@@ -99,7 +99,6 @@ type Database interface {
 	AppendDup(bucket string, key, value []byte) error
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	ReadSequence(bucket string) (uint64, error)
-
 }
 
 // MinDatabase is a minimalistic version of the Database interface.

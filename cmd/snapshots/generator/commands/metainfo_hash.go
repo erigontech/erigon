@@ -1,13 +1,14 @@
 package commands
 
 import (
-"errors"
+	"errors"
 	"fmt"
+	"time"
+
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"time"
 	"github.com/spf13/cobra"
 )
 
@@ -27,12 +28,13 @@ func PrintMetaInfoHash(path string) error {
 		return err
 	}
 
-	fmt.Println("infohash:",mi.HashInfoBytes().String())
+	fmt.Println("infohash:", mi.HashInfoBytes().String())
 	fmt.Println("infobytes:", common.Bytes2Hex(mi.InfoBytes))
 	fmt.Println("It took", time.Since(t))
 	return nil
 }
-	var snapshotMetainfoCmd = &cobra.Command{
+
+var snapshotMetainfoCmd = &cobra.Command{
 	Use:   "snapshotMetainfo",
 	Short: "Calculate snapshot metainfo",
 	RunE: func(cmd *cobra.Command, args []string) error {

@@ -9,16 +9,15 @@ import (
 	"time"
 )
 
-
 func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *snapshotsync.SnapshotMigrator, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	to, err := stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return fmt.Errorf("%w",  err)
+		return fmt.Errorf("%w", err)
 	}
 
 	currentSnapshotBlock, err := stages.GetStageProgress(db, stages.CreateHeadersSnapshot)
 	if err != nil {
-		return fmt.Errorf("%w",  err)
+		return fmt.Errorf("%w", err)
 	}
 
 	//Problem: we must inject this stage, because it's not possible to do compact mdbx after sync.
@@ -29,7 +28,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 		return nil
 	}
 
-	if to<snapshotsync.EpochSize {
+	if to < snapshotsync.EpochSize {
 		s.Done()
 		return nil
 	}
@@ -37,7 +36,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 		return fmt.Errorf("headers snapshot is higher canonical. snapshot %d headers %d", s.BlockNumber, to)
 	}
 
-	snapshotBlock :=snapshotsync.CalculateEpoch(to, 50)
+	snapshotBlock := snapshotsync.CalculateEpoch(to, 50)
 
 	if s.BlockNumber == snapshotBlock {
 		// we already did snapshot creation for this block
@@ -46,22 +45,21 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 	}
 
 	err = sm.Migrate(db, db, snapshotBlock, torrentClient)
+	if err != nil {
+		return err
+	}
 	for !sm.Finished(snapshotBlock) {
 		select {
 		case <-quit:
 			break
 		default:
 			log.Info("Migrating to new snapshot", "stage", sm.GetStage())
-			err = sm.Migrate(db,db,snapshotBlock, torrentClient)
-			if err!=nil {
+			err = sm.Migrate(db, db, snapshotBlock, torrentClient)
+			if err != nil {
 				return err
 			}
 		}
-		time.Sleep(time.Second*10)
+		time.Sleep(time.Second * 10)
 	}
 	return s.DoneAndUpdate(db, snapshotBlock)
 }
-
-
-
-

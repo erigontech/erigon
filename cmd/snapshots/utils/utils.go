@@ -2,16 +2,19 @@ package utils
 
 import (
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"os"
+
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 const (
 	TypeLMDB = "lmdb"
 	TypeMDBX = "mdbx"
 )
+
 var ErrUnsupported error = errors.New("unsupported KV type")
-func RmTmpFiles(dbType string, snapshotPath string) error  {
+
+func RmTmpFiles(dbType string, snapshotPath string) error {
 	switch dbType {
 	case TypeLMDB:
 		return rmLmdbLock(snapshotPath)
@@ -21,22 +24,21 @@ func RmTmpFiles(dbType string, snapshotPath string) error  {
 		return ErrUnsupported
 	}
 }
-func rmLmdbLock(snapshotPath string) error  {
+func rmLmdbLock(snapshotPath string) error {
 	err := os.Remove(snapshotPath + "/lock.mdb")
 	if err != nil {
 		return err
 	}
 	return os.Remove(snapshotPath + "/LOCK")
 }
-func rmMdbxLock(path string) error  {
+func rmMdbxLock(path string) error {
 	return os.Remove(path + "/mdbx.lck")
 }
 
-
 func OpenSnapshotKV(dbType string, configsFunc ethdb.BucketConfigsFunc, path string) ethdb.RwKV {
-	if dbType==TypeLMDB {
+	if dbType == TypeLMDB {
 		return ethdb.NewLMDB().WithBucketsConfig(configsFunc).Path(path).MustOpen()
-	} else if dbType==TypeMDBX {
+	} else if dbType == TypeMDBX {
 		return ethdb.NewMDBX().WithBucketsConfig(configsFunc).Path(path).MustOpen()
 	}
 	panic(ErrUnsupported.Error())

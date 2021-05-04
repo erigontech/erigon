@@ -187,7 +187,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 		db.buckets[name] = cfg
 	}
 
-	buckets:=bucketSlice(db.buckets)
+	buckets := bucketSlice(db.buckets)
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
 		tx, innerErr := db.BeginRo(context.Background())
@@ -1454,12 +1454,12 @@ func (c *LmdbDupSortCursor) CountDuplicates() (uint64, error) {
 }
 
 func bucketSlice(b dbutils.BucketsCfg) []string {
-	buckets:=make([]string, 0, len(b))
-	for name:=range b {
-		buckets=append(buckets,name)
+	buckets := make([]string, 0, len(b))
+	for name := range b {
+		buckets = append(buckets, name)
 	}
 	sort.Slice(buckets, func(i, j int) bool {
-		return strings.Compare(buckets[i], buckets[j])<0
+		return strings.Compare(buckets[i], buckets[j]) < 0
 	})
 	return buckets
 }

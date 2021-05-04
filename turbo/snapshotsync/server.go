@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/anacrolix/torrent"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -19,19 +20,19 @@ var (
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	db:=ethdb.MustOpen(dir + "/db")
-	peerID,err:=db.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-	if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return nil, fmt.Errorf("get peer id: %w",err)
+	db := ethdb.MustOpen(dir + "/db")
+	peerID, err := db.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, fmt.Errorf("get peer id: %w", err)
 	}
 	downloader, err := New(dir, seeding, string(peerID))
 	if err != nil {
 		return nil, err
 	}
-	if len(peerID)==0 {
+	if len(peerID) == 0 {
 		err = downloader.SavePeerID(db)
-		if err!=nil {
-			return nil, fmt.Errorf("save peer id: %w",err)
+		if err != nil {
+			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
 	return &SNDownloaderServer{
@@ -69,10 +70,10 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRe
 	return &reply, nil
 }
 
-func (S *SNDownloaderServer) Stats(ctx context.Context) (map[string]torrent.TorrentStats) {
-	stats:=map[string]torrent.TorrentStats{}
-	torrents:=S.t.Cli.Torrents()
-	for _,t:=range torrents {
+func (S *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
+	stats := map[string]torrent.TorrentStats{}
+	torrents := S.t.Cli.Torrents()
+	for _, t := range torrents {
 		stats[t.Name()] = t.Stats()
 	}
 	return stats

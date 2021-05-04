@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSnapshot2Get(t *testing.T) {
@@ -974,73 +974,72 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
-	tx,err:=kv.BeginRo(context.Background())
-	if err!=nil {
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	c, err:=tx.Cursor(dbutils.PlainStateBucket)
-	if err!=nil {
+	c, err := tx.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	k,v, err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
 	checkKVErr(t, k, v, err, []byte{1}, []byte{1})
 
-	done:=make(chan struct{})
+	done := make(chan struct{})
 	kv.(*SnapshotKV).UpdateSnapshots([]string{dbutils.PlainStateBucket}, snapshotDB2, done)
 
-	tx2,err:=kv.BeginRo(context.Background())
-	if err!=nil {
+	tx2, err := kv.BeginRo(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	c2,err:=tx2.Cursor(dbutils.PlainStateBucket)
-	if err!=nil {
+	c2, err := tx2.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	k2,v2, err2:=c2.First()
-	if err2!=nil {
+	k2, v2, err2 := c2.First()
+	if err2 != nil {
 		t.Fatal(err2)
 	}
 	checkKVErr(t, k2, v2, err2, []byte{1}, []byte{1})
 
-	i:=2
-	for  {
-		k,v, err=c.Next()
-		if err!=nil {
+	i := 2
+	for {
+		k, v, err = c.Next()
+		if err != nil {
 			t.Fatal(err)
 		}
-		if k==nil {
+		if k == nil {
 			break
 		}
 		checkKVErr(t, k, v, err, []byte{uint8(i)}, []byte{uint8(i)})
 		i++
 	}
 	//data[maxK]+1
-	if i!=6 {
+	if i != 6 {
 		t.Fatal("incorrect last key", i)
 	}
 	tx.Rollback()
 
-
-	i=2
-	for  {
-		k2,v2, err2=c2.Next()
-		if err2!=nil {
+	i = 2
+	for {
+		k2, v2, err2 = c2.Next()
+		if err2 != nil {
 			t.Fatal(err2)
 		}
-		if k2==nil {
+		if k2 == nil {
 			break
 		}
 		checkKVErr(t, k2, v2, err2, []byte{uint8(i)}, []byte{uint8(i)})
 		i++
 	}
 	//data2[maxK]+1
-	if i!=8 {
+	if i != 8 {
 		t.Fatal("incorrect last key", i)
 	}
 
@@ -1080,9 +1079,9 @@ func printBucket(kv RoKV, bucket string) {
 	fmt.Println("Print err", err)
 }
 
-func checkKVErr(t *testing.T,k, v []byte, err error, expectedK, expectedV []byte)  {
+func checkKVErr(t *testing.T, k, v []byte, err error, expectedK, expectedV []byte) {
 	t.Helper()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(k, expectedK) {

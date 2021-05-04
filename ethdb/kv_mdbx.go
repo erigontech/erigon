@@ -178,7 +178,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		db.buckets[name] = cfg
 	}
 
-	buckets:=bucketSlice(db.buckets)
+	buckets := bucketSlice(db.buckets)
 	// Open or create buckets
 	if opts.flags&mdbx.Readonly != 0 {
 		tx, innerErr := db.BeginRo(context.Background())

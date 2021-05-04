@@ -6,9 +6,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/anacrolix/torrent/bencode"
 	"path/filepath"
 	"time"
+
+	"github.com/anacrolix/torrent/bencode"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -30,12 +31,12 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-	torrentConfig.PeerID=peerID
+	torrentConfig.PeerID = peerID
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
-		return nil, fmt.Errorf("fail to start: %w",err)
+		return nil, fmt.Errorf("fail to start: %w", err)
 	}
 
 	return &Client{
@@ -56,10 +57,10 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 }
 
 func (cli *Client) Torrents() []metainfo.Hash {
-	t:=cli.Cli.Torrents()
-	hashes:=make([]metainfo.Hash, 0, len(t))
-	for _,v:=range t {
-		hashes = append(hashes,v.InfoHash())
+	t := cli.Cli.Torrents()
+	hashes := make([]metainfo.Hash, 0, len(t))
+	for _, v := range t {
+		hashes = append(hashes, v.InfoHash())
 	}
 	return hashes
 }
@@ -95,9 +96,8 @@ func (cli *Client) Close() {
 	cli.Cli.Close()
 }
 
-
 func (cli *Client) PeerID() []byte {
-	peerID:=cli.Cli.PeerID()
+	peerID := cli.Cli.PeerID()
 	return peerID[:]
 }
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) (*torrent.Torrent, error) {
@@ -221,7 +221,7 @@ func (cli *Client) Download() {
 			t.DownloadAll()
 
 			tt := time.Now()
-			prev:=t.BytesCompleted()
+			prev := t.BytesCompleted()
 		dwn:
 			for {
 				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
@@ -238,7 +238,7 @@ func (cli *Client) Download() {
 						"active", stats.ActivePeers,
 						"total", stats.TotalPeers)
 					prev = t.BytesCompleted()
-					time.Sleep(time.Second*10)
+					time.Sleep(time.Second * 10)
 
 				}
 
@@ -300,8 +300,8 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[Snapsh
 }
 
 func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error) {
-	info,err:=BuildInfoBytesForSnapshot(path, LmdbFilename)
-	if err!=nil {
+	info, err := BuildInfoBytesForSnapshot(path, LmdbFilename)
+	if err != nil {
 		return [20]byte{}, err
 	}
 
@@ -310,19 +310,18 @@ func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error)
 		return [20]byte{}, err
 	}
 
-
 	t, err := cli.AddTorrentSpec(name, metainfo.HashBytes(infoBytes), infoBytes)
-	if err!=nil {
+	if err != nil {
 		return [20]byte{}, err
 	}
 	return t.InfoHash(), nil
 }
 func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t,ok := cli.Cli.Torrent(hash)
+	t, ok := cli.Cli.Torrent(hash)
 	if !ok {
 		return nil
 	}
-	ch:=t.Closed()
+	ch := t.Closed()
 	t.Drop()
 	<-ch
 	return nil
@@ -372,14 +371,14 @@ func ParseInfoHashKey(k []byte) (uint64, string) {
 }
 
 func SnapshotSeeding(chainDB ethdb.Database, cli *Client, name string, snapshotsDir string) error {
-	snapshotBlock,err:=chainDB.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	snapshotBlock, err := chainDB.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 
 	if len(snapshotBlock) == 8 {
-		hash, err:=cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, binary.BigEndian.Uint64(snapshotBlock)))
-		if err!=nil {
+		hash, err := cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, binary.BigEndian.Uint64(snapshotBlock)))
+		if err != nil {
 			return err
 		}
 		log.Info("Start seeding", "snapshot", name, "hash", hash.String())

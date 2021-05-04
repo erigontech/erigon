@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -30,7 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"errors"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
@@ -133,39 +133,38 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-
 	var torrentClient *snapshotsync.Client
-	snapshotsDir:= stack.Config().ResolvePath("snapshots")
-	v,err:=chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-	if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("Get bittorrent peer","err", err)
+	snapshotsDir := stack.Config().ResolvePath("snapshots")
+	v, err := chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("Get bittorrent peer", "err", err)
 	}
 	torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, string(v))
 	if err != nil {
 		return nil, err
 	}
-	if len(v)==0 {
+	if len(v) == 0 {
 		log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
 		err = torrentClient.SavePeerID(chainDb)
-		if err!=nil {
-			log.Error("Bittorrent peerID haven't saved","err", err)
+		if err != nil {
+			log.Error("Bittorrent peerID haven't saved", "err", err)
 		}
 	}
 
 	if config.SnapshotLayout {
 		/*
-		0) Если скачивание начато, то продолжить/начать качать
-		1) Понять, какие сейчас снепшоты есть и рабочие
-		2) Подключиться к ним
-		3) Обернуть в них дб
-		4) Поставить сид
-		 */
+			0) Если скачивание начато, то продолжить/начать качать
+			1) Понять, какие сейчас снепшоты есть и рабочие
+			2) Подключиться к ним
+			3) Обернуть в них дб
+			4) Поставить сид
+		*/
 		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
-		if err!=nil {
+		if err != nil {
 			return nil, err
 		}
-		err= snapshotsync.SnapshotSeeding(chainDb, torrentClient, "headers", snapshotsDir)
-		if err!=nil {
+		err = snapshotsync.SnapshotSeeding(chainDb, torrentClient, "headers", snapshotsDir)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -237,20 +236,20 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
 		fmt.Println("SnapshotLayout", config.SnapshotLayout, stagedSync == nil, config.SnapshotMode)
-		currentSnapshotBlock, currentInfohash,err:=snapshotsync.GetSnapshotInfo(chainDb)
-		if err!=nil {
+		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
+		if err != nil {
 			return nil, err
 		}
-		mg=snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
 		err = mg.RemoveNonCurrentSnapshots(chainDb)
-		if err!=nil {
+		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)
 		}
 	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
 		if config.SnapshotLayout {
-			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: eth.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator:mg})
+			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: eth.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
 		} else {
 			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
 		}

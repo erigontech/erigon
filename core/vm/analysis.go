@@ -16,9 +16,6 @@
 
 package vm
 
-import (
-)
-
 // codeBitmap collects data locations in code.
 func codeBitmap(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code

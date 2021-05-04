@@ -19,7 +19,7 @@ import (
 func Seed(ctx context.Context, datadir string) error {
 	defer func() {
 		//hack origin lib don't have proper close handling
-		time.Sleep(time.Second*5)
+		time.Sleep(time.Second * 5)
 	}()
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)

@@ -138,17 +138,17 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	grpcServer := grpc.NewServer(opts...)
 	bittorrentServer, err := snapshotsync.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
-		return fmt.Errorf("new server: %w",err)
+		return fmt.Errorf("new server: %w", err)
 	}
 	log.Info("Load")
 	err = bittorrentServer.Load()
 	if err != nil {
-		return fmt.Errorf("load: %w",err)
+		return fmt.Errorf("load: %w", err)
 	}
 
 	mainNetPreDownload, err := cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
 	if err != nil {
-		return fmt.Errorf("get bool: %w",err)
+		return fmt.Errorf("get bool: %w", err)
 	}
 	if mainNetPreDownload {
 		log.Info("Predownload mainnet snapshots")
@@ -164,17 +164,17 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	}
 	go func() {
 		for {
-			snapshots,err:=bittorrentServer.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{
+			snapshots, err := bittorrentServer.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
 			})
-			if err!=nil {
+			if err != nil {
 				log.Error("get snapshots", "err", err)
 				time.Sleep(time.Minute)
 				continue
 			}
-			stats:=bittorrentServer.Stats(context.Background())
-			for _,v:=range snapshots.Info {
-				log.Info("Snapshot "+ v.Type.String(), "%", v.Readiness, "peers", stats[v.Type.String()].ConnectedSeeders)
+			stats := bittorrentServer.Stats(context.Background())
+			for _, v := range snapshots.Info {
+				log.Info("Snapshot "+v.Type.String(), "%", v.Readiness, "peers", stats[v.Type.String()].ConnectedSeeders)
 			}
 			time.Sleep(time.Minute)
 		}

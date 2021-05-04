@@ -13,14 +13,13 @@ import (
 )
 
 var (
-	_ RwKV             = &SnapshotKV{}
-	_ RoKV             = &SnapshotKV{}
+	_ RwKV           = &SnapshotKV{}
+	_ RoKV           = &SnapshotKV{}
 	_ Tx             = &snTX{}
 	_ BucketMigrator = &snTX{}
 	_ RwCursor       = &snCursor{}
 	_ Cursor         = &snCursor{}
 )
-
 
 type SnapshotUpdater interface {
 	UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{})
@@ -69,7 +68,7 @@ func (opts snapshotOpts) Open() RwKV {
 
 type SnapshotKV struct {
 	db        RwKV
-	mtx		  sync.RWMutex
+	mtx       sync.RWMutex
 	snapshots map[string]snapshotData
 }
 
@@ -103,32 +102,31 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-
 func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{}) {
-	sd:=snapshotData{
-		buckets: buckets,
+	sd := snapshotData{
+		buckets:  buckets,
 		snapshot: snapshotKV,
 	}
 
-	toClose:=[]RoKV{}
+	toClose := []RoKV{}
 	var (
 		snData snapshotData
-		ok bool
+		ok     bool
 	)
 
-	for _,bucket:=range buckets {
-		snData,ok = s.snapshots[bucket]
+	for _, bucket := range buckets {
+		snData, ok = s.snapshots[bucket]
 		if ok {
 			toClose = append(toClose, snData.snapshot)
 		}
 		s.snapshots[bucket] = sd
 	}
 	go func() {
-		wg:=sync.WaitGroup{}
+		wg := sync.WaitGroup{}
 		wg.Add(len(toClose))
 
-		for i:=range toClose {
-			i:=i
+		for i := range toClose {
+			i := i
 			go func() {
 				defer wg.Done()
 				toClose[i].Close()
@@ -161,12 +159,12 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (Tx, error) {
 		snTX:      map[string]Tx{},
 	}, nil
 }
-func(s *SnapshotKV) copySnapshots() map[string]snapshotData  {
+func (s *SnapshotKV) copySnapshots() map[string]snapshotData {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
-	mp:=make(map[string]snapshotData, len(s.snapshots))
-	for i:=range s.snapshots {
-		mp[i]=s.snapshots[i]
+	mp := make(map[string]snapshotData, len(s.snapshots))
+	for i := range s.snapshots {
+		mp[i] = s.snapshots[i]
 	}
 	return mp
 }
@@ -191,11 +189,6 @@ var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
 
 type snTX struct {
 	dbTX      Tx
-	snapshots map[string]snapshotData
-	snTX      map[string]Tx
-}
-type rwSnTX struct {
-	dbTX      RwTx
 	snapshots map[string]snapshotData
 	snTX      map[string]Tx
 }
@@ -272,14 +265,6 @@ func (s *snTX) Cursor(bucket string) (Cursor, error) {
 		dbCursor: dbCursor,
 		snCursor: snCursor2,
 	}, nil
-}
-
-func (s *rwSnTX) RwCursor(bucket string) (RwCursor, error) {
-	c, err := s.RwCursor(bucket)
-	if err != nil {
-		return nil, err
-	}
-	return c.(RwCursor), nil
 }
 
 func (s *snTX) CursorDupSort(bucket string) (CursorDupSort, error) {
@@ -449,7 +434,6 @@ func (s *snTX) DropBuckets(buckets ...string) error {
 	return s.dbTX.(BucketsMigrator).DropBuckets(buckets...)
 }
 
-
 var DeletedValue = []byte{0}
 
 type snCursor struct {
@@ -458,7 +442,6 @@ type snCursor struct {
 
 	currentKey []byte
 }
-
 
 func (s *snCursor) First() ([]byte, []byte, error) {
 	var err error

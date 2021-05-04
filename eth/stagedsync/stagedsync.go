@@ -37,8 +37,8 @@ type OptionalParameters struct {
 
 	SilkwormExecutionFunc unsafe.Pointer
 
-	SnapshotDir string
-	TorrnetClient *snapshotsync.Client
+	SnapshotDir      string
+	TorrnetClient    *snapshotsync.Client
 	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
@@ -106,9 +106,9 @@ func (stagedSync *StagedSync) Prepare(
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
 			senders:               senders,
-			snapshotsDir: stagedSync.params.SnapshotDir,
-			btClient: stagedSync.params.TorrnetClient,
-			SnapshotBuilder: stagedSync.params.SnapshotMigrator,
+			snapshotsDir:          stagedSync.params.SnapshotDir,
+			btClient:              stagedSync.params.TorrnetClient,
+			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
 		},
 	)
 	state := NewState(stages)
@@ -129,7 +129,7 @@ func (stagedSync *StagedSync) Prepare(
 }
 
 func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
-	stagedSync.params.TorrnetClient=client
+	stagedSync.params.TorrnetClient = client
 	stagedSync.params.SnapshotDir = snapshotsDir
 	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }

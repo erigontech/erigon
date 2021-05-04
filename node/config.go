@@ -191,7 +191,7 @@ func (c *Config) IPCEndpoint() string {
 }
 
 // NodeDB returns the path to the discovery node database.
-func (c *Config) NodeDB() (string) {
+func (c *Config) NodeDB() string {
 	//todo fix
 	return c.ResolvePath(datadirNodeDatabase)
 }
@@ -308,7 +308,7 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 		return key, nil
 	}
 
-	keyfile:= c.ResolvePath(datadirPrivateKey)
+	keyfile := c.ResolvePath(datadirPrivateKey)
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key, nil
 	}
@@ -331,13 +331,13 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
 func (c *Config) StaticNodes() ([]*enode.Node, error) {
-	dbPath:= c.ResolvePath(datadirStaticNodes)
+	dbPath := c.ResolvePath(datadirStaticNodes)
 	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
 func (c *Config) TrustedNodes() ([]*enode.Node, error) {
-	dbPath:= c.ResolvePath(datadirTrustedNodes)
+	dbPath := c.ResolvePath(datadirTrustedNodes)
 	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath), nil
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.Database, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator ) error {
+func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.Database, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(db); err != nil {
@@ -53,20 +53,19 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 		notifier.OnNewHeader(header)
 	}
 
-
 	return nil
 }
 
 func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
-	if mg==nil {
+	if mg == nil {
 		return nil
 	}
 	headersBlock, err := stages.GetStageProgress(tx, stages.Headers)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
-	snBlock:=snapshotsync.CalculateEpoch(headersBlock, 50)
+	snBlock := snapshotsync.CalculateEpoch(headersBlock, 50)
 
 	return mg.Migrate(db, tx, snBlock, btClient)
 }

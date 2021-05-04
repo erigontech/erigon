@@ -50,8 +50,8 @@ var (
 	MiningFinish      SyncStage = "MiningFinish"
 
 	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
-	CreateBodiesSnapshot SyncStage = "CreateBodiesSnapshot"
-	CreateStateSnapshot SyncStage = "CreateStateSnapshot"
+	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
+	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
 var AllStages = []SyncStage{

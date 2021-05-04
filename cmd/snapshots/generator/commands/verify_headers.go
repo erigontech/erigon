@@ -3,6 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
+	"sync/atomic"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -10,10 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
-	"sync/atomic"
-	"time"
 )
-
 
 func init() {
 	withSnapshotFile(verifyHeadersSnapshotCmd)
@@ -21,6 +21,7 @@ func init() {
 	rootCmd.AddCommand(verifyHeadersSnapshotCmd)
 
 }
+
 //go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state
 var verifyHeadersSnapshotCmd = &cobra.Command{
 	Use:     "verify_headers",
@@ -30,8 +31,9 @@ var verifyHeadersSnapshotCmd = &cobra.Command{
 		return VerifyHeadersSnapshot(cmd.Context(), snapshotFile)
 	},
 }
+
 func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
-	tt:=time.Now()
+	tt := time.Now()
 	log.Info("Start validation")
 	var prevHeader *types.Header
 	var lastHeader uint64
@@ -44,14 +46,14 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 			default:
 				log.Info("Verifying", "t", time.Since(tt), "block", atomic.LoadUint64(&lastHeader))
 			}
-			time.Sleep(time.Second*10)
+			time.Sleep(time.Second * 10)
 		}
 	}()
-	snKV,err := snapshotsync.OpenHeadersSnapshot(snapshotPath)
-	if err!=nil {
+	snKV, err := snapshotsync.OpenHeadersSnapshot(snapshotPath)
+	if err != nil {
 		return err
 	}
-	err =  snKV.View(ctx, func(tx ethdb.Tx) error {
+	err = snKV.View(ctx, func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.HeadersBucket)
 		if err != nil {
 			return err
@@ -82,20 +84,27 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 				}
 			}
 			k, v, innerErr = c.Next()
+			if innerErr != nil {
+				return innerErr
+			}
+
 			prevHeader = header
 
 			atomic.StoreUint64(&lastHeader, header.Number.Uint64())
 		}
+		if innerErr != nil {
+			return innerErr
+		}
 		return nil
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
-	if block!=0 {
-		if lastHeader!=block {
+	if block != 0 {
+		if lastHeader != block {
 			return errors.New("incorrect last block")
 		}
 	}
-	log.Info("Success","t",time.Since(tt))
+	log.Info("Success", "t", time.Since(tt))
 	return nil
 }
