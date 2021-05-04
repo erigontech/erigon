@@ -92,10 +92,10 @@ func doSearch2(
 		return nil, ErrNotFound
 	}
 
-	seek := make([]byte, 8+keyPrefixLen+common.IncarnationLength)
+	seek := make([]byte, common.BlockNumberLength+keyPrefixLen+common.IncarnationLength)
 	binary.BigEndian.PutUint64(seek, blockNumber)
 	copy(seek[8:], addrBytesToFind)
-	binary.BigEndian.PutUint64(seek[8+keyPrefixLen:], incarnation)
+	binary.BigEndian.PutUint64(seek[common.BlockNumberLength+keyPrefixLen:], incarnation)
 	k := seek
 	v, err := c.SeekBothRange(seek, keyBytesToFind)
 	if err != nil {
