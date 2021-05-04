@@ -41,13 +41,11 @@ func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
 }
 
 func (b StorageChangeSet) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
-	keyPrefixLen := common.AddressLength
 	return doSearch2(
 		b.c, blockNumber,
-		keyPrefixLen,
-		k[:keyPrefixLen],
-		k[keyPrefixLen+common.IncarnationLength:keyPrefixLen+common.HashLength+common.IncarnationLength],
-		binary.BigEndian.Uint64(k[keyPrefixLen:]), /* incarnation */
+		k[:common.AddressLength],
+		k[common.AddressLength+common.IncarnationLength:common.AddressLength+common.HashLength+common.IncarnationLength],
+		binary.BigEndian.Uint64(k[common.AddressLength:]), /* incarnation */
 	)
 }
 
@@ -58,7 +56,6 @@ func (b StorageChangeSet) FindWithoutIncarnation(blockNumber uint64, addressToFi
 func findWithoutIncarnationInStorageChangeSet2(c ethdb.CursorDupSort, blockNumber uint64, keyPrefixLen int, addrBytesToFind []byte, keyBytesToFind []byte) ([]byte, error) {
 	return doSearch2(
 		c, blockNumber,
-		keyPrefixLen,
 		addrBytesToFind,
 		keyBytesToFind,
 		0, /* incarnation */
@@ -68,11 +65,11 @@ func findWithoutIncarnationInStorageChangeSet2(c ethdb.CursorDupSort, blockNumbe
 func doSearch2(
 	c ethdb.CursorDupSort,
 	blockNumber uint64,
-	keyPrefixLen int,
 	addrBytesToFind []byte,
 	keyBytesToFind []byte,
 	incarnation uint64,
 ) ([]byte, error) {
+	keyPrefixLen := common.AddressLength
 	fromDBFormat := FromDBFormat(keyPrefixLen)
 	if incarnation == 0 {
 		seek := make([]byte, 8+keyPrefixLen)
