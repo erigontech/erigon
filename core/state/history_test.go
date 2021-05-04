@@ -54,7 +54,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err = changeset.Walk(tx, dbutils.PlainAccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, dbutils.AccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -76,7 +76,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	count := 0
-	err = changeset.Walk(tx, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		count++
 		return true, nil
 	})
@@ -166,7 +166,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 
 	changeSetInDB := changeset.NewAccountChangeSet()
-	err = changeset.Walk(tx, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
 		}
@@ -198,7 +198,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 
 	cs := changeset.NewStorageChangeSet()
-	err = changeset.Walk(tx, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err2 := cs.Add(k, v); err2 != nil {
 			return false, err2
 		}

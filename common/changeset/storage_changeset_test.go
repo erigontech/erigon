@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	storageTable       = dbutils.PlainStorageChangeSetBucket
+	storageTable       = dbutils.StorageChangeSetBucket
 	defaultIncarnation = 1
 )
 
@@ -385,7 +385,7 @@ func formatTestName(elements, keys int) string {
 }
 
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
-	bkt := dbutils.PlainStorageChangeSetBucket
+	bkt := dbutils.StorageChangeSetBucket
 	m := Mapper[bkt]
 	db := ethdb.NewMemDatabase()
 	defer db.Close()

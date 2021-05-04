@@ -101,13 +101,13 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	var prevK []byte
-	if err = changeset.Mapper[dbutils.PlainAccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = db.AppendDup(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
+			if err = db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = db.Append(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
+			if err = db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}
@@ -125,13 +125,13 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	if err = changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = db.AppendDup(dbutils.PlainStorageChangeSetBucket, k, v); err != nil {
+			if err = db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = db.Append(dbutils.PlainStorageChangeSetBucket, k, v); err != nil {
+			if err = db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}

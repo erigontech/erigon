@@ -371,10 +371,10 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	}
 
 	if historyEnabled {
-		if err := checkHistory(db, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(db, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
-		if err := checkHistory(db, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(db, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
 	}
@@ -516,7 +516,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 func checkChangeSet(db ethdb.Tx, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(db, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -542,7 +542,7 @@ func checkChangeSet(db ethdb.Tx, blockNum uint64, expectedAccountChanges *change
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {

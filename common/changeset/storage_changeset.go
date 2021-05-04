@@ -140,7 +140,7 @@ func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, tmpdir string, q
 
 	if err := walkAndCollect(
 		changes.Collect,
-		db, dbutils.PlainAccountChangeSetBucket,
+		db, dbutils.AccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
@@ -149,7 +149,7 @@ func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, tmpdir string, q
 
 	if err := walkAndCollect(
 		changes.Collect,
-		db, dbutils.PlainStorageChangeSetBucket,
+		db, dbutils.StorageChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestEncodingAccount(t *testing.T) {
-	bkt := dbutils.PlainAccountChangeSetBucket
+	bkt := dbutils.AccountChangeSetBucket
 	m := Mapper[bkt]
 
 	ch := m.New()

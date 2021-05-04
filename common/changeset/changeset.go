@@ -137,7 +137,7 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 	keyStart := dbutils.EncodeBlockNumber(from)
 
 	{
-		c, err := tx.RwCursorDupSort(dbutils.PlainAccountChangeSetBucket)
+		c, err := tx.RwCursorDupSort(dbutils.AccountChangeSetBucket)
 		if err != nil {
 			return err
 		}
@@ -153,7 +153,7 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 		}
 	}
 	{
-		c, err := tx.RwCursorDupSort(dbutils.PlainStorageChangeSetBucket)
+		c, err := tx.RwCursorDupSort(dbutils.StorageChangeSetBucket)
 		if err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ var Mapper = map[string]struct {
 	Encode        Encoder
 	Decode        Decoder
 }{
-	dbutils.PlainAccountChangeSetBucket: {
+	dbutils.AccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return AccountChangeSet{c: c}
@@ -189,7 +189,7 @@ var Mapper = map[string]struct {
 		Encode:   EncodeAccounts,
 		Decode:   DecodeAccounts,
 	},
-	dbutils.PlainStorageChangeSetBucket: {
+	dbutils.StorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return StorageChangeSet{c: c}
