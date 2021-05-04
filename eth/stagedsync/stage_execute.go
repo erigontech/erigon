@@ -45,6 +45,7 @@ type StateReaderBuilder func(ethdb.Database) state.StateReader
 type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockCfg struct {
+	db                    ethdb.RwKV
 	writeReceipts         bool
 	batchSize             datasize.ByteSize
 	changeSetHook         ChangeSetHook
@@ -58,6 +59,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
+	kv ethdb.RwKV,
 	WriteReceipts bool,
 	BatchSize datasize.ByteSize,
 	ReaderBuilder StateReaderBuilder,
@@ -70,6 +72,7 @@ func StageExecuteBlocksCfg(
 	tmpdir string,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
+		db:                    kv,
 		writeReceipts:         WriteReceipts,
 		batchSize:             BatchSize,
 		changeSetHook:         ChangeSetHook,

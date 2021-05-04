@@ -15,24 +15,22 @@ import (
 )
 
 type TxPoolCfg struct {
+	db   ethdb.RwKV
 	pool *core.TxPool
 }
 
-func StageTxPoolCfg(pool *core.TxPool) TxPoolCfg {
+func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool) TxPoolCfg {
 	return TxPoolCfg{
+		db:   db,
 		pool: pool,
 	}
 }
 
-func SpawnTxPool(s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -146,19 +144,15 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	return nil
 }
 
-func UnwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
 	}
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}

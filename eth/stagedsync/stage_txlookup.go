@@ -17,26 +17,25 @@ import (
 )
 
 type TxLookupCfg struct {
+	db     ethdb.RwKV
 	tmpdir string
 }
 
 func StageTxLookupCfg(
+	db ethdb.RwKV,
 	tmpdir string,
 ) TxLookupCfg {
 	return TxLookupCfg{
+		db:     db,
 		tmpdir: tmpdir,
 	}
 }
 
-func SpawnTxLookup(s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -98,18 +97,14 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}

@@ -28,6 +28,7 @@ import (
 )
 
 type CallTracesCfg struct {
+	db          ethdb.RwKV
 	ToBlock     uint64 // not setting this params means no limit
 	BatchSize   datasize.ByteSize
 	tmpdir      string
@@ -36,6 +37,7 @@ type CallTracesCfg struct {
 }
 
 func StageCallTracesCfg(
+	db ethdb.RwKV,
 	ToBlock uint64,
 	BatchSize datasize.ByteSize,
 	tmpdir string,
@@ -43,6 +45,7 @@ func StageCallTracesCfg(
 	engine consensus.Engine,
 ) CallTracesCfg {
 	return CallTracesCfg{
+		db:          db,
 		ToBlock:     ToBlock,
 		BatchSize:   BatchSize,
 		tmpdir:      tmpdir,

@@ -21,6 +21,7 @@ import (
 )
 
 type SendersCfg struct {
+	db              ethdb.RwKV
 	batchSize       int
 	blockSize       int
 	bufferSize      int
@@ -30,11 +31,12 @@ type SendersCfg struct {
 	chainConfig *params.ChainConfig
 }
 
-func StageSendersCfg(chainCfg *params.ChainConfig) SendersCfg {
+func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
 	return SendersCfg{
+		db:              db,
 		batchSize:       sendersBatchSize,
 		blockSize:       sendersBlockSize,
 		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
@@ -45,15 +47,11 @@ func StageSendersCfg(chainCfg *params.ChainConfig) SendersCfg {
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, db ethdb.Database, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -260,17 +258,27 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 	}
 }
 
-func UnwindSendersStage(u *UnwindState, s *StageState, db ethdb.Database) error {
-	// Does not require any special processing
-	mutation := db.NewBatch()
-	err := u.Done(mutation)
+func UnwindSendersStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SendersCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	err := u.Done(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
-	err = mutation.Commit()
-	if err != nil {
-		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
 	}
 	return nil
 }

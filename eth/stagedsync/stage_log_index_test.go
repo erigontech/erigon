@@ -51,7 +51,7 @@ func TestLogIndex(t *testing.T) {
 
 	err = rawdb.AppendReceipts(tx, 2, receipts2)
 	require.NoError(err)
-	cfg := StageLogIndexCfg("")
+	cfg := StageLogIndexCfg(db, "")
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Millisecond

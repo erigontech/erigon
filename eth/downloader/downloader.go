@@ -451,7 +451,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		txPool,
 		false,
 		nil,
-		stagedsync.StageSendersCfg(d.chainConfig),
 	)
 	if err != nil {
 		return err

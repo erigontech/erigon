@@ -325,7 +325,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -349,7 +349,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{

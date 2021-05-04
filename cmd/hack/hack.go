@@ -1058,7 +1058,7 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(true, true, ""), expectedRootHash, nil)
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, ""), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return tx.Commit()

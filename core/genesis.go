@@ -365,6 +365,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if dbErr != nil {
 		return nil, nil, dbErr
 	}
+	defer tx.Rollback()
 	block, statedb, err2 := g.WriteGenesisState(tx, history)
 	if err2 != nil {
 		return block, statedb, err2

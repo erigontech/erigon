@@ -62,7 +62,6 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
-	senders SendersCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -100,7 +99,6 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
-			senders:               senders,
 		},
 	)
 	state := NewState(stages)

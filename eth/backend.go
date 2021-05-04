@@ -445,7 +445,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 		eth.stagedSync2, err = download.NewStagedSync(
 			eth.downloadV2Ctx,
-			eth.chainDB,
+			eth.chainKV,
+			eth.config.StorageMode,
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,
@@ -813,7 +814,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		s.txPool,
 		false,
 		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
-		stagedsync.StageSendersCfg(s.chainConfig),
 	)
 	if err != nil {
 		return err
