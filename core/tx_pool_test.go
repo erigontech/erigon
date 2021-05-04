@@ -29,8 +29,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -152,17 +150,14 @@ func deriveSender(tx types.Transaction) (common.Address, error) {
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	db := ethdb.NewMemKV()
+	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
 	var (
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
 	)
-	stateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1)
-	ibs := state.New(state.NewPlainStateReader(tx))
+	stateWriter := state.NewPlainStateWriter(db, nil, 1)
+	ibs := state.New(state.NewPlainStateReader(db))
 
 	// setup pool with 2 transaction in it
 	// Using AddBalance instead of SetBalance to make it dirty
@@ -175,7 +170,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	tx1 := transaction(1, 100000, key)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, ethdb.NewObjectDatabase(db), txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("start tx pool: %v", err)
 	}
