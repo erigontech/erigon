@@ -363,13 +363,14 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err2 != nil {
 		return false, err2
 	}
-
+	syncState.DisableStages(stages.Finish)
 	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, tx, tx); err != nil {
+		if err = syncState.UnwindTo(forkblocknumber, db, tx); err != nil {
 			return false, err
 		}
 	}
-	if err = syncState.Run(tx, tx); err != nil {
+
+	if err = syncState.Run(db, tx); err != nil {
 		return false, err
 	}
 	if !useExternalTx {
