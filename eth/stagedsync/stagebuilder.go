@@ -359,10 +359,18 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookupCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTxLookup(s, tx, txLookupCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), txLookupCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTxLookup(u, s, tx, txLookupCfg, world.QuitCh)
 					},
 				}
 			},
