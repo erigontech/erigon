@@ -34,7 +34,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	if err != nil {
 		return nil, err
 	}
-	if reply.RlpTxs[0] != nil {
+	if len(reply.RlpTxs[0]) > 0 {
 		txn, err = types2.UnmarshalTransactionFromBinary(reply.RlpTxs[0])
 		if err != nil {
 			return nil, err
@@ -67,7 +67,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if err != nil {
 		return nil, err
 	}
-	if reply.RlpTxs[0] != nil {
+	if len(reply.RlpTxs[0]) > 0 {
 		return reply.RlpTxs[0], nil
 	}
 	return nil, nil
