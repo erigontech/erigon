@@ -58,6 +58,9 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 }
 
 func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
+	if mg==nil {
+		return nil
+	}
 	headersBlock, err := stages.GetStageProgress(tx, stages.Headers)
 	if err!=nil {
 		return err

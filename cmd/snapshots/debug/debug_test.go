@@ -34,6 +34,7 @@ func WithBlock(block uint64, key []byte) []byte  {
 	return append(b, key...)
 }
 func TestName(t *testing.T) {
+	t.Skip()
 	chaindataDir:="/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir:="/home/b00ris/event_stream"
 
@@ -102,10 +103,17 @@ func TestName(t *testing.T) {
 	for currentBlock:=blockNum; currentBlock<blockNum+limit; currentBlock++ {
 		//fmt.Println("exsecuted", currentBlock)
 		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(tx, tx, currentBlock))
-		block, err:=rawdb.ReadBlockByNumber(chaindata, currentBlock)
+		rtx, err:=db.RwKV().BeginRo(context.Background())
 		if err!=nil {
+			rtx.Rollback()
 			t.Fatal(err, currentBlock)
 		}
+		block, err:=rawdb.ReadBlockByNumber(rtx, currentBlock)
+		if err!=nil {
+			rtx.Rollback()
+			t.Fatal(err, currentBlock)
+		}
+		rtx.Rollback()
 		_, err = core.ExecuteBlockEphemerally(blockchain.Config(), blockchain.GetVMConfig(), getHeader, ethash.NewFaker(),  block, stateReaderWriter, stateReaderWriter)
 		if err != nil {
 			t.Fatal(err, currentBlock)

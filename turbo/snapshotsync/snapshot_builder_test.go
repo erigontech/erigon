@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"io/ioutil"
 	"math"
 	"os"
@@ -18,13 +19,13 @@ import (
 )
 
 func TestSnapshotMigratorStage(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	dir,err:=ioutil.TempDir(os.TempDir(), "tst")
 	if err!=nil {
 		t.Fatal(err)
 	}
 
 	defer func() {
-
 		if err!=nil {
 			t.Log(err, dir)
 		}
@@ -266,7 +267,7 @@ func GenerateHeaderData(db ethdb.Database, from, to int) error  {
 		return errors.New("greater than uint8")
 	}
 	for i:=from; i<=to; i++ {
-		err =tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i)})
+		err =tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i),uint8(i),uint8(i)})
 		if err!=nil {
 			return err
 		}

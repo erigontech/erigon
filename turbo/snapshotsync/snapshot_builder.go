@@ -79,16 +79,16 @@ func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.Database, toBlock 
 
 	sntx,err:=snKV.BeginRw(context.Background())
 	if err!=nil {
-		return err
+		return fmt.Errorf("begin err: %w", err)
 	}
 	defer sntx.Rollback()
 	err = GenerateHeadersSnapshot(ctx, chainDB, sntx, toBlock)
 	if err!=nil {
-		return err
+		return fmt.Errorf("generate err: %w", err)
 	}
 	err=sntx.Commit()
 	if err!=nil {
-		return err
+		return fmt.Errorf("commit err: %w", err)
 	}
 	snKV.Close()
 
@@ -120,8 +120,8 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Database, sntx ethdb.
 			return err
 		}
 		header = rawdb.ReadHeaderRLP(db, hash, i)
-		if len(header) == 0 {
-			return fmt.Errorf("header %d is empty", i)
+		if len(header) < 2 {
+			return fmt.Errorf("header %d is empty, %v", i, header)
 		}
 
 		err = headerCursor.Append(dbutils.HeaderKey(i, hash), header)
@@ -238,7 +238,9 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBloc
 				sm.mtx.Lock()
 				//we need to put all errors to err var just to handle error case and return to start
 				if err!=nil {
+					log.Warn("Rollback to stage start")
 					atomic.StoreUint64(&sm.Stage, StageStart)
+					atomic.StoreUint64(&sm.HeadersNewSnapshot, atomic.LoadUint64(&sm.HeadersCurrentSnapshot))
 				}
 				sm.cancel = nil
 				sm.mtx.Unlock()

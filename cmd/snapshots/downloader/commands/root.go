@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 	"google.golang.org/grpc"
@@ -137,7 +136,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	bittorrentServer, err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	bittorrentServer, err := snapshotsync.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
 		return fmt.Errorf("new server: %w",err)
 	}
@@ -156,7 +155,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		go func() {
 			_, err := bittorrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
-				Type:      bittorrent.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
+				Type:      snapshotsync.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
 			})
 			if err != nil {
 				log.Error("Predownload failed", "err", err, "networkID", params.MainnetChainConfig.ChainID.Uint64())

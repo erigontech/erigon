@@ -33,6 +33,15 @@ var (
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
+func GetAvailableSnapshotTypes(chainID uint64) []SnapshotType  {
+	v:=TorrentHashes[chainID]
+	res:=make([]SnapshotType, 0, len(v))
+	for i:=range v {
+		res=append(res, i)
+	}
+	return res
+}
+
 var Trackers = [][]string{{
 	"http://35.189.110.210:80/announce",
 },{
