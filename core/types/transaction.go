@@ -189,6 +189,37 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	}
 }
 
+func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
+	var err error
+	var buf bytes.Buffer
+	result := make([][]byte, len(txs))
+	for i := range txs {
+		if txs[i] == nil {
+			result[i] = nil
+			continue
+		}
+		buf.Reset()
+		err = txs[i].MarshalBinary(&buf)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = common.CopyBytes(buf.Bytes())
+	}
+	return result, nil
+}
+
+func UnmarshalTransactionsFromBinary(txs [][]byte) ([]Transaction, error) {
+	result := make([]Transaction, len(txs))
+	var err error
+	for i := range txs {
+		result[i], err = UnmarshalTransactionFromBinary(txs[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
 	if isProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
