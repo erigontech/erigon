@@ -69,8 +69,8 @@ func (s *PersistentUnwindStack) Empty() bool {
 	return len(s.unwindStack) == 0
 }
 
-func (s *PersistentUnwindStack) Add(u UnwindState, r ethdb.KVGetter, w ethdb.Putter) error {
-	currentPoint, err := stages.GetStageUnwind(r, u.Stage)
+func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.KVGetter, w ethdb.Putter) error {
+	currentPoint, err := stages.GetStageUnwind(db, u.Stage)
 	if err != nil {
 		return err
 	}

@@ -43,7 +43,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return s.DoneAndUpdate(world.TX, blockNum)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.DB)
+						return u.Done(world.TX)
 					},
 				}
 			},
@@ -267,10 +267,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return FinishForward(s, world.DB, world.notifier)
+						return FinishForward(s, world.TX, world.notifier)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindFinish(u, s, world.DB)
+						return UnwindFinish(u, s, world.TX)
 					},
 				}
 			},
@@ -364,7 +364,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	}
 	syncState.DisableStages(stages.Finish)
 	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, db, tx); err != nil {
+		if err = syncState.UnwindTo(forkblocknumber, tx, tx); err != nil {
 			return false, err
 		}
 	}
