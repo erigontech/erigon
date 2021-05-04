@@ -29,7 +29,8 @@ import (
 const MaxTxTTL = 30 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
-var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
+// 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
+var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
