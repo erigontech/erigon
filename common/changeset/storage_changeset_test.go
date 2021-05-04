@@ -206,7 +206,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
 
 	c, err := tx.CursorDupSort(storageTable)
 	require.NoError(t, err)
-	cs := m.WalkerAdapter(c).(StorageChangeSetPlain)
+	cs := m.WalkerAdapter(c).(StorageChangeSet)
 
 	clear := func() {
 		c, err := tx.RwCursor(storageTable)
@@ -237,7 +237,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPla
 
 	c, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
-	cs := m.WalkerAdapter(c).(StorageChangeSetPlain)
+	cs := m.WalkerAdapter(c).(StorageChangeSet)
 
 	clear := func() {
 		c, err := tx.RwCursor(bkt)
@@ -397,7 +397,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	c1, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
-	cs := m.WalkerAdapter(c1).(StorageChangeSetPlain)
+	cs := m.WalkerAdapter(c1).(StorageChangeSet)
 
 	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
 	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")

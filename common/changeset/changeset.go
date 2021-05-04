@@ -210,7 +210,7 @@ var Mapper = map[string]struct {
 	dbutils.PlainStorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return StorageChangeSetPlain{c: c}
+			return StorageChangeSet{c: c}
 		},
 		KeySize:  common.AddressLength,
 		Template: "st-ind-",

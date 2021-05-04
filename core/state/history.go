@@ -88,7 +88,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		}
 		defer c.Close()
 		if storage {
-			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSetPlain).FindWithIncarnation(changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSet).FindWithIncarnation(changeSetBlock, key)
 		} else {
 			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).Find(changeSetBlock, key)
 		}

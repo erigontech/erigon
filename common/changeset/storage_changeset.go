@@ -34,13 +34,13 @@ func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 	return encodeStorage2(blockN, s, common.AddressLength, f)
 }
 
-type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
+type StorageChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
+func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
 }
 
-func (b StorageChangeSetPlain) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
+func (b StorageChangeSet) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
 	keyPrefixLen := common.AddressLength
 	return doSearch2(
 		b.c, blockNumber,
@@ -51,7 +51,7 @@ func (b StorageChangeSetPlain) FindWithIncarnation(blockNumber uint64, k []byte)
 	)
 }
 
-func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addressToFind []byte, keyToFind []byte) ([]byte, error) {
+func (b StorageChangeSet) FindWithoutIncarnation(blockNumber uint64, addressToFind []byte, keyToFind []byte) ([]byte, error) {
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
 }
 
