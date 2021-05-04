@@ -46,7 +46,7 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
 		storageFactory: changeset.NewStorageChangeSet,
-		accountFactory: changeset.NewAccountChangeSetPlain,
+		accountFactory: changeset.NewAccountChangeSet,
 		accountKeyGen:  plainAccountKeyGen,
 		storageKeyGen:  plainStorageKeyGen,
 	}
@@ -58,7 +58,7 @@ func NewChangeSetWriterPlain(db ethdb.Database, blockNumber uint64) *ChangeSetWr
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
 		storageFactory: changeset.NewStorageChangeSet,
-		accountFactory: changeset.NewAccountChangeSetPlain,
+		accountFactory: changeset.NewAccountChangeSet,
 		accountKeyGen:  plainAccountKeyGen,
 		storageKeyGen:  plainStorageKeyGen,
 		blockNumber:    blockNumber,

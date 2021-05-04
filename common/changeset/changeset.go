@@ -203,8 +203,8 @@ var Mapper = map[string]struct {
 		},
 		KeySize:  common.AddressLength,
 		Template: "acc-ind-",
-		New:      NewAccountChangeSetPlain,
-		Encode:   EncodeAccountsPlain,
+		New:      NewAccountChangeSet,
+		Encode:   EncodeAccounts,
 		Decode:   FromDBFormat(common.AddressLength),
 	},
 	dbutils.PlainStorageChangeSetBucket: {

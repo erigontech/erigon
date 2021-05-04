@@ -12,16 +12,14 @@ import (
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 
-/* Plain changesets (key is a common.Address) */
-
-func NewAccountChangeSetPlain() *ChangeSet {
+func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
 		keyLen:  common.AddressLength,
 	}
 }
 
-func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
 	sort.Sort(s)
 	newK := dbutils.EncodeBlockNumber(blockN)
 	for _, cs := range s.Changes {

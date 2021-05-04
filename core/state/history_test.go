@@ -165,7 +165,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	changeSetInDB := changeset.NewAccountChangeSetPlain()
+	changeSetInDB := changeset.NewAccountChangeSet()
 	err = changeset.Walk(tx, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
@@ -176,7 +176,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedChangeSet := changeset.NewAccountChangeSetPlain()
+	expectedChangeSet := changeset.NewAccountChangeSet()
 	for i := range addrs {
 		// Make ajustments for THIN_HISTORY
 		c := accHistory[i].SelfCopy()
