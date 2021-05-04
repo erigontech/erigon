@@ -211,13 +211,13 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 
-	txs := make([]types.Transaction, len(reply.RplTxs[0]))
+	txs := make([]types.Transaction, len(reply.RplTxs))
 	reader := bytes.NewReader(nil)
 	stream := rlp.NewStream(reader, 0)
 
-	for i := range reply.RplTxs {
-		reader.Reset(reply.RplTxs[i])
-		stream.Reset(reader, uint64(len(reply.RplTxs[i])))
+	for i, rplTx := range reply.RplTxs {
+		reader.Reset(rplTx)
+		stream.Reset(reader, uint64(len(rplTx)))
 		var decodeErr error
 		txs[i], decodeErr = types.DecodeTransaction(stream)
 		if decodeErr != nil {

@@ -90,16 +90,19 @@ func (s *TxPoolServer) OnAdd(req *proto_txpool.OnAddRequest, stream proto_txpool
 
 	var buf bytes.Buffer
 	var rplTxs [][]byte
-	for tx := range txsCh {
-		buf.Reset()
-		if err := rlp.Encode(&buf, tx); err != nil {
-			log.Warn("error while marshaling a pending transaction", "err", err)
+	for txs := range txsCh {
+		rplTxs = rplTxs[:0]
+		for _, tx := range txs.Txs {
+			buf.Reset()
+			if err := rlp.Encode(&buf, tx); err != nil {
+				log.Warn("error while marshaling a pending transaction", "err", err)
+				return err
+			}
+			rplTxs = append(rplTxs, common.CopyBytes(buf.Bytes()))
+		}
+		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: rplTxs}); err != nil {
 			return err
 		}
-		rplTxs = append(rplTxs, common.CopyBytes(buf.Bytes()))
-	}
-	if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: rplTxs}); err != nil {
-		return err
 	}
 	return nil
 }
