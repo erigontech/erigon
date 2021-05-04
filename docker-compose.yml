@@ -22,7 +22,7 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/tg-prometheus:/prometheus
 
   grafana:
-    image: grafana/grafana:7.5.4
+    image: grafana/grafana:7.5.5
     ports:
       - 3000:3000
     volumes:
