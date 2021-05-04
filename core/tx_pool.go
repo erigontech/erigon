@@ -606,7 +606,6 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 func (pool *TxPool) add(tx types.Transaction, local bool) (replaced bool, err error) {
 	// If the transaction is already known, discard it
 	hash := tx.Hash()
-	fmt.Printf("aa: %x\n", hash)
 	if pool.all.Get(hash) != nil {
 		log.Trace("Discarding already known transaction", "hash", hash)
 		knownTxMeter.Mark(1)
