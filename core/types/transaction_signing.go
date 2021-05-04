@@ -41,7 +41,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsAleut(blockNumber):
+	case config.IsAleut(blockNumber) || config.IsBaikal(blockNumber):
 		// All transaction types are still supported
 		signer.protected = true
 		signer.accesslist = true

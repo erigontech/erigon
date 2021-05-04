@@ -558,12 +558,12 @@ func (c *ChainConfig) IsBerlin(num uint64) bool {
 	return isForked(c.BerlinBlock, num)
 }
 
-// IsAleut returns whether num represents a block number after the Aleut fork
+// IsLondon returns whether num represents a block number after the Aleut fork
 func (c *ChainConfig) IsAleut(num uint64) bool {
 	return isForked(c.AleutBlock, num)
 }
 
-// IsBaikal returns whether num represents a block number after the Aleut fork
+// IsBaikal returns whether num represents a block number after the Baikal fork
 func (c *ChainConfig) IsBaikal(num uint64) bool {
 	return isForked(c.AleutBlock, num)
 }

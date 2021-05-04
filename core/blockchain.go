@@ -540,7 +540,7 @@ func ExecuteBlockEphemerally(
 	var receipts types.Receipts
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	if chainConfig.IsAleut(block.NumberU64()) {
+	if chainConfig.IsAleut(block.NumberU64()) || chainConfig.IsBaikal(block.NumberU64()) {
 		gp.AddGas(block.GasLimit() * params.ElasticityMultiplier)
 	} else {
 		gp.AddGas(block.GasLimit())
