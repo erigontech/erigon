@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
@@ -18,7 +19,6 @@ import (
 )
 
 func TestSendRawTransaction(t *testing.T) {
-	t.Skip("Fix in the next PR")
 	db, err := createTestKV()
 	require.NoError(t, err)
 	defer db.Close()
@@ -44,9 +44,8 @@ func TestSendRawTransaction(t *testing.T) {
 	require.NoError(t, err)
 	select {
 	case <-txsCh:
-	default:
-		t.Fatalf("expected notification")
-
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout waiting for  expected notification")
 	}
 }
 
