@@ -53,7 +53,7 @@ func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashe
 
 func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*proto_txpool.AddReply, error) {
 	reply := &proto_txpool.AddReply{Imported: make([]proto_txpool.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
-	txs, err := UnmarshalTxs(in.RlpTxs)
+	txs, err := types.UnmarshalTransactionsFromBinary(in.RlpTxs)
 	if err != nil {
 		return nil, err
 	}
@@ -119,35 +119,4 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 	}
 
 	return reply, nil
-}
-
-func MarshalTxs(txs types.Transactions) ([][]byte, error) {
-	var err error
-	var buf bytes.Buffer
-	result := make([][]byte, len(txs))
-	for i := range txs {
-		if txs[i] == nil {
-			result[i] = nil
-			continue
-		}
-		buf.Reset()
-		err = txs[i].MarshalBinary(&buf)
-		if err != nil {
-			return nil, err
-		}
-		result[i] = common.CopyBytes(buf.Bytes())
-	}
-	return result, nil
-}
-
-func UnmarshalTxs(txs [][]byte) ([]types.Transaction, error) {
-	result := make([]types.Transaction, len(txs))
-	var err error
-	for i := range txs {
-		result[i], err = types.UnmarshalTransactionFromBinary(txs[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-	return result, nil
 }

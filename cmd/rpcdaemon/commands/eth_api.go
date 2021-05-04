@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"sync"
@@ -34,6 +35,9 @@ type EthAPI interface {
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
+	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutil.Bytes, error)
+	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error)
+	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
@@ -229,4 +233,20 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
+}
+
+// newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
+func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
+	return newRPCTransaction(tx, common.Hash{}, 0, 0)
+}
+
+// newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
+func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.Bytes, error) {
+	txs := b.Transactions()
+	if index >= uint64(len(txs)) {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	err := txs[index].MarshalBinary(&buf)
+	return buf.Bytes(), err
 }
