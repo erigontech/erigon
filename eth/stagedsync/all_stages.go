@@ -317,7 +317,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		var err error
 		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
-			return false, nil
+			panic(1)
+			return false, err
 		}
 		defer tx.Rollback()
 	}
