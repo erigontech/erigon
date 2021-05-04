@@ -56,10 +56,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnRecoverSendersStage(sendersCfg, s, world.TX, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(sendersCfg, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, s, world.TX)
+						return UnwindSendersStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), sendersCfg)
 					},
 				}
 			},
@@ -123,10 +123,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, cfg, world.QuitCh)
+						return SpawnAccountHistoryIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
+						return UnwindAccountHistoryIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 				}
 			},
@@ -141,10 +141,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, cfg, world.QuitCh)
+						return SpawnStorageHistoryIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
+						return UnwindStorageHistoryIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 				}
 			},
@@ -159,10 +159,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, cfg, world.QuitCh)
+						return SpawnLogIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, cfg, world.QuitCh)
+						return UnwindLogIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), cfg, world.QuitCh)
 					},
 				}
 			},

@@ -74,10 +74,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, ctx.Done())
+						return SpawnRecoverSendersStage(senders, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), 0, world.TmpDir, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, s, world.TX)
+						return UnwindSendersStage(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), senders)
 					},
 				}
 			},
@@ -137,10 +137,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, history, ctx.Done())
+						return SpawnAccountHistoryIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), history, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, s, world.TX, history, ctx.Done())
+						return UnwindAccountHistoryIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), history, ctx.Done())
 					},
 				}
 			},
@@ -154,10 +154,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, history, ctx.Done())
+						return SpawnStorageHistoryIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), history, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, s, world.TX, history, ctx.Done())
+						return UnwindStorageHistoryIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), history, ctx.Done())
 					},
 				}
 			},
@@ -171,10 +171,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, logIndex, ctx.Done())
+						return SpawnLogIndex(s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), logIndex, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, logIndex, ctx.Done())
+						return UnwindLogIndex(u, s, world.TX.(ethdb.HasTx).Tx().(ethdb.RwTx), logIndex, ctx.Done())
 					},
 				}
 			},
