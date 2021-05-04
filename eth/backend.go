@@ -97,11 +97,13 @@ type Ethereum struct {
 
 	torrentClient *snapshotsync.Client
 
-	lock        sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	events      *remotedbserver.Events
-	chainConfig *params.ChainConfig
-	genesisHash common.Hash
-	quitMining  chan struct{}
+	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	events        *remotedbserver.Events
+	chainConfig   *params.ChainConfig
+	genesisHash   common.Hash
+	quitMining    chan struct{}
+	pendingBlocks chan *types.Block
+	minedBlocks   chan *types.Block
 
 	// downloader v2 fields
 	downloadV2Ctx    context.Context
@@ -413,7 +415,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	if err := backend.StartMining(mining, tmpdir); err != nil {
+	eth.quitMining = make(chan struct{})
+	eth.pendingBlocks = make(chan *types.Block, 1)
+	eth.minedBlocks = make(chan *types.Block, 1)
+
+	if err := backend.StartMining(eth.pendingBlocks, eth.minedBlocks, mining, tmpdir, eth.quitMining); err != nil {
 		return nil, err
 	}
 
@@ -528,14 +534,13 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) error {
+func (s *Ethereum) StartMining(pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	if !s.config.Miner.Enabled {
 		return nil
 	}
 
 	s.lock.Lock()
 	price := s.gasPrice
-	s.quitMining = make(chan struct{})
 	s.lock.Unlock()
 	s.txPool.SetGasPrice(price)
 
@@ -570,41 +575,37 @@ func (s *Ethereum) StartMining(mining *stagedsync.StagedSync, tmpdir string) err
 			return err
 		}
 		defer tx.Rollback()
+		execution, _ := stages.GetStageProgress(tx, stages.Execution)
 		hh := rawdb.ReadCurrentHeader(tx)
+		tx.Rollback()
 		if hh != nil {
-			execution, _ := stages.GetStageProgress(tx, stages.Execution)
 			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
 				return err
 			}
 		}
 	}
-	txsChMining := make(chan core.NewTxsEvent, txChanSize)
-	txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
 
 	s.quitMining = make(chan struct{})
 	go func() {
+		txsChMining := make(chan core.NewTxsEvent, txChanSize)
+		txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
 		defer txsSubMining.Unsubscribe()
 		defer close(txsChMining)
-		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir, s.quitMining)
+		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir, pendingBlocksCh, minedBlocksCh, quitCh)
 	}()
 
 	return nil
 }
 
-func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) {
+func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string, pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, quitCh chan struct{}) {
 	var works bool
 	var hasWork bool
 	errc := make(chan error, 1)
-	resultCh := make(chan *types.Block, 1)
 
 	for {
 		select {
 		case <-newTransactions:
 			hasWork = true
-		case minedBlock := <-resultCh:
-			works = false
-			// TODO: send mined block to sentry
-			_ = minedBlock
 		case err := <-errc:
 			works = false
 			hasWork = false
@@ -619,12 +620,12 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 
 		if !works && hasWork {
 			works = true
-			go func() { errc <- s.miningStep(resultCh, mining, tmpdir, quitCh) }()
+			go func() { errc <- s.miningStep(pendingBlocksCh, minedBlocksCh, mining, tmpdir, quitCh) }()
 		}
 	}
 }
 
-func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
+func (s *Ethereum) miningStep(pendingBlockCh chan *types.Block, minedBlockCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	sealCancel := make(chan struct{})
 	tx, err := s.chainKV.BeginRw(context.Background())
 	if err != nil {
@@ -646,7 +647,7 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		nil,
 		s.txPool,
 		false,
-		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
+		stagedsync.StageMiningCfg(s.config.Miner, true, minedBlockCh, sealCancel),
 	)
 	if err != nil {
 		return err

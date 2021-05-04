@@ -12,7 +12,7 @@ import (
 
 //var prev common.Hash
 
-func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, engine consensus.Engine, chainConfig params.ChainConfig, results chan<- *types.Block, sealCancel <-chan struct{}, quit <-chan struct{}) error {
+func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, engine consensus.Engine, chainConfig params.ChainConfig, pendingBlocksCh chan<- *types.Block, minedBlocksCh chan<- *types.Block, sealCancel <-chan struct{}, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -33,10 +33,12 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 
 	// Tests may set pre-calculated nonce
 	if block.Header().Nonce.Uint64() != 0 {
-		results <- block
+		minedBlocksCh <- block
 		s.Done()
 		return nil
 	}
+
+	pendingBlocksCh <- block
 
 	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
 		"number", block.NumberU64(),
@@ -47,7 +49,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 	)
 
 	chain := ChainReader{Cfg: chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
-	if err := engine.Seal(chain, block, results, sealCancel); err != nil {
+	if err := engine.Seal(chain, block, minedBlocksCh, sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
 
