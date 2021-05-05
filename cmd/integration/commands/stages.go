@@ -231,6 +231,16 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
+var cmdSetStorageMode = &cobra.Command{
+	Use:   "set_storage_mode",
+	Short: "Override storage mode (if you know what you are doing)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+		return overrideStorageMode(db)
+	},
+}
+
 func init() {
 	withDatadir(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
@@ -311,6 +321,10 @@ func init() {
 
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+
+	withDatadir(cmdSetStorageMode)
+	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htr", "Storage mode to override database")
+	rootCmd.AddCommand(cmdSetStorageMode)
 }
 
 func stageBodies(db ethdb.Database, ctx context.Context) error {
@@ -851,4 +865,12 @@ func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.Snap
 		db.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 	}
 	return nil
+}
+
+func overrideStorageMode(db ethdb.Database) error {
+	sm, err := ethdb.StorageModeFromString(storageMode)
+	if err != nil {
+		return err
+	}
+	return ethdb.OverrideStorageMode(db, sm)
 }

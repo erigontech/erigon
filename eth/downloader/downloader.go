@@ -167,7 +167,7 @@ type Downloader struct {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New1(stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(stateDB ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig *vm.Config, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
 	dl := &Downloader{
 		stateDB:       stateDB,
 		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
