@@ -52,12 +52,14 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashAp
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	if metrics.Enabled {
 		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
 		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{

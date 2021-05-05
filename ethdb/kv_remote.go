@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -147,7 +148,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.C
 	kvClient := remote.NewKVClient(conn)
 	// Perform compatibility check
 	go func() {
-		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true), grpc_retry.WithMax(5))
 		if err != nil {
 			log.Error("getting Version info from remove KV", "error", err)
 			cancelFn()
@@ -225,7 +226,7 @@ func (db *RemoteKV) CollectMetrics() {}
 
 func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
-	stream, err := db.remoteKV.Tx(streamCtx)
+	stream, err := db.remoteKV.Tx(streamCtx, grpc_retry.WithMax(5))
 	if err != nil {
 		streamCancelFn()
 		return nil, err

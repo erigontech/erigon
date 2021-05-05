@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/protobuf/ptypes/empty"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -44,9 +45,7 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
 	dialOpts = append(dialOpts, grpc.WithInsecure())
@@ -77,11 +76,10 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
 
-	// TODO: Make a reconnection loop
 	statusMsg := makeStatusData(controlServer)
 
 	for _, sentry := range sentries {
-		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
+		if _, err := sentry.SetStatus(ctx, statusMsg, grpc_retry.WithMax(5)); err != nil {
 			return fmt.Errorf("setting initial status message: %w", err)
 		}
 	}
@@ -180,7 +178,7 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, grpc_retry.WithMax(5))
 	if err2 != nil {
 		log.Error("Receive messages failed", "error", err2)
 		return
@@ -285,7 +283,7 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 
 func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
 	for i := range sentries {
-		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc_retry.WithMax(5)); err != nil {
 			return err
 		}
 	}
