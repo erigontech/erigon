@@ -24,11 +24,13 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 
 	"github.com/urfave/cli"
 )
@@ -104,17 +106,22 @@ func stateTestCmd(ctx *cli.Context) error {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, tds, err := test.Run(context.Background(), db, st, cfg)
+			var root common.Hash
 
-			// print state root for evmlab tracing
-			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Hash().Bytes())
-			}
+			statedb, err := test.Run(context.Background(), db, st, cfg)
 
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
-				/*
+			} else {
+				root, err = trie.CalcRoot("", db)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+				}
+			}
+
+			/*
+				if result.Error != "" {
 					if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
 						tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
 						if err1 != nil {
@@ -124,7 +131,12 @@ func stateTestCmd(ctx *cli.Context) error {
 						tx.Rollback()
 						result.State = &dump
 					}
-				*/
+				}
+			*/
+
+			// print state root for evmlab tracing
+			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root.Bytes())
 			}
 
 			results = append(results, *result)
