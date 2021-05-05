@@ -19,6 +19,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -302,7 +303,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		resp := h.handleCall(ctx, msg, stream)
 		var ctx []interface{}
 		ctx = append(ctx, "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start))
-		if resp.Error != nil {
+		if resp != nil && resp.Error != nil {
 			ctx = append(ctx, "err", resp.Error.Message)
 			if resp.Error.Data != nil {
 				ctx = append(ctx, "errdata", resp.Error.Data)
@@ -351,13 +352,13 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter
 	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
 		rpcRequestGauge.Inc(1)
-		if answer.Error != nil {
+		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc(1)
 		} else {
 			successfulRequestGauge.Inc(1)
 		}
 		rpcServingTimer.UpdateSince(start)
-		newRPCServingTimer(msg.Method, answer.Error == nil).UpdateSince(start)
+		newRPCServingTimer(msg.Method, answer == nil || answer.Error == nil).UpdateSince(start)
 	}
 	return answer
 }
@@ -397,10 +398,44 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
-	result, err := callb.call(ctx, msg.Method, args, stream)
 	if callb.streamable {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("jsonrpc")
+		stream.WriteString("2.0")
+		stream.WriteMore()
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+		stream.WriteObjectField("result")
+		_, err := callb.call(ctx, msg.Method, args, stream)
+		if err != nil {
+			stream.WriteMore()
+			stream.WriteObjectField("error")
+			stream.WriteObjectStart()
+			stream.WriteObjectField("code")
+			ec, ok := err.(Error)
+			if ok {
+				stream.WriteInt(ec.ErrorCode())
+			} else {
+				stream.WriteInt(defaultErrorCode)
+			}
+			de, ok := err.(DataError)
+			if ok {
+				stream.WriteMore()
+				stream.WriteObjectField("data")
+				data, derr := json.Marshal(de.ErrorData())
+				if derr == nil {
+					stream.Write(data)
+				} else {
+					stream.WriteString(fmt.Sprintf("%v", derr))
+				}
+			}
+			stream.WriteObjectEnd()
+		}
+		stream.WriteObjectEnd()
 		return nil
 	} else {
+		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
 			return msg.errorResponse(err)
 		}

@@ -338,7 +338,7 @@ func DefaultStages() StageBuilders {
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
-					Disabled:            !world.storageMode.CallTraces,
+					Disabled:            false,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.QuitCh, callTracesCfg)
