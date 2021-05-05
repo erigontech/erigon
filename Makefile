@@ -134,7 +134,7 @@ mdbx-dbg:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test: mdbx
-	TEST_DB=mdbx $(GOTEST) --timeout 5m -v
+	TEST_DB=mdbx $(GOTEST) --timeout 15m
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)

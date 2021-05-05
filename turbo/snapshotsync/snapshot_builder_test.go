@@ -80,6 +80,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 				err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
 				if err != nil {
 					t.Error(err)
+					tx.Rollback()
 					panic(err)
 				}
 				currentSnapshotBlock = uint64(newHeight)

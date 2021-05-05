@@ -156,7 +156,7 @@ func (sm *SnapshotMigrator) Close() {
 	sm.cancel()
 }
 
-func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots(db ethdb.Database) error {
+func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 	files, err := ioutil.ReadDir(sm.snapshotsDir)
 	if err != nil {
 		return err
@@ -313,12 +313,14 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBloc
 		log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", sm.HeadersNewSnapshot)
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 			wtx = tx.(ethdb.HasTx).Tx().(ethdb.DBTX).DBTX()
+			fmt.Println("Has tx")
 			useExternalTx = true
+		} else if wtx1,ok:=tx.(ethdb.RwTx); ok{
+			fmt.Println("Is tx")
+			wtx=wtx1
 		} else {
-			wtx, err = tx.(ethdb.HasRwKV).RwKV().(ethdb.SnapshotUpdater).WriteDB().BeginRw(context.Background())
-			if err != nil {
-				return err
-			}
+			log.Error("Incorrect db type","type", tx)
+			return nil
 		}
 
 		err = sm.RemoveHeadersData(db, wtx)
