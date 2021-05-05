@@ -398,10 +398,14 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
 	result, err := callb.call(ctx, msg.Method, args, stream)
-	if err != nil {
-		return msg.errorResponse(err)
+	if callb.streamable {
+		return nil
+	} else {
+		if err != nil {
+			return msg.errorResponse(err)
+		}
+		return msg.response(result)
 	}
-	return msg.response(result)
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
