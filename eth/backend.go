@@ -54,7 +54,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/turbo-geth/event"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -110,7 +109,7 @@ type Ethereum struct {
 	downloadV2Cancel context.CancelFunc
 	downloadServer   *download.ControlServerImpl
 	sentryServer     *download.SentryServerImpl
-	txPoolServer     *eth.TxPoolServer
+	txPoolP2PServer  *eth.TxPoolServer
 	sentries         []proto_sentry.SentryClient
 	stagedSync2      *stagedsync.StagedSync
 }
@@ -270,7 +269,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
+
+	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
+	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, ethashApi, gitCommit)
+	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
+
 	if stack.Config().PrivateApiAddr != "" {
+
 		if stack.Config().TLSConnection {
 			// load peer cert/key, ca cert
 			var creds credentials.TransportCredentials
@@ -304,29 +309,23 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				return nil, err
 			}
 			backend.privateAPI, err = remotedbserver.StartGrpc(
-				chainDb.(ethdb.HasRwKV).RwKV(),
-				backend,
-				backend.txPool,
-				ethashApi,
+				kvRPC,
+				ethBackendRPC,
+				txPoolRPC,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
-				&creds,
-				backend.events,
-				gitCommit)
+				&creds)
 			if err != nil {
 				return nil, err
 			}
 		} else {
 			backend.privateAPI, err = remotedbserver.StartGrpc(
-				chainDb.(ethdb.HasRwKV).RwKV(),
-				backend,
-				backend.txPool,
-				ethashApi,
+				kvRPC,
+				ethBackendRPC,
+				txPoolRPC,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
-				nil,
-				backend.events,
-				gitCommit)
+				nil)
 			if err != nil {
 				return nil, err
 			}
@@ -359,17 +358,17 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
 			return nil, err
 		}
-		backend.txPoolServer, err = eth.NewTxPoolServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
+		backend.txPoolP2PServer, err = eth.NewTxPoolServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
 		if err != nil {
 			return nil, err
 		}
 
 		fetchTx := func(peerID string, hashes []common.Hash) error {
-			backend.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+			backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
 			return nil
 		}
 
-		backend.txPoolServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
+		backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		backend.stagedSync2, err = download.NewStagedSync(
@@ -381,7 +380,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			backend.downloadServer,
 			tmpdir,
 			backend.txPool,
-			backend.txPoolServer,
+			backend.txPoolP2PServer,
 		)
 		if err != nil {
 			return nil, err
@@ -415,11 +414,27 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	eth.quitMining = make(chan struct{})
-	eth.pendingBlocks = make(chan *types.Block, 1)
-	eth.minedBlocks = make(chan *types.Block, 1)
+	backend.quitMining = make(chan struct{})
+	backend.pendingBlocks = make(chan *types.Block, 1)
+	backend.minedBlocks = make(chan *types.Block, 1)
+	go func() {
+		for {
+			select {
+			case b := <-backend.minedBlocks:
+				// todo: broadcast
+				// todo: send to rpcdaemon
+				txPoolRPC.SendMinedBlock(b)
+				_ = b
+			case b := <-backend.pendingBlocks:
+				txPoolRPC.SendPendingBlock(b)
+				_ = b
+			case <-backend.quitMining:
+				return
+			}
+		}
+	}()
 
-	if err := backend.StartMining(eth.pendingBlocks, eth.minedBlocks, mining, tmpdir, eth.quitMining); err != nil {
+	if err := backend.StartMining(backend.chainKV, backend.pendingBlocks, backend.minedBlocks, mining, backend.config.Miner, backend.gasPrice, tmpdir, backend.quitMining); err != nil {
 		return nil, err
 	}
 
@@ -534,15 +549,12 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
-	if !s.config.Miner.Enabled {
+func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, tmpdir string, quitCh chan struct{}) error {
+	if !cfg.Enabled {
 		return nil
 	}
 
-	s.lock.Lock()
-	price := s.gasPrice
-	s.lock.Unlock()
-	s.txPool.SetGasPrice(price)
+	s.txPool.SetGasPrice(gasPrice)
 
 	// Configure the local mining address
 	eb, err := s.Etherbase()
@@ -551,13 +563,13 @@ func (s *Ethereum) StartMining(pendingBlocksCh chan *types.Block, minedBlocksCh 
 		return fmt.Errorf("etherbase missing: %v", err)
 	}
 	if clique, ok := s.engine.(*clique.Clique); ok {
-		if s.config.Miner.SigKey == nil {
+		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %v", err)
 		}
 
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(message, s.config.Miner.SigKey)
+			return crypto.Sign(message, cfg.SigKey)
 		})
 	}
 
@@ -570,7 +582,7 @@ func (s *Ethereum) StartMining(pendingBlocksCh chan *types.Block, minedBlocksCh 
 			atomic.StoreUint32(&s.handler.acceptTxs, 1)
 		}
 
-		tx, err := s.chainKV.BeginRo(context.Background())
+		tx, err := kv.BeginRo(context.Background())
 		if err != nil {
 			return err
 		}
@@ -585,49 +597,45 @@ func (s *Ethereum) StartMining(pendingBlocksCh chan *types.Block, minedBlocksCh 
 		}
 	}
 
-	s.quitMining = make(chan struct{})
 	go func() {
-		txsChMining := make(chan core.NewTxsEvent, txChanSize)
-		txsSubMining := s.txPool.SubscribeNewTxsEvent(txsChMining)
-		defer txsSubMining.Unsubscribe()
-		defer close(txsChMining)
-		s.miningLoop(txsChMining, txsSubMining, mining, tmpdir, pendingBlocksCh, minedBlocksCh, quitCh)
+		newTransactions := make(chan core.NewTxsEvent, txChanSize)
+		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
+		defer sub.Unsubscribe()
+		defer close(newTransactions)
+
+		var works bool
+		var hasWork bool
+		errc := make(chan error, 1)
+
+		for {
+			select {
+			case <-newTransactions:
+				hasWork = true
+			case err := <-errc:
+				works = false
+				hasWork = false
+				if err != nil {
+					log.Warn("mining", "err", err)
+				}
+			case <-sub.Err():
+				return
+			case <-quitCh:
+				return
+			}
+
+			if !works && hasWork {
+				works = true
+				go func() { errc <- s.miningStep(kv, pendingBlocksCh, minedBlocksCh, mining, cfg, tmpdir, quitCh) }()
+			}
+		}
 	}()
 
 	return nil
 }
 
-func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.Subscription, mining *stagedsync.StagedSync, tmpdir string, pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, quitCh chan struct{}) {
-	var works bool
-	var hasWork bool
-	errc := make(chan error, 1)
-
-	for {
-		select {
-		case <-newTransactions:
-			hasWork = true
-		case err := <-errc:
-			works = false
-			hasWork = false
-			if err != nil {
-				log.Warn("mining", "err", err)
-			}
-		case <-sub.Err():
-			return
-		case <-quitCh:
-			return
-		}
-
-		if !works && hasWork {
-			works = true
-			go func() { errc <- s.miningStep(pendingBlocksCh, minedBlocksCh, mining, tmpdir, quitCh) }()
-		}
-	}
-}
-
-func (s *Ethereum) miningStep(pendingBlockCh chan *types.Block, minedBlockCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
+func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, minedBlockCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, tmpdir string, quitCh chan struct{}) error {
 	sealCancel := make(chan struct{})
-	tx, err := s.chainKV.BeginRw(context.Background())
+	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -647,7 +655,7 @@ func (s *Ethereum) miningStep(pendingBlockCh chan *types.Block, minedBlockCh cha
 		nil,
 		s.txPool,
 		false,
-		stagedsync.StageMiningCfg(s.config.Miner, true, minedBlockCh, sealCancel),
+		stagedsync.StageMiningCfg(cfg, true, pendingBlockCh, minedBlockCh, sealCancel),
 	)
 	if err != nil {
 		return err
@@ -721,7 +729,7 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	if s.config.EnableDownloadV2 {
 		s.downloadV2Cancel()
-		s.txPoolServer.TxFetcher.Stop()
+		s.txPoolP2PServer.TxFetcher.Stop()
 		s.txPool.Stop()
 	} else {
 		s.handler.Stop()

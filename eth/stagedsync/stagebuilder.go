@@ -69,15 +69,16 @@ type MiningCfg struct {
 	// non-stop and no real transaction will be included.
 	noempty bool
 
-	resultCh   chan<- *types.Block
-	sealCancel <-chan struct{}
+	pendingBlocks chan<- *types.Block
+	minedBlocks   chan<- *types.Block
+	sealCancel    <-chan struct{}
 
 	// runtime dat
 	Block *miningBlock
 }
 
-func StageMiningCfg(cfg params.MiningConfig, noempty bool, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
-	return &MiningCfg{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, resultCh: resultCh, sealCancel: sealCancel}
+func StageMiningCfg(cfg params.MiningConfig, noempty bool, pendingBlocks chan<- *types.Block, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
+	return &MiningCfg{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, pendingBlocks: pendingBlocks, minedBlocks: resultCh, sealCancel: sealCancel}
 
 }
 
@@ -460,7 +461,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnMiningFinishStage(s, tx, world.mining.Block, world.Engine, *world.ChainConfig, world.mining.resultCh, world.mining.sealCancel, world.QuitCh)
+						return SpawnMiningFinishStage(s, tx, world.mining.Block, world.Engine, *world.ChainConfig, world.mining.pendingBlocks, world.mining.minedBlocks, world.mining.sealCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}

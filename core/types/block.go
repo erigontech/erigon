@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"math/bits"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1200,3 +1201,41 @@ func (b *Block) Hash() common.Hash {
 }
 
 type Blocks []*Block
+
+type BlocksPubSub struct {
+	sync.Mutex
+	id    uint
+	chans map[uint]chan *Block
+}
+
+func (s *BlocksPubSub) Pub(block *Block) {
+	s.Lock()
+	defer s.Unlock()
+	for _, ch := range s.chans {
+		ch <- block
+	}
+}
+
+func (s *BlocksPubSub) unsubscribe(id uint) {
+	s.Lock()
+	defer s.Unlock()
+	ch, ok := s.chans[id]
+	if !ok { // double-unsubscribe support
+		return
+	}
+	close(ch)
+	delete(s.chans, id)
+}
+
+func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
+	s.Lock()
+	defer s.Unlock()
+	if s.chans == nil {
+		s.chans = make(map[uint]chan *Block)
+	}
+	s.id++
+	id := s.id
+	ch = make(chan *Block, 1)
+	s.chans[id] = ch
+	return ch, func() { s.unsubscribe(id) }
+}

@@ -22,13 +22,16 @@ type txPool interface {
 
 type TxPoolServer struct {
 	proto_txpool.UnimplementedTxpoolServer
-	ctx    context.Context
-	txPool txPool
+	ctx                 context.Context
+	txPool              txPool
+	pendingBlocksPubSub types.BlocksPubSub
+	minedBlocksPubSub   types.BlocksPubSub
 }
 
 func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
+
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
 	return nil, fmt.Errorf("unimplemented")
 	/*
@@ -125,25 +128,21 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 	return reply, nil
 }
 
+func (s *TxPoolServer) SendMinedBlock(block *types.Block)   { s.minedBlocksPubSub.Pub(block) }
+func (s *TxPoolServer) SendPendingBlock(block *types.Block) { s.pendingBlocksPubSub.Pub(block) }
+
 func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Txpool_OnPendingBlockServer) error {
-	txsCh := make(chan core.NewTxsEvent, 1024)
-	defer close(txsCh)
-	sub := s.txPool.SubscribeNewTxsEvent(txsCh)
-	defer sub.Unsubscribe()
+	ch, unsubscribe := s.pendingBlocksPubSub.Sub()
+	defer unsubscribe()
 
 	var buf bytes.Buffer
-	var rplTxs [][]byte
-	for txs := range txsCh {
-		rplTxs = rplTxs[:0]
-		for _, tx := range txs.Txs {
-			buf.Reset()
-			if err := tx.MarshalBinary(&buf); err != nil {
-				log.Warn("error while marshaling a pending transaction", "err", err)
-				return err
-			}
-			rplTxs = append(rplTxs, common.CopyBytes(buf.Bytes()))
+	for b := range ch {
+		buf.Reset()
+		if err := b.EncodeRLP(&buf); err != nil {
+			return err
 		}
-		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: rplTxs}); err != nil {
+
+		if err := reply.Send(&proto_txpool.OnPendingBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}); err != nil {
 			return err
 		}
 	}
@@ -151,24 +150,17 @@ func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 }
 
 func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
-	txsCh := make(chan core.NewTxsEvent, 1024)
-	defer close(txsCh)
-	sub := s.txPool.SubscribeNewTxsEvent(txsCh)
-	defer sub.Unsubscribe()
+	ch, unsubscribe := s.pendingBlocksPubSub.Sub()
+	defer unsubscribe()
 
 	var buf bytes.Buffer
-	var rplTxs [][]byte
-	for txs := range txsCh {
-		rplTxs = rplTxs[:0]
-		for _, tx := range txs.Txs {
-			buf.Reset()
-			if err := tx.MarshalBinary(&buf); err != nil {
-				log.Warn("error while marshaling a pending transaction", "err", err)
-				return err
-			}
-			rplTxs = append(rplTxs, common.CopyBytes(buf.Bytes()))
+	for b := range ch {
+		buf.Reset()
+		if err := b.EncodeRLP(&buf); err != nil {
+			return err
 		}
-		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: rplTxs}); err != nil {
+
+		if err := reply.Send(&proto_txpool.OnMinedBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}); err != nil {
 			return err
 		}
 	}
