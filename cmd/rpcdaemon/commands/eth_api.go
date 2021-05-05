@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/holiman/uint256"
 	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -192,7 +191,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
 	// because the return value of ChainId is zero for those transactions.
-	var chainId *uint256.Int
+	var chainId *big.Int
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
@@ -204,20 +203,22 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-		chainId = types.DeriveChainId(&t.V)
+		chainId = types.DeriveChainId(&t.V).ToBig()
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 	case *types.AccessListTx:
-		result.ChainID = (*hexutil.Big)(t.ChainID.ToBig())
+		chainId = t.ChainID.ToBig()
+		result.ChainID = (*hexutil.Big)(chainId)
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
-		result.ChainID = (*hexutil.Big)(t.ChainID.ToBig())
+		chainId = t.ChainID.ToBig()
+		result.ChainID = (*hexutil.Big)(chainId)
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
@@ -225,7 +226,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 	}
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash

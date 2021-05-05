@@ -44,9 +44,7 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
 	dialOpts = append(dialOpts, grpc.WithInsecure())

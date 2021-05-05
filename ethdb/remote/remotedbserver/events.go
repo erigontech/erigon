@@ -56,8 +56,8 @@ func (e *Events) AddPendingTxsSubscription(s PendingTxsSubscription) {
 }
 
 func (e *Events) OnNewHeader(newHeader *types.Header) {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	for i, sub := range e.headerSubscriptions {
 		if err := sub(newHeader); err != nil {
 			delete(e.headerSubscriptions, i)
@@ -66,8 +66,8 @@ func (e *Events) OnNewHeader(newHeader *types.Header) {
 }
 
 func (e *Events) OnNewPendingLogs(logs types.Logs) {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	for i, sub := range e.pendingLogsSubscriptions {
 		if err := sub(logs); err != nil {
 			delete(e.pendingLogsSubscriptions, i)
@@ -76,8 +76,8 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 }
 
 func (e *Events) OnNewPendingBlock(block *types.Block) {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	for i, sub := range e.pendingBlockSubscriptions {
 		if err := sub(block); err != nil {
 			delete(e.pendingBlockSubscriptions, i)
@@ -86,8 +86,8 @@ func (e *Events) OnNewPendingBlock(block *types.Block) {
 }
 
 func (e *Events) OnNewPendingTxs(txs []types.Transaction) {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	for i, sub := range e.pendingTxsSubscriptions {
 		if err := sub(txs); err != nil {
 			delete(e.pendingTxsSubscriptions, i)
