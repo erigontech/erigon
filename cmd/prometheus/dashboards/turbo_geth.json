@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1620103980605,
+  "iteration": 1620213736197,
   "links": [],
   "panels": [
     {
@@ -469,13 +469,13 @@
       "hiddenSeries": false,
       "id": 166,
       "legend": {
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -498,6 +498,27 @@
           "interval": "",
           "legendFormat": "commit: {{instance}}",
           "refId": "A"
+        },
+        {
+          "expr": "db_commit_gc{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "commit_gc: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "db_commit_write{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "commit_write: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "db_commit_sync{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "commit_sync: {{instance}}",
+          "refId": "D"
         }
       ],
       "thresholds": [],
@@ -567,12 +588,12 @@
       "id": 159,
       "legend": {
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -663,13 +684,13 @@
       "hiddenSeries": false,
       "id": 169,
       "legend": {
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -729,7 +750,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:117",
-          "format": "decbytes",
+          "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -774,13 +795,13 @@
       "hiddenSeries": false,
       "id": 168,
       "legend": {
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -876,7 +897,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:117",
-          "format": "decbytes",
+          "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -921,13 +942,13 @@
       "hiddenSeries": false,
       "id": 167,
       "legend": {
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -1411,14 +1432,14 @@
       "id": 85,
       "legend": {
         "alignAsTable": false,
-        "avg": false,
+        "avg": true,
         "current": false,
         "max": false,
         "min": false,
         "rightSide": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -4457,7 +4478,7 @@
       "type": "row"
     }
   ],
-  "refresh": "30s",
+  "refresh": false,
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4466,7 +4487,7 @@
       {
         "allValue": "txpool_invalid",
         "current": {
-          "selected": true,
+          "selected": false,
           "text": [
             "All"
           ],
@@ -4527,8 +4548,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "0.99",
-          "value": "0.99"
+          "text": "0.95",
+          "value": "0.95"
         },
         "description": null,
         "error": null,
@@ -4549,12 +4570,12 @@
             "value": "0.75"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "0.95",
             "value": "0.95"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.99",
             "value": "0.99"
           },
@@ -4579,10 +4600,10 @@
         "current": {
           "selected": false,
           "text": [
-            "All"
+            "turbogeth16c.weblogix.it:6060"
           ],
           "value": [
-            "$__all"
+            "turbogeth16c.weblogix.it:6060"
           ]
         },
         "datasource": "Prometheus",
@@ -4612,8 +4633,8 @@
     ]
   },
   "time": {
-    "from": "now-30m",
-    "to": "now"
+    "from": "2021-05-05T02:36:52.939Z",
+    "to": "2021-05-05T11:17:44.003Z"
   },
   "timepicker": {
     "refresh_intervals": [
@@ -4642,5 +4663,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 88
+  "version": 97
 }
