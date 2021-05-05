@@ -24,7 +24,7 @@ import (
 type Client struct {
 	Cli          *torrent.Client
 	snapshotsDir string
-	trackers [][]string
+	trackers     [][]string
 }
 
 func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
@@ -43,7 +43,7 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	return &Client{
 		Cli:          torrentClient,
 		snapshotsDir: snapshotsDir,
-		trackers: Trackers,
+		trackers:     Trackers,
 	}, nil
 }
 

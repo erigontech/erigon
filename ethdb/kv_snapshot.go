@@ -113,7 +113,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 		snData snapshotData
 		ok     bool
 	)
-
+	s.mtx.Lock()
 	for _, bucket := range buckets {
 		snData, ok = s.snapshots[bucket]
 		if ok {
@@ -121,6 +121,8 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 		}
 		s.snapshots[bucket] = sd
 	}
+	s.mtx.Unlock()
+
 	go func() {
 		wg := sync.WaitGroup{}
 		wg.Add(len(toClose))
@@ -354,7 +356,6 @@ func (s *snTX) getSnapshotTX(bucket string) (Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	s.snTX[bucket] = tx
 	return tx, nil
 }

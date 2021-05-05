@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,11 +44,21 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	btCli.trackers=[][]string{}
+	btCli.trackers = [][]string{}
 
 	db := ethdb.MustOpen(path.Join(dir, "chaindata"))
 	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
-	err = GenerateHeaderData(db, 0, 11)
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	err = GenerateHeaderData(tx, 0, 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = tx.Commit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +66,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		snapshotsDir: snapshotsDir,
 	}
 	currentSnapshotBlock := uint64(10)
+	generateChan := make(chan int)
 	go func() {
 		for {
 			tx, err := db.Begin(context.Background(), ethdb.RW)
@@ -64,15 +74,29 @@ func TestSnapshotMigratorStage(t *testing.T) {
 				tx.Rollback()
 				t.Error(err)
 			}
-			snBlock := atomic.LoadUint64(&currentSnapshotBlock)
-			err = sb.Migrate(db, tx, snBlock, btCli)
+
+			select {
+			case newHeight := <-generateChan:
+				err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
+				if err != nil {
+					t.Error(err)
+					panic(err)
+				}
+				currentSnapshotBlock = uint64(newHeight)
+			default:
+
+			}
+
+			err = sb.Migrate(db, tx, currentSnapshotBlock, btCli)
 			if err != nil {
 				tx.Rollback()
 				t.Error(err)
+				panic(err)
 			}
 			err = tx.Commit()
 			if err != nil {
 				t.Error(err)
+				panic(err)
 			}
 			tx.Rollback()
 			time.Sleep(time.Second)
@@ -156,27 +180,22 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal("incorrect snapshot")
 	}
 
-	err = GenerateHeaderData(db, 12, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tx, err := db.Begin(context.Background(), ethdb.RO)
+	roTX, err := db.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		t.Fatal(err)
 	}
 	//just start snapshot transaction
-	tx.Get(dbutils.HeadersBucket, []byte{})
-	defer tx.Rollback()
+	roTX.Get(dbutils.HeadersBucket, []byte{})
+	defer roTX.Rollback()
 
-	atomic.StoreUint64(&currentSnapshotBlock, 20)
+	generateChan <- 20
 
 	rollbacked := false
 	c := time.After(time.Second * 3)
 	for !(sb.Finished(20)) {
 		select {
 		case <-c:
-			tx.Rollback()
+			roTX.Rollback()
 			rollbacked = true
 		default:
 		}
@@ -256,12 +275,8 @@ func TestSnapshotMigratorStage(t *testing.T) {
 
 }
 
-func GenerateHeaderData(db ethdb.Database, from, to int) error {
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func GenerateHeaderData(tx ethdb.DbWithPendingMutations, from, to int) error {
+	var err error
 	if to > math.MaxInt8 {
 		return errors.New("greater than uint8")
 	}
@@ -275,5 +290,5 @@ func GenerateHeaderData(db ethdb.Database, from, to int) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }

@@ -184,7 +184,7 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots(db ethdb.Database) error {
 }
 
 func (sm *SnapshotMigrator) Finished(block uint64) bool {
-	return atomic.LoadUint64(&sm.HeadersNewSnapshot) == atomic.LoadUint64(&sm.HeadersCurrentSnapshot) && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) > 0 && sm.Stage == StageStart && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == block
+	return atomic.LoadUint64(&sm.HeadersNewSnapshot) == atomic.LoadUint64(&sm.HeadersCurrentSnapshot) && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) > 0 && atomic.LoadUint64(&sm.Stage) == StageStart && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == block
 }
 
 const (
