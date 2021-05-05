@@ -82,7 +82,7 @@ func TestState(t *testing.T) {
 							t.Fatal(err)
 						}
 						defer tx.Rollback()
-						_, _, err = test.Run(ctx, tx, subtest, vmconfig)
+						_, err = test.Run(ctx, tx, subtest, vmconfig)
 						return st.checkFailure(t, err)
 					})
 				})
