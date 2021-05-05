@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -19,23 +20,23 @@ import (
 )
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
-func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig) (interface{}, error) {
+func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.dbReader.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer tx.Rollback()
 
 	// Retrieve the transaction and assemble its EVM context
 	txn, blockHash, _, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
-		return nil, fmt.Errorf("transaction %#x not found", hash)
+		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	getter := adapter.NewBlockGetter(tx)
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -43,27 +44,27 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig)
+	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
 }
 
-func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig) (interface{}, error) {
+func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	dbtx, err := api.dbReader.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer dbtx.Rollback()
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.pending)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
@@ -73,11 +74,11 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
 	if header == nil {
-		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
 	msg := args.ToMessage(api.GasCap)
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig)
+	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
 }

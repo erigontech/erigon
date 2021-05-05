@@ -4,17 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -86,24 +89,34 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 // TraceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
-func TraceTx(ctx context.Context, message core.Message, blockCtx vm.BlockContext, txCtx vm.TxContext, ibs vm.IntraBlockState, config *tracers.TraceConfig, chainConfig *params.ChainConfig) (interface{}, error) {
+func TraceTx(
+	ctx context.Context,
+	message core.Message,
+	blockCtx vm.BlockContext,
+	txCtx vm.TxContext,
+	ibs vm.IntraBlockState,
+	config *tracers.TraceConfig,
+	chainConfig *params.ChainConfig,
+	stream *jsoniter.Stream,
+) error {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
 		tracer vm.Tracer
 		err    error
 	)
+	var streaming bool
 	switch {
 	case config != nil && config.Tracer != nil:
 		// Define a meaningful timeout of a single transaction trace
 		timeout := defaultTraceTimeout
 		if config.Timeout != nil {
 			if timeout, err = time.ParseDuration(*config.Timeout); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		// Constuct the JavaScript tracer to execute with
 		if tracer, err = tracers.New(*config.Tracer, txCtx); err != nil {
-			return nil, err
+			return err
 		}
 		// Handle timeouts and RPC cancellations
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -112,12 +125,15 @@ func TraceTx(ctx context.Context, message core.Message, blockCtx vm.BlockContext
 			tracer.(*tracers.Tracer).Stop(errors.New("execution timeout"))
 		}()
 		defer cancel()
+		streaming = false
 
 	case config == nil:
-		tracer = vm.NewStructLogger(nil)
+		tracer = NewJsonStreamLogger(nil, stream)
+		streaming = true
 
 	default:
-		tracer = vm.NewStructLogger(config.LogConfig)
+		tracer = NewJsonStreamLogger(config.LogConfig, stream)
+		streaming = true
 	}
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
@@ -126,24 +142,209 @@ func TraceTx(ctx context.Context, message core.Message, blockCtx vm.BlockContext
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
+	if streaming {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("structLogs")
+		stream.WriteArrayStart()
+	}
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
-		return nil, fmt.Errorf("tracing failed: %v", err)
+		return fmt.Errorf("tracing failed: %v", err)
 	}
 	// Depending on the tracer type, format and return the output
-	switch tracer := tracer.(type) {
-	case *vm.StructLogger:
-		return &ethapi.ExecutionResult{
-			Gas:         result.UsedGas,
-			Failed:      result.Failed(),
-			ReturnValue: fmt.Sprintf("%x", result.Return()),
-			StructLogs:  ethapi.FormatLogs(tracer.StructLogs()),
-		}, nil
-
-	case *tracers.Tracer:
-		return tracer.GetResult()
-
-	default:
-		panic(fmt.Sprintf("bad tracer type %T", tracer))
+	if streaming {
+		stream.WriteArrayEnd()
+		stream.WriteMore()
+		stream.WriteObjectField("gas")
+		stream.WriteUint64(result.UsedGas)
+		stream.WriteMore()
+		stream.WriteObjectField("failed")
+		stream.WriteBool(result.Failed())
+		stream.WriteMore()
+		stream.WriteObjectField("returnValue")
+		stream.WriteString(fmt.Sprintf("%x", result.Return()))
+		stream.WriteObjectEnd()
+	} else {
+		if r, err1 := tracer.(*tracers.Tracer).GetResult(); err1 == nil {
+			stream.Write(r)
+		} else {
+			return err1
+		}
 	}
+	return nil
+}
+
+// StructLogger is an EVM state logger and implements Tracer.
+//
+// StructLogger can capture state based on the given Log configuration and also keeps
+// a track record of modified storage which is used in reporting snapshots of the
+// contract their storage.
+type JsonStreamLogger struct {
+	cfg          vm.LogConfig
+	stream       *jsoniter.Stream
+	firstCapture bool
+
+	storage map[common.Address]vm.Storage
+	logs    []vm.StructLog
+	output  []byte
+	err     error
+}
+
+// NewStructLogger returns a new logger
+func NewJsonStreamLogger(cfg *vm.LogConfig, stream *jsoniter.Stream) *JsonStreamLogger {
+	logger := &JsonStreamLogger{
+		stream:       stream,
+		storage:      make(map[common.Address]vm.Storage),
+		firstCapture: true,
+	}
+	if cfg != nil {
+		logger.cfg = *cfg
+	}
+	return logger
+}
+
+// CaptureStart implements the Tracer interface to initialize the tracing operation.
+func (l *JsonStreamLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+	return nil
+}
+
+// CaptureState logs a new structured log message and pushes it out to the environment
+//
+// CaptureState also tracks SLOAD/SSTORE ops to track storage change.
+func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
+	// check if already accumulated the specified number of logs
+	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
+		return vm.ErrTraceLimitReached
+	}
+	if !l.firstCapture {
+		l.stream.WriteMore()
+	} else {
+		l.firstCapture = false
+	}
+	if !l.cfg.DisableStorage {
+		// initialise new changed values storage container for this contract
+		// if not present.
+		if l.storage[contract.Address()] == nil {
+			l.storage[contract.Address()] = make(vm.Storage)
+		}
+		// capture SLOAD opcodes and record the read entry in the local storage
+		if op == vm.SLOAD && stack.Len() >= 1 {
+			var (
+				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   uint256.Int
+			)
+			env.IntraBlockState.GetState(contract.Address(), &address, &value)
+			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+		}
+		// capture SSTORE opcodes and record the written entry in the local storage.
+		if op == vm.SSTORE && stack.Len() >= 2 {
+			var (
+				value   = common.Hash(stack.Data[stack.Len()-2].Bytes32())
+				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+			)
+			l.storage[contract.Address()][address] = value
+		}
+	}
+	var rdata []byte
+	if !l.cfg.DisableReturnData {
+		rdata = make([]byte, len(rData))
+		copy(rdata, rData)
+	}
+	// create a new snapshot of the EVM.
+	l.stream.WriteObjectStart()
+	l.stream.WriteObjectField("pc")
+	l.stream.WriteUint64(pc)
+	l.stream.WriteMore()
+	l.stream.WriteObjectField("op")
+	l.stream.WriteString(op.String())
+	l.stream.WriteMore()
+	l.stream.WriteObjectField("gas")
+	l.stream.WriteUint64(gas)
+	l.stream.WriteMore()
+	l.stream.WriteObjectField("gasCost")
+	l.stream.WriteUint64(cost)
+	l.stream.WriteMore()
+	l.stream.WriteObjectField("depth")
+	l.stream.WriteInt(depth)
+	if err != nil {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("error")
+		l.stream.WriteString(err.Error())
+	}
+	if !l.cfg.DisableStack {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("stack")
+		l.stream.WriteArrayStart()
+		for i, stackValue := range stack.Data {
+			if i > 0 {
+				l.stream.WriteMore()
+			}
+			l.stream.WriteString(fmt.Sprintf("%x", stackValue.Bytes32()))
+		}
+		l.stream.WriteArrayEnd()
+	}
+	if !l.cfg.DisableMemory {
+		memData := memory.Data()
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("memory")
+		l.stream.WriteArrayStart()
+		for i := 0; i+32 <= len(memData); i += 32 {
+			if i > 0 {
+				l.stream.WriteMore()
+			}
+			l.stream.WriteString(fmt.Sprintf("%x", memData[i:i+32]))
+		}
+		l.stream.WriteArrayEnd()
+	}
+	if !l.cfg.DisableStorage {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("storage")
+		l.stream.WriteObjectStart()
+		first := true
+		for i, storageValue := range l.storage[contract.Address()] {
+			if first {
+				first = false
+			} else {
+				l.stream.WriteMore()
+			}
+			l.stream.WriteObjectField(fmt.Sprintf("%x", i))
+			l.stream.WriteString(fmt.Sprintf("%x", storageValue))
+		}
+		l.stream.WriteObjectEnd()
+	}
+	l.stream.WriteObjectEnd()
+	return nil
+}
+
+// CaptureFault implements the Tracer interface to trace an execution fault
+// while running an opcode.
+func (l *JsonStreamLogger) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+
+// CaptureEnd is called after the call finishes to finalize the tracing.
+func (l *JsonStreamLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	if depth != 0 {
+		return nil
+	}
+	l.output = output
+	l.err = err
+	if l.cfg.Debug {
+		fmt.Printf("0x%x\n", output)
+		if err != nil {
+			fmt.Printf(" error: %v\n", err)
+		}
+	}
+	return nil
+}
+
+func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+}
+
+func (l *JsonStreamLogger) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (l *JsonStreamLogger) CaptureAccountWrite(account common.Address) error {
+	return nil
 }
