@@ -1206,6 +1206,7 @@ type Blocks []*Block
 type BlocksPubSub struct {
 	sync.Mutex
 	id    uint
+	last  *Block
 	chans map[uint]chan *Block
 }
 
@@ -1225,9 +1226,16 @@ func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
 func (s *BlocksPubSub) Pub(block *Block) {
 	s.Lock()
 	defer s.Unlock()
+	s.last = block
 	for _, ch := range s.chans {
 		ch <- block
 	}
+}
+
+func (s *BlocksPubSub) Last() *Block {
+	s.Lock()
+	defer s.Unlock()
+	return s.last
 }
 
 func (s *BlocksPubSub) unsubscribe(id uint) {
