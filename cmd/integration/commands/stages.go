@@ -872,5 +872,13 @@ func overrideStorageMode(db ethdb.Database) error {
 	if err != nil {
 		return err
 	}
-	return ethdb.OverrideStorageMode(db, sm)
+	if err = ethdb.OverrideStorageMode(db, sm); err != nil {
+		return err
+	}
+	sm, err = ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
+	log.Info("Storage mode in DB", "mode", sm.ToString())
+	return nil
 }

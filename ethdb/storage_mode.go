@@ -146,7 +146,6 @@ func setMode(db Database, key []byte, currentValue bool) error {
 	if err := db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
 		return err
 	}
-
 	return nil
 }
 
