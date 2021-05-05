@@ -292,9 +292,8 @@ func TestBlocksPubSub(t *testing.T) {
 	got2 := <-ch2
 	require.Equal(t, len(ch2), 0)
 	require.Equal(t, got2.ReceivedAt, t2)
-	unsubscribe() // double unsubscribe must be safe
+	unsubscribe()
 	unsubscribe() // double unsubscribe must be safe
 	unsubscribe2()
 	require.Equal(t, len(ps.sub.chans), 0)
-
 }
