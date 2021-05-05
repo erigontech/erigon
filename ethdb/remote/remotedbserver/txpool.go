@@ -130,8 +130,6 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 	return reply, nil
 }
 
-func (s *TxPoolServer) SendPendingBlock(block *types.Block) { s.pendingBlocksPubSub.Pub(block) }
-
 func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Txpool_OnPendingBlockServer) error {
 	ch, unsubscribe := s.pendingBlocksPubSub.Sub()
 	defer unsubscribe()
@@ -149,6 +147,13 @@ func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 	}
 	return nil
 }
+func (s *TxPoolServer) SendPendingBlock(block *types.Block) { s.pendingBlocksPubSub.Pub(block) }
+
+func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
+	s.minedBlockStreams.Add(reply)
+	<-reply.Context().Done()
+	return reply.Context().Err()
+}
 
 func (s *TxPoolServer) SendMinedBlock(block *types.Block) {
 	var buf bytes.Buffer
@@ -157,13 +162,7 @@ func (s *TxPoolServer) SendMinedBlock(block *types.Block) {
 		return
 	}
 	reply := &proto_txpool.OnMinedBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}
-	s.minedBlockStreams.Pub(reply)
-}
-
-func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
-	s.minedBlockStreams.Add(reply)
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	s.minedBlockStreams.Send(reply)
 }
 
 // BlocksPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
@@ -185,7 +184,7 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Txpool_OnMinedBlockServer) (
 	return func() { s.unsubscribe(id) }
 }
 
-func (s *MinedBlockStreams) Pub(reply *proto_txpool.OnMinedBlockReply) {
+func (s *MinedBlockStreams) Send(reply *proto_txpool.OnMinedBlockReply) {
 	s.Lock()
 	defer s.Unlock()
 	for _, stream := range s.chans {
