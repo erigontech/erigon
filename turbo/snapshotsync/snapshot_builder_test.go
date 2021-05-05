@@ -45,6 +45,8 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	btCli.trackers=[][]string{}
+
 	db := ethdb.MustOpen(path.Join(dir, "chaindata"))
 	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
 	err = GenerateHeaderData(db, 0, 11)
