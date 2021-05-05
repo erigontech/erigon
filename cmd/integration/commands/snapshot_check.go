@@ -35,7 +35,7 @@ var cmdSnapshotCheck = &cobra.Command{
 	Short:   "check execution over state snapshot by block",
 	Example: "go run cmd/integration/main.go snapshot_check --block 11400000 --datadir /media/b00ris/nvme/backup/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshots/ --snapshotMode s --tmp_db /media/b00ris/nvme/tmp/debug",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		//db to provide headers, blocks, senders ...
 		mainDB, err := ethdb.Open(chaindata, true)
 		if err != nil {
@@ -140,7 +140,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		defer tx.Rollback()
 
 		tt := time.Now()
-		err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(tmpDir), ctx.Done())
+		err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(db.RwKV(), tmpDir), ctx.Done())
 		log.Info("Promote took", "t", time.Since(tt))
 		if err != nil {
 			return fmt.Errorf("promote state err: %w", err)
@@ -173,7 +173,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(true, true, tmpDir), expectedRootHash, ctx.Done())
+		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(db.RwKV(), true, true, tmpDir), expectedRootHash, ctx.Done())
 		if err != nil {
 			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 		}
@@ -229,7 +229,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
+	kv := db.RwKV()
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		return err
@@ -246,7 +246,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
 		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(false, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir),
+			stagedsync.StageExecuteBlocksCfg(kv, false, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir),
 		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
@@ -255,7 +255,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage5 := progress(stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
-		err = stagedsync.SpawnHashStateStage(stage5, tx, stagedsync.StageHashStateCfg(tmpDir), ch)
+		err = stagedsync.SpawnHashStateStage(stage5, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(kv, tmpDir), ch)
 		if err != nil {
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
@@ -263,7 +263,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, stagedsync.StageTrieCfg(true, true, tmpDir), ch); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(kv, true, true, tmpDir), ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

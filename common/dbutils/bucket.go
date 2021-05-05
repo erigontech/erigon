@@ -50,15 +50,15 @@ const (
 	//value - code hash
 	PlainContractCodeBucket = "PLAIN-contractCode"
 
-	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
+	// AccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	PlainAccountChangeSetBucket = "PLAIN-ACS"
+	AccountChangeSetBucket = "PLAIN-ACS"
 
-	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
+	// StorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	PlainStorageChangeSetBucket = "PLAIN-SCS"
+	StorageChangeSetBucket = "PLAIN-SCS"
 
 	//HashedAccountsBucket
 	// key - address hash
@@ -267,8 +267,8 @@ var Buckets = []string{
 	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
-	PlainAccountChangeSetBucket,
-	PlainStorageChangeSetBucket,
+	AccountChangeSetBucket,
+	StorageChangeSetBucket,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
@@ -371,10 +371,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	PlainAccountChangeSetBucket: {
+	AccountChangeSetBucket: {
 		Flags: DupSort,
 	},
-	PlainStorageChangeSetBucket: {
+	StorageChangeSetBucket: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {

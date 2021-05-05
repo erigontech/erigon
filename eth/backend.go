@@ -21,13 +21,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
 	"path"
-	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -129,16 +127,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
 	var err error
-	if config.EnableDebugProtocol {
-		if err = os.RemoveAll("simulator"); err != nil {
-			return nil, fmt.Errorf("removing simulator db: %w", err)
-		}
-		chainDb = ethdb.MustOpen("simulator")
-	} else {
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", tmpdir)
-		if err != nil {
-			return nil, err
-		}
+	chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
@@ -278,7 +269,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		config:        config,
 		chainDB:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
-		engine:        ethconfig.CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify),
 		networkID:     config.NetworkID,
 		etherbase:     config.Miner.Etherbase,
 		p2pServer:     stack.Server(),
@@ -305,13 +295,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	sm, err := ethdb.GetStorageModeFromDB(chainDb)
-	if err != nil {
-		return nil, err
-	}
-	if !reflect.DeepEqual(sm, config.StorageMode) {
-		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
-	}
+	//sm, err := ethdb.GetStorageModeFromDB(chainDb)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if !reflect.DeepEqual(sm, config.StorageMode) {
+	//	return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+	//}
 
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
 		return nil, err
@@ -385,6 +375,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
 				eth,
+				eth.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
@@ -398,6 +389,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
 				eth,
+				eth.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
@@ -412,18 +404,28 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	checkpoint := config.Checkpoint
 	if eth.config.EnableDownloadV2 {
-		eth.sentryServer = download.NewSentryServer(context.Background())
-		sentry := &download.SentryClientDirect{}
-		eth.sentryServer.P2pServer = eth.p2pServer
-		sentry.SetServer(eth.sentryServer)
-		eth.sentries = []proto_sentry.SentryClient{sentry}
-		blockDownloaderWindow := 65536
 		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
+		if len(stack.Config().P2P.SentryAddr) > 0 {
+			for _, addr := range stack.Config().P2P.SentryAddr {
+				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, addr)
+				if err != nil {
+					return nil, err
+				}
+				eth.sentries = append(eth.sentries, sentry)
+			}
+		} else {
+			eth.sentryServer = download.NewSentryServer(eth.downloadV2Ctx)
+			sentry := &download.SentryClientDirect{}
+			eth.sentryServer.P2pServer = eth.p2pServer
+			sentry.SetServer(eth.sentryServer)
+			eth.sentries = []proto_sentry.SentryClient{sentry}
+		}
+		blockDownloaderWindow := 65536
 		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
-		if err = download.SetSentryStatus(eth.downloadV2Ctx, sentry, eth.downloadServer); err != nil {
+		if err = download.SetSentryStatus(eth.downloadV2Ctx, eth.sentries, eth.downloadServer); err != nil {
 			return nil, err
 		}
 		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
@@ -437,22 +439,26 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 
 		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
+		eth.txPoolServer.TxFetcher.Start()
+		eth.txPool.Start(0, 0)           // Start tx pool to avoid deadlocks in the initial stages (before TxPool stage starts working)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
 			eth.downloadV2Ctx,
-			eth.chainDB,
+			eth.chainKV,
+			eth.config.StorageMode,
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,
 			tmpdir,
+			eth.txPool,
 		)
 		if err != nil {
 			return nil, err
 		}
 
 	} else {
-		genesisBlock, _ := rawdb.ReadBlockByNumber(chainDb, 0)
+		genesisBlock, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, 0)
 		if genesisBlock == nil {
 			return nil, core.ErrNoGenesis
 		}
@@ -501,7 +507,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
-	stack.RegisterProtocols(eth.Protocols())
+	if eth.config.P2PEnabled {
+		stack.RegisterProtocols(eth.Protocols())
+	}
+
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
 	return eth, nil
@@ -803,10 +812,8 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 		quitCh,
 		nil,
 		s.txPool,
-		nil,
 		false,
 		stagedsync.StageMiningCfg(s.config.Miner, true, resultCh, sealCancel),
-		stagedsync.StageSendersCfg(s.chainConfig),
 	)
 	if err != nil {
 		return err
@@ -867,7 +874,6 @@ func (s *Ethereum) Start() error {
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
 	if s.config.EnableDownloadV2 {
-		s.txPoolServer.TxFetcher.Stop()
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)

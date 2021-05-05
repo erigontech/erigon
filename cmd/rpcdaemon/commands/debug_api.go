@@ -98,7 +98,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block, err1 := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
+		block, err1 := rawdb.ReadBlockByHash(tx, hash)
 		if err1 != nil {
 			return state.IteratorDump{}, err1
 		}
@@ -118,7 +118,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
+	hash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -177,7 +177,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	startBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), startHash)
+	startBlock, err := rawdb.ReadBlockByHash(tx, startHash)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	endNum := startNum // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), *endHash)
+		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
 		if err != nil {
 			return nil, err
 		}

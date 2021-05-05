@@ -81,7 +81,6 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 		return StorageMode{}, err
 	}
 	sm.CallTraces = len(v) == 1 && v[0] == 1
-
 	return sm, nil
 }
 

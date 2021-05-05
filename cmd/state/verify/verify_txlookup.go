@@ -48,7 +48,7 @@ func ValidateTxLookups(chaindata string) error {
 		if err != nil {
 			return err
 		}
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blockNum)
+		body := rawdb.ReadBody(tx, blockHash, blockNum)
 
 		if body == nil {
 			log.Error("Empty body", "blocknum", blockNum)

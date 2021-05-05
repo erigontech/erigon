@@ -60,10 +60,8 @@ func (stagedSync *StagedSync) Prepare(
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
-	poolStart func() error,
 	initialCycle bool,
 	miningConfig *MiningCfg,
-	senders SendersCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -93,7 +91,6 @@ func (stagedSync *StagedSync) Prepare(
 			QuitCh:                quitCh,
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,
-			poolStart:             poolStart,
 			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
@@ -102,7 +99,6 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
-			senders:               senders,
 		},
 	)
 	state := NewState(stages)

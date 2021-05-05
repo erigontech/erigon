@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
@@ -28,7 +29,8 @@ import (
 const MaxTxTTL = 30 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
-var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
+// 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
+var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -36,7 +38,7 @@ type KvServer struct {
 	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -45,16 +47,19 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 
 	kv2Srv := NewKvServer(kv)
 	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
+	txPoolServer := NewTxPoolServer(context.Background(), txPool)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	if metrics.Enabled {
 		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
 		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
@@ -78,6 +83,7 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, ethashApi *ethash.API, addr s
 	}
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
 	remote.RegisterKVServer(grpcServer, kv2Srv)
 
 	if metrics.Enabled {

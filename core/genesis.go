@@ -252,8 +252,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.YoloV3GenesisHash:
-		return params.YoloV3ChainConfig
 	case ghash == params.TurboMineGenesisHash:
 		return params.TurboMineChainConfig
 	default:
@@ -314,7 +312,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && g.Config.IsAleut(0) {
+	if g.Config != nil && (g.Config.IsAleut(0) || g.Config.IsBaikal(0)) {
 		head.Eip1559 = true
 		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 	}
@@ -322,7 +320,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock(history)
 	if err != nil {
 		return nil, nil, err
@@ -342,7 +340,7 @@ func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Blo
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 
-	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
+	blockWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -367,7 +365,9 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if dbErr != nil {
 		return nil, nil, dbErr
 	}
-	block, statedb, err2 := g.WriteGenesisState(tx, history)
+	defer tx.Rollback()
+
+	block, statedb, err2 := g.WriteGenesisState(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -381,7 +381,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteBlock(context.Background(), tx, block); err != nil {
+	if err := rawdb.WriteBlockDeprecated(context.Background(), tx, block); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
@@ -484,18 +484,6 @@ func DefaultGoerliGenesisBlock() *Genesis {
 		GasLimit:   10485760,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/goerli.json"),
-	}
-}
-
-func DefaultYoloV3GenesisBlock() *Genesis {
-	// Full genesis: https://gist.github.com/holiman/c6ed9269dce28304ad176314caa75e97
-	return &Genesis{
-		Config:     params.YoloV3ChainConfig,
-		Timestamp:  0x6027dd2e,
-		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001041afbcb359d5a8dc58c15b2ff51354ff8a217d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x47b760,
-		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/yolov3.json"),
 	}
 }
 

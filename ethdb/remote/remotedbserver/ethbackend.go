@@ -3,9 +3,7 @@ package remotedbserver
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,20 +30,6 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.
 	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
-func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	signedTx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(in.Signedtx), 0))
-	if err != nil {
-		return nil, err
-	}
-	if err = s.eth.TxPool().AddLocal(signedTx); err != nil {
-		return out, err
-	}
-
-	out.Hash = gointerfaces.ConvertHashToH256(signedTx.Hash())
-	return out, nil
-}
-
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
 	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 
@@ -68,23 +52,21 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	log.Debug("establishing event subscription channel with the RPC daemon")
-	wg := sync.WaitGroup{}
-	wg.Add(1)
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(h)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, h); err != nil {
 			log.Warn("error while marshaling a header", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_HEADER,
 			Data: payload,
 		})
@@ -100,8 +82,68 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		return err
 	})
 
+	s.events.AddPendingLogsSubscription(func(data types.Logs) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			return subscribeServer.Context().Err()
+		default:
+		}
+
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
+			log.Warn("error while marshaling a pending logs", "err", err)
+			return err
+		}
+		payload := buf.Bytes()
+
+		err := subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_PENDING_LOGS,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
+	s.events.AddPendingBlockSubscription(func(data *types.Block) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			return subscribeServer.Context().Err()
+		default:
+		}
+
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
+			log.Warn("error while marshaling a pending block", "err", err)
+			return err
+		}
+		payload := buf.Bytes()
+
+		err := subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_PENDING_BLOCK,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
 	log.Info("event subscription channel established with the RPC daemon")
-	wg.Wait()
+	<-subscribeServer.Context().Done()
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
 }

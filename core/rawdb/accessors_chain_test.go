@@ -116,7 +116,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
-	WriteHeader(context.Background(), db, header)
+	WriteHeader(db, header)
 	if entry := ReadHeader(db, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
@@ -141,8 +141,12 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
-	db, require := ethdb.NewMemDatabase(), require.New(t)
+	db, require := ethdb.NewMemKV(), require.New(t)
 	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
@@ -167,16 +171,16 @@ func TestBodyStorage(t *testing.T) {
 	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
 
-	if entry := ReadBody(db, hash, 0); entry != nil {
+	if entry := ReadBody(tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	require.NoError(WriteBody(db, hash, 0, body))
-	if entry := ReadBody(db, hash, 0); entry == nil {
+	require.NoError(WriteBody(tx, hash, 0, body))
+	if entry := ReadBody(tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := ReadBodyRLP(db, hash, 0); entry == nil {
+	if entry := ReadBodyRLP(tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		hasher := sha3.NewLegacyKeccak256()
@@ -187,16 +191,19 @@ func TestBodyStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and verify the execution
-	DeleteBody(db, hash, 0)
-	if entry := ReadBody(db, hash, 0); entry != nil {
+	DeleteBody(tx, hash, 0)
+	if entry := ReadBody(tx, hash, 0); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -205,85 +212,86 @@ func TestBlockStorage(t *testing.T) {
 		TxHash:      types.EmptyRootHash,
 		ReceiptHash: types.EmptyRootHash,
 	})
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
-	if entry := ReadHeader(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
-	if entry := ReadBody(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	err := WriteBlock(context.Background(), db, block)
+	err = WriteBlock(tx, block)
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
 	}
-	if entry := ReadHeader(db, block.Hash(), block.NumberU64()); entry == nil {
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != block.Header().Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if entry := ReadBody(db, block.Hash(), block.NumberU64()); entry == nil {
+	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := DeleteBlock(db, block.Hash(), block.NumberU64()); err != nil {
+	if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
 		t.Fatalf("Could not delete block: %v", err)
 	}
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
-	if entry := ReadHeader(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
-	if entry := ReadBody(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
-
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 	block := types.NewBlockWithHeader(&types.Header{
 		Extra:       []byte("test block"),
 		UncleHash:   types.EmptyUncleHash,
 		TxHash:      types.EmptyRootHash,
 		ReceiptHash: types.EmptyRootHash,
 	})
-	ctx := context.Background()
 	// Store a header and check that it's not recognized as a block
-	WriteHeader(ctx, db, block.Header())
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
+	WriteHeader(tx, block.Header())
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
-	DeleteHeader(db, block.Hash(), block.NumberU64())
+	DeleteHeader(tx, block.Hash(), block.NumberU64())
 
 	// Store a body and check that it's not recognized as a block
-	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+	if err := WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
-	DeleteBody(db, block.Hash(), block.NumberU64())
+	DeleteBody(tx, block.Hash(), block.NumberU64())
 
 	// Store a header and a body separately and check reassembly
-	WriteHeader(ctx, db, block.Header())
-	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+	WriteHeader(tx, block.Header())
+	if err := WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}
 
-	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
@@ -404,8 +412,11 @@ func TestHeadStorage(t *testing.T) {
 
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
@@ -443,22 +454,22 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Check that no receipt entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
+	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
-	if err := WriteBody(db, hash, 0, body); err != nil {
+	if err := WriteBody(tx, hash, 0, body); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSenders(context.Background(), db, hash, 0, body.SendersFromTxs()); err != nil {
+	if err := WriteSenders(tx, hash, 0, body.SendersFromTxs()); err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert the receipt slice into the database and check presence
-	if err := WriteReceipts(db, 0, receipts); err != nil {
+	if err := WriteReceipts(tx, 0, receipts); err != nil {
 		t.Fatalf("WriteReceipts failed: %v", err)
 	}
-	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
+	if rs := ReadReceipts(tx, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -466,23 +477,23 @@ func TestBlockReceiptStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
-	DeleteBody(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0); rs != nil {
+	DeleteBody(tx, hash, 0)
+	if rs := ReadReceipts(tx, hash, 0); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(ReadRawReceipts(db, hash, 0), receipts); err != nil {
+	if err := checkReceiptsRLP(ReadRawReceipts(tx, hash, 0), receipts); err != nil {
 		t.Fatal(err)
 	}
 	// Sanity check that body alone without the receipt is a full purge
-	if err := WriteBody(db, hash, 0, body); err != nil {
+	if err := WriteBody(tx, hash, 0, body); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := DeleteReceipts(db, 0); err != nil {
+	if err := DeleteReceipts(tx, 0); err != nil {
 		t.Fatalf("DeleteReceipts failed: %v", err)
 	}
-	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
+	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

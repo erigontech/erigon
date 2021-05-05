@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -151,6 +152,11 @@ type HeaderRequest struct {
 	Reverse bool
 }
 
+type Announce struct {
+	Hash   common.Hash
+	Number uint64
+}
+
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
@@ -171,7 +177,9 @@ type HeaderDownload struct {
 	stageReadyCh       chan struct{}
 	stageHeight        uint64
 	topSeenHeight      uint64
-	insertList         []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
+	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
+	toAnnounce         []Announce
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
@@ -201,6 +209,7 @@ func NewHeaderDownload(
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
+		seenAnnounces:      NewSeenAnnounces(),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)
@@ -258,4 +267,29 @@ func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, loc
 		headerProgress: headerProgress,
 		unwindPoint:    headerProgress,
 	}
+}
+
+// SeenAnnounces - external announcement hashes, after header verification if hash is in this set - will broadcast it further
+type SeenAnnounces struct {
+	hashes *lru.Cache
+}
+
+func NewSeenAnnounces() *SeenAnnounces {
+	cache, err := lru.New(1000)
+	if err != nil {
+		panic("error creating prefetching cache for blocks")
+	}
+	return &SeenAnnounces{hashes: cache}
+}
+
+func (s *SeenAnnounces) Pop(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
+	if ok {
+		s.hashes.Remove(hash)
+	}
+	return ok
+}
+
+func (s *SeenAnnounces) Add(b common.Hash) {
+	s.hashes.ContainsOrAdd(b, struct{}{})
 }

@@ -37,11 +37,7 @@ func (r *StateReader) ReadAccountData(address common.Address) (*accounts.Account
 
 func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := state.GetAsOf(r.tx, true /* storage */, compositeKey, r.blockNr+1)
-	if err != nil || enc == nil {
-		return nil, nil
-	}
-	return enc, nil
+	return state.GetAsOf(r.tx, true /* storage */, compositeKey, r.blockNr+1)
 }
 
 func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {

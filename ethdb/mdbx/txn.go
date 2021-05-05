@@ -421,6 +421,9 @@ type TxInfo struct {
 	  For WRITE transaction: The summarized size of the dirty database
 	  pages that generated during this transaction. */
 	SpaceDirty uint64
+
+	Spill   uint64
+	Unspill uint64
 }
 
 // scan_rlt   The boolean flag controls the scan of the read lock

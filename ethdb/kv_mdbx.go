@@ -32,6 +32,7 @@ type MdbxOpts struct {
 	bucketsCfg        BucketConfigsFunc
 	mapSize           datasize.ByteSize
 	dirtyListMaxPages uint64
+	verbosity         DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
@@ -71,6 +72,11 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) DBVerbosity(v DBVerbosityLvl) MdbxOpts {
+	opts.verbosity = v
+	return opts
+}
+
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
@@ -98,8 +104,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	if err != nil {
 		return nil, err
 	}
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
+	if opts.verbosity != -1 {
+		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+		if err != nil {
+			return nil, fmt.Errorf("db verbosity set: %w", err)
+		}
+	}
 	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
@@ -299,45 +309,8 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	/*
-		info, _ := db.env.Info()
-			dbSize.Update(int64(info.Geo.Current))
-
-				if err := db.View(context.Background(), func(tx Tx) error {
-				stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
-				tableScsLeaf.Update(int64(stat.LeafPages))
-				tableScsBranch.Update(int64(stat.BranchPages))
-				tableScsOverflow.Update(int64(stat.OverflowPages))
-				tableScsEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
-				tableStateLeaf.Update(int64(stat.LeafPages))
-				tableStateBranch.Update(int64(stat.BranchPages))
-				tableStateOverflow.Update(int64(stat.OverflowPages))
-				tableStateEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
-				tableLogLeaf.Update(int64(stat.LeafPages))
-				tableLogBranch.Update(int64(stat.BranchPages))
-				tableLogOverflow.Update(int64(stat.OverflowPages))
-				tableLogEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
-				tableTxLeaf.Update(int64(stat.LeafPages))
-				tableTxBranch.Update(int64(stat.BranchPages))
-				tableTxOverflow.Update(int64(stat.OverflowPages))
-				tableTxEntries.Update(int64(stat.Entries))
-
-				stat, _ = tx.(*MdbxTx).BucketStat("gc")
-				tableGcLeaf.Update(int64(stat.LeafPages))
-				tableGcBranch.Update(int64(stat.BranchPages))
-				tableGcOverflow.Update(int64(stat.OverflowPages))
-				tableGcEntries.Update(int64(stat.Entries))
-				return nil
-			}); err != nil {
-				log.Error("collecting metrics failed", "err", err)
-			}
-	*/
+	info, _ := db.env.Info()
+	dbSize.Update(int64(info.Geo.Current))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
@@ -352,7 +325,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -373,10 +346,10 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, mdbx.TxNoMetaSync|mdbx.TxNoSync)
+	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -397,7 +370,6 @@ type MdbxCursor struct {
 	bucketName string
 	dbi        mdbx.DBI
 	bucketCfg  dbutils.BucketConfigItem
-	prefix     []byte
 
 	c *mdbx.Cursor
 }
@@ -416,6 +388,17 @@ func (db *MdbxKV) AllDBI() map[string]dbutils.DBI {
 
 func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
+}
+
+func (tx *MdbxTx) CollectMetrics() {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		panic(err)
+	}
+
+	txDirty.Update(int64(txInfo.SpaceDirty))
+	txSpill.Update(int64(txInfo.Spill))
+	txUnspill.Update(int64(txInfo.Unspill))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
@@ -711,16 +694,6 @@ func (tx *MdbxTx) closeCursors() {
 	tx.cursors = []*mdbx.Cursor{}
 }
 
-func (c *MdbxCursor) Prefix(v []byte) Cursor {
-	c.prefix = v
-	return c
-}
-
-func (c *MdbxCursor) Prefetch(v uint) Cursor {
-	//c.cursorOpts.PrefetchSize = int(v)
-	return c
-}
-
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
@@ -728,6 +701,7 @@ func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Put(k, v)
 	}
 
@@ -741,6 +715,7 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		return c.Delete(k, v)
 	}
 
@@ -976,14 +951,10 @@ func (c *MdbxCursor) Count() (uint64, error) {
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
-	return c.Seek(c.prefix)
+	return c.Seek(nil)
 }
 
 func (c *MdbxCursor) Last() ([]byte, []byte, error) {
-	if c.prefix != nil {
-		return []byte{}, nil, fmt.Errorf(".Last doesn't support c.prefix yet")
-	}
-
 	k, v, err := c.last()
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1020,9 +991,6 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		err = fmt.Errorf("failed MdbxKV cursor.Seek(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
 		return []byte{}, nil, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 
 	return k, v, nil
 }
@@ -1037,9 +1005,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 				return nil, nil, nil
 			}
 			return []byte{}, nil, err
-		}
-		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-			k, v = nil, nil
 		}
 
 		if len(k) == to {
@@ -1087,9 +1052,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		k = k2
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 	return k, v, nil
 }
 
@@ -1107,10 +1069,6 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil
@@ -1132,10 +1090,6 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 		v = v[keyPart:]
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
-
 	return k, v, nil
 }
 
@@ -1154,10 +1108,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil

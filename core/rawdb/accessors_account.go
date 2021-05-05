@@ -23,10 +23,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// ReadAccount reading account object from multiple buckets of db
-func ReadAccount(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+// ReadAccountDeprecated reading account object from multiple buckets of db
+func ReadAccountDeprecated(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.HashedAccountsBucket, addrHashBytes)
+	if err != nil {
+		return false, err
+	}
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func ReadAccount(db ethdb.Tx, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+	addrHashBytes := addrHash[:]
+	enc, err := db.GetOne(dbutils.HashedAccountsBucket, addrHashBytes)
 	if err != nil {
 		return false, err
 	}

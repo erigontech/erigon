@@ -42,9 +42,10 @@ type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type StateReaderBuilder func(ethdb.Database) state.StateReader
 
-type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
+type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockCfg struct {
+	db                    ethdb.RwKV
 	writeReceipts         bool
 	batchSize             datasize.ByteSize
 	changeSetHook         ChangeSetHook
@@ -58,6 +59,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
+	kv ethdb.RwKV,
 	WriteReceipts bool,
 	BatchSize datasize.ByteSize,
 	ReaderBuilder StateReaderBuilder,
@@ -70,6 +72,7 @@ func StageExecuteBlocksCfg(
 	tmpdir string,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
+		db:                    kv,
 		writeReceipts:         WriteReceipts,
 		batchSize:             BatchSize,
 		changeSetHook:         ChangeSetHook,
@@ -83,7 +86,7 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-func readBlock(blockNum uint64, tx ethdb.Getter) (*types.Block, error) {
+func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -104,9 +107,9 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	}
 
 	if params.writerBuilder != nil {
-		stateWriter = params.writerBuilder(batch, tx, blockNum)
+		stateWriter = params.writerBuilder(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
 	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+		stateWriter = state.NewPlainStateWriter(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
 	}
 
 	// where the magic happens
@@ -191,8 +194,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				return err
 			}
 		} else {
+			txn := tx.(ethdb.HasTx).Tx()
 			var block *types.Block
-			if block, err = readBlock(blockNum, tx); err != nil {
+			if block, err = readBlock(blockNum, txn); err != nil {
 				return err
 			}
 			if block == nil {
@@ -227,6 +231,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		default:
 		case <-logEvery.C:
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
+			if hasTx, ok := tx.(ethdb.HasTx); ok {
+				hasTx.Tx().CollectMetrics()
+			}
 		}
 		stageExecutionGauge.Update(int64(blockNum))
 	}

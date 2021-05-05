@@ -27,6 +27,7 @@ var DefaultFlags = []cli.Flag{
 	ExternalSnapshotDownloaderAddrFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
+	DatabaseVerbosityFlag,
 	PrivateApiAddr,
 	EtlBufferSizeFlag,
 	LMDBMapSizeFlag,
@@ -68,4 +69,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerExtraDataFlag,
 	utils.MinerNoVerfiyFlag,
 	DownloadV2Flag,
+	utils.SentryAddrFlag,
 }

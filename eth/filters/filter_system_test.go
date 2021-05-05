@@ -91,7 +91,7 @@ func (b *testBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*type
 
 func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
 	if number := rawdb.ReadHeaderNumber(b.db, hash); number != nil {
-		return rawdb.ReadReceipts(b.db, hash, *number), nil
+		return rawdb.ReadReceiptsDeprecated(b.db, hash, *number), nil
 	}
 	return nil, nil
 }
@@ -101,7 +101,7 @@ func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(b.db, hash, *number)
+	receipts := rawdb.ReadReceiptsDeprecated(b.db, hash, *number)
 
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {

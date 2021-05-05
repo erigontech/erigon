@@ -16,24 +16,22 @@ import (
 )
 
 type HashStateCfg struct {
+	db     ethdb.RwKV
 	tmpDir string
 }
 
-func StageHashStateCfg(tmpDir string) HashStateCfg {
+func StageHashStateCfg(db ethdb.RwKV, tmpDir string) HashStateCfg {
 	return HashStateCfg{
+		db:     db,
 		tmpDir: tmpDir,
 	}
 }
 
-func SpawnHashStateStage(s *StageState, db ethdb.Database, cfg HashStateCfg, quit <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -79,15 +77,11 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, cfg HashStateCfg, qui
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, cfg HashStateCfg, quit <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -411,9 +405,9 @@ func getCodeUnwindExtractFunc(db ethdb.Tx, changeSetBucket string) etl.ExtractFu
 func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.StorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.AccountChangeSetBucket
 	}
 	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
@@ -459,9 +453,9 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.StorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.AccountChangeSetBucket
 	}
 	from := s.BlockNumber
 	to := u.UnwindPoint

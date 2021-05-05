@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -82,20 +83,25 @@ var eip2200Tests = []struct {
 }
 
 func TestEIP2200(t *testing.T) {
+
 	for i, tt := range eip2200Tests {
 		tt := tt
 		i := i
+
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			address := common.BytesToAddress([]byte("contract"))
-
-			db := ethdb.NewMemDatabase()
+			db := ethdb.NewMemKV()
 			defer db.Close()
-			s := state.New(state.NewPlainStateReader(db))
+			tx, err := db.BeginRw(context.Background())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			s := state.New(state.NewPlainStateReader(tx))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
 
-			_ = s.CommitBlock(context.Background(), state.NewPlainStateWriter(db, db, 0))
+			_ = s.CommitBlock(context.Background(), state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0))
 			vmctx := BlockContext{
 				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
 				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},

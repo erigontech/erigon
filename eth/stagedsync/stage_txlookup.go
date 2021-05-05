@@ -17,26 +17,25 @@ import (
 )
 
 type TxLookupCfg struct {
+	db     ethdb.RwKV
 	tmpdir string
 }
 
 func StageTxLookupCfg(
+	db ethdb.RwKV,
 	tmpdir string,
 ) TxLookupCfg {
 	return TxLookupCfg{
+		db:     db,
 		tmpdir: tmpdir,
 	}
 }
 
-func SpawnTxLookup(s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -76,7 +75,7 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		body := rawdb.ReadBody(ethdb.NewRoTxDb(tx), blockHash, blocknum)
+		body := rawdb.ReadBody(tx, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
@@ -98,15 +97,14 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, cfg TxLookupCfg, quitCh <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+	if s.BlockNumber <= u.UnwindPoint {
+		return nil
+	}
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -157,7 +155,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, _ := rawdb.ReadTransactions(ethdb.NewRoTxDb(tx), body.BaseTxId, body.TxAmount)
+		txs, _ := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
 		for _, txn := range txs {
 			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
 				return false, err

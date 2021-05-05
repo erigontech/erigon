@@ -169,7 +169,20 @@ func (g *RequestGenerator) traceBlock(bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_block", "params": ["0x%x"]`, bn)
 	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+	return sb.String()
+}
 
+func (g *RequestGenerator) traceFilterFrom(prevBn uint64, bn uint64, account common.Address) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "fromAddress": ["0x%x"]}]`, prevBn, bn, account)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+	return sb.String()
+}
+
+func (g *RequestGenerator) traceFilterTo(prevBn uint64, bn uint64, account common.Address) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "toAddress": ["0x%x"]}]`, prevBn, bn, account)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
 	return sb.String()
 }
 

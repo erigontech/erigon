@@ -121,6 +121,7 @@ type Config struct {
 	Pruning bool // Whether to disable pruning and flush everything to disk
 
 	EnableDownloadV2 bool
+	P2PEnabled       bool
 
 	StorageMode     ethdb.StorageMode
 	BatchSize       datasize.ByteSize // Batch size for execution stage

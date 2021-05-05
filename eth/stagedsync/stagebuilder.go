@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
@@ -44,7 +43,6 @@ type StageParameters struct {
 	QuitCh                <-chan struct{}
 	headersFetchers       []func() error
 	txPool                *core.TxPool
-	poolStart             func() error
 	prefetchedBlocks      *bodydownload.PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
@@ -52,8 +50,6 @@ type StageParameters struct {
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
 	mining                *MiningCfg
-
-	senders SendersCfg
 }
 
 type MiningCfg struct {
@@ -173,14 +169,23 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.Senders,
 			Build: func(world StageParameters) *Stage {
+				sendersCfg := StageSendersCfg(world.DB.RwKV(), world.ChainConfig)
 				return &Stage{
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnRecoverSendersStage(world.senders, s, world.TX, 0, world.TmpDir, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnRecoverSendersStage(sendersCfg, s, tx, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, s, world.TX)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindSendersStage(u, s, tx, sendersCfg)
 					},
 				}
 			},
@@ -188,7 +193,7 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
-				execCfg := StageExecuteBlocksCfg(world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig, world.TmpDir)
+				execCfg := StageExecuteBlocksCfg(world.DB.RwKV(), world.storageMode.Receipts, world.BatchSize, world.stateReaderBuilder, world.stateWriterBuilder, world.silkwormExecutionFunc, nil, world.ChainConfig, world.Engine, world.vmConfig, world.TmpDir)
 				return &Stage{
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
@@ -208,10 +213,18 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnHashStateStage(s, tx, StageHashStateCfg(world.DB.RwKV(), world.TmpDir), world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindHashStateStage(u, s, tx, StageHashStateCfg(world.DB.RwKV(), world.TmpDir), world.QuitCh)
 					},
 				}
 			},
@@ -223,11 +236,19 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						_, err := SpawnIntermediateHashesStage(s, u, tx, StageTrieCfg(world.DB.RwKV(), true, true, world.TmpDir), world.QuitCh)
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, StageTrieCfg(true, true, world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindIntermediateHashesStage(u, s, tx, StageTrieCfg(world.DB.RwKV(), true, true, world.TmpDir), world.QuitCh)
 					},
 				}
 			},
@@ -235,17 +256,25 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.AccountHistoryIndex,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHistoryCfg(world.TmpDir)
+				cfg := StageHistoryCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.AccountHistoryIndex,
 					Description:         "Generate account history index",
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, cfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnAccountHistoryIndex(s, tx, cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindAccountHistoryIndex(u, s, tx, cfg, world.QuitCh)
 					},
 				}
 			},
@@ -253,17 +282,25 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.StorageHistoryIndex,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHistoryCfg(world.TmpDir)
+				cfg := StageHistoryCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.StorageHistoryIndex,
 					Description:         "Generate storage history index",
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, cfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnStorageHistoryIndex(s, tx, cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, s, world.TX, cfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindStorageHistoryIndex(u, s, tx, cfg, world.QuitCh)
 					},
 				}
 			},
@@ -271,17 +308,25 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.LogIndex,
 			Build: func(world StageParameters) *Stage {
-				logIndexCfg := StageLogIndexCfg(world.TmpDir)
+				logIndexCfg := StageLogIndexCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.LogIndex,
 					Description:         "Generate receipt logs index",
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, logIndexCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnLogIndex(s, tx, logIndexCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, logIndexCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindLogIndex(u, s, tx, logIndexCfg, world.QuitCh)
 					},
 				}
 			},
@@ -289,7 +334,7 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.CallTraces,
 			Build: func(world StageParameters) *Stage {
-				callTracesCfg := StageCallTracesCfg(0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
+				callTracesCfg := StageCallTracesCfg(world.DB.RwKV(), 0, world.BatchSize, world.TmpDir, world.ChainConfig, world.Engine)
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
@@ -307,17 +352,25 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
-				txLookupCfg := StageTxLookupCfg(world.TmpDir)
+				txLookupCfg := StageTxLookupCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:                  stages.TxLookup,
 					Description:         "Generate tx lookup index",
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, txLookupCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTxLookup(s, tx, txLookupCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, txLookupCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTxLookup(u, s, tx, txLookupCfg, world.QuitCh)
 					},
 				}
 			},
@@ -325,15 +378,23 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
-				txPoolCfg := StageTxPoolCfg(world.txPool, world.poolStart)
+				txPoolCfg := StageTxPoolCfg(world.DB.RwKV(), world.txPool)
 				return &Stage{
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return SpawnTxPool(s, world.TX, txPoolCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTxPool(s, tx, txPoolCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxPool(u, s, world.TX, txPoolCfg, world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTxPool(u, s, tx, txPoolCfg, world.QuitCh)
 					},
 				}
 			},
@@ -345,28 +406,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						logPrefix := s.state.LogPrefix()
-						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
-
-						err = NotifyNewHeaders(s.BlockNumber+1, executionAt, world.notifier, world.DB)
-						if err != nil {
-							return err
-						}
-
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return FinishForward(s, world.DB, world.notifier)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						var executionAt uint64
-						var err error
-						if executionAt, err = s.ExecutionAt(world.DB); err != nil {
-							return err
-						}
-						return s.DoneAndUpdate(world.DB, executionAt)
+						return UnwindFinish(u, s, world.DB)
 					},
 				}
 			},
@@ -428,7 +471,11 @@ func MiningStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, StageHashStateCfg(world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnHashStateStage(s, tx, StageHashStateCfg(world.DB.RwKV(), world.TmpDir), world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
@@ -441,7 +488,11 @@ func MiningStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, StageTrieCfg(false, true, world.TmpDir), world.QuitCh)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, StageTrieCfg(world.DB.RwKV(), false, true, world.TmpDir), world.QuitCh)
 						if err != nil {
 							return err
 						}

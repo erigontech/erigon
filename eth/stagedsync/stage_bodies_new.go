@@ -21,6 +21,7 @@ import (
 var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 type BodiesCfg struct {
+	db              ethdb.RwKV
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
 	penalise        func(context.Context, []byte)
@@ -32,6 +33,7 @@ type BodiesCfg struct {
 }
 
 func StageBodiesCfg(
+	db ethdb.RwKV,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
@@ -41,7 +43,7 @@ func StageBodiesCfg(
 	timeout int,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, wakeUpChan: wakeUpChan, timeout: timeout, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, wakeUpChan: wakeUpChan, timeout: timeout, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -138,7 +140,7 @@ func BodiesForward(
 		}
 		d := cfg.bd.GetDeliveries()
 		for _, block := range d {
-			if err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+			if err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
 			blockHeight := block.NumberU64()

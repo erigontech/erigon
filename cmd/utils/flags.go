@@ -35,7 +35,6 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -468,6 +467,10 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	SentryAddrFlag = cli.StringSliceFlag{
+		Name:  "sentry.api.addr",
+		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
@@ -634,8 +637,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
 		case params.AleutChainName:
@@ -676,8 +677,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
 		case params.AleutChainName:
@@ -724,6 +723,9 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
+		cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
 	}
 }
 
@@ -816,6 +818,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 }
+
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	flags := cmd.Flags()
 	//SetP2PConfig(ctx, &cfg.P2P)
@@ -835,8 +838,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.YoloV3ChainName:
-		return filepath.Join(datadir, "yolo-v3")
 	case params.AleutChainName:
 		return filepath.Join(datadir, "aleut")
 	default:
@@ -1125,6 +1126,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
+	cfg.P2PEnabled = len(stack.Config().P2P.SentryAddr) == 0
+
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
@@ -1201,11 +1204,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.YoloV3ChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("yolov3x")).Uint64() // "yolov3x"
-		}
-		cfg.Genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
@@ -1281,10 +1279,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
-	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
-
 	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name, tmpdir)
+	chainDb, err := stack.OpenDatabase(name, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
@@ -1301,8 +1297,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.YoloV3ChainName:
-		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
 	case params.AleutChainName:

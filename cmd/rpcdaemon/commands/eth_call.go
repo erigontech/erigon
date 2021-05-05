@@ -99,7 +99,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo  uint64 = params.TxGas - 1
+		lo  = params.TxGas - 1
 		hi  uint64
 		cap uint64
 	)

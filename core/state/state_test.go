@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -285,9 +286,13 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	w := NewPlainStateWriter(db, db, 0)
-	state := New(NewPlainStateReader(db))
+	db := ethdb.NewMemKV()
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	w := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
+	state := New(NewPlainStateReader(ethdb.NewRoTxDb(tx)))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -300,7 +305,7 @@ func TestDump(t *testing.T) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err = w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +319,7 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockWriter := NewPlainStateWriter(db, db, 1)
+	blockWriter := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1)
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)
@@ -329,11 +334,6 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := db.RwKV().BeginRo(context.Background())
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
 	got := string(NewDumper(tx, 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",

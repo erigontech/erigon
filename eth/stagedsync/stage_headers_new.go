@@ -18,26 +18,32 @@ import (
 )
 
 type HeadersCfg struct {
-	hd            *headerdownload.HeaderDownload
-	chainConfig   params.ChainConfig
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte
-	wakeUpChan    chan struct{}
-	batchSize     datasize.ByteSize
+	db                ethdb.RwKV
+	hd                *headerdownload.HeaderDownload
+	chainConfig       params.ChainConfig
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
+	announceNewHashes func(context.Context, []headerdownload.Announce)
+	wakeUpChan        chan struct{}
+	batchSize         datasize.ByteSize
 }
 
 func StageHeadersCfg(
+	db ethdb.RwKV,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	announceNewHashes func(context.Context, []headerdownload.Announce),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
 ) HeadersCfg {
 	return HeadersCfg{
-		hd:            headerDownload,
-		chainConfig:   chainConfig,
-		headerReqSend: headerReqSend,
-		wakeUpChan:    wakeUpChan,
-		batchSize:     batchSize,
+		db:                db,
+		hd:                headerDownload,
+		chainConfig:       chainConfig,
+		headerReqSend:     headerReqSend,
+		announceNewHashes: announceNewHashes,
+		wakeUpChan:        wakeUpChan,
+		batchSize:         batchSize,
 	}
 }
 
@@ -128,6 +134,7 @@ func HeadersForward(
 			}
 			maxRequests--
 		}
+
 		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
 		if req != nil {
@@ -151,6 +158,10 @@ func HeadersForward(
 			}
 		}
 		timer.Stop()
+		announces := cfg.hd.GrabAnnounces()
+		if len(announces) > 0 {
+			cfg.announceNewHashes(ctx, announces)
+		}
 		if !initialCycle && headerInserter.AnythingDone() {
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
@@ -169,7 +180,7 @@ func HeadersForward(
 			log.Debug("headerLoop woken up by the incoming request")
 		}
 		if initialCycle && cfg.hd.InSync() {
-			fmt.Printf("Top seen height: %d\n", cfg.hd.TopSeenHeight())
+			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
 			break
 		}
 	}
@@ -179,7 +190,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch, batch); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
@@ -220,7 +231,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
-			fmt.Printf("ancestor nil for %d %x\n", ancestorHeight, ancestorHash)
+			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
