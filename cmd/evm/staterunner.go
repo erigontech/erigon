@@ -46,7 +46,7 @@ type StatetestResult struct {
 	Name  string      `json:"name"`
 	Pass  bool        `json:"pass"`
 	Fork  string      `json:"fork"`
-	Error *string     `json:"error,omitempty"`
+	Error string      `json:"error,omitempty"`
 	State *state.Dump `json:"state,omitempty"`
 }
 
@@ -102,7 +102,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
+			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
 			statedb, tds, err := test.Run(context.Background(), db, st, cfg)
 
@@ -110,19 +110,20 @@ func stateTestCmd(ctx *cli.Context) error {
 			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
 				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Hash().Bytes())
 			}
+
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, *result.Error = false, err.Error()
+				result.Pass, result.Error = false, err.Error()
 				/*
-				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
-					if err1 != nil {
-						return fmt.Errorf("transition cannot open tx: %v", err1)
+					if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
+						tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
+						if err1 != nil {
+							return fmt.Errorf("transition cannot open tx: %v", err1)
+						}
+						dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+						tx.Rollback()
+						result.State = &dump
 					}
-					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
-					tx.Rollback()
-					result.State = &dump
-				}
 				*/
 			}
 
