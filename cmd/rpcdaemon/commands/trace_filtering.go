@@ -191,7 +191,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
-	fmt.Printf("Streamable filter\n")
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %v", err1)

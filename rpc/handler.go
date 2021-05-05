@@ -433,6 +433,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 			stream.WriteObjectEnd()
 		}
 		stream.WriteObjectEnd()
+		stream.Write([]byte("\n"))
 		return nil
 	} else {
 		result, err := callb.call(ctx, msg.Method, args, stream)
