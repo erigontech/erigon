@@ -1209,6 +1209,19 @@ type BlocksPubSub struct {
 	chans map[uint]chan *Block
 }
 
+func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
+	s.Lock()
+	defer s.Unlock()
+	if s.chans == nil {
+		s.chans = make(map[uint]chan *Block)
+	}
+	s.id++
+	id := s.id
+	ch = make(chan *Block, 1)
+	s.chans[id] = ch
+	return ch, func() { s.unsubscribe(id) }
+}
+
 func (s *BlocksPubSub) Pub(block *Block) {
 	s.Lock()
 	defer s.Unlock()
@@ -1226,17 +1239,4 @@ func (s *BlocksPubSub) unsubscribe(id uint) {
 	}
 	close(ch)
 	delete(s.chans, id)
-}
-
-func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]chan *Block)
-	}
-	s.id++
-	id := s.id
-	ch = make(chan *Block, 1)
-	s.chans[id] = ch
-	return ch, func() { s.unsubscribe(id) }
 }
