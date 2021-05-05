@@ -89,6 +89,11 @@ cons:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
 
+evm:
+	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/evm\" to run EVM"
+
 db-tools: mdbx
 	@echo "Building bb-tools"
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_drop mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_drop $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
@@ -194,3 +199,4 @@ prometheus:
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
+

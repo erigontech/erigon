@@ -151,33 +151,33 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
+func (t *StateTest) Run(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, error) {
+	state, root, tds, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
 	if err != nil {
-		return state, err
+		return state, tds, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
-		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return state, tds, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
-		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return state, tds, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return state, nil
+	return state, tds, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, *state.TrieDbState, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, nil, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := t.genesis(config).ToBlock(false)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, nil, UnsupportedForkError{subtest.Fork}
 	}
 
 	readBlockNr := block.Number().Uint64()
@@ -187,7 +187,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	//_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, common.Hash{}, nil, UnsupportedForkError{subtest.Fork}
 	}
 	statedb := state.New(state.NewDbStateReader(tx))
 	tds.StartNewBuffer()
@@ -196,7 +196,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
 	if err != nil {
-		return nil, common.Hash{}, err
+		return nil, common.Hash{}, nil, err
 	}
 
 	// Prepare the EVM.
@@ -215,7 +215,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 
 	// Commit block
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, common.Hash{}, err
+		return nil, common.Hash{}, nil, err
 	}
 	// And _now_ get the state root
 	// Add 0-value mining reward. This only makes a difference in the cases
@@ -225,19 +225,19 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, common.Hash{}, err
+		return nil, common.Hash{}, nil, err
 	}
 	if err = statedb.CommitBlock(ctx, w); err != nil {
-		return nil, common.Hash{}, err
+		return nil, common.Hash{}, nil, err
 	}
 
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
-		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+		return nil, common.Hash{}, nil, fmt.Errorf("error calculating state root: %v", err)
 	}
 
 	root := roots[len(roots)-1]
-	return statedb, root, nil
+	return statedb, root, tds, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {

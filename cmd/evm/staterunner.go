@@ -98,29 +98,32 @@ func stateTestCmd(ctx *cli.Context) error {
 	results := make([]StatetestResult, 0, len(tests))
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
+
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
 
-			statedb, err := test.Run(context.Background(), db, st, cfg)
+			statedb, tds, err := test.Run(context.Background(), db, st, cfg)
+
 			// print state root for evmlab tracing
-			//if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-			//fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
-			//}
+			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Hash().Bytes())
+			}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
+				/*
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					_ = statedb
-					//tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
-					//if err1 != nil {
-					//	return fmt.Errorf("transition cannot open tx: %v", err1)
-					//}
-					//dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
-					//tx.Rollback()
-					//result.State = &dump
+					tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
+					if err1 != nil {
+						return fmt.Errorf("transition cannot open tx: %v", err1)
+					}
+					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+					tx.Rollback()
+					result.State = &dump
 				}
+				*/
 			}
 
 			results = append(results, *result)
