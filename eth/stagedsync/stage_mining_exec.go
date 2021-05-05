@@ -25,7 +25,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	logPrefix := s.state.LogPrefix()
 
 	ibs := state.New(state.NewPlainStateReader(tx))
-	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+	stateWriter := state.NewPlainStateWriter(tx, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}

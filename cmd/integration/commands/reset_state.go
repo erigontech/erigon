@@ -107,7 +107,7 @@ func resetState(db ethdb.Database, ctx context.Context) error {
 	}
 
 	// set genesis after reset all buckets
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}

@@ -42,7 +42,7 @@ type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type StateReaderBuilder func(ethdb.Database) state.StateReader
 
-type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
+type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockCfg struct {
 	db                    ethdb.RwKV
@@ -107,9 +107,9 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	}
 
 	if params.writerBuilder != nil {
-		stateWriter = params.writerBuilder(batch, tx, blockNum)
+		stateWriter = params.writerBuilder(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
 	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+		stateWriter = state.NewPlainStateWriter(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
 	}
 
 	// where the magic happens

@@ -320,7 +320,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock(history)
 	if err != nil {
 		return nil, nil, err
@@ -340,7 +340,7 @@ func (g *Genesis) WriteGenesisState(tx ethdb.Database, history bool) (*types.Blo
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 
-	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
+	blockWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -366,7 +366,8 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 		return nil, nil, dbErr
 	}
 	defer tx.Rollback()
-	block, statedb, err2 := g.WriteGenesisState(tx, history)
+
+	block, statedb, err2 := g.WriteGenesisState(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
 	if err2 != nil {
 		return block, statedb, err2
 	}
