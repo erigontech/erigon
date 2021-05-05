@@ -27,6 +27,10 @@ type TxpoolClient interface {
 	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
 	// subscribe to new transactions add event
 	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error)
+	// subscribe to new pending blocks
+	OnPendingBlock(ctx context.Context, in *OnPendingBlockRequest, opts ...grpc.CallOption) (Txpool_OnPendingBlockClient, error)
+	// subscribe to new mined blocks
+	OnMinedBlock(ctx context.Context, in *OnMinedBlockRequest, opts ...grpc.CallOption) (Txpool_OnMinedBlockClient, error)
 }
 
 type txpoolClient struct {
@@ -96,6 +100,70 @@ func (x *txpoolOnAddClient) Recv() (*OnAddReply, error) {
 	return m, nil
 }
 
+func (c *txpoolClient) OnPendingBlock(ctx context.Context, in *OnPendingBlockRequest, opts ...grpc.CallOption) (Txpool_OnPendingBlockClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Txpool_ServiceDesc.Streams[1], "/txpool.Txpool/OnPendingBlock", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &txpoolOnPendingBlockClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Txpool_OnPendingBlockClient interface {
+	Recv() (*OnPendingBlockReply, error)
+	grpc.ClientStream
+}
+
+type txpoolOnPendingBlockClient struct {
+	grpc.ClientStream
+}
+
+func (x *txpoolOnPendingBlockClient) Recv() (*OnPendingBlockReply, error) {
+	m := new(OnPendingBlockReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *txpoolClient) OnMinedBlock(ctx context.Context, in *OnMinedBlockRequest, opts ...grpc.CallOption) (Txpool_OnMinedBlockClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Txpool_ServiceDesc.Streams[2], "/txpool.Txpool/OnMinedBlock", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &txpoolOnMinedBlockClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Txpool_OnMinedBlockClient interface {
+	Recv() (*OnMinedBlockReply, error)
+	grpc.ClientStream
+}
+
+type txpoolOnMinedBlockClient struct {
+	grpc.ClientStream
+}
+
+func (x *txpoolOnMinedBlockClient) Recv() (*OnMinedBlockReply, error) {
+	m := new(OnMinedBlockReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // TxpoolServer is the server API for Txpool service.
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility
@@ -109,6 +177,10 @@ type TxpoolServer interface {
 	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)
 	// subscribe to new transactions add event
 	OnAdd(*OnAddRequest, Txpool_OnAddServer) error
+	// subscribe to new pending blocks
+	OnPendingBlock(*OnPendingBlockRequest, Txpool_OnPendingBlockServer) error
+	// subscribe to new mined blocks
+	OnMinedBlock(*OnMinedBlockRequest, Txpool_OnMinedBlockServer) error
 	mustEmbedUnimplementedTxpoolServer()
 }
 
@@ -127,6 +199,12 @@ func (UnimplementedTxpoolServer) Transactions(context.Context, *TransactionsRequ
 }
 func (UnimplementedTxpoolServer) OnAdd(*OnAddRequest, Txpool_OnAddServer) error {
 	return status.Errorf(codes.Unimplemented, "method OnAdd not implemented")
+}
+func (UnimplementedTxpoolServer) OnPendingBlock(*OnPendingBlockRequest, Txpool_OnPendingBlockServer) error {
+	return status.Errorf(codes.Unimplemented, "method OnPendingBlock not implemented")
+}
+func (UnimplementedTxpoolServer) OnMinedBlock(*OnMinedBlockRequest, Txpool_OnMinedBlockServer) error {
+	return status.Errorf(codes.Unimplemented, "method OnMinedBlock not implemented")
 }
 func (UnimplementedTxpoolServer) mustEmbedUnimplementedTxpoolServer() {}
 
@@ -216,6 +294,48 @@ func (x *txpoolOnAddServer) Send(m *OnAddReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Txpool_OnPendingBlock_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(OnPendingBlockRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TxpoolServer).OnPendingBlock(m, &txpoolOnPendingBlockServer{stream})
+}
+
+type Txpool_OnPendingBlockServer interface {
+	Send(*OnPendingBlockReply) error
+	grpc.ServerStream
+}
+
+type txpoolOnPendingBlockServer struct {
+	grpc.ServerStream
+}
+
+func (x *txpoolOnPendingBlockServer) Send(m *OnPendingBlockReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Txpool_OnMinedBlock_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(OnMinedBlockRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TxpoolServer).OnMinedBlock(m, &txpoolOnMinedBlockServer{stream})
+}
+
+type Txpool_OnMinedBlockServer interface {
+	Send(*OnMinedBlockReply) error
+	grpc.ServerStream
+}
+
+type txpoolOnMinedBlockServer struct {
+	grpc.ServerStream
+}
+
+func (x *txpoolOnMinedBlockServer) Send(m *OnMinedBlockReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Txpool_ServiceDesc is the grpc.ServiceDesc for Txpool service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -240,6 +360,16 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "OnAdd",
 			Handler:       _Txpool_OnAdd_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "OnPendingBlock",
+			Handler:       _Txpool_OnPendingBlock_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "OnMinedBlock",
+			Handler:       _Txpool_OnMinedBlock_Handler,
 			ServerStreams: true,
 		},
 	},
