@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 	"testing"
 	"time"
 )
@@ -1104,4 +1105,94 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 		t.Log("-", common.Bytes2Hex(val))
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
 	}
+}
+
+type getKVMachine struct {
+	bucket        string
+	snKV          RwKV
+	modelKV       RwKV
+	overWriteKeys [][20]byte
+	snKeys        [][20]byte
+	newKeys       [][20]byte
+	allKeys       [][20]byte
+}
+
+func (m *getKVMachine) Init(t *rapid.T) {
+	m.bucket = dbutils.PlainStateBucket
+	m.snKV = NewMemKV()
+	m.modelKV = NewMemKV()
+	m.snKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
+		return len(_v) > 0
+	}).Draw(t, "generate keys").([][20]byte)
+	m.overWriteKeys = rapid.SliceOf(rapid.SampledFrom(m.snKeys)).Draw(t, "get snKeys").([][20]byte)
+	m.newKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Draw(t, "generate new keys").([][20]byte)
+	m.allKeys = append(m.snKeys, m.overWriteKeys...)
+	m.allKeys = append(m.snKeys, m.newKeys...)
+	notExistingKeys := rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Draw(t, "generate not excisting keys").([][20]byte)
+	m.allKeys = append(m.snKeys, notExistingKeys...)
+
+	txSn, err := m.snKV.BeginRw(context.Background())
+	require.NoError(t, err)
+
+	txModel, err := m.modelKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer txModel.Rollback()
+	for _, key := range m.snKeys {
+		innerErr := txSn.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+		innerErr = txModel.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+	}
+
+	//save snapshot and wrap new write db
+	err = txSn.Commit()
+	require.NoError(t, err)
+	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
+	txSn, err = m.snKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer txSn.Rollback()
+
+	for _, key := range m.overWriteKeys {
+		innerErr := txSn.Put(m.bucket, key[:], []byte("overwrite_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+		innerErr = txModel.Put(m.bucket, key[:], []byte("overwrite_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+	}
+	for _, key := range m.newKeys {
+		innerErr := txSn.Put(m.bucket, key[:], []byte("new_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+		innerErr = txModel.Put(m.bucket, key[:], []byte("new_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+	}
+	err = txSn.Commit()
+	require.NoError(t, err)
+	err = txModel.Commit()
+	require.NoError(t, err)
+}
+
+func (m *getKVMachine) Check(t *rapid.T) {
+}
+
+func (m *getKVMachine) Get(t *rapid.T) {
+	key := rapid.SampledFrom(m.allKeys).Draw(t, "get a key").([20]byte)
+	var (
+		v1, v2     []byte
+		err1, err2 error
+	)
+	err := m.snKV.View(context.Background(), func(tx Tx) error {
+		v1, err1 = tx.GetOne(m.bucket, key[:])
+		return nil
+	})
+	require.NoError(t, err)
+	err = m.modelKV.View(context.Background(), func(tx Tx) error {
+		v2, err2 = tx.GetOne(m.bucket, key[:])
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, err1, err2)
+	require.Equal(t, v1, v2)
+}
+
+func TestGet(t *testing.T) {
+	rapid.Check(t, rapid.Run(&getKVMachine{}))
 }
