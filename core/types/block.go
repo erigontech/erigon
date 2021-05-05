@@ -1202,6 +1202,7 @@ func (b *Block) Hash() common.Hash {
 
 type Blocks []*Block
 
+// BlocksPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
 type BlocksPubSub struct {
 	sync.Mutex
 	id    uint
