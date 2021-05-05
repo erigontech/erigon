@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -301,8 +300,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blocks = append(blocks, block)
 	}
 
-	traces := []ParityTrace{}
-
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	stream.WriteArrayStart()
+	defer stream.WriteArrayEnd()
+	first := true
 	// Execute all transactions in picked blocks
 	for _, block := range blocks {
 		t, tErr := api.callManyTransactions(ctx, dbtx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
@@ -313,17 +314,19 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			// Check if transaction concerns any of the addresses we wanted
 			if filter_trace(trace, fromAddresses, toAddresses) {
 				for _, pt := range trace.Trace {
-					traces = append(traces, *pt)
+					if !first {
+						stream.WriteMore()
+					}
+					first = false
+					b, err := json.Marshal(pt)
+					if err != nil {
+						return err
+					}
+					stream.Write(b)
 				}
 			}
 		}
 	}
-	b, err := json.Marshal(traces)
-	if err != nil {
-		return err
-	}
-	stream.Write(b)
-
 	return nil
 }
 
