@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -456,21 +455,25 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	if metrics.Enabled {
 		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
 		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	var grpcServer *grpc.Server
-	cpus := uint32(runtime.GOMAXPROCS(-1))
+	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
 		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time: 10 * time.Minute,
+		// Don't drop the connection, settings accordign to this comment on GitHub
+		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
 		}),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
