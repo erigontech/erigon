@@ -1814,8 +1814,11 @@ public:
     env::operate_options options;
 
     MDBX_CXX11_CONSTEXPR operate_parameters() noexcept {}
-    MDBX_env_flags_t make_flags(bool accede = true, ///< \copydoc MDBX_ACCEDE
-                                bool use_subdirectory = false) const;
+    MDBX_env_flags_t
+    make_flags(bool accede = true, ///< \copydoc MDBX_ACCEDE
+               bool use_subdirectory =
+                   false ///< use subdirectory to place the DB files
+    ) const;
     static env::mode mode_from_flags(MDBX_env_flags_t) noexcept;
     static env::durability durability_from_flags(MDBX_env_flags_t) noexcept;
     inline static env::reclaiming_options
@@ -2491,6 +2494,9 @@ public:
   /// increase in the length of the value will be twice as slow, since it will
   /// require splitting already filled pages.
   ///
+  /// \param [in] map   A map handle to append
+  /// \param [in] key   A key to be append
+  /// \param [in] value A value to store with the key
   /// \param [in] multivalue_order_preserved
   /// If `multivalue_order_preserved == true` then the same rules applied for
   /// to pages of nested b+tree of multimap's values.

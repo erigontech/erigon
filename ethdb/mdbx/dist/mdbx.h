@@ -1951,17 +1951,49 @@ enum MDBX_option_t {
    * Default is 0, i.e. by default no spilling performed during starting nested
    * transactions, that correspond historically behaviour. */
   MDBX_opt_spill_parent4child_denominator,
+
+  /** \brief Controls the in-process threshold of semi-empty pages merge.
+   * \warning This is experimental option and subject for change or removal.
+   * \details This option controls the in-process threshold of minimum page
+   * fill, as used space of percentage of a page. Neighbour pages emptier than
+   * this value are candidates for merging. The threshold value is specified
+   * in 1/65536 of percent, which is equivalent to the 16-dot-16 fixed point
+   * format. The specified value must be in the range from 12.5% (almost empty)
+   * to 50% (half empty) which corresponds to the range from 8192 and to 32768
+   * in units respectively. */
+  MDBX_opt_merge_threshold_16dot16_percent,
 };
 #ifndef __cplusplus
 /** \ingroup c_settings */
 typedef enum MDBX_option_t MDBX_option_t;
 #endif
 
+/** \brief Sets the value of a runtime options for an environment.
+ * \ingroup c_settings
+ *
+ * \param [in] env     An environment handle returned by \ref mdbx_env_create().
+ * \param [in] option  The option from \ref MDBX_option_t to set value of it.
+ * \param [in] value   The value of option to be set.
+ *
+ * \see MDBX_option_t
+ * \see mdbx_env_get_option()
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
                                     const uint64_t value);
+
+/** \brief Gets the value of runtime options from an environment.
+ * \ingroup c_settings
+ *
+ * \param [in] env     An environment handle returned by \ref mdbx_env_create().
+ * \param [in] option  The option from \ref MDBX_option_t to get value of it.
+ * \param [out] pvalue The address where the option's value will be stored.
+ *
+ * \see MDBX_option_t
+ * \see mdbx_env_get_option()
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_get_option(const MDBX_env *env,
                                     const MDBX_option_t option,
-                                    uint64_t *value);
+                                    uint64_t *pvalue);
 
 /** \brief Open an environment instance.
  * \ingroup c_opening
@@ -2876,12 +2908,23 @@ LIBMDBX_INLINE_API(int, mdbx_env_get_maxdbs,
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API size_t mdbx_default_pagesize(void);
 
 /** \brief Returns basic information about system RAM.
+ * This function provides a portable way to get information about available RAM
+ * and can be useful in that it returns the same information that libmdbx uses
+ * internally to adjust various options and control readahead.
  * \ingroup c_statinfo
- */
+ *
+ * \param [out] page_size     Optional address where the system page size
+ *                            will be stored.
+ * \param [out] total_pages   Optional address where the number of total RAM
+ *                            pages will be stored.
+ * \param [out] avail_pages   Optional address where the number of
+ *                            available/free RAM pages will be stored.
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
                                     intptr_t *avail_pages);
 
-/** \brief Get the maximum size of keys can write.
+/** \brief Returns the maximum size of keys can put.
  * \ingroup c_statinfo
  *
  * \param [in] env    An environment handle returned by \ref mdbx_env_create().
@@ -2893,7 +2936,7 @@ LIBMDBX_API int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int
 mdbx_env_get_maxkeysize_ex(const MDBX_env *env, MDBX_db_flags_t flags);
 
-/** \brief Get the maximum size of data we can write.
+/** \brief Returns the maximum size of data we can put.
  * \ingroup c_statinfo
  *
  * \param [in] env    An environment handle returned by \ref mdbx_env_create().
@@ -2911,9 +2954,10 @@ mdbx_env_get_maxvalsize_ex(const MDBX_env *env, MDBX_db_flags_t flags);
 MDBX_NOTHROW_PURE_FUNCTION MDBX_DEPRECATED LIBMDBX_API int
 mdbx_env_get_maxkeysize(const MDBX_env *env);
 
-/** \brief Set application information associated with the \ref MDBX_env.
- * \ingroup c_settings
+/** \brief Sets application information (a context pointer) associated with
+ * the environment.
  * \see mdbx_env_get_userctx()
+ * \ingroup c_settings
  *
  * \param [in] env  An environment handle returned by \ref mdbx_env_create().
  * \param [in] ctx  An arbitrary pointer for whatever the application needs.
@@ -2921,9 +2965,10 @@ mdbx_env_get_maxkeysize(const MDBX_env *env);
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_set_userctx(MDBX_env *env, void *ctx);
 
-/** \brief Get the application information associated with the MDBX_env.
- * \ingroup c_statinfo
+/** \brief Returns an application information (a context pointer) associated
+ * with the environment.
  * \see mdbx_env_set_userctx()
+ * \ingroup c_statinfo
  *
  * \param [in] env An environment handle returned by \ref mdbx_env_create()
  * \returns The pointer set by \ref mdbx_env_set_userctx()
@@ -2969,7 +3014,8 @@ mdbx_env_get_userctx(const MDBX_env *env);
  *                        to \ref MDBX_NOMETASYNC or \ref MDBX_SAFE_NOSYNC
  *                        description. \see sync_modes
  *
- * \param [out] txn    Address where the new MDBX_txn handle will be stored.
+ * \param [out] txn    Address where the new \ref MDBX_txn handle
+ *                     will be stored.
  *
  * \param [in] context A pointer to application context to be associated with
  *                     created transaction and could be retrieved by
@@ -3030,7 +3076,8 @@ LIBMDBX_API int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent,
  *                        to \ref MDBX_NOMETASYNC or \ref MDBX_SAFE_NOSYNC
  *                        description. \see sync_modes
  *
- * \param [out] txn    Address where the new MDBX_txn handle will be stored.
+ * \param [out] txn    Address where the new \ref MDBX_txn handle
+ *                     will be stored.
  *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
@@ -3052,7 +3099,8 @@ LIBMDBX_INLINE_API(int, mdbx_txn_begin,
   return mdbx_txn_begin_ex(env, parent, flags, txn, NULL);
 }
 
-/** \brief Set application information associated with the \ref MDBX_txn.
+/** \brief Sets application information associated (a context pointer) with the
+ * transaction.
  * \ingroup c_transactions
  * \see mdbx_txn_get_userctx()
  *
@@ -3063,7 +3111,8 @@ LIBMDBX_INLINE_API(int, mdbx_txn_begin,
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_txn_set_userctx(MDBX_txn *txn, void *ctx);
 
-/** \brief Get the application information associated with the MDBX_txn.
+/** \brief Returns an application information (a context pointer) associated
+ * with the transaction.
  * \ingroup c_transactions
  * \see mdbx_txn_set_userctx()
  *
@@ -3286,8 +3335,8 @@ LIBMDBX_API int mdbx_txn_abort(MDBX_txn *txn);
 /** \brief Marks transaction as broken.
  * \ingroup c_transactions
  *
- * Function keeps the transaction handle and corresponding locks, but it
- * is not possible to perform any operations in a broken transaction.
+ * Function keeps the transaction handle and corresponding locks, but makes
+ * impossible to perform any operations within a broken transaction.
  * Broken transaction must then be aborted explicitly later.
  *
  * \param [in] txn  A transaction handle returned by \ref mdbx_txn_begin().
@@ -4131,7 +4180,7 @@ LIBMDBX_API MDBX_dbi mdbx_cursor_dbi(const MDBX_cursor *cursor);
 LIBMDBX_API int mdbx_cursor_copy(const MDBX_cursor *src, MDBX_cursor *dest);
 
 /** \brief Retrieve by cursor.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function retrieves key/data pairs from the database. The address and
  * length of the key are returned in the object to which key refers (except
@@ -4155,7 +4204,7 @@ LIBMDBX_API int mdbx_cursor_get(MDBX_cursor *cursor, MDBX_val *key,
                                 MDBX_val *data, MDBX_cursor_op op);
 
 /** \brief Store by cursor.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function stores key/data pairs into the database. The cursor is
  * positioned at the new item, or on failure usually near it.
@@ -4238,7 +4287,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
                                 MDBX_val *data, MDBX_put_flags_t flags);
 
 /** \brief Delete current key/data pair.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function deletes the key/data pair to which the cursor refers. This
  * does not invalidate the cursor, so operations such as \ref MDBX_NEXT can
@@ -4270,7 +4319,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
 LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
 
 /** \brief Return count of duplicates for current key.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This call is valid for all databases, but reasonable only for that support
  * sorted duplicate data items \ref MDBX_DUPSORT.
@@ -4809,8 +4858,8 @@ LIBMDBX_API int mdbx_env_turn_for_recovery(MDBX_env *env, unsigned target_meta);
 
 /** @} B-tree Traversal */
 
-/**** Attribute support functions for Nexenta
- * *******************************************/
+/**** Attribute support functions for Nexenta (scheduled for removal)
+ * *****************************************************************/
 #if defined(MDBX_NEXENTA_ATTRS) || defined(DOXYGEN)
 /** \defgroup nexenta Attribute support functions for Nexenta
  * \ingroup c_crud

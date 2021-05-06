@@ -16,7 +16,8 @@ TODO:
 
 TODO:
 
-- [Documentation issue](https://github.com/erthink/libmdbx/issues/177).
+ - [Documentation issue](https://github.com/erthink/libmdbx/issues/177).
+ - [C++ Buffer issue](https://github.com/erthink/libmdbx/issues/191).
 
 Acknowledgements:
 
@@ -28,6 +29,7 @@ Acknowledgements:
 
 New features:
 
+ - Added `mdbx_env_set_option()` and `mdbx_env_get_option()` for controls various runtime options for an environment (announce of this feature was missed in a previous news).
  - Added `MDBX_DISABLE_PAGECHECKS` build option to disable some checks to reduce an overhead
    and detection probability of database corruption to a values closer to the LMDB.
    The `MDBX_DISABLE_PAGECHECKS=1` provides a performance boost of about 10% in CRUD scenarios,
@@ -87,6 +89,7 @@ Fixes:
  - Fixed non-alloy build for Windows.
  - Switched to using Heap-functions instead of LocalAlloc/LocalFree on Windows.
  - Fixed `mdbx_env_stat_ex()` to returning statistics of the whole environment instead of MainDB only (https://github.com/erthink/libmdbx/issues/190).
+ - Fixed building by GCC 4.8.5 (added workaround for a preprocessor's bug).
 
 ## v0.9.3 at 2021-02-02
 

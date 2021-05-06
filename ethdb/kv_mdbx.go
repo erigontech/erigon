@@ -165,6 +165,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
 			return nil, err
 		}
+		// must be in the range from 12.5% (almost empty)
+		//   * to 50% (half empty) which corresponds to the range from 8192 and to 32768
+		//   * in units respectively
+		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, 32768); err != nil {
+			return nil, err
+		}
 	}
 
 	db := &MdbxKV{

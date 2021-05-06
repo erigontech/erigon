@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 63a3919e7fbf25fc1973ac8af06b1ab02a76f88aa07b799a9817ab2e3545e93b_v0_9_3_188_gca66d29a
+#define MDBX_BUILD_SOURCERY f3d117bd0bc35fdd62fe980d8c0004ea83fd2e6ceddcfa57d7bd96b28ec0bdb3_v0_9_3_193_g1275bdb6
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1570,24 +1570,21 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 /** Controls online database auto-compactification during write-transactions. */
 #ifndef MDBX_ENABLE_REFUND
 #define MDBX_ENABLE_REFUND 1
-#endif
-#if !(MDBX_ENABLE_REFUND == 0 || MDBX_ENABLE_REFUND == 1)
+#elif !(MDBX_ENABLE_REFUND == 0 || MDBX_ENABLE_REFUND == 1)
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
 
 /** Controls gathering statistics for page operations. */
 #ifndef MDBX_ENABLE_PGOP_STAT
 #define MDBX_ENABLE_PGOP_STAT 1
-#endif
-#if !(MDBX_ENABLE_PGOP_STAT == 0 || MDBX_ENABLE_PGOP_STAT == 1)
+#elif !(MDBX_ENABLE_PGOP_STAT == 0 || MDBX_ENABLE_PGOP_STAT == 1)
 #error MDBX_ENABLE_PGOP_STAT must be defined as 0 or 1
 #endif /* MDBX_ENABLE_PGOP_STAT */
 
 /** Controls use of POSIX madvise() hints and friends. */
 #ifndef MDBX_ENABLE_MADVISE
 #define MDBX_ENABLE_MADVISE 1
-#endif
-#if !(MDBX_ENABLE_MADVISE == 0 || MDBX_ENABLE_MADVISE == 1)
+#elif !(MDBX_ENABLE_MADVISE == 0 || MDBX_ENABLE_MADVISE == 1)
 #error MDBX_ENABLE_MADVISE must be defined as 0 or 1
 #endif /* MDBX_ENABLE_MADVISE */
 
@@ -1595,24 +1592,21 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
  * database corruption to a values closer to the LMDB. */
 #ifndef MDBX_DISABLE_PAGECHECKS
 #define MDBX_DISABLE_PAGECHECKS 0
-#endif
-#if !(MDBX_DISABLE_PAGECHECKS == 0 || MDBX_DISABLE_PAGECHECKS == 1)
+#elif !(MDBX_DISABLE_PAGECHECKS == 0 || MDBX_DISABLE_PAGECHECKS == 1)
 #error MDBX_DISABLE_PAGECHECKS must be defined as 0 or 1
 #endif /* MDBX_DISABLE_PAGECHECKS */
 
 #ifndef MDBX_PNL_PREALLOC_FOR_RADIXSORT
 #define MDBX_PNL_PREALLOC_FOR_RADIXSORT 1
-#endif
-#if !(MDBX_PNL_PREALLOC_FOR_RADIXSORT == 0 ||                                  \
-      MDBX_PNL_PREALLOC_FOR_RADIXSORT == 1)
+#elif !(MDBX_PNL_PREALLOC_FOR_RADIXSORT == 0 ||                                \
+        MDBX_PNL_PREALLOC_FOR_RADIXSORT == 1)
 #error MDBX_PNL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
 #endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
 
 #ifndef MDBX_DPL_PREALLOC_FOR_RADIXSORT
 #define MDBX_DPL_PREALLOC_FOR_RADIXSORT 1
-#endif
-#if !(MDBX_DPL_PREALLOC_FOR_RADIXSORT == 0 ||                                  \
-      MDBX_DPL_PREALLOC_FOR_RADIXSORT == 1)
+#elif !(MDBX_DPL_PREALLOC_FOR_RADIXSORT == 0 ||                                \
+        MDBX_DPL_PREALLOC_FOR_RADIXSORT == 1)
 #error MDBX_DPL_PREALLOC_FOR_RADIXSORT must be defined as 0 or 1
 #endif /* MDBX_DPL_PREALLOC_FOR_RADIXSORT */
 
@@ -1630,8 +1624,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #else
 #define MDBX_FAKE_SPILL_WRITEMAP 0
 #endif
-#endif
-#if !(MDBX_FAKE_SPILL_WRITEMAP == 0 || MDBX_FAKE_SPILL_WRITEMAP == 1)
+#elif !(MDBX_FAKE_SPILL_WRITEMAP == 0 || MDBX_FAKE_SPILL_WRITEMAP == 1)
 #error MDBX_FAKE_SPILL_WRITEMAP must be defined as 0 or 1
 #endif /* MDBX_FAKE_SPILL_WRITEMAP */
 
@@ -1641,24 +1634,21 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
  * different option value are incompatible. */
 #ifndef MDBX_PNL_ASCENDING
 #define MDBX_PNL_ASCENDING 0
-#endif
-#if !(MDBX_PNL_ASCENDING == 0 || MDBX_PNL_ASCENDING == 1)
+#elif !(MDBX_PNL_ASCENDING == 0 || MDBX_PNL_ASCENDING == 1)
 #error MDBX_PNL_ASCENDING must be defined as 0 or 1
 #endif /* MDBX_PNL_ASCENDING */
 
 /** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
 #ifndef MDBX_WITHOUT_MSVC_CRT
 #define MDBX_WITHOUT_MSVC_CRT 1
-#endif
-#if !(MDBX_WITHOUT_MSVC_CRT == 0 || MDBX_WITHOUT_MSVC_CRT == 1)
+#elif !(MDBX_WITHOUT_MSVC_CRT == 0 || MDBX_WITHOUT_MSVC_CRT == 1)
 #error MDBX_WITHOUT_MSVC_CRT must be defined as 0 or 1
 #endif /* MDBX_WITHOUT_MSVC_CRT */
 
 /** Size of buffer used during copying a environment/database file. */
 #ifndef MDBX_ENVCOPY_WRITEBUF
 #define MDBX_ENVCOPY_WRITEBUF 1048576u
-#endif
-#if MDBX_ENVCOPY_WRITEBUF < 65536u || MDBX_ENVCOPY_WRITEBUF > 1073741824u ||   \
+#elif MDBX_ENVCOPY_WRITEBUF < 65536u || MDBX_ENVCOPY_WRITEBUF > 1073741824u || \
     MDBX_ENVCOPY_WRITEBUF % 65536u
 #error MDBX_ENVCOPY_WRITEBUF must be defined in range 65536..1073741824 and be multiple of 65536
 #endif /* MDBX_ENVCOPY_WRITEBUF */
@@ -1666,15 +1656,18 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 /** Forces assertion checking */
 #ifndef MDBX_FORCE_ASSERTIONS
 #define MDBX_FORCE_ASSERTIONS 1
-#endif
-#if !(MDBX_FORCE_ASSERTIONS == 0 || MDBX_FORCE_ASSERTIONS == 1)
+#elif !(MDBX_FORCE_ASSERTIONS == 0 || MDBX_FORCE_ASSERTIONS == 1)
 #error MDBX_FORCE_ASSERTIONS must be defined as 0 or 1
 #endif /* MDBX_FORCE_ASSERTIONS */
 
 /** Presumed malloc size overhead for each allocation
  * to adjust allocations to be more aligned. */
 #ifndef MDBX_ASSUME_MALLOC_OVERHEAD
+#ifdef __SIZEOF_POINTER__
+#define MDBX_ASSUME_MALLOC_OVERHEAD (__SIZEOF_POINTER__ * 2u)
+#else
 #define MDBX_ASSUME_MALLOC_OVERHEAD (sizeof(void *) * 2u)
+#endif
 #elif MDBX_ASSUME_MALLOC_OVERHEAD < 0 || MDBX_ASSUME_MALLOC_OVERHEAD > 64 ||   \
     MDBX_ASSUME_MALLOC_OVERHEAD % 4
 #error MDBX_ASSUME_MALLOC_OVERHEAD must be defined in range 0..64 and be multiple of 4
@@ -1868,8 +1861,8 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #define MDBX_64BIT_CAS_CONFIG STRINGIFY(MDBX_64BIT_CAS)
 #endif /* MDBX_64BIT_CAS */
 
-#if !defined(MDBX_UNALIGNED_OK)
-#if defined(_MSC_VER)
+#ifndef MDBX_UNALIGNED_OK
+#ifdef _MSC_VER
 #define MDBX_UNALIGNED_OK 1 /* avoid MSVC misoptimization */
 #elif __CLANG_PREREQ(5, 0) || __GNUC_PREREQ(5, 0)
 #define MDBX_UNALIGNED_OK 0 /* expecting optimization is well done */
@@ -2877,7 +2870,10 @@ struct MDBX_env {
   unsigned me_leaf_nodemax; /* max size of a leaf-node */
   uint8_t me_psize2log;     /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
-  unsigned me_os_psize; /* OS page size, from mdbx_syspagesize() */
+  uint16_t me_merge_threshold,
+      me_merge_threshold_gc;  /* pages emptier than this are candidates for
+                                 merging */
+  unsigned me_os_psize;       /* OS page size, from mdbx_syspagesize() */
   unsigned me_maxreaders;     /* size of the reader table */
   MDBX_dbi me_maxdbs;         /* size of the DB table */
   uint32_t me_pid;            /* process ID of this env */
@@ -2904,6 +2900,7 @@ struct MDBX_env {
     uint8_t spill_max_denominator;
     uint8_t spill_min_denominator;
     uint8_t spill_parent4child_denominator;
+    unsigned merge_threshold_16dot16_percent;
     union {
       unsigned all;
       /* tracks options with non-auto values but tuned by user */
@@ -14164,6 +14161,16 @@ fail:
   return rc;
 }
 
+static void recalculate_merge_threshold(MDBX_env *env) {
+  const unsigned bytes = page_space(env);
+  env->me_merge_threshold = (uint16_t)(
+      bytes - (bytes * env->me_options.merge_threshold_16dot16_percent >> 16));
+  env->me_merge_threshold_gc = (uint16_t)(
+      bytes - ((env->me_options.merge_threshold_16dot16_percent > 19005)
+                   ? bytes / 3 /* 33 % */
+                   : bytes / 4 /* 25 % */));
+}
+
 static void __cold mdbx_setup_pagesize(MDBX_env *env, const size_t pagesize) {
   STATIC_ASSERT(PTRDIFF_MAX > MAX_MAPSIZE);
   STATIC_ASSERT(MIN_PAGESIZE > sizeof(MDBX_page) + sizeof(MDBX_meta));
@@ -14196,6 +14203,7 @@ static void __cold mdbx_setup_pagesize(MDBX_env *env, const size_t pagesize) {
   env->me_psize2log = (uint8_t)log2n_powerof2(pagesize);
   mdbx_assert(env, pgno2bytes(env, 1) == pagesize);
   mdbx_assert(env, bytes2pgno(env, pagesize + pagesize) == 2);
+  recalculate_merge_threshold(env);
 
   const pgno_t max_pgno = bytes2pgno(env, MAX_MAPSIZE);
   if (!env->me_options.flags.non_auto.dp_limit) {
@@ -14251,6 +14259,7 @@ __cold int mdbx_env_create(MDBX_env **penv) {
   env->me_options.spill_min_denominator = 8;
   env->me_options.spill_parent4child_denominator = 0;
   env->me_options.dp_loose_limit = 64;
+  env->me_options.merge_threshold_16dot16_percent = 65536 / 4 /* 25% */;
 
   int rc;
   const size_t os_psize = mdbx_syspagesize();
@@ -20041,12 +20050,10 @@ static int mdbx_rebalance(MDBX_cursor *mc) {
   STATIC_ASSERT(P_BRANCH == 1);
   const unsigned minkeys = (pagetype & P_BRANCH) + 1;
 
-  /* The threshold of minimum page fill, as a number of free bytes on a page.
-   * Pages emptier than this are candidates for merging. */
-  unsigned room_threshold = (mc->mc_dbi == FREE_DBI)
-                                ? page_space(mc->mc_txn->mt_env) * 2u / 3u
-                                : page_space(mc->mc_txn->mt_env) / 2u;
-  mdbx_cassert(mc, room_threshold * 2 >= page_space(mc->mc_txn->mt_env));
+  /* Pages emptier than this are candidates for merging. */
+  unsigned room_threshold = likely(mc->mc_dbi != FREE_DBI)
+                                ? mc->mc_txn->mt_env->me_merge_threshold
+                                : mc->mc_txn->mt_env->me_merge_threshold_gc;
 
   const MDBX_page *const tp = mc->mc_pg[mc->mc_top];
   const unsigned numkeys = page_numkeys(tp);
@@ -25062,6 +25069,13 @@ __cold int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
     env->me_options.dp_loose_limit = (uint8_t)value;
     break;
 
+  case MDBX_opt_merge_threshold_16dot16_percent:
+    if (unlikely(value < 8192 || value > 32768))
+      return MDBX_EINVAL;
+    env->me_options.merge_threshold_16dot16_percent = (unsigned)value;
+    recalculate_merge_threshold(env);
+    break;
+
   default:
     return MDBX_EINVAL;
   }
@@ -25072,63 +25086,67 @@ __cold int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
 }
 
 __cold int mdbx_env_get_option(const MDBX_env *env, const MDBX_option_t option,
-                               uint64_t *value) {
+                               uint64_t *pvalue) {
   int err = check_env(env, false);
   if (unlikely(err != MDBX_SUCCESS))
     return err;
-  if (unlikely(!value))
+  if (unlikely(!pvalue))
     return MDBX_EINVAL;
 
   switch (option) {
   case MDBX_opt_sync_bytes:
     if (unlikely(!(env->me_flags & MDBX_ENV_ACTIVE)))
       return MDBX_EPERM;
-    *value = pgno2bytes(
+    *pvalue = pgno2bytes(
         env, atomic_load32(&env->me_lck->mti_autosync_threshold, mo_Relaxed));
     break;
 
   case MDBX_opt_sync_period:
     if (unlikely(!(env->me_flags & MDBX_ENV_ACTIVE)))
       return MDBX_EPERM;
-    *value = mdbx_osal_monotime_to_16dot16(
+    *pvalue = mdbx_osal_monotime_to_16dot16(
         atomic_load64(&env->me_lck->mti_autosync_period, mo_Relaxed));
     break;
 
   case MDBX_opt_max_db:
-    *value = env->me_maxdbs - CORE_DBS;
+    *pvalue = env->me_maxdbs - CORE_DBS;
     break;
 
   case MDBX_opt_max_readers:
-    *value = env->me_maxreaders;
+    *pvalue = env->me_maxreaders;
     break;
 
   case MDBX_opt_dp_reserve_limit:
-    *value = env->me_options.dp_reserve_limit;
+    *pvalue = env->me_options.dp_reserve_limit;
     break;
 
   case MDBX_opt_rp_augment_limit:
-    *value = env->me_options.rp_augment_limit;
+    *pvalue = env->me_options.rp_augment_limit;
     break;
 
   case MDBX_opt_txn_dp_limit:
-    *value = env->me_options.dp_limit;
+    *pvalue = env->me_options.dp_limit;
     break;
   case MDBX_opt_txn_dp_initial:
-    *value = env->me_options.dp_initial;
+    *pvalue = env->me_options.dp_initial;
     break;
 
   case MDBX_opt_spill_max_denominator:
-    *value = env->me_options.spill_max_denominator;
+    *pvalue = env->me_options.spill_max_denominator;
     break;
   case MDBX_opt_spill_min_denominator:
-    *value = env->me_options.spill_min_denominator;
+    *pvalue = env->me_options.spill_min_denominator;
     break;
   case MDBX_opt_spill_parent4child_denominator:
-    *value = env->me_options.spill_parent4child_denominator;
+    *pvalue = env->me_options.spill_parent4child_denominator;
     break;
 
   case MDBX_opt_loose_limit:
-    *value = env->me_options.dp_loose_limit;
+    *pvalue = env->me_options.dp_loose_limit;
+    break;
+
+  case MDBX_opt_merge_threshold_16dot16_percent:
+    *pvalue = env->me_options.merge_threshold_16dot16_percent;
     break;
 
   default:
@@ -28056,9 +28074,9 @@ __dll_export
         0,
         9,
         3,
-        188,
-        {"2021-05-03T01:36:38+03:00", "a1d03921fd2e5fc46849e6522b6c6929ed4ec773", "ca66d29a0f8b49f467f589fa11aeb2777dbbf5a1",
-         "v0.9.3-188-gca66d29a"},
+        193,
+        {"2021-05-06T02:05:33+03:00", "b0c05720dac4eabc77a664b84ad463110480901d", "1275bdb6234ebaf6317c3e4d0961961b95d595e2",
+         "v0.9.3-193-g1275bdb6"},
         sourcery};
 
 __dll_export
