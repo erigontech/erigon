@@ -211,6 +211,7 @@ func (b *Buffer) merge(other *Buffer) {
 }
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
+//Deprecated
 type TrieDbState struct {
 	t                 *trie.Trie
 	tMu               *sync.Mutex
@@ -230,6 +231,7 @@ type TrieDbState struct {
 	incarnationMap    map[common.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
+//Deprecated
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
 
