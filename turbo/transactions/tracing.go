@@ -313,7 +313,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 		l.stream.WriteObjectEnd()
 	}
 	l.stream.WriteObjectEnd()
-	return nil
+	return l.stream.Flush()
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault

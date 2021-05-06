@@ -434,6 +434,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		}
 		stream.WriteObjectEnd()
 		stream.Write([]byte("\n"))
+		stream.Flush()
 		return nil
 	} else {
 		result, err := callb.call(ctx, msg.Method, args, stream)

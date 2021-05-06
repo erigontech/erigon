@@ -31,7 +31,6 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 const (
@@ -226,26 +225,6 @@ func (t *httpServerConn) RemoteAddr() string {
 // SetWriteDeadline does nothing and always returns nil.
 func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 
-type StreamFlusher struct {
-	written    int
-	flushLimit int
-	w          io.Writer
-	f          http.Flusher
-}
-
-func (sf *StreamFlusher) Write(b []byte) (int, error) {
-	c, err := sf.w.Write(b)
-	sf.written += c
-	if err != nil {
-		return c, err
-	}
-	if sf.written > sf.flushLimit {
-		sf.f.Flush()
-		sf.written = 0
-	}
-	return c, nil
-}
-
 // ServeHTTP serves JSON-RPC requests over HTTP.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Permit dumb empty requests for remote health-checks (AWS)
@@ -274,18 +253,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.close()
-	var writer io.Writer
-	if flusher, ok := w.(http.Flusher); ok {
-		writer = &StreamFlusher{w: w, f: flusher}
-	} else {
-		writer = w
-	}
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, writer, 4096)
-	defer func() {
-		if stErr := stream.Flush(); stErr != nil {
-			log.Error("Flushing stream", "error", stErr)
-		}
-	}()
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
 	s.serveSingleRequest(ctx, codec, stream)
 }
 
