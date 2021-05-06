@@ -184,15 +184,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			return err
 		}
 		if useSilkworm {
-			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			if blockNum, err = silkworm.ExecuteBlocks(cfg.silkwormExecutionFunc, txn, cfg.chainConfig.ChainID, blockNum, to, int(cfg.batchSize), cfg.writeReceipts); err != nil {
+			if blockNum, err = silkworm.ExecuteBlocks(cfg.silkwormExecutionFunc, tx, cfg.chainConfig.ChainID, blockNum, to, int(cfg.batchSize), cfg.writeReceipts); err != nil {
 				return err
 			}
 		} else {
-			txn := tx.(ethdb.HasTx).Tx()
 			var block *types.Block
-			if block, err = readBlock(blockNum, txn); err != nil {
+			if block, err = readBlock(blockNum, tx); err != nil {
 				return err
 			}
 			if block == nil {
