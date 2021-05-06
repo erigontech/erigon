@@ -34,7 +34,7 @@ func WithBlock(block uint64, key []byte) []byte {
 	binary.BigEndian.PutUint64(b, block)
 	return append(b, key...)
 }
-func TestName(t *testing.T) {
+func TestMatreshkaStream(t *testing.T) {
 	t.Skip()
 	chaindataDir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir := "/home/b00ris/event_stream"
@@ -64,15 +64,26 @@ func TestName(t *testing.T) {
 	tmpDb.ClearBuckets(dbutils.HeadHeaderKey)
 
 	snkv := ethdb.NewSnapshotKV().DB(tmpDb.RwKV()).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
+	defer snkv.Close()
 	db := ethdb.NewObjectDatabase(snkv)
 
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := snkv.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	//
+	//tx, err := db.Begin(context.Background(), ethdb.RW)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	psCursor, err := tx.Cursor(dbutils.PlainStateBucket)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	i := 5
-	err = tx.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(psCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		fmt.Println(common.Bytes2Hex(k))
 		i--
 		if i == 0 {
@@ -88,7 +99,7 @@ func TestName(t *testing.T) {
 	fmt.Println("currentBlock", currentBlock.Number.Uint64())
 	blockNum := uint64(1)
 	limit := currentBlock.Number.Uint64()
-	blockchain, err := core.NewBlockChain(tx, nil, chainConfig, ethash.NewFaker(), vm.Config{
+	blockchain, err := core.NewBlockChain(db, nil, chainConfig, ethash.NewFaker(), vm.Config{
 		NoReceipts: true,
 	}, nil, nil)
 	if err != nil {
@@ -96,23 +107,16 @@ func TestName(t *testing.T) {
 	}
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNum))
+	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(db, tx, blockNum))
 	tt := time.Now()
 	ttt := time.Now()
 	for currentBlock := blockNum; currentBlock < blockNum+limit; currentBlock++ {
-		//fmt.Println("exsecuted", currentBlock)
-		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(tx, tx, currentBlock))
-		rtx, err := db.RwKV().BeginRo(context.Background())
+		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(db, tx, currentBlock))
+		block, err := rawdb.ReadBlockByNumber(tx, currentBlock)
 		if err != nil {
-			rtx.Rollback()
 			t.Fatal(err, currentBlock)
 		}
-		block, err := rawdb.ReadBlockByNumber(rtx, currentBlock)
-		if err != nil {
-			rtx.Rollback()
-			t.Fatal(err, currentBlock)
-		}
-		rtx.Rollback()
+
 		_, err = core.ExecuteBlockEphemerally(blockchain.Config(), blockchain.GetVMConfig(), getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter)
 		if err != nil {
 			t.Fatal(err, currentBlock)
@@ -153,10 +157,15 @@ func TestName(t *testing.T) {
 
 		stateReaderWriter.Reset()
 		if currentBlock%10000 == 0 {
-			err = tx.CommitAndBegin(context.Background())
+			err = tx.Commit()
 			if err != nil {
 				t.Fatal(err, currentBlock)
 			}
+			tx, err = snkv.BeginRw(context.Background())
+			if err != nil {
+				t.Fatal(err, currentBlock)
+			}
+
 			dr := time.Since(ttt)
 			fmt.Println(currentBlock, "finished", "acc-", accDiffLen, "st-", stDiffLen, "codes - ", codesDiffLen, "all -", time.Since(tt), "chunk - ", dr, "blocks/s", 10000/dr.Seconds())
 			ttt = time.Now()
