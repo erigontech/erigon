@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -506,3 +507,50 @@ func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }
+
+// TransactionsPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
+type TransactionsPubSub struct {
+	sync.Mutex
+	id    uint
+	last  Transaction
+	chans map[uint]chan Transaction
+}
+
+func (s *TransactionsPubSub) Sub() (ch chan Transaction, unsubscribe func()) {
+	s.Lock()
+	defer s.Unlock()
+	if s.chans == nil {
+		s.chans = make(map[uint]chan Transaction)
+	}
+	s.id++
+	id := s.id
+	ch = make(chan Transaction, 1)
+	s.chans[id] = ch
+	return ch, func() { s.unsubscribe(id) }
+}
+
+func (s *TransactionsPubSub) Pub(block Transaction) {
+	s.Lock()
+	defer s.Unlock()
+	s.last = block
+	for _, ch := range s.chans {
+		ch <- block
+	}
+}
+
+func (s *TransactionsPubSub) Last() Transaction {
+	s.Lock()
+	defer s.Unlock()
+	return s.last
+}
+
+func (s *TransactionsPubSub) unsubscribe(id uint) {
+	s.Lock()
+	defer s.Unlock()
+	ch, ok := s.chans[id]
+	if !ok { // double-unsubscribe support
+		return
+	}
+	close(ch)
+	delete(s.chans, id)
+}

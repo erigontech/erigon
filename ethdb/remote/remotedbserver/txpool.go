@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -27,7 +26,6 @@ type TxPoolServer struct {
 	txPool              txPool
 	pendingBlocksPubSub types.BlocksPubSub
 	minedBlocksPubSub   types.BlocksPubSub
-	minedBlockStreams   MinedBlockStreams
 }
 
 func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
@@ -134,8 +132,15 @@ func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 	ch, unsubscribe := s.pendingBlocksPubSub.Sub()
 	defer unsubscribe()
 
+	// send last saw block on hand-shake
 	var buf bytes.Buffer
-	for b := range ch {
+	b := s.pendingBlocksPubSub.Last()
+	buf.Reset()
+	if err := b.EncodeRLP(&buf); err != nil {
+		return err
+	}
+
+	for b = range ch {
 		buf.Reset()
 		if err := b.EncodeRLP(&buf); err != nil {
 			return err
@@ -150,57 +155,30 @@ func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 func (s *TxPoolServer) SendPendingBlock(block *types.Block) { s.pendingBlocksPubSub.Pub(block) }
 
 func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
-	s.minedBlockStreams.Add(reply)
-	<-reply.Context().Done()
-	return reply.Context().Err()
-}
+	ch, unsubscribe := s.minedBlocksPubSub.Sub()
+	defer unsubscribe()
 
-func (s *TxPoolServer) SendMinedBlock(block *types.Block) {
 	var buf bytes.Buffer
-	if err := block.EncodeRLP(&buf); err != nil {
-		//log error
-		return
+
+	// send last saw block on hand-shake
+	b := s.minedBlocksPubSub.Last()
+	buf.Reset()
+	if err := b.EncodeRLP(&buf); err != nil {
+		return err
 	}
-	reply := &proto_txpool.OnMinedBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}
-	s.minedBlockStreams.Send(reply)
-}
-
-// BlocksPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
-type MinedBlockStreams struct {
-	sync.Mutex
-	id    uint
-	chans map[uint]proto_txpool.Txpool_OnMinedBlockServer
-}
-
-func (s *MinedBlockStreams) Add(stream proto_txpool.Txpool_OnMinedBlockServer) (unsubscribe func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Txpool_OnMinedBlockServer)
+	if err := reply.Send(&proto_txpool.OnMinedBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}); err != nil {
+		return err
 	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.unsubscribe(id) }
-}
 
-func (s *MinedBlockStreams) Send(reply *proto_txpool.OnMinedBlockReply) {
-	s.Lock()
-	defer s.Unlock()
-	for _, stream := range s.chans {
-		if err := stream.Send(reply); err != nil {
-			fmt.Printf("errr from stream: %s\n", err)
-			_ = err //TODO: log me
+	for b = range ch {
+		buf.Reset()
+		if err := b.EncodeRLP(&buf); err != nil {
+			return err
+		}
+
+		if err := reply.Send(&proto_txpool.OnMinedBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}); err != nil {
+			return err
 		}
 	}
-}
-
-func (s *MinedBlockStreams) unsubscribe(id uint) {
-	s.Lock()
-	defer s.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
+	return nil
 }
