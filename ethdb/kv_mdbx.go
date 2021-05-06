@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 var _ DbCopier = &MdbxKV{}
@@ -311,6 +312,9 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
+	if !metrics.Enabled {
+		return
+	}
 	info, err := db.env.Info()
 	if err != nil {
 		return // ignore error for metrics collection
@@ -404,6 +408,9 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 }
 
 func (tx *MdbxTx) CollectMetrics() {
+	if !metrics.Enabled {
+		return
+	}
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
