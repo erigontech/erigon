@@ -120,7 +120,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 	}
 
 	if params.writeReceipts {
-		if err = rawdb.AppendReceipts(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum, receipts); err != nil {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
 	}
