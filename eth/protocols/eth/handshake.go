@@ -29,12 +29,12 @@ import (
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
-	handshakeTimeout = 5 * time.Second
+	HandshakeTimeout = 5 * time.Second
 )
 
 // Handshake executes the eth protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis blocks.
-func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
+func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter, timeout time.Duration) error {
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
@@ -54,8 +54,8 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		errc <- p.readStatus(network, &status, genesis, forkFilter)
 	}()
 
-	timeout := time.NewTimer(handshakeTimeout)
-	defer timeout.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -63,7 +63,7 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 			if err != nil {
 				return err
 			}
-		case <-timeout.C:
+		case <-timer.C:
 			return p2p.DiscReadTimeout
 		}
 	}
