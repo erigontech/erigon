@@ -48,26 +48,31 @@ func TestSnapshotMigratorStage(t *testing.T) {
 
 	db := ethdb.MustOpen(path.Join(dir, "chaindata"))
 	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	err = GenerateHeaderData(tx, 0, 11)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	err = tx.Commit()
-	if err != nil {
-		t.Fatal(err)
-	}
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 	}
-	currentSnapshotBlock := uint64(10)
 	generateChan := make(chan int)
 	go func() {
+		currentSnapshotBlock := uint64(10)
+		tx, err := db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		defer tx.Rollback()
+		err = GenerateHeaderData(tx, 0, 11)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+
 		for {
 			tx, err := db.Begin(context.Background(), ethdb.RW)
 			if err != nil {
@@ -83,7 +88,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 					tx.Rollback()
 					panic(err)
 				}
-				currentSnapshotBlock = uint64(newHeight)
+				currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
 			default:
 
 			}

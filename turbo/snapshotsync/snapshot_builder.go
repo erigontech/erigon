@@ -307,19 +307,15 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBloc
 
 	case StagePruneDB:
 		var wtx ethdb.RwTx
-		var useExternalTx bool
 		var err error
 		tt := time.Now()
 		log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", sm.HeadersNewSnapshot)
 		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 			wtx = tx.(ethdb.HasTx).Tx().(ethdb.DBTX).DBTX()
-			fmt.Println("Has tx")
-			useExternalTx = true
-		} else if wtx1,ok:=tx.(ethdb.RwTx); ok{
-			fmt.Println("Is tx")
-			wtx=wtx1
+		} else if wtx1, ok := tx.(ethdb.RwTx); ok {
+			wtx = wtx1
 		} else {
-			log.Error("Incorrect db type","type", tx)
+			log.Error("Incorrect db type", "type", tx)
 			return nil
 		}
 
@@ -343,18 +339,13 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBloc
 			return err
 		}
 
-		if !useExternalTx {
-			err = wtx.Commit()
-			if err != nil {
-				return err
-			}
-		}
 		log.Info("Prune db success", "t", time.Since(tt))
 		atomic.StoreUint64(&sm.Stage, StageFinish)
 
 	case StageFinish:
 		tt := time.Now()
-		v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		//todo check commited
+		v, err := tx.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil
 		}
@@ -443,27 +434,13 @@ func RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx, currentSnapshot, newSna
 	snapshotDB := ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
 	c, err := tx.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
-		return err
+		return fmt.Errorf("get headers cursor %w", err)
 	}
-	err = snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
+	return snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
 		innerErr := c.Delete(k, nil)
 		if innerErr != nil {
-			return false, innerErr
+			return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
 		}
 		return true, nil
 	})
-	if err != nil {
-		return err
-	}
-	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, newSnapshot)
-	c2, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
-	if err != nil {
-		return err
-	}
-	err = c2.Put(dbutils.CurrentHeadersSnapshotBlock, v)
-	if err != nil {
-		return err
-	}
-	return nil
 }
