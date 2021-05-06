@@ -432,12 +432,12 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	cfg := stagedsync.StageExecuteBlocksCfg(kv, sm.Receipts, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		err = stagedsync.UnwindExecutionStage(u, stage4, ethdb.WrapIntoTxDB(tx), ch, cfg)
+		err = stagedsync.UnwindExecutionStage(u, stage4, tx, ch, cfg)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, ethdb.WrapIntoTxDB(tx), block, ch, cfg)
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, block, ch, cfg)
 		if err != nil {
 			return err
 		}

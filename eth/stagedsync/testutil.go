@@ -22,8 +22,8 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	db1 ethdb.Database,
-	db2 ethdb.Database,
+	db1 ethdb.Tx,
+	db2 ethdb.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
@@ -31,37 +31,47 @@ func compareCurrentState(
 	}
 }
 
-func compareBucket(t *testing.T, db1, db2 ethdb.Database, bucketName string) {
+func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
 	var err error
 
 	bucket1 := make(map[string][]byte)
-	err = db1.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
+	c1, err := db1.Cursor(bucketName)
+	if err != nil {
+		assert.NoError(t, err)
+	}
+	defer c1.Close()
+	err = ethdb.ForEach(c1, func(k, v []byte) (bool, error) {
 		bucket1[string(k)] = v
 		return true, nil
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	bucket2 := make(map[string][]byte)
-	err = db2.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
+	c2, err := db2.Cursor(bucketName)
+	if err != nil {
+		assert.NoError(t, err)
+	}
+	defer c2.Close()
+	err = ethdb.ForEach(c2, func(k, v []byte) (bool, error) {
 		bucket2[string(k)] = v
 		return true, nil
 	})
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	assert.Equal(t, bucket1 /*expected*/, bucket2 /*actual*/)
 }
 
 type stateWriterGen func(uint64) state.WriterWithChangeSets
 
-func hashedWriterGen(db ethdb.Database) stateWriterGen {
+func hashedWriterGen(tx ethdb.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewDbStateWriter(db, blockNum)
+		return state.NewDbStateWriter(ethdb.WrapIntoTxDB(tx), blockNum)
 	}
 }
 
-func plainWriterGen(db ethdb.DbWithPendingMutations) stateWriterGen {
+func plainWriterGen(tx ethdb.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewPlainStateWriter(db, db.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
+		return state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, blockNum)
 	}
 }
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
