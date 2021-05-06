@@ -25,6 +25,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/stretchr/testify/require"
 )
 
 var unmarshalLogTests = map[string]struct {
@@ -129,4 +130,41 @@ func checkError(t *testing.T, testname string, got, want error) bool {
 		t.Errorf("test %q: got error %q, want %q", testname, got, want)
 	}
 	return false
+}
+
+func TestLogsPubSub(t *testing.T) {
+	require := require.New(t)
+	type NonPointerUse struct {
+		sub LogsPubSub
+	}
+	ps := NonPointerUse{}
+	c1 := uint(1289)
+	require.Nil(ps.sub.Last())
+	ps.sub.Pub(Logs{&Log{Index: c1}})
+	require.Equal(ps.sub.Last()[0].Index, c1)
+	ch1, unsubscribe := ps.sub.Sub()
+	defer unsubscribe()
+	ch2, unsubscribe2 := ps.sub.Sub()
+	defer unsubscribe2()
+
+	c2 := uint(8877)
+	ps.sub.Pub(Logs{&Log{Index: c2}})
+	got1 := <-ch1
+	require.Equal(len(ch1), 0)
+	require.Equal(got1[0].Index, c2)
+
+	require.Equal(ps.sub.Last()[0].Index, c2)
+
+	got2 := <-ch2
+	require.Equal(len(ch2), 0)
+	require.Equal(got2[0].Index, c2)
+
+	require.Equal(ps.sub.Last()[0].Index, c2)
+
+	unsubscribe()
+	unsubscribe() // double unsubscribe must be safe
+	unsubscribe2()
+	require.Equal(len(ps.sub.chans), 0)
+
+	require.Equal(ps.sub.Last()[0].Index, c2)
 }

@@ -529,12 +529,12 @@ func (s *TransactionsPubSub) Sub() (ch chan Transaction, unsubscribe func()) {
 	return ch, func() { s.unsubscribe(id) }
 }
 
-func (s *TransactionsPubSub) Pub(block Transaction) {
+func (s *TransactionsPubSub) Pub(v Transaction) {
 	s.Lock()
 	defer s.Unlock()
-	s.last = block
+	s.last = v
 	for _, ch := range s.chans {
-		ch <- block
+		ch <- v
 	}
 }
 

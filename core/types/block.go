@@ -1223,12 +1223,12 @@ func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
 	return ch, func() { s.unsubscribe(id) }
 }
 
-func (s *BlocksPubSub) Pub(block *Block) {
+func (s *BlocksPubSub) Pub(v *Block) {
 	s.Lock()
 	defer s.Unlock()
-	s.last = block
+	s.last = v
 	for _, ch := range s.chans {
-		ch <- block
+		ch <- v
 	}
 }
 
