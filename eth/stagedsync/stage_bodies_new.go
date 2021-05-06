@@ -50,16 +50,12 @@ func StageBodiesCfg(
 func BodiesForward(
 	s *StageState,
 	ctx context.Context,
-	db ethdb.Database,
+	tx ethdb.RwTx,
 	cfg BodiesCfg) error {
-	var tx ethdb.DbWithPendingMutations
 	var err error
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -87,7 +83,7 @@ func BodiesForward(
 	}
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
-	batch := tx.NewBatch()
+	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -111,7 +107,7 @@ func BodiesForward(
 		*/
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = cfg.bd.RequestMoreBodies(db, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 		}
 		peer = nil
 		if req != nil {
@@ -126,7 +122,7 @@ func BodiesForward(
 		}
 		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = cfg.bd.RequestMoreBodies(db, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			peer = nil
 			if req != nil {
 				peer = cfg.bodyReqSend(ctx, req)
@@ -155,17 +151,22 @@ func BodiesForward(
 			}
 
 			if batch.BatchSize() >= int(cfg.batchSize) {
-				if err = batch.CommitAndBegin(context.Background()); err != nil {
+				if err = batch.Commit(); err != nil {
 					return err
 				}
 				if !useExternalTx {
 					if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
 						return err
 					}
-					if err = tx.CommitAndBegin(context.Background()); err != nil {
+					if err = tx.Commit(); err != nil {
+						return err
+					}
+					tx, err = cfg.db.BeginRw(ctx)
+					if err != nil {
 						return err
 					}
 				}
+				batch = ethdb.NewBatch(tx)
 			}
 		}
 		//log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)

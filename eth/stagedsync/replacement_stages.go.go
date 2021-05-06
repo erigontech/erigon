@@ -29,10 +29,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return HeadersForward(s, u, ctx, world.TX, headers, world.InitialCycle)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return HeadersForward(s, u, ctx, tx, headers, world.InitialCycle)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return HeadersUnwind(u, s, world.TX)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return HeadersUnwind(u, s, tx, headers)
 					},
 				}
 			},
@@ -47,7 +55,7 @@ func ReplacementStages(ctx context.Context,
 						return SpawnBlockHashStage(s, world.TX, world.TmpDir, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.DB)
+						return u.Done(world.TX)
 					},
 				}
 			},
@@ -59,10 +67,14 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return BodiesForward(s, ctx, world.TX, bodies)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return BodiesForward(s, ctx, tx, bodies)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.DB)
+						return u.Done(world.TX)
 					},
 				}
 			},
