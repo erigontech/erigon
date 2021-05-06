@@ -36,7 +36,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 		return fmt.Errorf("headers snapshot is higher canonical. snapshot %d headers %d", s.BlockNumber, to)
 	}
 
-	snapshotBlock := snapshotsync.CalculateEpoch(to, 50)
+	snapshotBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
 
 	if s.BlockNumber == snapshotBlock {
 		// we already did snapshot creation for this block

@@ -29,7 +29,7 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 		return err
 	}
 
-	err = MigrateSnapshot(s.BlockNumber+1, tx, db, btClient, snBuilder)
+	err = MigrateSnapshot(executionAt, tx, db, btClient, snBuilder)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *
 		return err
 	}
 
-	snBlock := snapshotsync.CalculateEpoch(headersBlock, 50)
+	snBlock := snapshotsync.CalculateEpoch(headersBlock, snapshotsync.EpochSize)
 
 	return mg.Migrate(db, tx, snBlock, btClient)
 }

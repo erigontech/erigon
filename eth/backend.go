@@ -152,13 +152,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	if config.SnapshotLayout {
-		/*
-			0) Если скачивание начато, то продолжить/начать качать
-			1) Понять, какие сейчас снепшоты есть и рабочие
-			2) Подключиться к ним
-			3) Обернуть в них дб
-			4) Поставить сид
-		*/
 		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
 		if err != nil {
 			return nil, err
@@ -235,7 +228,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	eth.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
-		fmt.Println("SnapshotLayout", config.SnapshotLayout, stagedSync == nil, config.SnapshotMode)
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
 		if err != nil {
 			return nil, err
