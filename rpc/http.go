@@ -31,6 +31,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 const (
@@ -254,7 +255,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	codec := newHTTPServerConn(r, w)
 	defer codec.close()
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
-	defer stream.Flush()
+	defer func() {
+		if stErr := stream.Flush(); stErr != nil {
+			log.Error("Flushing stream", "error", stErr)
+		}
+	}()
 	s.serveSingleRequest(ctx, codec, stream)
 }
 
