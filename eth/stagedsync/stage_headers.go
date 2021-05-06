@@ -92,7 +92,7 @@ func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.Chai
 	return engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
 }
 
-func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, verifyDuration time.Duration) (bool, bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -264,7 +264,7 @@ Error: %v
 	}
 	// Report some public statistics so the user has a clue what's going on
 	ctx := []interface{}{
-		"count", len(headers), "elapsed", common.PrettyDuration(time.Since(start)),
+		"count", len(headers), "verification", common.PrettyDuration(verifyDuration), "elapsed", common.PrettyDuration(time.Since(start)),
 		"number", lastHeader.Number, "hash", lastHeader.Hash(),
 		"age", common.PrettyAge(time.Unix(int64(lastHeader.Time), 0)),
 	}

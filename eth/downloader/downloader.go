@@ -1358,14 +1358,16 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				var err error
 				var newCanonical bool
 
+				verifyStart := time.Now()
 				if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.engine, frequency); err != nil {
 					log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 					return fmt.Errorf("%w: %v", errInvalidChain, err)
 				}
+				verifyDuration := time.Since(verifyStart)
 				var reorg bool
 				var forkBlockNumber uint64
 				logPrefix := d.stagedSyncState.LogPrefix()
-				newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk)
+				newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, verifyDuration)
 				if reorg && d.headersUnwinder != nil {
 					// Need to unwind further stages
 					if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB, d.stateDB); err1 != nil {
