@@ -627,7 +627,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
-func (n *Node) ResolvePath(x string) (string, error) {
-	//todo fix
-	return n.config.ResolvePath(x), nil
+func (n *Node) ResolvePath(x string) string {
+	return n.config.ResolvePath(x)
 }

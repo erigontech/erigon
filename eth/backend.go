@@ -214,10 +214,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
-		if err != nil {
-			return nil, err
-		}
+		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)

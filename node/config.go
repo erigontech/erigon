@@ -192,7 +192,6 @@ func (c *Config) IPCEndpoint() string {
 
 // NodeDB returns the path to the discovery node database.
 func (c *Config) NodeDB() string {
-	//todo fix
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
