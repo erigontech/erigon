@@ -26,21 +26,19 @@ import (
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem             bool
-	exclusive         bool
-	flags             uint
-	path              string
-	bucketsCfg        BucketConfigsFunc
-	mapSize           datasize.ByteSize
-	dirtyListMaxPages uint64
-	verbosity         DBVerbosityLvl
+	inMem      bool
+	exclusive  bool
+	flags      uint
+	path       string
+	bucketsCfg BucketConfigsFunc
+	mapSize    datasize.ByteSize
+	verbosity  DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg:        DefaultBucketConfigs,
-		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
-		dirtyListMaxPages: 128 * 1024,
+		bucketsCfg: DefaultBucketConfigs,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
 	}
 }
 
@@ -156,13 +154,13 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpInitial, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptDpReverseLimit, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024); err != nil {
 			return nil, err
 		}
 		// must be in the range from 12.5% (almost empty)
