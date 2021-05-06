@@ -151,9 +151,9 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
-			return nil, err
-		}
+		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		//	return nil, err
+		//}
 		if err = env.SetOption(mdbx.OptTxnDpInitial, 16*1024); err != nil {
 			return nil, err
 		}
@@ -170,6 +170,11 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		}
 	}
 
+	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	db := &MdbxKV{
 		opts:     opts,
 		env:      env,
@@ -177,6 +182,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		wg:       &sync.WaitGroup{},
 		buckets:  dbutils.BucketsCfg{},
 		pageSize: pageSize,
+		txSize:   dirtyPagesLimit * pageSize,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -269,6 +275,7 @@ func (opts MdbxOpts) MustOpen() RwKV {
 
 type MdbxKV struct {
 	opts     MdbxOpts
+	txSize   uint64
 	pageSize uint64
 	env      *mdbx.Env
 	log      log.Logger
@@ -647,7 +654,9 @@ func (tx *MdbxTx) Commit() error {
 	//commitTimer := time.Now()
 	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
-	//tx.printDebugInfo()
+	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+		tx.PrintDebugInfo()
+	}
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
@@ -696,26 +705,35 @@ func (tx *MdbxTx) Rollback() {
 }
 
 //nolint
-func (tx *MdbxTx) printDebugInfo() {
-	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-		txInfo, err := tx.tx.Info(true)
-		if err != nil {
-			panic(err)
-		}
+func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		return 0, 0, err
+	}
 
-		txSize := uint(txInfo.SpaceDirty / 1024)
-		doPrint := tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb()
-		doPrint = doPrint || (!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
-		if doPrint {
-			log.Info("Tx info",
-				"id", txInfo.Id,
-				"read_lag", txInfo.ReadLag,
-				"ro", tx.readOnly,
-				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
-				"space_dirty_kb", txInfo.SpaceDirty/1024,
-				"callers", debug.Callers(7),
-			)
-		}
+	return txInfo.SpaceDirty, tx.db.txSize, nil
+}
+
+//nolint
+func (tx *MdbxTx) PrintDebugInfo() {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		panic(err)
+	}
+
+	txSize := uint(txInfo.SpaceDirty / 1024)
+	doPrint := debug.BigRoTxKb() == 0 && debug.BigRwTxKb() == 0 ||
+		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
+		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
+	if doPrint {
+		log.Info("Tx info",
+			"id", txInfo.Id,
+			"read_lag", txInfo.ReadLag,
+			"ro", tx.readOnly,
+			//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
+			"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
+			//"callers", debug.Callers(7),
+		)
 	}
 }
 
