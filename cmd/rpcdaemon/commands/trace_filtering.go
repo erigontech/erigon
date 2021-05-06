@@ -302,7 +302,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
-	defer stream.WriteArrayEnd()
 	first := true
 	// Execute all transactions in picked blocks
 	for _, block := range blocks {
@@ -327,7 +326,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 	}
-	return nil
+	stream.WriteArrayEnd()
+	return stream.Flush()
 }
 
 func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
