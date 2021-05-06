@@ -152,6 +152,9 @@ func HeadersForward(
 				return err
 			}
 			if !useExternalTx {
+				if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+					return err
+				}
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
