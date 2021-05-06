@@ -95,7 +95,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Database, params ExecuteBlockCfg) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -107,9 +107,9 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	}
 
 	if params.writerBuilder != nil {
-		stateWriter = params.writerBuilder(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
+		stateWriter = params.writerBuilder(batch, tx, blockNum)
 	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), blockNum)
+		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 	}
 
 	// where the magic happens
@@ -134,8 +134,18 @@ func executeBlockWithGo(block *types.Block, tx ethdb.Database, batch ethdb.Datab
 	return nil
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint64, quit <-chan struct{}, params ExecuteBlockCfg) error {
-	prevStageProgress, errStart := stages.GetStageProgress(stateDB, stages.Senders)
+func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
@@ -150,29 +160,15 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = stateDB.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		var err error
-		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	useSilkworm := params.silkwormExecutionFunc != nil
-	if useSilkworm && params.changeSetHook != nil {
+	useSilkworm := cfg.silkwormExecutionFunc != nil
+	if useSilkworm && cfg.changeSetHook != nil {
 		panic("ChangeSetHook is not supported with Silkworm")
 	}
 
 	var batch ethdb.DbWithPendingMutations
 	useBatch := !useSilkworm
 	if useBatch {
-		batch = tx.NewBatch()
+		batch = ethdb.NewBatch(tx)
 		defer batch.Rollback()
 	}
 
@@ -190,7 +186,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 		if useSilkworm {
 			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			if blockNum, err = silkworm.ExecuteBlocks(params.silkwormExecutionFunc, txn, params.chainConfig.ChainID, blockNum, to, int(params.batchSize), params.writeReceipts); err != nil {
+			if blockNum, err = silkworm.ExecuteBlocks(cfg.silkwormExecutionFunc, txn, cfg.chainConfig.ChainID, blockNum, to, int(cfg.batchSize), cfg.writeReceipts); err != nil {
 				return err
 			}
 		} else {
@@ -203,17 +199,17 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, params); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg); err != nil {
 				return err
 			}
 		}
 
 		stageProgress = blockNum
 
-		updateProgress := !useBatch || batch.BatchSize() >= int(params.batchSize)
+		updateProgress := !useBatch || batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {
 			if useBatch {
-				if err = batch.CommitAndBegin(context.Background()); err != nil {
+				if err = batch.Commit(); err != nil {
 					return err
 				}
 			}
@@ -221,10 +217,16 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 				if err = s.Update(tx, stageProgress); err != nil {
 					return err
 				}
-				if err = tx.CommitAndBegin(context.Background()); err != nil {
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+
+				tx, err = cfg.db.BeginRw(context.Background())
+				if err != nil {
 					return err
 				}
 			}
+			batch = ethdb.NewBatch(tx)
 		}
 
 		select {
@@ -275,19 +277,15 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, quit <-chan struct{}, params ExecuteBlockCfg) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
 	}
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = stateDB.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -296,7 +294,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err := unwindExecutionStage(u, s, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), quit, params); err != nil {
+	if err := unwindExecutionStage(u, s, tx, quit, cfg); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
