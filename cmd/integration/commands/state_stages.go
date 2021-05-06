@@ -315,7 +315,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 			}
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-				err = stagedsync.SpawnMiningCreateBlockStage(s, ethdb.WrapIntoTxDB(tx),
+				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					miningWorld.Block,
 					chainConfig,
 					engine,

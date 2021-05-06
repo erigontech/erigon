@@ -244,10 +244,18 @@ func ReplacementStages(ctx context.Context,
 					DisabledDescription: "Work In Progress",
 					Disabled:            !sm.CallTraces,
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, ctx.Done(), callTraces)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnCallTraces(s, tx, ctx.Done(), callTraces)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, ctx.Done(), callTraces)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindCallTraces(u, s, tx, ctx.Done(), callTraces)
 					},
 				}
 			},

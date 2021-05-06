@@ -614,12 +614,12 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
-		err = stagedsync.UnwindCallTraces(u, s, ethdb.WrapIntoTxDB(tx), ch, cfg)
+		err = stagedsync.UnwindCallTraces(u, s, tx, ch, cfg)
 		if err != nil {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnCallTraces(s, ethdb.WrapIntoTxDB(tx), ch, cfg); err != nil {
+		if err := stagedsync.SpawnCallTraces(s, tx, ch, cfg); err != nil {
 			return err
 		}
 	}
