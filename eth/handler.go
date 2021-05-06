@@ -219,10 +219,6 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
 // various subsistems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
-	// TODO(karalabe): Not sure why this is needed
-	if !h.chainSync.handlePeerEvent() {
-		return p2p.DiscQuitting
-	}
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 

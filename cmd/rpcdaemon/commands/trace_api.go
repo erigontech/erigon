@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -25,7 +26,7 @@ type TraceAPI interface {
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
-	Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
+	Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
