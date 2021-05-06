@@ -107,7 +107,10 @@ func BodiesForward(
 		*/
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			if err != nil {
+				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+			}
 		}
 		peer = nil
 		if req != nil {
@@ -122,7 +125,10 @@ func BodiesForward(
 		}
 		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			if err != nil {
+				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+			}
 			peer = nil
 			if req != nil {
 				peer = cfg.bodyReqSend(ctx, req)
