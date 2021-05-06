@@ -20,7 +20,7 @@
 #pragma warning(disable : 4996) /* The POSIX name is deprecated... */
 #endif                          /* _MSC_VER (warnings) */
 
-#define MDBX_TOOLS /* Avoid using internal mdbx_assert() */
+#define xMDBX_TOOLS /* Avoid using internal mdbx_assert() */
 /*
  * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
@@ -34,43 +34,30 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 3c041ab4d3d07620cff579b3acb5605660c47b2ee4e2ced50c29871f19a2ae10_v0_9_3_165_gde4a52e9
+#define MDBX_BUILD_SOURCERY 63a3919e7fbf25fc1973ac8af06b1ab02a76f88aa07b799a9817ab2e3545e93b_v0_9_3_188_gca66d29a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
 
 #define LIBMDBX_INTERNALS
-#ifdef MDBX_TOOLS
+#ifdef xMDBX_TOOLS
 #define MDBX_DEPRECATED
-#endif /* MDBX_TOOLS */
+#endif /* xMDBX_TOOLS */
 
-/* *INDENT-OFF* */
-/* clang-format off */
-
-/* In case the MDBX_DEBUG is undefined set it corresponding to NDEBUG */
-#ifndef MDBX_DEBUG
-#   ifdef NDEBUG
-#       define MDBX_DEBUG 0
-#   else
-#       define MDBX_DEBUG 1
-#   endif
-#endif
-
-/* Undefine the NDEBUG if debugging is enforced by MDBX_DEBUG */
-#if MDBX_DEBUG
-#   undef NDEBUG
-#endif
-
-#ifdef MDBX_ALLOY
+#ifdef xMDBX_ALLOY
 /* Amalgamated build */
-#   define MDBX_INTERNAL_FUNC static
-#   define MDBX_INTERNAL_VAR static
+#define MDBX_INTERNAL_FUNC static
+#define MDBX_INTERNAL_VAR static
 #else
 /* Non-amalgamated build */
-#   define MDBX_INTERNAL_FUNC
-#   define MDBX_INTERNAL_VAR extern
-#endif /* MDBX_ALLOY */
+#define MDBX_INTERNAL_FUNC
+#define MDBX_INTERNAL_VAR extern
+#endif /* xMDBX_ALLOY */
 
+/** Disables using GNU/Linux libc extensions.
+ * \ingroup build_option
+ * \note This option couldn't be moved to the options.h since dependant
+ * control macros/defined should be prepared before include the options.h */
 #ifndef MDBX_DISABLE_GNU_SOURCE
 #define MDBX_DISABLE_GNU_SOURCE 0
 #endif
@@ -78,13 +65,13 @@
 #undef _GNU_SOURCE
 #elif (defined(__linux__) || defined(__gnu_linux__)) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
-#endif
+#endif /* MDBX_DISABLE_GNU_SOURCE */
 
 /*----------------------------------------------------------------------------*/
 
 /* Should be defined before any includes */
 #ifndef _FILE_OFFSET_BITS
-#   define _FILE_OFFSET_BITS 64
+#define _FILE_OFFSET_BITS 64
 #endif
 
 #ifdef __APPLE__
@@ -92,37 +79,49 @@
 #endif
 
 #ifdef _MSC_VER
-#   if _MSC_FULL_VER < 190024234
-        /* Actually libmdbx was not tested with compilers older than 19.00.24234 (Visual Studio 2015 Update 3).
-         * But you could remove this #error and try to continue at your own risk.
-         * In such case please don't rise up an issues related ONLY to old compilers.
-         */
-#       error "At least \"Microsoft C/C++ Compiler\" version 19.00.24234 (Visual Studio 2015 Update 3) is required."
-#   endif
-#   ifndef _CRT_SECURE_NO_WARNINGS
-#       define _CRT_SECURE_NO_WARNINGS
-#   endif
+#if _MSC_FULL_VER < 190024234
+/* Actually libmdbx was not tested with compilers older than 19.00.24234 (Visual
+ * Studio 2015 Update 3). But you could remove this #error and try to continue
+ * at your own risk. In such case please don't rise up an issues related ONLY to
+ * old compilers.
+ */
+#error                                                                         \
+    "At least \"Microsoft C/C++ Compiler\" version 19.00.24234 (Visual Studio 2015 Update 3) is required."
+#endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #if _MSC_VER > 1800
-#   pragma warning(disable : 4464) /* relative include path contains '..' */
+#pragma warning(disable : 4464) /* relative include path contains '..' */
 #endif
 #if _MSC_VER > 1913
-#   pragma warning(disable : 5045) /* Compiler will insert Spectre mitigation... */
+#pragma warning(disable : 5045) /* Compiler will insert Spectre mitigation...  \
+                                 */
 #endif
 #pragma warning(disable : 4710) /* 'xyz': function not inlined */
-#pragma warning(disable : 4711) /* function 'xyz' selected for automatic inline expansion */
-#pragma warning(disable : 4201) /* nonstandard extension used : nameless struct / union */
+#pragma warning(disable : 4711) /* function 'xyz' selected for automatic       \
+                                   inline expansion */
+#pragma warning(                                                               \
+    disable : 4201) /* nonstandard extension used : nameless struct / union */
 #pragma warning(disable : 4702) /* unreachable code */
 #pragma warning(disable : 4706) /* assignment within conditional expression */
 #pragma warning(disable : 4127) /* conditional expression is constant */
-#pragma warning(disable : 4324) /* 'xyz': structure was padded due to alignment specifier */
+#pragma warning(disable : 4324) /* 'xyz': structure was padded due to          \
+                                   alignment specifier */
 #pragma warning(disable : 4310) /* cast truncates constant value */
-#pragma warning(disable : 4820) /* bytes padding added after data member for alignment */
-#pragma warning(disable : 4548) /* expression before comma has no effect; expected expression with side - effect */
-#pragma warning(disable : 4366) /* the result of the unary '&' operator may be unaligned */
-#pragma warning(disable : 4200) /* nonstandard extension used: zero-sized array in struct/union */
-#pragma warning(disable : 4204) /* nonstandard extension used: non-constant aggregate initializer */
-#pragma warning(disable : 4505) /* unreferenced local function has been removed */
-#endif                          /* _MSC_VER (warnings) */
+#pragma warning(                                                               \
+    disable : 4820) /* bytes padding added after data member for alignment */
+#pragma warning(disable : 4548) /* expression before comma has no effect;      \
+                                   expected expression with side - effect */
+#pragma warning(disable : 4366) /* the result of the unary '&' operator may be \
+                                   unaligned */
+#pragma warning(disable : 4200) /* nonstandard extension used: zero-sized      \
+                                   array in struct/union */
+#pragma warning(disable : 4204) /* nonstandard extension used: non-constant    \
+                                   aggregate initializer */
+#pragma warning(                                                               \
+    disable : 4505) /* unreferenced local function has been removed */
+#endif              /* _MSC_VER (warnings) */
 
 #include "mdbx.h"
 /*
@@ -485,71 +484,69 @@
 /* *INDENT-ON* */
 /* clang-format on */
 
-#if defined(__GNUC__) && !__GNUC_PREREQ(4,2)
-    /* Actually libmdbx was not tested with compilers older than GCC 4.2.
-     * But you could ignore this warning at your own risk.
-     * In such case please don't rise up an issues related ONLY to old compilers.
-     */
-#   warning "libmdbx required GCC >= 4.2"
+#if defined(__GNUC__) && !__GNUC_PREREQ(4, 2)
+/* Actually libmdbx was not tested with compilers older than GCC 4.2.
+ * But you could ignore this warning at your own risk.
+ * In such case please don't rise up an issues related ONLY to old compilers.
+ */
+#warning "libmdbx required GCC >= 4.2"
 #endif
 
-#if defined(__clang__) && !__CLANG_PREREQ(3,8)
-    /* Actually libmdbx was not tested with CLANG older than 3.8.
-     * But you could ignore this warning at your own risk.
-     * In such case please don't rise up an issues related ONLY to old compilers.
-     */
-#   warning "libmdbx required CLANG >= 3.8"
+#if defined(__clang__) && !__CLANG_PREREQ(3, 8)
+/* Actually libmdbx was not tested with CLANG older than 3.8.
+ * But you could ignore this warning at your own risk.
+ * In such case please don't rise up an issues related ONLY to old compilers.
+ */
+#warning "libmdbx required CLANG >= 3.8"
 #endif
 
-#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,12)
-    /* Actually libmdbx was not tested with something older than glibc 2.12.
-     * But you could ignore this warning at your own risk.
-     * In such case please don't rise up an issues related ONLY to old systems.
-     */
-#   warning "libmdbx was only tested with GLIBC >= 2.12."
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2, 12)
+/* Actually libmdbx was not tested with something older than glibc 2.12.
+ * But you could ignore this warning at your own risk.
+ * In such case please don't rise up an issues related ONLY to old systems.
+ */
+#warning "libmdbx was only tested with GLIBC >= 2.12."
 #endif
 
 #ifdef __SANITIZE_THREAD__
-#   warning "libmdbx don't compatible with ThreadSanitizer, you will get a lot of false-positive issues."
+#warning                                                                       \
+    "libmdbx don't compatible with ThreadSanitizer, you will get a lot of false-positive issues."
 #endif /* __SANITIZE_THREAD__ */
 
 #if __has_warning("-Wnested-anon-types")
-#   if defined(__clang__)
-#       pragma clang diagnostic ignored "-Wnested-anon-types"
-#   elif defined(__GNUC__)
-#       pragma GCC diagnostic ignored "-Wnested-anon-types"
-#   else
-#      pragma warning disable "nested-anon-types"
-#   endif
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wnested-anon-types"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wnested-anon-types"
+#else
+#pragma warning disable "nested-anon-types"
+#endif
 #endif /* -Wnested-anon-types */
 
 #if __has_warning("-Wconstant-logical-operand")
-#   if defined(__clang__)
-#       pragma clang diagnostic ignored "-Wconstant-logical-operand"
-#   elif defined(__GNUC__)
-#       pragma GCC diagnostic ignored "-Wconstant-logical-operand"
-#   else
-#      pragma warning disable "constant-logical-operand"
-#   endif
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wconstant-logical-operand"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wconstant-logical-operand"
+#else
+#pragma warning disable "constant-logical-operand"
+#endif
 #endif /* -Wconstant-logical-operand */
 
 #if defined(__LCC__) && (__LCC__ <= 121)
-    /* bug #2798 */
-#   pragma diag_suppress alignment_reduction_ignored
+/* bug #2798 */
+#pragma diag_suppress alignment_reduction_ignored
 #elif defined(__ICC)
-#   pragma warning(disable: 3453 1366)
+#pragma warning(disable : 3453 1366)
 #elif __has_warning("-Walignment-reduction-ignored")
-#   if defined(__clang__)
-#       pragma clang diagnostic ignored "-Walignment-reduction-ignored"
-#   elif defined(__GNUC__)
-#       pragma GCC diagnostic ignored "-Walignment-reduction-ignored"
-#   else
-#       pragma warning disable "alignment-reduction-ignored"
-#   endif
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Walignment-reduction-ignored"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Walignment-reduction-ignored"
+#else
+#pragma warning disable "alignment-reduction-ignored"
+#endif
 #endif /* -Walignment-reduction-ignored */
-
-/* *INDENT-ON* */
-/* clang-format on */
 
 #ifdef __cplusplus
 extern "C" {
@@ -591,7 +588,7 @@ extern "C" {
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 #if !defined(_NO_CRT_STDIO_INLINE) && MDBX_BUILD_SHARED_LIBRARY &&             \
-    !defined(MDBX_TOOLS) && MDBX_AVOID_CRT
+    !defined(xMDBX_TOOLS) && MDBX_WITHOUT_MSVC_CRT
 #define _NO_CRT_STDIO_INLINE
 #endif
 #elif !defined(_POSIX_C_SOURCE)
@@ -711,7 +708,6 @@ __extern_C key_t ftok(const char *, int);
 #define HAVE_SYS_TYPES_H
 typedef HANDLE mdbx_thread_t;
 typedef unsigned mdbx_thread_key_t;
-#define MDBX_OSAL_SECTION HANDLE
 #define MAP_FAILED NULL
 #define HIGH_DWORD(v) ((DWORD)((sizeof(v) > 4) ? ((uint64_t)(v) >> 32) : 0))
 #define THREAD_CALL WINAPI
@@ -722,36 +718,42 @@ typedef struct {
 } mdbx_condpair_t;
 typedef CRITICAL_SECTION mdbx_fastmutex_t;
 
-#if MDBX_AVOID_CRT
+#if MDBX_WITHOUT_MSVC_CRT
+
 #ifndef mdbx_malloc
 static inline void *mdbx_malloc(size_t bytes) {
-  return LocalAlloc(LMEM_FIXED, bytes);
+  return HeapAlloc(GetProcessHeap(), 0, bytes);
 }
 #endif /* mdbx_malloc */
 
 #ifndef mdbx_calloc
 static inline void *mdbx_calloc(size_t nelem, size_t size) {
-  return LocalAlloc(LMEM_FIXED | LMEM_ZEROINIT, nelem * size);
+  return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nelem * size);
 }
 #endif /* mdbx_calloc */
 
 #ifndef mdbx_realloc
 static inline void *mdbx_realloc(void *ptr, size_t bytes) {
-  return ptr ? LocalReAlloc(ptr, bytes, LMEM_MOVEABLE)
-             : LocalAlloc(LMEM_FIXED, bytes);
+  return ptr ? HeapReAlloc(GetProcessHeap(), 0, ptr, bytes)
+             : HeapAlloc(GetProcessHeap(), 0, bytes);
 }
 #endif /* mdbx_realloc */
 
 #ifndef mdbx_free
-#define mdbx_free LocalFree
+static inline void mdbx_free(void *ptr) {
+  return HeapFree(GetProcessHeap(), 0, ptr);
+}
 #endif /* mdbx_free */
-#else
+
+#else /* MDBX_WITHOUT_MSVC_CRT */
+
 #define mdbx_malloc malloc
 #define mdbx_calloc calloc
 #define mdbx_realloc realloc
 #define mdbx_free free
 #define mdbx_strdup _strdup
-#endif /* MDBX_AVOID_CRT */
+
+#endif /* MDBX_WITHOUT_MSVC_CRT */
 
 #ifndef snprintf
 #define snprintf _snprintf /* ntdll */
@@ -799,7 +801,7 @@ typedef pthread_mutex_t mdbx_fastmutex_t;
 /* malloc_usable_size() already provided */
 #elif defined(__APPLE__)
 #define malloc_usable_size(ptr) malloc_size(ptr)
-#elif defined(_MSC_VER) && !MDBX_AVOID_CRT
+#elif defined(_MSC_VER) && !MDBX_WITHOUT_MSVC_CRT
 #define malloc_usable_size(ptr) _msize(ptr)
 #endif /* malloc_usable_size */
 
@@ -996,10 +998,8 @@ typedef struct mdbx_mmap_param {
   size_t limit;   /* mapping length, but NOT a size of file nor DB */
   size_t current; /* mapped region size, i.e. the size of file and DB */
 #if defined(_WIN32) || defined(_WIN64)
-  uint64_t filesize /* in-process cache of a file size. */;
-#endif
-#ifdef MDBX_OSAL_SECTION
-  MDBX_OSAL_SECTION section;
+  uint64_t filesize /* in-process cache of a file size */;
+  HANDLE section; /* memory-mapped section handle */
 #endif
 } mdbx_mmap_t;
 
@@ -1517,7 +1517,7 @@ MDBX_INTERNAL_VAR MDBX_RegGetValueA mdbx_RegGetValueA;
 #endif
 
 #define mdbx_sourcery_anchor XCONCAT(mdbx_sourcery_, MDBX_BUILD_SOURCERY)
-#if defined(MDBX_TOOLS)
+#if defined(xMDBX_TOOLS)
 extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #endif
 
@@ -1539,30 +1539,6 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 /** \defgroup build_option Build options
  * The libmdbx build options.
  @{ */
-
-#ifdef DOXYGEN
-/* !!! Actually this is a fake definitions     !!!
- * !!! for documentation generation by Doxygen !!! */
-
-/** Controls enabling of debugging features.
- *
- *  - `MDBX_DEBUG = 0` (by default) Disables any debugging features at all,
- *                     including logging and assertion controls.
- *                     Logging level and corresponding debug flags changing
- *                     by \ref mdbx_setup_debug() will not have effect.
- *  - `MDBX_DEBUG > 0` Enables code for the debugging features (logging,
- *                     assertions checking and internal audit).
- *                     Simultaneously sets the default logging level
- *                     to the `MDBX_DEBUG` value.
- *                     Also enables \ref MDBX_DBG_AUDIT if `MDBX_DEBUG >= 2`.
- *
- * \ingroup build_option */
-#define MDBX_DEBUG 0...7
-
-/** Disables using of GNU libc extensions. */
-#define MDBX_DISABLE_GNU_SOURCE 0 or 1
-
-#endif /* DOXYGEN */
 
 /** Using fcntl(F_FULLFSYNC) with 5-10 times slowdown */
 #define MDBX_OSX_WANNA_DURABILITY 0
@@ -1682,14 +1658,68 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #endif /* MDBX_FAKE_SPILL_WRITEMAP */
 
 /** Controls sort order of internal page number lists.
- * The database format depend on this option and libmdbx builded with different
- * option value are incompatible. */
+ * This mostly experimental/advanced option with not for regular MDBX users.
+ * \warning The database format depend on this option and libmdbx builded with
+ * different option value are incompatible. */
 #ifndef MDBX_PNL_ASCENDING
 #define MDBX_PNL_ASCENDING 0
 #endif
 #if !(MDBX_PNL_ASCENDING == 0 || MDBX_PNL_ASCENDING == 1)
 #error MDBX_PNL_ASCENDING must be defined as 0 or 1
 #endif /* MDBX_PNL_ASCENDING */
+
+/** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
+#ifndef MDBX_WITHOUT_MSVC_CRT
+#define MDBX_WITHOUT_MSVC_CRT 1
+#endif
+#if !(MDBX_WITHOUT_MSVC_CRT == 0 || MDBX_WITHOUT_MSVC_CRT == 1)
+#error MDBX_WITHOUT_MSVC_CRT must be defined as 0 or 1
+#endif /* MDBX_WITHOUT_MSVC_CRT */
+
+/** Size of buffer used during copying a environment/database file. */
+#ifndef MDBX_ENVCOPY_WRITEBUF
+#define MDBX_ENVCOPY_WRITEBUF 1048576u
+#endif
+#if MDBX_ENVCOPY_WRITEBUF < 65536u || MDBX_ENVCOPY_WRITEBUF > 1073741824u ||   \
+    MDBX_ENVCOPY_WRITEBUF % 65536u
+#error MDBX_ENVCOPY_WRITEBUF must be defined in range 65536..1073741824 and be multiple of 65536
+#endif /* MDBX_ENVCOPY_WRITEBUF */
+
+/** Forces assertion checking */
+#ifndef MDBX_FORCE_ASSERTIONS
+#define MDBX_FORCE_ASSERTIONS 1
+#endif
+#if !(MDBX_FORCE_ASSERTIONS == 0 || MDBX_FORCE_ASSERTIONS == 1)
+#error MDBX_FORCE_ASSERTIONS must be defined as 0 or 1
+#endif /* MDBX_FORCE_ASSERTIONS */
+
+/** Presumed malloc size overhead for each allocation
+ * to adjust allocations to be more aligned. */
+#ifndef MDBX_ASSUME_MALLOC_OVERHEAD
+#define MDBX_ASSUME_MALLOC_OVERHEAD (sizeof(void *) * 2u)
+#elif MDBX_ASSUME_MALLOC_OVERHEAD < 0 || MDBX_ASSUME_MALLOC_OVERHEAD > 64 ||   \
+    MDBX_ASSUME_MALLOC_OVERHEAD % 4
+#error MDBX_ASSUME_MALLOC_OVERHEAD must be defined in range 0..64 and be multiple of 4
+#endif /* MDBX_ASSUME_MALLOC_OVERHEAD */
+
+/** In case the MDBX_DEBUG is undefined set it corresponding to NDEBUG */
+#ifndef MDBX_DEBUG
+#ifdef NDEBUG
+#define MDBX_DEBUG 0
+#else
+#define MDBX_DEBUG 1
+#endif
+#endif /* MDBX_DEBUG */
+
+/** If defined then enables integration with Valgrind,
+ * a memory analyzing tool. */
+#ifndef MDBX_USE_VALGRIND
+#endif /* MDBX_USE_VALGRIND */
+
+/** If defined then enables use C11 atomics,
+ *  otherwise detects ones availability automatically. */
+#ifndef MDBX_HAVE_C11ATOMICS
+#endif /* MDBX_HAVE_C11ATOMICS */
 
 //------------------------------------------------------------------------------
 
@@ -1887,6 +1917,35 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 /*******************************************************************************
  *******************************************************************************
  ******************************************************************************/
+
+#ifdef DOXYGEN
+/* !!! Actually this is a fake definitions     !!!
+ * !!! for documentation generation by Doxygen !!! */
+
+/** Controls enabling of debugging features.
+ *
+ *  - `MDBX_DEBUG = 0` (by default) Disables any debugging features at all,
+ *                     including logging and assertion controls.
+ *                     Logging level and corresponding debug flags changing
+ *                     by \ref mdbx_setup_debug() will not have effect.
+ *  - `MDBX_DEBUG > 0` Enables code for the debugging features (logging,
+ *                     assertions checking and internal audit).
+ *                     Simultaneously sets the default logging level
+ *                     to the `MDBX_DEBUG` value.
+ *                     Also enables \ref MDBX_DBG_AUDIT if `MDBX_DEBUG >= 2`.
+ *
+ * \ingroup build_option */
+#define MDBX_DEBUG 0...7
+
+/** Disables using of GNU libc extensions. */
+#define MDBX_DISABLE_GNU_SOURCE 0 or 1
+
+#endif /* DOXYGEN */
+
+/* Undefine the NDEBUG if debugging is enforced by MDBX_DEBUG */
+#if MDBX_DEBUG
+#undef NDEBUG
+#endif
 
 /*----------------------------------------------------------------------------*/
 /* Atomics */
@@ -2122,14 +2181,14 @@ typedef MDBX_atomic_uint64_t atomic_txnid_t;
 #define INITIAL_TXNID (MIN_TXNID + NUM_METAS - 1)
 #define INVALID_TXNID UINT64_MAX
 /* LY: for testing non-atomic 64-bit txnid on 32-bit arches.
- * #define MDBX_TXNID_STEP (UINT32_MAX / 3) */
-#ifndef MDBX_TXNID_STEP
+ * #define xMDBX_TXNID_STEP (UINT32_MAX / 3) */
+#ifndef xMDBX_TXNID_STEP
 #if MDBX_64BIT_CAS
-#define MDBX_TXNID_STEP 1u
+#define xMDBX_TXNID_STEP 1u
 #else
-#define MDBX_TXNID_STEP 2u
+#define xMDBX_TXNID_STEP 2u
 #endif
-#endif /* MDBX_TXNID_STEP */
+#endif /* xMDBX_TXNID_STEP */
 
 /* Used for offsets within a single page.
  * Since memory pages are typically 4 or 8KB in size, 12-13 bits,
@@ -2494,10 +2553,6 @@ typedef struct MDBX_lockinfo {
 
 #define MDBX_LOCK_MAGIC ((MDBX_MAGIC << 8) + MDBX_LOCK_VERSION)
 
-#ifndef MDBX_ASSUME_MALLOC_OVERHEAD
-#define MDBX_ASSUME_MALLOC_OVERHEAD (sizeof(void *) * 2u)
-#endif /* MDBX_ASSUME_MALLOC_OVERHEAD */
-
 /* The maximum size of a database page.
  *
  * It is 64K, but value-PAGEHDRSZ must fit in MDBX_page.mp_upper.
@@ -2838,7 +2893,7 @@ struct MDBX_env {
   mdbx_filehandle_t me_dsync_fd;
   mdbx_mmap_t me_lck_mmap; /* The lock file */
 #define me_lfd me_lck_mmap.fd
-#define me_lck me_lck_mmap.lck
+  struct MDBX_lockinfo *me_lck;
 
   unsigned me_psize;        /* DB page size, initialized from me_os_psize */
   unsigned me_leaf_nodemax; /* max size of a leaf-node */
@@ -2853,25 +2908,15 @@ struct MDBX_env {
   void *me_pbuf;              /* scratch area for DUPSORT put() */
   MDBX_txn *me_txn0;          /* prealloc'd write transaction */
 
-  MDBX_dbx *me_dbxs;         /* array of static DB info */
-  uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
-  unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
-  atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  /* Number of freelist items that can fit in a single overflow page */
-  unsigned me_maxgc_ov1page;
+  MDBX_dbx *me_dbxs;    /* array of static DB info */
+  uint16_t *me_dbflags; /* array of flags from MDBX_db.md_flags */
+  unsigned *me_dbiseqs; /* array of dbi sequence numbers */
+  unsigned
+      me_maxgc_ov1page;    /* Number of pgno_t fit in a single overflow page */
   uint32_t me_live_reader; /* have liveness lock in reader table */
   void *me_userctx;        /* User-settable context */
-  MDBX_atomic_uint64_t *me_sync_timestamp;
-  MDBX_atomic_uint64_t *me_autosync_period;
-  atomic_pgno_t *me_unsynced_pages;
-  atomic_pgno_t *me_autosync_threshold;
-  atomic_pgno_t *me_discarded_tail;
-  pgno_t *me_readahead_anchor;
-  MDBX_atomic_uint32_t *me_meta_sync_txnid;
-#if MDBX_ENABLE_PGOP_STAT
-  MDBX_pgop_stat_t *me_pgop_stat;
-#endif                            /* MDBX_ENABLE_PGOP_STAT*/
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
+
   struct {
     unsigned dp_reserve_limit;
     unsigned rp_augment_limit;
@@ -2921,11 +2966,6 @@ struct MDBX_env {
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
 
-  /* write-txn lock */
-#if MDBX_LOCKING > 0
-  mdbx_ipclock_t *me_wlock;
-#endif /* MDBX_LOCKING > 0 */
-
 #if defined(_WIN32) || defined(_WIN64)
   MDBX_srwlock me_remap_guard;
   /* Workaround for LockFileEx and WriteFile multithread bug */
@@ -2933,23 +2973,6 @@ struct MDBX_env {
 #else
   mdbx_fastmutex_t me_remap_guard;
 #endif
-
-  struct {
-#if MDBX_LOCKING > 0
-    mdbx_ipclock_t wlock;
-#endif /* MDBX_LOCKING > 0 */
-    atomic_txnid_t oldest;
-    MDBX_atomic_uint64_t sync_timestamp;
-    MDBX_atomic_uint64_t autosync_period;
-    atomic_pgno_t autosync_pending;
-    atomic_pgno_t autosync_threshold;
-    atomic_pgno_t discarded_tail;
-    pgno_t readahead_anchor;
-    MDBX_atomic_uint32_t meta_sync_txnid;
-#if MDBX_ENABLE_PGOP_STAT
-    MDBX_pgop_stat_t pgop_stat;
-#endif /* MDBX_ENABLE_PGOP_STAT*/
-  } me_lckless_stub;
 
   /* -------------------------------------------------------------- debugging */
 
@@ -2962,6 +2985,19 @@ struct MDBX_env {
 #if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
   pgno_t me_poison_edge;
 #endif /* MDBX_USE_VALGRIND || __SANITIZE_ADDRESS__ */
+
+#ifndef xMDBX_DEBUG_SPILLING
+#define xMDBX_DEBUG_SPILLING 0
+#endif
+#if xMDBX_DEBUG_SPILLING == 2
+  unsigned debug_dirtied_est, debug_dirtied_act;
+#endif /* xMDBX_DEBUG_SPILLING */
+
+  /* ------------------------------------------------- stub for lck-less mode */
+  alignas(MDBX_CACHELINE_SIZE) uint64_t
+      me_lckless_stub[((sizeof(MDBX_lockinfo) + MDBX_CACHELINE_SIZE - 1) &
+                       ~(MDBX_CACHELINE_SIZE - 1)) /
+                      8];
 };
 
 #ifndef __cplusplus
@@ -2994,7 +3030,7 @@ MDBX_INTERNAL_FUNC void mdbx_debug_log_va(int level, const char *function,
 
 #define mdbx_audit_enabled() (0)
 
-#if !defined(NDEBUG) || defined(MDBX_FORCE_ASSERTIONS)
+#if !defined(NDEBUG) || MDBX_FORCE_ASSERTIONS
 #define mdbx_assert_enabled() (1)
 #else
 #define mdbx_assert_enabled() (0)
@@ -3088,7 +3124,7 @@ void mdbx_assert_fail(const MDBX_env *env, const char *msg, const char *func,
 /* assert(3) variant in transaction context */
 #define mdbx_tassert(txn, expr) mdbx_assert((txn)->mt_env, expr)
 
-#ifndef MDBX_TOOLS /* Avoid using internal mdbx_assert() */
+#ifndef xMDBX_TOOLS /* Avoid using internal mdbx_assert() */
 #undef assert
 #define assert(expr) mdbx_assert(NULL, expr)
 #endif
@@ -3531,7 +3567,6 @@ int main(int argc, char *argv[]) {
   MDBX_env *env;
   MDBX_txn *txn;
   MDBX_dbi dbi;
-  MDBX_stat mst;
   MDBX_envinfo mei;
   prog = argv[0];
   char *envname;
@@ -3652,25 +3687,21 @@ int main(int argc, char *argv[]) {
   }
 
   if (envinfo) {
-    rc = mdbx_env_stat_ex(env, txn, &mst, sizeof(mst));
-    if (unlikely(rc != MDBX_SUCCESS)) {
-      error("mdbx_env_stat_ex", rc);
-      goto txn_abort;
-    }
     printf("Environment Info\n");
-    printf("  Pagesize: %u\n", mst.ms_psize);
+    printf("  Pagesize: %u\n", mei.mi_dxb_pagesize);
     if (mei.mi_geo.lower != mei.mi_geo.upper) {
       printf("  Dynamic datafile: %" PRIu64 "..%" PRIu64 " bytes (+%" PRIu64
              "/-%" PRIu64 "), %" PRIu64 "..%" PRIu64 " pages (+%" PRIu64
              "/-%" PRIu64 ")\n",
              mei.mi_geo.lower, mei.mi_geo.upper, mei.mi_geo.grow,
-             mei.mi_geo.shrink, mei.mi_geo.lower / mst.ms_psize,
-             mei.mi_geo.upper / mst.ms_psize, mei.mi_geo.grow / mst.ms_psize,
-             mei.mi_geo.shrink / mst.ms_psize);
+             mei.mi_geo.shrink, mei.mi_geo.lower / mei.mi_dxb_pagesize,
+             mei.mi_geo.upper / mei.mi_dxb_pagesize,
+             mei.mi_geo.grow / mei.mi_dxb_pagesize,
+             mei.mi_geo.shrink / mei.mi_dxb_pagesize);
       printf("  Current mapsize: %" PRIu64 " bytes, %" PRIu64 " pages \n",
-             mei.mi_mapsize, mei.mi_mapsize / mst.ms_psize);
+             mei.mi_mapsize, mei.mi_mapsize / mei.mi_dxb_pagesize);
       printf("  Current datafile: %" PRIu64 " bytes, %" PRIu64 " pages\n",
-             mei.mi_geo.current, mei.mi_geo.current / mst.ms_psize);
+             mei.mi_geo.current, mei.mi_geo.current / mei.mi_dxb_pagesize);
 #if defined(_WIN32) || defined(_WIN64)
       if (mei.mi_geo.shrink && mei.mi_geo.current != mei.mi_geo.upper)
         printf("                    WARNING: Due Windows system limitations a "
@@ -3681,7 +3712,7 @@ int main(int argc, char *argv[]) {
 #endif
     } else {
       printf("  Fixed datafile: %" PRIu64 " bytes, %" PRIu64 " pages\n",
-             mei.mi_geo.current, mei.mi_geo.current / mst.ms_psize);
+             mei.mi_geo.current, mei.mi_geo.current / mei.mi_dxb_pagesize);
     }
     printf("  Last transaction ID: %" PRIu64 "\n", mei.mi_recent_txnid);
     printf("  Latter reader transaction ID: %" PRIu64 " (%" PRIi64 ")\n",
@@ -3689,9 +3720,6 @@ int main(int argc, char *argv[]) {
            mei.mi_latter_reader_txnid - mei.mi_recent_txnid);
     printf("  Max readers: %u\n", mei.mi_maxreaders);
     printf("  Number of reader slots uses: %u\n", mei.mi_numreaders);
-  } else {
-    /* LY: zap warnings from gcc */
-    memset(&mst, 0, sizeof(mst));
   }
 
   if (rdrinfo) {
@@ -3730,6 +3758,8 @@ int main(int argc, char *argv[]) {
       error("mdbx_cursor_open", rc);
       goto txn_abort;
     }
+
+    MDBX_stat mst;
     rc = mdbx_dbi_stat(txn, dbi, &mst, sizeof(mst));
     if (unlikely(rc != MDBX_SUCCESS)) {
       error("mdbx_dbi_stat", rc);
@@ -3804,18 +3834,18 @@ int main(int argc, char *argv[]) {
     }
 
     if (envinfo) {
-      uint64_t value = mei.mi_mapsize / mst.ms_psize;
+      uint64_t value = mei.mi_mapsize / mei.mi_dxb_pagesize;
       double percent = value / 100.0;
       printf("Page Usage\n");
       printf("  Total: %" PRIu64 " 100%%\n", value);
 
-      value = mei.mi_geo.current / mst.ms_psize;
+      value = mei.mi_geo.current / mei.mi_dxb_pagesize;
       printf("  Backed: %" PRIu64 " %.1f%%\n", value, value / percent);
 
       value = mei.mi_last_pgno + 1;
       printf("  Allocated: %" PRIu64 " %.1f%%\n", value, value / percent);
 
-      value = mei.mi_mapsize / mst.ms_psize - (mei.mi_last_pgno + 1);
+      value = mei.mi_mapsize / mei.mi_dxb_pagesize - (mei.mi_last_pgno + 1);
       printf("  Remained: %" PRIu64 " %.1f%%\n", value, value / percent);
 
       value = mei.mi_last_pgno + 1 - pages;
@@ -3830,8 +3860,8 @@ int main(int argc, char *argv[]) {
       value = reclaimable;
       printf("  Reclaimable: %" PRIu64 " %.1f%%\n", value, value / percent);
 
-      value =
-          mei.mi_mapsize / mst.ms_psize - (mei.mi_last_pgno + 1) + reclaimable;
+      value = mei.mi_mapsize / mei.mi_dxb_pagesize - (mei.mi_last_pgno + 1) +
+              reclaimable;
       printf("  Available: %" PRIu64 " %.1f%%\n", value, value / percent);
     } else
       printf("  GC: %" PRIaPGNO " pages\n", pages);
@@ -3842,6 +3872,8 @@ int main(int argc, char *argv[]) {
     error("mdbx_dbi_open", rc);
     goto txn_abort;
   }
+
+  MDBX_stat mst;
   rc = mdbx_dbi_stat(txn, dbi, &mst, sizeof(mst));
   if (unlikely(rc != MDBX_SUCCESS)) {
     error("mdbx_dbi_stat", rc);

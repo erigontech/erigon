@@ -21,8 +21,9 @@
 #error "C++11 or better is required"
 #endif
 
-#if (defined(_WIN32) || defined(_WIN64)) && MDBX_AVOID_CRT
-#error "CRT is required for C++ API, the MDBX_AVOID_CRT option must be disabled"
+#if (defined(_WIN32) || defined(_WIN64)) && MDBX_WITHOUT_MSVC_CRT
+#error                                                                         \
+    "CRT is required for C++ API, the MDBX_WITHOUT_MSVC_CRT option must be disabled"
 #endif /* Windows */
 
 #ifndef __has_include
