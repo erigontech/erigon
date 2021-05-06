@@ -223,6 +223,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	if !h.chainSync.handlePeerEvent() {
 		return p2p.DiscQuitting
 	}
+	fmt.Printf("Got through handlePeerEvent\n")
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
