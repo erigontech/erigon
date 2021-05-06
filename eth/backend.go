@@ -21,11 +21,13 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -295,13 +297,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	//sm, err := ethdb.GetStorageModeFromDB(chainDb)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if !reflect.DeepEqual(sm, config.StorageMode) {
-	//	return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
-	//}
+	sm, err := ethdb.GetStorageModeFromDB(chainDb)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(sm, config.StorageMode) {
+		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+	}
 
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
 		return nil, err
