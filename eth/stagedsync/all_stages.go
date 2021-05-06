@@ -283,7 +283,7 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, false, 0, err
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, 0)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -321,7 +321,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		}
 		defer tx.Rollback()
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers, 0)
 	if err != nil {
 		return false, err
 	}

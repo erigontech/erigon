@@ -166,6 +166,7 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 			log.Error("blockFetcher.Notify", "error", err)
 		}
 	}
+	h.chainSync.handlePeerEvent() // Make sure sync start a new iteration to get this
 	return nil
 }
 
