@@ -128,11 +128,11 @@ func TraceTx(
 		streaming = false
 
 	case config == nil:
-		tracer = NewJsonStreamLogger(nil, stream)
+		tracer = NewJsonStreamLogger(nil, ctx, stream)
 		streaming = true
 
 	default:
-		tracer = NewJsonStreamLogger(config.LogConfig, stream)
+		tracer = NewJsonStreamLogger(config.LogConfig, ctx, stream)
 		streaming = true
 	}
 	// Run the transaction with tracing enabled.
@@ -180,6 +180,7 @@ func TraceTx(
 // a track record of modified storage which is used in reporting snapshots of the
 // contract their storage.
 type JsonStreamLogger struct {
+	ctx          context.Context
 	cfg          vm.LogConfig
 	stream       *jsoniter.Stream
 	firstCapture bool
@@ -191,8 +192,9 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *vm.LogConfig, stream *jsoniter.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsoniter.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
+		ctx:          ctx,
 		stream:       stream,
 		storage:      make(map[common.Address]vm.Storage),
 		firstCapture: true,
@@ -212,6 +214,11 @@ func (l *JsonStreamLogger) CaptureStart(depth int, from common.Address, to commo
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
 func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
+	select {
+	case <-l.ctx.Done():
+		return fmt.Errorf("interrupted")
+	default:
+	}
 	// check if already accumulated the specified number of logs
 	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
 		return vm.ErrTraceLimitReached
@@ -244,11 +251,6 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			)
 			l.storage[contract.Address()][address] = value
 		}
-	}
-	var rdata []byte
-	if !l.cfg.DisableReturnData {
-		rdata = make([]byte, len(rData))
-		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
@@ -324,17 +326,6 @@ func (l *JsonStreamLogger) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, ga
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (l *JsonStreamLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	if depth != 0 {
-		return nil
-	}
-	l.output = output
-	l.err = err
-	if l.cfg.Debug {
-		fmt.Printf("0x%x\n", output)
-		if err != nil {
-			fmt.Printf(" error: %v\n", err)
-		}
-	}
 	return nil
 }
 
