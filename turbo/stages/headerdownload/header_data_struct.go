@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -248,7 +247,6 @@ func (pp PeerPenalty) String() string {
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
 	logPrefix      string
-	batch          ethdb.DbWithPendingMutations
 	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
 	prevHeight     uint64
 	newCanonical   bool
@@ -259,10 +257,9 @@ type HeaderInserter struct {
 	headerProgress uint64
 }
 
-func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
 		logPrefix:      logPrefix,
-		batch:          batch,
 		localTd:        localTd,
 		headerProgress: headerProgress,
 		unwindPoint:    headerProgress,

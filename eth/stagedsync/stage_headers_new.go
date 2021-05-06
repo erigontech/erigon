@@ -100,7 +100,7 @@ func HeadersForward(
 	if err != nil {
 		return err
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 
 	var req *headerdownload.HeaderRequest
@@ -140,7 +140,7 @@ func HeadersForward(
 			}
 		}
 		// Load headers into the database
-		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
+		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch)); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(cfg.batchSize) {
