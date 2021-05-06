@@ -599,7 +599,7 @@ func (tx *lmdbTx) Commit() error {
 	tx.closeCursors()
 
 	commitTimer := time.Now()
-	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
 	if err := tx.tx.Commit(); err != nil {
 		return err

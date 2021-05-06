@@ -20,26 +20,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem             bool
-	exclusive         bool
-	flags             uint
-	path              string
-	bucketsCfg        BucketConfigsFunc
-	mapSize           datasize.ByteSize
-	dirtyListMaxPages uint64
-	verbosity         DBVerbosityLvl
+	inMem      bool
+	exclusive  bool
+	flags      uint
+	path       string
+	bucketsCfg BucketConfigsFunc
+	mapSize    datasize.ByteSize
+	verbosity  DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg:        DefaultBucketConfigs,
-		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
-		dirtyListMaxPages: 128 * 1024,
+		bucketsCfg: DefaultBucketConfigs,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
 	}
 }
 
@@ -124,14 +123,14 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
-
+	const pageSize = 4 * 1024
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
 			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.MB), 0, 4*1024); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
 				return nil, err
 			}
 		}
@@ -152,26 +151,38 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		//	return nil, err
+		//}
+		if err = env.SetOption(mdbx.OptTxnDpInitial, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptDpReverseLimit, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+		// must be in the range from 12.5% (almost empty) to 50% (half empty)
+		// which corresponds to the range from 8192 and to 32768 in units respectively
+		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, 32768); err != nil {
 			return nil, err
 		}
 	}
 
+	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	db := &MdbxKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		wg:      &sync.WaitGroup{},
-		buckets: dbutils.BucketsCfg{},
+		opts:     opts,
+		env:      env,
+		log:      logger,
+		wg:       &sync.WaitGroup{},
+		buckets:  dbutils.BucketsCfg{},
+		pageSize: pageSize,
+		txSize:   dirtyPagesLimit * pageSize,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -264,11 +275,13 @@ func (opts MdbxOpts) MustOpen() RwKV {
 }
 
 type MdbxKV struct {
-	opts    MdbxOpts
-	env     *mdbx.Env
-	log     log.Logger
-	buckets dbutils.BucketsCfg
-	wg      *sync.WaitGroup
+	opts     MdbxOpts
+	txSize   uint64
+	pageSize uint64
+	env      *mdbx.Env
+	log      log.Logger
+	buckets  dbutils.BucketsCfg
+	wg       *sync.WaitGroup
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -310,8 +323,22 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	info, _ := db.env.Info()
+	if !metrics.Enabled {
+		return
+	}
+	info, err := db.env.Info()
+	if err != nil {
+		return // ignore error for metrics collection
+	}
 	dbSize.Update(int64(info.Geo.Current))
+	dbPgopsNewly.Update(int64(info.PageOps.Newly))
+	dbPgopsCow.Update(int64(info.PageOps.Cow))
+	dbPgopsClone.Update(int64(info.PageOps.Clone))
+	dbPgopsSplit.Update(int64(info.PageOps.Split))
+	dbPgopsMerge.Update(int64(info.PageOps.Merge))
+	dbPgopsSpill.Update(int64(info.PageOps.Spill))
+	dbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	dbPgopsWops.Update(int64(info.PageOps.Wops))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
@@ -326,7 +353,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -350,7 +377,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -392,14 +419,25 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 }
 
 func (tx *MdbxTx) CollectMetrics() {
+	if !metrics.Enabled {
+		return
+	}
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
-		panic(err)
+		return
 	}
 
 	txDirty.Update(int64(txInfo.SpaceDirty))
 	txSpill.Update(int64(txInfo.Spill))
 	txUnspill.Update(int64(txInfo.Unspill))
+
+	gc, err := tx.BucketStat("gc")
+	if err != nil {
+		return
+	}
+	gcLeafMetric.Update(int64(gc.LeafPages))
+	gcOverflowMetric.Update(int64(gc.OverflowPages))
+	gcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
@@ -614,15 +652,24 @@ func (tx *MdbxTx) Commit() error {
 		slowTx = debug.SlowCommit()
 	}
 
-	commitTimer := time.Now()
-	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+	//commitTimer := time.Now()
+	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
-	//tx.printDebugInfo()
+	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+		tx.PrintDebugInfo()
+	}
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
+
+	dbCommitPreparation.Update(latency.Preparation)
+	dbCommitGc.Update(latency.GC)
+	dbCommitAudit.Update(latency.Audit)
+	dbCommitWrite.Update(latency.Write)
+	dbCommitSync.Update(latency.Sync)
+	dbCommitEnding.Update(latency.Ending)
 
 	if latency.Whole > slowTx {
 		log.Info("Commit",
@@ -659,26 +706,35 @@ func (tx *MdbxTx) Rollback() {
 }
 
 //nolint
-func (tx *MdbxTx) printDebugInfo() {
-	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-		txInfo, err := tx.tx.Info(true)
-		if err != nil {
-			panic(err)
-		}
+func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		return 0, 0, err
+	}
 
-		txSize := uint(txInfo.SpaceDirty / 1024)
-		doPrint := tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb()
-		doPrint = doPrint || (!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
-		if doPrint {
-			log.Info("Tx info",
-				"id", txInfo.Id,
-				"read_lag", txInfo.ReadLag,
-				"ro", tx.readOnly,
-				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
-				"space_dirty_kb", txInfo.SpaceDirty/1024,
-				"callers", debug.Callers(7),
-			)
-		}
+	return txInfo.SpaceDirty, tx.db.txSize, nil
+}
+
+//nolint
+func (tx *MdbxTx) PrintDebugInfo() {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		panic(err)
+	}
+
+	txSize := uint(txInfo.SpaceDirty / 1024)
+	doPrint := debug.BigRoTxKb() == 0 && debug.BigRwTxKb() == 0 ||
+		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
+		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
+	if doPrint {
+		log.Info("Tx info",
+			"id", txInfo.Id,
+			"read_lag", txInfo.ReadLag,
+			"ro", tx.readOnly,
+			//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
+			"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
+			//"callers", debug.Callers(7),
+		)
 	}
 }
 

@@ -44,9 +44,7 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
 	dialOpts = append(dialOpts, grpc.WithInsecure())
@@ -115,10 +113,16 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		}(sentry)
 	}
 
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
+
 	batchSize := 512 * datasize.MB
 	sync, err := NewStagedSync(
 		ctx,
-		db,
+		db.(ethdb.HasRwKV).RwKV(),
+		sm,
 		batchSize,
 		timeout,
 		controlServer,
@@ -230,10 +234,15 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		log.Error("failed to set sentry status", "error", err)
 		return nil
 	}
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
 	batchSize := 512 * datasize.MB
 	sync, err := NewStagedSync(
 		ctx,
-		db,
+		db.(ethdb.HasRwKV).RwKV(),
+		sm,
 		batchSize,
 		timeout,
 		controlServer,
@@ -283,20 +292,18 @@ func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, 
 
 func NewStagedSync(
 	ctx context.Context,
-	db ethdb.Database,
+	db ethdb.RwKV,
+	sm ethdb.StorageMode,
 	batchSize datasize.ByteSize,
 	bodyDownloadTimeout int,
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		return nil, err
-	}
 
 	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
+			db,
 			controlServer.hd,
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
@@ -305,6 +312,7 @@ func NewStagedSync(
 			batchSize,
 		),
 		stagedsync.StageBodiesCfg(
+			db,
 			controlServer.bd,
 			controlServer.sendBodyRequest,
 			controlServer.penalise,
@@ -314,8 +322,9 @@ func NewStagedSync(
 			bodyDownloadTimeout,
 			batchSize,
 		),
-		stagedsync.StageSendersCfg(controlServer.chainConfig),
+		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
 		stagedsync.StageExecuteBlocksCfg(
+			db,
 			sm.Receipts,
 			batchSize,
 			nil,
@@ -327,13 +336,13 @@ func NewStagedSync(
 			&vm.Config{NoReceipts: !sm.Receipts},
 			tmpdir,
 		),
-		stagedsync.StageHashStateCfg(tmpdir),
-		stagedsync.StageTrieCfg(true, true, tmpdir),
-		stagedsync.StageHistoryCfg(tmpdir),
-		stagedsync.StageLogIndexCfg(tmpdir),
-		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
-		stagedsync.StageTxLookupCfg(tmpdir),
-		stagedsync.StageTxPoolCfg(txPool),
+		stagedsync.StageHashStateCfg(db, tmpdir),
+		stagedsync.StageTrieCfg(db, true, true, tmpdir),
+		stagedsync.StageHistoryCfg(db, tmpdir),
+		stagedsync.StageLogIndexCfg(db, tmpdir),
+		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
+		stagedsync.StageTxLookupCfg(db, tmpdir),
+		stagedsync.StageTxPoolCfg(db, txPool),
 	), nil
 }
 

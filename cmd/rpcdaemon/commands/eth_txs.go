@@ -25,10 +25,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
-	if txn == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
-	}
-	if tx != nil {
+	if txn != nil {
 		return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 	}
 
@@ -37,7 +34,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	if err != nil {
 		return nil, err
 	}
-	if reply.RlpTxs[0] != nil {
+	if len(reply.RlpTxs[0]) > 0 {
 		txn, err = types2.UnmarshalTransactionFromBinary(reply.RlpTxs[0])
 		if err != nil {
 			return nil, err
@@ -59,10 +56,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	txn, _, _, _ := rawdb.ReadTransaction(tx, hash)
-	if txn == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
-	}
-	if tx != nil {
+	if txn != nil {
 		var buf bytes.Buffer
 		err = txn.MarshalBinary(&buf)
 		return buf.Bytes(), err
@@ -73,7 +67,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if err != nil {
 		return nil, err
 	}
-	if reply.RlpTxs[0] != nil {
+	if len(reply.RlpTxs[0]) > 0 {
 		return reply.RlpTxs[0], nil
 	}
 	return nil, nil

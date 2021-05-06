@@ -58,16 +58,6 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	}()
 
 	go func() {
-		if ethBackend == nil {
-			return
-		}
-		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
-			log.Warn("rpc filters: error subscribing to events", "err", err)
-			time.Sleep(time.Second)
-		}
-	}()
-
-	go func() {
 		if txPool == nil {
 			return
 		}
@@ -171,7 +161,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &header)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (header), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.headsSubs {
 				v <- &header
@@ -183,7 +173,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &logs)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (pending logs), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.pendingLogsSubs {
 				v <- logs
@@ -195,14 +185,14 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 		err := rlp.Decode(bytes.NewReader(payload), &block)
 		if err != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", err)
+			log.Warn("OnNewEvent rpc filters (pending txs), unprocessable payload", "err", err)
 		} else {
 			for _, v := range ff.pendingBlockSubs {
 				v <- &block
 			}
 		}
 	default:
-		log.Warn("rpc filters: unsupported event type", "type", event.Type)
+		log.Warn("OnNewEvent rpc filters: unsupported event type", "type", event.Type)
 		return
 	}
 }
@@ -212,17 +202,12 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	defer ff.mu.RUnlock()
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
-
-	for i := range reply.RplTxs {
-		reader.Reset(reply.RplTxs[i])
-		stream.Reset(reader, uint64(len(reply.RplTxs[i])))
+	for i, rplTx := range reply.RplTxs {
 		var decodeErr error
-		txs[i], decodeErr = types.DecodeTransaction(stream)
+		txs[i], decodeErr = types.UnmarshalTransactionFromBinary(rplTx)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("rpc filters, unprocessable payload", "err", decodeErr)
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr)
 			break
 		}
 	}

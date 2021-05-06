@@ -27,7 +27,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
-	cfg := StageHistoryCfg(getTmpDir())
+	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())
@@ -59,18 +59,18 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account plain state", test(2100, dbutils.PlainAccountChangeSetBucket))
-	t.Run("storage plain state", test(2100, dbutils.PlainStorageChangeSetBucket))
+	t.Run("account plain state", test(2100, dbutils.AccountChangeSetBucket))
+	t.Run("storage plain state", test(2100, dbutils.StorageChangeSetBucket))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	buckets := []string{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
-	cfg := StageHistoryCfg(getTmpDir())
+	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
 	for i := range buckets {
 		csbucket := buckets[i]
 
@@ -194,14 +194,14 @@ func generateTestData(t *testing.T, db ethdb.RwTx, csBucket string, numOfBlocks 
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if dbutils.PlainStorageChangeSetBucket == csBucket || dbutils.PlainAccountChangeSetBucket == csBucket {
+	if dbutils.StorageChangeSetBucket == csBucket || dbutils.AccountChangeSetBucket == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dbutils.PlainStorageChangeSetBucket == csBucket {
+	if dbutils.StorageChangeSetBucket == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		if innerErr != nil {
 			t.Fatal(innerErr)

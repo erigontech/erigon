@@ -22,9 +22,9 @@ func addTestAccount(db ethdb.Putter, hash common.Hash, balance uint64) error {
 }
 
 func TestTrieOfAccountsLayout(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -46,12 +46,15 @@ func TestTrieOfAccountsLayout(t *testing.T) {
 	hash6 := common.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash6, 100_000_000_000))
 
-	_, err = RegenerateIntermediateHashes("IH", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), StageTrieCfg(false, true, getTmpDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, getTmpDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	account_trie := make(map[string][]byte)
 
-	err = tx.Walk(dbutils.TrieOfAccountsBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	c, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	require.NoError(t, err)
+	defer c.Close()
+	err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 		account_trie[string(k)] = v
 		return true, nil
 	})

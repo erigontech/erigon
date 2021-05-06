@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type txPool interface {
@@ -89,13 +88,18 @@ func (s *TxPoolServer) OnAdd(req *proto_txpool.OnAddRequest, stream proto_txpool
 	defer sub.Unsubscribe()
 
 	var buf bytes.Buffer
-	for tx := range txsCh {
-		buf.Reset()
-		if err := rlp.Encode(&buf, tx); err != nil {
-			log.Warn("error while marshaling a pending transaction", "err", err)
-			return err
+	var rplTxs [][]byte
+	for txs := range txsCh {
+		rplTxs = rplTxs[:0]
+		for _, tx := range txs.Txs {
+			buf.Reset()
+			if err := tx.MarshalBinary(&buf); err != nil {
+				log.Warn("error while marshaling a pending transaction", "err", err)
+				return err
+			}
+			rplTxs = append(rplTxs, common.CopyBytes(buf.Bytes()))
 		}
-		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: [][]byte{common.CopyBytes(buf.Bytes())}}); err != nil {
+		if err := stream.Send(&proto_txpool.OnAddReply{RplTxs: rplTxs}); err != nil {
 			return err
 		}
 	}
@@ -112,7 +116,7 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 			continue
 		}
 		buf.Reset()
-		if err := rlp.Encode(buf, txn); err != nil {
+		if err := txn.MarshalBinary(buf); err != nil {
 			return nil, err
 		}
 		reply.RlpTxs[i] = common.CopyBytes(buf.Bytes())

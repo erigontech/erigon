@@ -218,9 +218,26 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
 	blocksMap := map[uint32]struct{}{}
-	var loadAddresses = func(addr common.Address) error {
+	var loadFromAddresses = func(addr common.Address) error {
 		// Load bitmap for address from trace index
 		b, err := bitmapdb.Get(dbtx, dbutils.CallFromIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
+		if err != nil {
+			return err
+		}
+
+		// Extract block numbers from bitmap
+		for _, block := range b.ToArray() {
+			// Observe the limits
+			if uint64(block) >= fromBlock && uint64(block) <= toBlock {
+				blocksMap[block] = struct{}{}
+			}
+		}
+
+		return nil
+	}
+	var loadToAddresses = func(addr common.Address) error {
+		// Load bitmap for address from trace index
+		b, err := bitmapdb.Get(dbtx, dbutils.CallToIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
 		if err != nil {
 			return err
 		}
@@ -238,7 +255,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			if err := loadAddresses(*addr); err != nil {
+			if err := loadFromAddresses(*addr); err != nil {
 				return nil, err
 			}
 
@@ -248,7 +265,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			if err := loadAddresses(*addr); err != nil {
+			if err := loadToAddresses(*addr); err != nil {
 				return nil, err
 			}
 
@@ -290,7 +307,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		if tErr != nil {
 			return nil, tErr
 		}
-
 		for _, trace := range t {
 			// Check if transaction concerns any of the addresses we wanted
 			if filter_trace(trace, fromAddresses, toAddresses) {
@@ -307,13 +323,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
 	for _, pt := range trace.Trace {
 		switch action := pt.Action.(type) {
-		case CallTraceAction:
+		case *CallTraceAction:
 			_, f := fromAddresses[action.From]
 			_, t := toAddresses[action.To]
 			if f || t {
 				return true
 			}
-		case CreateTraceAction:
+		case *CreateTraceAction:
 			_, f := fromAddresses[action.From]
 			if f {
 				return true
@@ -326,7 +342,7 @@ func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struc
 					}
 				}
 			}
-		case SuicideTraceAction:
+		case *SuicideTraceAction:
 			_, f := fromAddresses[action.RefundAddress]
 			_, t := toAddresses[action.Address]
 			if f || t {

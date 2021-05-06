@@ -89,6 +89,11 @@ cons:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
 
+evm:
+	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/evm\" to run EVM"
+
 seeder:
 	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
 	@echo "Done building."

@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -11,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 type StagedSync struct {
@@ -67,7 +67,6 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
-	senders SendersCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -105,7 +104,6 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
-			senders:               senders,
 			snapshotsDir:          stagedSync.params.SnapshotDir,
 			btClient:              stagedSync.params.TorrnetClient,
 			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
