@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -62,7 +63,8 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash
 	return headHeight, headHash, headTd256, nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64) {
+// RequestMoreBodies - returns nil if nothing to request
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
@@ -97,20 +99,17 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveries[blockNum-bd.requestedLow].Header()
 			if header == nil {
-				log.Error("Header not found", "block number", blockNum)
-				panic("")
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
 			hash = header.Hash()
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
 			if err != nil {
-				log.Error("Could not find canonical header", "block number", blockNum, "err", err)
-				panic(err)
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
 			header = rawdb.ReadHeader(db, hash, blockNum)
 			if header == nil {
-				log.Error("Header not found", "block number", blockNum)
-				panic("")
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
@@ -154,7 +153,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 			bd.requests[blockNum-bd.requestedLow] = bodyReq
 		}
 	}
-	return bodyReq, blockNum
+	return bodyReq, blockNum, nil
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {

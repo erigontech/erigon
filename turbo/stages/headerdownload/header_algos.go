@@ -485,16 +485,15 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest 
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.timestamp <= currentTime {
-				if anchor.timeouts < 10 {
-					return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
-				} else {
-					// Ancestors of this anchor seem to be unavailable, invalidate and move on
-					hd.invalidateAnchor(anchor)
-				}
-			} else {
+			if anchor.timestamp > currentTime {
 				// Anchor not ready for re-request yet
 				return nil
+			}
+			if anchor.timeouts < 10 {
+				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
+			} else {
+				// Ancestors of this anchor seem to be unavailable, invalidate and move on
+				hd.invalidateAnchor(anchor)
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on
