@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -60,12 +59,7 @@ func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *
 	if mg == nil {
 		return nil
 	}
-	headersBlock, err := stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return err
-	}
 
-	snBlock := snapshotsync.CalculateEpoch(headersBlock, snapshotsync.EpochSize)
-
+	snBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
 	return mg.Migrate(db, tx, snBlock, btClient)
 }
