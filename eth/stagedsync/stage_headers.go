@@ -266,9 +266,7 @@ Error: %v
 	ctx := []interface{}{
 		"count", len(headers), "elapsed", common.PrettyDuration(time.Since(start)),
 		"number", lastHeader.Number, "hash", lastHeader.Hash(),
-	}
-	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {
-		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
+		"age", common.PrettyAge(time.Unix(int64(lastHeader.Time), 0)),
 	}
 	if ignored > 0 {
 		ctx = append(ctx, []interface{}{"ignored", ignored}...)
