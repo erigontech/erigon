@@ -212,15 +212,15 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, toBlock uint
 
 		updateProgress := !useBatch || batch.BatchSize() >= int(params.batchSize)
 		if updateProgress {
-			if err = s.Update(tx, stageProgress); err != nil {
-				return err
-			}
 			if useBatch {
 				if err = batch.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
 			}
 			if !useExternalTx {
+				if err = s.Update(tx, stageProgress); err != nil {
+					return err
+				}
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
