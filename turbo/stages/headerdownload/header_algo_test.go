@@ -9,15 +9,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInserter1(t *testing.T) {
 	db := ethdb.NewMemKV()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		t.Fatalf("begin transaction: %v", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 	// Set up parent difficulty
 	if err := rawdb.WriteTd(tx, common.Hash{}, 4, big.NewInt(0)); err != nil {
