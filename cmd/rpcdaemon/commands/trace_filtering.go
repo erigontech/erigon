@@ -419,8 +419,8 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 			}
 		}
 	case *SuicideTraceAction:
-		_, f := fromAddresses[action.RefundAddress]
-		_, t := toAddresses[action.Address]
+		_, f := fromAddresses[action.Address]
+		_, t := toAddresses[action.RefundAddress]
 		if f || t {
 			return true
 		}
