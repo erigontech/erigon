@@ -88,12 +88,7 @@ func testHandshake(t *testing.T, protocol uint) {
 			}
 		}()
 
-		err := peer.Handshake(
-			1, td, head.Hash(), genesis.Hash(),
-			forkID,
-			forkid.NewFilter(backend.chain.Config(), backend.chain.Genesis().Hash(), func() uint64 { return backend.headBlock.NumberU64() }),
-			HandshakeTimeout,
-		)
+		err := peer.Handshake(1, td, head.Hash(), genesis.Hash(), forkID, forkid.NewFilter(backend.chain.Config(), backend.chain.Genesis().Hash(), func() uint64 { return backend.headBlock.NumberU64() }))
 		if err == nil {
 			t.Errorf("test %d: protocol returned nil error, want %q", i, test.want)
 		} else if !errors.Is(err, test.want) {

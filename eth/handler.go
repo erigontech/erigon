@@ -240,7 +240,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		return fmt.Errorf("reading td for %d %x: %v", number, hash, err1)
 	}
 	forkID := forkid.NewID(h.chainConfig, genesis.Hash(), number)
-	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter, eth.HandshakeTimeout); err != nil {
+	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}

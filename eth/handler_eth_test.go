@@ -228,12 +228,7 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = src.Handshake(
-		1, td, head.Hash(), genesis.Hash(),
-		forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()),
-		forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() }),
-		eth.HandshakeTimeout,
-	); err != nil {
+	if err = src.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
@@ -296,12 +291,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = sink.Handshake(
-		1, td, head.Hash(), genesis.Hash(),
-		forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()),
-		forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() }),
-		eth.HandshakeTimeout,
-	); err != nil {
+	if err = sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewID(handler.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(handler.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -394,12 +384,7 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 		go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
 			return eth.Handle((*ethHandler)(source.handler), peer)
 		})
-		if err = sinkPeer.Handshake(
-			1, td, genesis.Hash(), genesis.Hash(),
-			forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()),
-			forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() }),
-			30*time.Second,
-		); err != nil {
+		if err = sinkPeer.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 			t.Fatalf("failed to run protocol handshake: %v", err)
 		}
 		//nolint:errcheck
@@ -476,12 +461,7 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = sink.Handshake(
-		1, td, genesis.Hash(), genesis.Hash(),
-		forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()),
-		forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() }),
-		eth.HandshakeTimeout,
-	); err != nil {
+	if err = sink.Handshake(1, td, genesis.Hash(), genesis.Hash(), forkid.NewID(source.ChainConfig, genesis.Hash(), head.NumberU64()), forkid.NewFilter(source.ChainConfig, genesis.Hash(), func() uint64 { return head.NumberU64() })); err != nil {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 	// After the handshake completes, the source handler should stream the sink
