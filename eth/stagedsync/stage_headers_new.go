@@ -160,6 +160,7 @@ func HeadersForward(
 				}
 			}
 			batch = ethdb.NewBatch(tx)
+			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
 		timer.Stop()
 		announces := cfg.hd.GrabAnnounces()
