@@ -73,7 +73,6 @@ _MithrilDB_ is a rightly relevant name.
 
 [![https://t.me/libmdbx](https://raw.githubusercontent.com/wiki/erthink/libmdbx/img/telegram.png)](https://t.me/libmdbx)
 [![GithubCI](https://github.com/erthink/libmdbx/workflows/CI/badge.svg)](https://github.com/erthink/libmdbx/actions?query=workflow%3ACI)
-[![TravisCI](https://travis-ci.org/erthink/libmdbx.svg?branch=master)](https://travis-ci.org/erthink/libmdbx)
 [![AppveyorCI](https://ci.appveyor.com/api/projects/status/ue94mlopn50dqiqg/branch/master?svg=true)](https://ci.appveyor.com/project/leo-yuriev/libmdbx/branch/master)
 [![CircleCI](https://circleci.com/gh/erthink/libmdbx/tree/master.svg?style=svg)](https://circleci.com/gh/erthink/libmdbx/tree/master)
 [![CirrusCI](https://api.cirrus-ci.com/github/erthink/libmdbx.svg)](https://cirrus-ci.com/github/erthink/libmdbx)
@@ -373,7 +372,9 @@ are completely traditional and have minimal prerequirements like
 `build-essential`, i.e. the non-obsolete C/C++ compiler and a
 [SDK](https://en.wikipedia.org/wiki/Software_development_kit) for the
 target platform. Obviously you need building tools itself, i.e. `git`,
-`cmake` or GNU `make` with `bash`.
+`cmake` or GNU `make` with `bash`. For your convenience, `make help`
+and `make options` are also available for listing existing targets
+and build options respectively.
 
 So just using CMake or GNU Make in your habitual manner and feel free to
 fill an issue or make pull request in the case something will be
@@ -431,11 +432,11 @@ recommended. Otherwise do not forget to add `ntdll.lib` to linking.
 
 Building by MinGW, MSYS or Cygwin is potentially possible. However,
 these scripts are not tested and will probably require you to modify the
-CMakeLists.txt or Makefile respectively.
+`CMakeLists.txt` or `Makefile` respectively.
 
 It should be noted that in _libmdbx_ was efforts to resolve
-runtime dependencies from CRT and other libraries Visual Studio.
-For this is enough to define the `MDBX_AVOID_CRT` during build.
+runtime dependencies from CRT and other MSVC libraries.
+For this is enough to define the `MDBX_WITHOUT_MSVC_CRT` during build.
 
 An example of running a basic test script can be found in the
 [CI-script](appveyor.yml) for [AppVeyor](https://www.appveyor.com/). To

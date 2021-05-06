@@ -16,9 +16,30 @@ var (
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
 	dbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
+	txLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
 	txSpill   = metrics.GetOrRegisterGauge("tx/spill", metrics.DefaultRegistry)   //nolint
 	txUnspill = metrics.GetOrRegisterGauge("tx/unspill", metrics.DefaultRegistry) //nolint
 	txDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
+
+	dbCommitPreparation = metrics.GetOrRegisterTimer("db/commit/preparation", metrics.DefaultRegistry) //nolint
+	dbCommitGc          = metrics.GetOrRegisterTimer("db/commit/gc", metrics.DefaultRegistry)          //nolint
+	dbCommitAudit       = metrics.GetOrRegisterTimer("db/commit/audit", metrics.DefaultRegistry)       //nolint
+	dbCommitWrite       = metrics.GetOrRegisterTimer("db/commit/write", metrics.DefaultRegistry)       //nolint
+	dbCommitSync        = metrics.GetOrRegisterTimer("db/commit/sync", metrics.DefaultRegistry)        //nolint
+	dbCommitEnding      = metrics.GetOrRegisterTimer("db/commit/ending", metrics.DefaultRegistry)      //nolint
+
+	dbPgopsNewly   = metrics.GetOrRegisterGauge("db/pgops/newly", metrics.DefaultRegistry)   //nolint
+	dbPgopsCow     = metrics.GetOrRegisterGauge("db/pgops/cow", metrics.DefaultRegistry)     //nolint
+	dbPgopsClone   = metrics.GetOrRegisterGauge("db/pgops/clone", metrics.DefaultRegistry)   //nolint
+	dbPgopsSplit   = metrics.GetOrRegisterGauge("db/pgops/split", metrics.DefaultRegistry)   //nolint
+	dbPgopsMerge   = metrics.GetOrRegisterGauge("db/pgops/merge", metrics.DefaultRegistry)   //nolint
+	dbPgopsSpill   = metrics.GetOrRegisterGauge("db/pgops/spill", metrics.DefaultRegistry)   //nolint
+	dbPgopsUnspill = metrics.GetOrRegisterGauge("db/pgops/unspill", metrics.DefaultRegistry) //nolint
+	dbPgopsWops    = metrics.GetOrRegisterGauge("db/pgops/wops", metrics.DefaultRegistry)    //nolint
+
+	gcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
+	gcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
+	gcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
 )
 
 type DBVerbosityLvl int8
