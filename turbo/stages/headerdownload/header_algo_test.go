@@ -12,20 +12,19 @@ import (
 )
 
 func TestInserter1(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
-	// Set up parent difficulty
-	if err := rawdb.WriteTd(db, common.Hash{}, 4, big.NewInt(0)); err != nil {
-		t.Fatalf("write parent diff: %v", err)
-	}
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		t.Fatalf("begin transaction: %v", err)
 	}
 	defer tx.Rollback()
-	batch := tx.NewBatch()
-	hi := NewHeaderInserter("headers", batch, big.NewInt(0), 0)
-	if err := hi.FeedHeader(&types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
+	// Set up parent difficulty
+	if err := rawdb.WriteTd(tx, common.Hash{}, 4, big.NewInt(0)); err != nil {
+		t.Fatalf("write parent diff: %v", err)
+	}
+	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
+	if err := hi.FeedHeader(tx, &types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
 		t.Errorf("feed empty header: %v", err)
 	}
 }
