@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1620213736197,
+  "iteration": 1620292751666,
   "links": [],
   "panels": [
     {
@@ -967,10 +967,17 @@
       "steppedLine": false,
       "targets": [
         {
+          "expr": "tx_limit{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "limit: {{instance}}",
+          "refId": "A"
+        },
+        {
           "expr": "tx_dirty{instance=~\"$instance\"}",
+          "hide": false,
           "interval": "",
           "legendFormat": "dirty: {{instance}}",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "thresholds": [],
@@ -4478,7 +4485,7 @@
       "type": "row"
     }
   ],
-  "refresh": false,
+  "refresh": "30s",
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4487,7 +4494,7 @@
       {
         "allValue": "txpool_invalid",
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "All"
           ],
@@ -4600,10 +4607,12 @@
         "current": {
           "selected": false,
           "text": [
-            "turbogeth16c.weblogix.it:6060"
+            "turbogeth16c.weblogix.it:6060",
+            "turbogeth16d.weblogix.it:6060"
           ],
           "value": [
-            "turbogeth16c.weblogix.it:6060"
+            "turbogeth16c.weblogix.it:6060",
+            "turbogeth16d.weblogix.it:6060"
           ]
         },
         "datasource": "Prometheus",
@@ -4633,8 +4642,8 @@
     ]
   },
   "time": {
-    "from": "2021-05-05T02:36:52.939Z",
-    "to": "2021-05-05T11:17:44.003Z"
+    "from": "now-1h",
+    "to": "now"
   },
   "timepicker": {
     "refresh_intervals": [
@@ -4663,5 +4672,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 97
+  "version": 98
 }

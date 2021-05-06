@@ -427,6 +427,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 
 	txDirty.Update(int64(txInfo.SpaceDirty))
+	txLimit.Update(int64(tx.db.txSize))
 	txSpill.Update(int64(txInfo.Spill))
 	txUnspill.Update(int64(txInfo.Unspill))
 
