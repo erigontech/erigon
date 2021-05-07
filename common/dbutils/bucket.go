@@ -219,6 +219,8 @@ const (
 
 // Keys
 var (
+	//StorageModePruning - does node prune.
+	StorageModePruning = []byte("smPruning")
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
