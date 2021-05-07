@@ -1352,7 +1352,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 				newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, verifyDuration)
 				if reorg && d.headersUnwinder != nil {
 					// Need to unwind further stages
-					if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB, d.stateDB); err1 != nil {
+					if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
 						return fmt.Errorf("%s: unwinding all stages to %d: %v", logPrefix, forkBlockNumber, err1)
 					}
 				}
