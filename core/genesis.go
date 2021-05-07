@@ -184,7 +184,7 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := genesis.ToBlock(history)
+		block, _, err1 := genesis.ToBlock()
 		if err1 != nil {
 			return genesis.Config, common.Hash{}, err1
 		}
@@ -254,7 +254,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	tmpDB := ethdb.NewMemDatabase()
 	defer tmpDB.Close()
 	tx, err := tmpDB.Begin(context.Background(), ethdb.RW)
@@ -314,7 +314,7 @@ func (g *Genesis) ToBlock(history bool) (*types.Block, *state.IntraBlockState, e
 }
 
 func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := g.ToBlock(history)
+	block, statedb, err := g.ToBlock()
 	if err != nil {
 		return nil, nil, err
 	}
