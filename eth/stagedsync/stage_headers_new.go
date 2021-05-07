@@ -118,7 +118,7 @@ func HeadersForward(
 			progress := cfg.hd.Progress()
 			limit := headerProgress + (*cfg.increment)
 			if progress > limit {
-				log.Info("Increment limit reached (%d > %d), quitting download cycle", progress, limit)
+				log.Info(fmt.Sprintf("Increment limit reached (%d > %d), quitting download cycle", progress, limit))
 				break
 			}
 		}
