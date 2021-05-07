@@ -1127,9 +1127,9 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	m.overWriteKeys = rapid.SliceOf(rapid.SampledFrom(m.snKeys)).Draw(t, "get snKeys").([][20]byte)
 	m.newKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Draw(t, "generate new keys").([][20]byte)
 	m.allKeys = append(m.snKeys, m.overWriteKeys...)
-	m.allKeys = append(m.snKeys, m.newKeys...)
+	m.allKeys = append(m.allKeys, m.newKeys...)
 	notExistingKeys := rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Draw(t, "generate not excisting keys").([][20]byte)
-	m.allKeys = append(m.snKeys, notExistingKeys...)
+	m.allKeys = append(m.allKeys, notExistingKeys...)
 
 	txSn, err := m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -1168,6 +1168,10 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
+}
+func (m *getKVMachine) Cleanup() {
+	m.snKV.Close()
+	m.modelKV.Close()
 }
 
 func (m *getKVMachine) Check(t *rapid.T) {

@@ -164,6 +164,12 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	}
 	go func() {
 		for {
+			select {
+			case <-cmd.Context().Done():
+				return
+			default:
+			}
+
 			snapshots, err := bittorrentServer.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
 			})
