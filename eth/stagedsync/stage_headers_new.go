@@ -98,7 +98,7 @@ func HeadersForward(
 
 	incrementalTarget := headerProgress + cfg.increment
 	if cfg.increment > 0 {
-		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "incremental target", incrementalTarget)
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "target", incrementalTarget)
 	} else {
 		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	}
@@ -130,7 +130,7 @@ func HeadersForward(
 		if cfg.increment > 0 {
 			progress := cfg.hd.Progress()
 			if progress > incrementalTarget {
-				log.Info("Increment limit reached, quitting download cycle", "progress", progress, "limit", incrementalTarget)
+				log.Info(fmt.Sprintf("[%s] Target reached, exiting cycle", logPrefix), "progress", progress, "target", incrementalTarget)
 				break
 			}
 		}
@@ -242,7 +242,7 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info("Processed", "highest", headerInserter.GetHighest())
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest())
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}
