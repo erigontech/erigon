@@ -134,7 +134,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
+	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -309,7 +309,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	vmConfig, _ := BlockchainRuntimeConfig(config)
+	vmConfig := BlockchainRuntimeConfig(config)
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 
 	if config.TxPool.Journal != "" {
@@ -537,22 +537,14 @@ func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Eve
 	}
 }
 
-func BlockchainRuntimeConfig(config *ethconfig.Config) (vm.Config, *core.CacheConfig) {
+func BlockchainRuntimeConfig(config *ethconfig.Config) vm.Config {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			NoReceipts:              !config.StorageMode.Receipts,
 		}
-		cacheConfig = &core.CacheConfig{
-			Pruning:             config.Pruning,
-			BlocksBeforePruning: config.BlocksBeforePruning,
-			BlocksToPrune:       config.BlocksToPrune,
-			PruneTimeout:        config.PruningTimeout,
-			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           !config.StorageMode.History,
-		}
 	)
-	return vmConfig, cacheConfig
+	return vmConfig
 }
 
 // func makeExtraData(extra []byte) []byte {

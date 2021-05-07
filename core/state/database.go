@@ -221,7 +221,6 @@ type TrieDbState struct {
 	aggregateBuffer   *Buffer // Merge of all buffers
 	currentBuffer     *Buffer
 	historical        bool
-	noHistory         bool
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
 	newStream         trie.Stream
@@ -259,10 +258,6 @@ func (tds *TrieDbState) SetHistorical(h bool) {
 
 func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
-}
-
-func (tds *TrieDbState) SetNoHistory(nh bool) {
-	tds.noHistory = nh
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -322,7 +317,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
 		historical:        tds.historical,
-		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
 		pw:                tds.pw,

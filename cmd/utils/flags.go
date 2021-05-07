@@ -28,7 +28,6 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -147,50 +146,13 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	GCModePruningFlag = cli.BoolFlag{
-		Name:  "pruning",
-		Usage: `Enable storage pruning`,
-	}
-	GCModeLimitFlag = cli.Uint64Flag{
-		Name:  "pruning.stop_limit",
-		Usage: `Blockchain pruning limit`,
-		Value: 1024,
-	}
-	GCModeBlockToPruneFlag = cli.Uint64Flag{
-		Name:  "pruning.processing_limit",
-		Usage: `Block to prune per tick`,
-		Value: 20,
-	}
-	GCModeTickTimeout = cli.DurationFlag{
-		Name:  "pruning.tick",
-		Usage: `Time of tick`,
-		Value: time.Second * 2,
-	}
-	LightServFlag = cli.IntFlag{
-		Name:  "lightserv",
-		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",
-		Value: 0,
-	}
-	LightKDFFlag = cli.BoolFlag{
-		Name:  "lightkdf",
-		Usage: "Reduce key-derivation RAM & CPU usage at some expense of KDF strength",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	BloomFilterSizeFlag = cli.Uint64Flag{
-		Name:  "bloomfilter.size",
-		Usage: "Megabytes of memory allocated to bloom-filter for pruning",
-		Value: 2048,
-	}
 	OverrideBerlinFlag = cli.Uint64Flag{
 		Name:  "override.berlin",
 		Usage: "Manually specify Berlin fork-block, overriding the bundled setting",
-	}
-	DownloadOnlyFlag = cli.BoolFlag{
-		Name:  "download-only",
-		Usage: "Run in download only mode - only fetch blocks but not process them",
 	}
 	DebugProtocolFlag = cli.BoolFlag{
 		Name:  "debug-protocol",
@@ -342,10 +304,6 @@ var (
 	FakePoWFlag = cli.BoolFlag{
 		Name:  "fakepow",
 		Usage: "Disables proof-of-work verification",
-	}
-	NoCompactionFlag = cli.BoolFlag{
-		Name:  "nocompaction",
-		Usage: "Disables db compaction after import",
 	}
 	// RPC settings
 	IPCDisabledFlag = cli.BoolFlag{
@@ -1131,16 +1089,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-
-	// todo uncomment after fix pruning
-	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
-	cfg.Pruning = false
-	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
-	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
-	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
-
-	// Read the value from the flag no matter if it's set or not.
-	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 

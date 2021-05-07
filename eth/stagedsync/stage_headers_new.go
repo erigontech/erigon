@@ -26,6 +26,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
+	increment         uint64
 }
 
 func StageHeadersCfg(
@@ -37,6 +38,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
+	increment uint64,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -47,6 +49,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		wakeUpChan:        wakeUpChan,
 		batchSize:         batchSize,
+		increment:         increment,
 	}
 }
 
@@ -93,7 +96,12 @@ func HeadersForward(
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
+	incrementalTarget := headerProgress + cfg.increment
+	if cfg.increment > 0 {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "target", incrementalTarget)
+	} else {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
+	}
 	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
@@ -110,7 +118,23 @@ func HeadersForward(
 	stopped := false
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
+
+	// FIXME: remove this hack
+	if cfg.increment > 0 {
+		if cfg.hd.TopSeenHeight() > incrementalTarget {
+			initialCycle = true
+		}
+	}
+
 	for !stopped {
+		if cfg.increment > 0 {
+			progress := cfg.hd.Progress()
+			if progress > incrementalTarget {
+				log.Info(fmt.Sprintf("[%s] Target reached, exiting cycle", logPrefix), "progress", progress, "target", incrementalTarget)
+				break
+			}
+		}
+
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
@@ -218,7 +242,7 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info("Processed", "highest", headerInserter.GetHighest())
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest())
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}

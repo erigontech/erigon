@@ -62,7 +62,7 @@ func TestReimportMirroredState(t *testing.T) {
 
 	// Generate a batch of blocks, each properly signed
 	txCacher := core.NewTxSenderCacher(1)
-	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
+	chain, _ := core.NewBlockChain(db, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
 	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -112,7 +112,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
 	txCacher2 := core.NewTxSenderCacher(1)
-	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
+	chain2, _ := core.NewBlockChain(db, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
