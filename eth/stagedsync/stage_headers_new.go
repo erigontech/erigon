@@ -26,6 +26,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
+	increment         *uint64
 }
 
 func StageHeadersCfg(
@@ -37,6 +38,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
+	increment *uint64,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -47,6 +49,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		wakeUpChan:        wakeUpChan,
 		batchSize:         batchSize,
+		increment:         increment,
 	}
 }
 
@@ -111,6 +114,9 @@ func HeadersForward(
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 	for !stopped {
+		if cfg.increment != nil && cfg.hd.Progress() > (prevProgress+*cfg.increment) {
+			break
+		}
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {

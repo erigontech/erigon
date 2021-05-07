@@ -300,6 +300,11 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
+	var increment *uint64
+	if sm.Pruning {
+		var v uint64 = params.FullImmutabilityThreshold
+		increment = &v
+	}
 
 	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
@@ -311,6 +316,7 @@ func NewStagedSync(
 			controlServer.penalize,
 			controlServer.requestWakeUpBodies,
 			batchSize,
+			increment,
 		),
 		stagedsync.StageBodiesCfg(
 			db,
