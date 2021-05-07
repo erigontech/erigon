@@ -23,6 +23,7 @@ type HeadersCfg struct {
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
 	announceNewHashes func(context.Context, []headerdownload.Announce)
+	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
 }
@@ -33,6 +34,7 @@ func StageHeadersCfg(
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	announceNewHashes func(context.Context, []headerdownload.Announce),
+	penalize func(context.Context, []headerdownload.PenaltyItem),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
 ) HeadersCfg {
@@ -42,6 +44,7 @@ func StageHeadersCfg(
 		chainConfig:       chainConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
+		penalize:          penalize,
 		wakeUpChan:        wakeUpChan,
 		batchSize:         batchSize,
 	}
@@ -103,14 +106,13 @@ func HeadersForward(
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 
-	var req *headerdownload.HeaderRequest
 	var peer []byte
 	stopped := false
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
-		req = cfg.hd.RequestMoreHeaders(currentTime)
+		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
@@ -118,9 +120,10 @@ func HeadersForward(
 				log.Debug("Sent request", "height", req.Number)
 			}
 		}
+		cfg.penalize(ctx, penalties)
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
 		for req != nil && peer != nil && maxRequests > 0 {
-			req = cfg.hd.RequestMoreHeaders(currentTime)
+			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				peer = cfg.headerReqSend(ctx, req)
 				if peer != nil {
@@ -128,6 +131,7 @@ func HeadersForward(
 					log.Debug("Sent request", "height", req.Number)
 				}
 			}
+			cfg.penalize(ctx, penalties)
 			maxRequests--
 		}
 

@@ -218,6 +218,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 		newAnchor := &Anchor{
 			parentHash:  newAnchorHeader.ParentHash,
 			timestamp:   0,
+			peerID:      anchor.peerID,
 			blockHeight: newAnchorHeader.Number.Uint64(),
 		}
 		if newAnchor.blockHeight > 0 {
@@ -306,7 +307,8 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 	return nil
 }
 
-func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error {
+// if anchor will be abandoned - given peerID will get Penalty
+func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID string) error {
 	anchorHeader := segment.Headers[end-1]
 
 	if anchorHeader.Number.Uint64() < hd.highestInDb {
@@ -317,6 +319,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	}
 	anchor := &Anchor{
 		parentHash:  anchorHeader.ParentHash,
+		peerID:      peerID,
 		timestamp:   0,
 		blockHeight: anchorHeader.Number.Uint64(),
 	}
@@ -474,32 +477,33 @@ func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor) {
 	hd.removeUpwards(anchor.links)
 }
 
-func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest {
+func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, []PenaltyItem) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-
+	var penalties []PenaltyItem
 	if hd.anchorQueue.Len() == 0 {
 		log.Debug("Empty anchor queue")
-		return nil
+		return nil, penalties
 	}
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
 			if anchor.timestamp > currentTime {
 				// Anchor not ready for re-request yet
-				return nil
+				return nil, penalties
 			}
 			if anchor.timeouts < 10 {
-				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
+				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}, penalties
 			} else {
 				// Ancestors of this anchor seem to be unavailable, invalidate and move on
 				hd.invalidateAnchor(anchor)
+				penalties = append(penalties, PenaltyItem{Reason: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on
 		heap.Remove(hd.anchorQueue, 0)
 	}
-	return nil
+	return nil, penalties
 }
 
 func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout uint64) {
@@ -743,7 +747,8 @@ func (hi *HeaderInserter) AnythingDone() bool {
 // If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
 // it allows higher-level algo immediately request more headers without waiting all stages precessing,
 // speeds up visibility of new blocks
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (requestMore bool) {
+// It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -790,7 +795,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) (
 		}
 	} else {
 		// NewAnchor
-		if err := hd.newAnchor(segment, start, end); err != nil {
+		if err := hd.newAnchor(segment, start, end, peerID); err != nil {
 			log.Debug("NewAnchor failed", "error", err)
 			return
 		}
