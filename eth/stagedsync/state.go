@@ -240,10 +240,7 @@ func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb.RwTx) error {
-	if tx != nil {
-		db = ethdb.WrapIntoTxDB(tx)
-	}
+func (s *State) UnwindStage(unwind *UnwindState, db TxOrDb, tx ethdb.RwTx) error {
 	start := time.Now()
 	log.Info("Unwinding...", "stage", string(unwind.Stage))
 	stage, err := s.StageByID(unwind.Stage)
@@ -253,7 +250,9 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	if stage.UnwindFunc == nil {
 		return nil
 	}
-
+	if tx != nil {
+		db = tx
+	}
 	stageState, err := s.StageState(unwind.Stage, db)
 	if err != nil {
 		return err

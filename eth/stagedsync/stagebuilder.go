@@ -136,7 +136,7 @@ func DefaultStages() StageBuilders {
 						return SpawnHeaderDownloadStage(s, u, world.d, world.headersFetchers)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return u.Done(tx)
+						return u.Done(world.DB)
 					},
 				}
 			},
