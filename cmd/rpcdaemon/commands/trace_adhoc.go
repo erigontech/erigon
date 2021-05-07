@@ -241,6 +241,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
+		case vm.ErrWriteProtection:
+			topTrace.Error = "Mutable Call In Static Context"
 		default:
 			switch err.(type) {
 			case *vm.ErrStackUnderflow:
