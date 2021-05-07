@@ -300,10 +300,9 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
-	var increment *uint64
+	var increment uint64
 	if sm.Pruning {
-		var v uint64 = params.FullImmutabilityThreshold
-		increment = &v
+		increment = params.FullImmutabilityThreshold
 	}
 
 	return stages.NewStagedSync(ctx, sm,

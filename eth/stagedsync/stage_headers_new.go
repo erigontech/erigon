@@ -26,7 +26,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
-	increment         *uint64
+	increment         uint64
 }
 
 func StageHeadersCfg(
@@ -38,7 +38,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
-	increment *uint64,
+	increment uint64,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -115,16 +115,16 @@ func HeadersForward(
 	prevProgress := headerProgress
 
 	// FIXME: remove this hack
-	if cfg.increment != nil {
-		if cfg.hd.TopSeenHeight()-headerProgress > *cfg.increment {
+	if cfg.increment > 0 {
+		if cfg.hd.TopSeenHeight()-headerProgress > cfg.increment {
 			initialCycle = true
 		}
 	}
 
 	for !stopped {
-		if cfg.increment != nil {
+		if cfg.increment > 0 {
 			progress := cfg.hd.Progress()
-			limit := headerProgress + (*cfg.increment)
+			limit := headerProgress + cfg.increment
 			if progress > limit {
 				log.Info(fmt.Sprintf("Increment limit reached (%d > %d), quitting download cycle", progress, limit))
 				break
