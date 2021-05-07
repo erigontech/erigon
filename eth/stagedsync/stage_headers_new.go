@@ -113,6 +113,14 @@ func HeadersForward(
 	stopped := false
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
+
+	// FIXME: remove this hack
+	if cfg.increment != nil {
+		if cfg.hd.TopSeenHeight()-headerProgress > *cfg.increment {
+			initialCycle = true
+		}
+	}
+
 	for !stopped {
 		if cfg.increment != nil {
 			progress := cfg.hd.Progress()
