@@ -435,7 +435,10 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = networkID
 	var err error
-	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
+	err = db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
+		return err
+	})
 	return cs, err
 }
 

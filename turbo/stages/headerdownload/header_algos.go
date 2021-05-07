@@ -485,16 +485,15 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest 
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.timestamp <= currentTime {
-				if anchor.timeouts < 10 {
-					return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
-				} else {
-					// Ancestors of this anchor seem to be unavailable, invalidate and move on
-					hd.invalidateAnchor(anchor)
-				}
-			} else {
+			if anchor.timestamp > currentTime {
 				// Anchor not ready for re-request yet
 				return nil
+			}
+			if anchor.timeouts < 10 {
+				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
+			} else {
+				// Ancestors of this anchor seem to be unavailable, invalidate and move on
+				hd.invalidateAnchor(anchor)
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on
@@ -633,7 +632,14 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) error {
+func (hi *HeaderInserter) FeedHeaderFunc(db ethdb.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
+	return func(header *types.Header, blockHeight uint64) error {
+		return hi.FeedHeader(db, header, blockHeight)
+	}
+
+}
+
+func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Header, blockHeight uint64) error {
 	hash := header.Hash()
 	if hash == hi.prevHash {
 		// Skip duplicates
@@ -642,19 +648,19 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	if blockHeight < hi.prevHeight {
 		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
 	}
-	if oldH := rawdb.ReadHeader(hi.batch, hash, blockHeight); oldH != nil {
+	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
 		return nil
 	}
 	// Load parent header
-	parent := rawdb.ReadHeader(hi.batch, header.ParentHash, blockHeight-1)
+	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
 		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
 		// Skip headers without parents
 		return nil
 	}
 	// Parent's total difficulty
-	parentTd, err := rawdb.ReadTd(hi.batch, header.ParentHash, blockHeight-1)
+	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil {
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
@@ -666,7 +672,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
 		// Most common case - forking point is the height of the parent header
 		var forkingPoint uint64
-		ch, err1 := rawdb.ReadCanonicalHash(hi.batch, blockHeight-1)
+		ch, err1 := rawdb.ReadCanonicalHash(db, blockHeight-1)
 		if err1 != nil {
 			return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err1)
 		}
@@ -676,8 +682,8 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 			// Going further back
 			ancestorHash := parent.ParentHash
 			ancestorHeight := blockHeight - 2
-			for ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight) {
-				ancestor := rawdb.ReadHeader(hi.batch, ancestorHash, ancestorHeight)
+			for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
+				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
 				ancestorHash = ancestor.ParentHash
 				ancestorHeight--
 			}
@@ -687,11 +693,11 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 			forkingPoint = ancestorHeight
 		}
-		if err = rawdb.WriteHeadHeaderHash(hi.batch, hash); err != nil {
+		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
 			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
 		hi.headerProgress = blockHeight
-		if err = stages.SaveStageProgress(hi.batch, stages.Headers, blockHeight); err != nil {
+		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
 			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 		}
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
@@ -703,10 +709,10 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	if err2 != nil {
 		return fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
 	}
-	if err = rawdb.WriteTd(hi.batch, hash, blockHeight, td); err != nil {
+	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = hi.batch.Put(dbutils.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = db.Put(dbutils.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash

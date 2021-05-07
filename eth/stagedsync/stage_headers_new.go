@@ -52,19 +52,15 @@ func HeadersForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	db ethdb.Database,
+	tx ethdb.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
 ) error {
 	var headerProgress uint64
 	var err error
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -76,12 +72,12 @@ func HeadersForward(
 	}
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err1 := rawdb.ReadCanonicalHash(tx, headerProgress)
-	if err1 != nil {
-		return err1
+	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
+	if err != nil {
+		return err
 	}
-	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if hash == (common.Hash{}) {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
 		}
@@ -95,16 +91,16 @@ func HeadersForward(
 	}
 
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
-	batch := tx.NewBatch()
+	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	localTd, err1 := rawdb.ReadTd(tx, hash, headerProgress)
-	if err1 != nil {
-		return err1
+	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
+	if err != nil {
+		return err
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 
 	var req *headerdownload.HeaderRequest
@@ -144,21 +140,27 @@ func HeadersForward(
 			}
 		}
 		// Load headers into the database
-		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
+		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch)); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(cfg.batchSize) {
-			if err = batch.CommitAndBegin(context.Background()); err != nil {
+			if err = batch.Commit(); err != nil {
 				return err
 			}
 			if !useExternalTx {
 				if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
 					return err
 				}
-				if err = tx.CommitAndBegin(context.Background()); err != nil {
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+				tx, err = cfg.db.BeginRw(ctx)
+				if err != nil {
 					return err
 				}
 			}
+			batch = ethdb.NewBatch(tx)
+			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
 		timer.Stop()
 		announces := cfg.hd.GrabAnnounces()
@@ -220,7 +222,7 @@ func HeadersForward(
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
 	if height == 0 {
 		return nil
 	}
@@ -245,15 +247,11 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
+func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) error {
 	var err error
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -261,7 +259,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
 	}
 	// Delete canonical hashes that are being unwound
 	var headerProgress uint64
-	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
+	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}
