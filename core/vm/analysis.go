@@ -17,27 +17,66 @@
 package vm
 
 import (
-)
+	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/params")
+
+
+// what we want are relative changes, what we have are absolute minStack and maxStack
+func pops(oper operation) int {
+	return op.minStack
+}
+func pushes(oper operation) int {
+	return -(oper.maxStack - int(params.StackLimit) - pops(oper))
+}
+func changes(oper operation) int {
+	return pushes(oper) - pops(oper)
+}
 
 // fill in segment of operation information array for a block
 func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
-	info := NewBlockInfo(ctx.contract, pc)
+	blockInfo := NewBlockInfo(ctx.contract, pc)
 	code := ctx.contract.Code
 	jumpTable := ctx.interpreter.jt
-	for ; pc < uint64(len(code)); pc++ {
-		op := OpCode(code[pc])
-		operation := jumpTable[op]
-		if operation == nil {
-			return nil, &ErrInvalidOpCode{opcode: op}
-		}
-		info.minStack += operation.minStack
-		info.maxStack += operation.maxStack
-		info.constantGas += operation.constantGas
-		
-		if op >= PUSH1 && op <= PUSH32 {
 
-			// decode push data to PushInfo
-			// ...			
+	height := 0
+	minHeight := 0
+	maxHeight := 0
+	for ; pc < uint64(len(code)); pc++ {
+		oper := jumpTable[op]
+		if oper == nil {
+			continue
+		}
+		op := OpCode(code[pc])
+
+		// track low and high watermark relative to block entry
+		height += changes(*oper)
+		minHeight = min(minHeight, height)
+		maxHeight = max(maxHeight, height)
+		blockInfo.constantGas += oper.constantGas
+
+		if PUSH1 <= op && op <= PUSH32 {
+		    pushByteSize := int(op) - int(PUSH1) + 1
+			codeLen := len(ctx.contract.Code)
+
+			startMin := int(pc + 1)
+			if startMin >= codeLen {
+				startMin = codeLen
+			}
+			endMin := startMin + pushByteSize
+			if startMin+pushByteSize >= codeLen {
+				endMin = codeLen
+			}
+
+			integer := new(uint256.Int)
+			integer.SetBytes(common.RightPadBytes(
+				// So it doesn't matter what we push onto the stack.
+				ctx.contract.Code[startMin:endMin], pushByteSize))
+
+			// attach PushInfo with decoded push data to PUSHn
+			ctx.contract.opsInfo[pc] = NewPushInfo(ctx.contract, pc, *integer)
+
 			continue
 		}
 		if op == JUMP || op == JUMPI {
@@ -45,17 +84,32 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 			if prevOp >= PUSH1 && prevOp <= PUSH32 {
 
 				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
-				// ...
+				if op == JUMP {
+					code[pc-1] = byte(JMP)
+				}
+				if op == JUMPI {
+					code[pc-1] = byte(JMPI)
+				}
+				code[pc] = byte(NOOP)
+				ctx.contract.opsInfo[pc] = NewJumpInfo(ctx.contract, pc)
+
+				// end block
+				break
 			}
-			// end block
-			break
 		}
-		if 	op == JUMPDEST || op == STOP || op == RETURN || op == REVERT || op == SELFDESTRUCT {
+		if	op == JUMPDEST || op == STOP || op == RETURN || op == REVERT || op == SELFDESTRUCT {
+
 			// end block
 			break
 		}
 	}
-	return nil, nil
+
+	// min and max absolute stack length to avoid stack underflow or underflow
+	blockInfo.minStack = -minHeight
+	blockInfo.maxStack = int(params.StackLimit) - maxHeight
+
+	ctx.contract.opsInfo[pc] = blockInfo
+	return blockInfo, nil
 }
 
 // codeBitmap collects data locations in code.

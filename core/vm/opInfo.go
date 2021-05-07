@@ -43,7 +43,7 @@ func NewBlockInfo(c *Contract, pc uint64) *BlockInfo {
 
 // destination for static jump
 type JumpInfo struct {
-	dest uint64	// pc to jump to
+	dest uint64 // pc to jump to
 }
 func (JumpInfo) opInfo() {}
 func NewJumpInfo(c *Contract, pc uint64) *JumpInfo {
@@ -68,7 +68,7 @@ func NewPushInfo(c *Contract, pc uint64, data uint256.Int) *PushInfo {
 func getBlockInfo(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	info := (ctx.contract.opsInfo[pc])
 	if info != nil {
-	    return info.(*BlockInfo), nil
+		return info.(*BlockInfo), nil
 	}
 	return analyzeBlock(ctx, pc)
 }

@@ -63,7 +63,7 @@ type Interpreter interface {
 // callCtx contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type callCtx struct {
-	memory	    *Memory
+	memory		*Memory
 	stack		*stack.Stack
 	contract	*Contract
 	interpreter *EVMInterpreter
@@ -163,13 +163,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			memory:		 mem,
 			stack:		 locStack,
 			contract:	 contract,
-	        interpreter: in,
+			interpreter: in,
 		}
 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc  = uint64(0) // program counter
+		pc	= uint64(0) // program counter
 		res []byte // result of the opcode execution function
 	)
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
@@ -188,7 +188,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	for {
 		op := contract.GetOp(pc)
 		
-		// none of the bare ops can resize memory or use dynamic gas
+		// none of the bare ops can resize memory or use dynamic gas, must us execute()
 		switch op {
 		case ADD:
 			x, y := locStack.Pop(), locStack.Peek()
@@ -197,8 +197,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			x, y := locStack.Pop(), locStack.Peek()
 			y.Sub(&x, y)
 		case MUL:
-		x, y := locStack.Pop(), locStack.Peek()
-		y.Mul(&x, y)
+			x, y := locStack.Pop(), locStack.Peek()
+			y.Mul(&x, y)
 		case DIV:
 			x, y := locStack.Pop(), locStack.Peek()
 			y.Div(&x, y)
@@ -209,8 +209,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			x, y := locStack.Pop(), locStack.Peek()
 			y.Mod(&x, y)
 		case SMOD:
-		x, y := locStack.Pop(), locStack.Peek()
-		y.SMod(&x, y)
+			x, y := locStack.Pop(), locStack.Peek()
+			y.SMod(&x, y)
 		case SIGNEXTEND:
 			back, num := locStack.Pop(), locStack.Peek()
 			num.ExtendSign(num, &back)
@@ -246,7 +246,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				y.Clear()
 			}
 		case EQ:
-		x, y := locStack.Pop(), locStack.Peek()
+			x, y := locStack.Pop(), locStack.Peek()
 			if x.Eq(y) {
 				y.SetOne()
 			} else {
@@ -327,14 +327,29 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			locStack.Pop()
 
 		case PUSH1:
-            info := callContext.contract.opsInfo[pc].(PushInfo)
-            integer := info.data
-            callContext.stack.Push(&integer)
+			info := callContext.contract.opsInfo[pc].(PushInfo)
+			integer := info.data
+			callContext.stack.Push(&integer)
 		case PUSH2:
-            info := callContext.contract.opsInfo[pc].(PushInfo)
-            integer := info.data
-            callContext.stack.Push(&integer)
+			info := callContext.contract.opsInfo[pc].(PushInfo)
+			integer := info.data
+			callContext.stack.Push(&integer)
 
+		case JMP:
+			info := callContext.contract.opsInfo[pc].(JumpInfo)
+			pc = info.dest
+		case JMPI:
+			cond := locStack.Pop()
+			if !cond.IsZero() {
+				info := callContext.contract.opsInfo[pc].(JumpInfo)
+				pc = info.dest
+			} else {
+				pc++
+				err = enterBlock(callContext, pc)
+				if err != nil {
+					return nil, err
+				}
+			}
 		case JUMP:	
 			dest := locStack.Pop()
 			pc = dest.Uint64()
@@ -343,7 +358,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if !cond.IsZero() {
 				pc = dest.Uint64()
 			} else {
-			    pc++
+				pc++
 				err = enterBlock(callContext, pc)
 				if err != nil {
 					return nil, err
@@ -357,10 +372,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 		default:
 
-            operation, err := op_gas_memory(in, op, contract, locStack, mem)
-            if err != nil {
-                return nil, err
-            }
+			operation, err := op_gas_memory(in, op, contract, locStack, mem)
+			if err != nil {
+				return nil, err
+			}
 
 			// execute the operation
 			res, err = operation.execute(&pc, in, callContext)
@@ -379,7 +394,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		if err != nil {
-		    return nil, err
+			return nil, err
 		}
 	}
 	return nil, nil
@@ -394,7 +409,7 @@ func (in *EVMInterpreter) CanRun(code []byte) bool {
 // check block's stack bounds and use constant gas
 func enterBlock(ctx *callCtx, pc uint64) error {
 
-    // block info is created first time block is entered
+	// block info is created first time block is entered
 	info, err := getBlockInfo(ctx, pc)
 	if info == nil || err != nil {
 		return err
@@ -414,7 +429,7 @@ func enterBlock(ctx *callCtx, pc uint64) error {
 func op_gas_memory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *stack.Stack, mem *Memory)(*operation, error) {
 	
 	var (
-	    operation *operation = in.jt[op]
+		operation *operation = in.jt[op]
 		memorySize uint64
 		err error
 	)
