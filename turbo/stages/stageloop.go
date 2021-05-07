@@ -85,6 +85,12 @@ func StageLoopStep(
 		}
 	}()
 
+	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
+	if err1 != nil {
+		return fmt.Errorf("prepare staged sync: %w", err1)
+	}
+
+
 	origin, err := stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return err
@@ -96,29 +102,16 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
-	var writeDB ethdb.Database // on this variable will run sync cycle.
-
-	// create empty TxDb object, it's not usable before .Begin() call which will use this object
-	// It allows inject tx object to stages now, define rollback now,
-	// but call .Begin() after hearer/body download stages
-	var tx ethdb.DbWithPendingMutations
-	if canRunCycleInOneTransaction {
-		tx, err = db.Begin(ctx, ethdb.RW)
-		if err != nil {
-			return err
+		var tx ethdb.RwTx // on this variable will run sync cycle.
+		if canRunCycleInOneTransaction {
+			tx, err = db.RwKV().BeginRw(context.Background())
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
 		}
-		defer tx.Rollback()
-		writeDB = tx
-	} else {
-		writeDB = db
-	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
-	if err1 != nil {
-		return fmt.Errorf("prepare staged sync: %w", err1)
-	}
-
-	err = st.Run(db, writeDB)
+	err = st.Run(db, tx)
 	if err != nil {
 		return err
 	}

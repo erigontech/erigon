@@ -421,27 +421,12 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
 	//syncCycleStart := time.Now()
 
-	var writeDB ethdb.Database // on this variable will run sync cycle.
-
-	// create empty TxDb object, it's not usable before .Begin() call which will use this object
-	// It allows inject tx object to stages now, define rollback now,
-	// but call .Begin() after hearer/body download stages
-	var tx ethdb.DbWithPendingMutations
-	if canRunCycleInOneTransaction {
-		tx = ethdb.NewTxDbWithoutTransaction(d.stateDB, ethdb.RW)
-		defer tx.Rollback()
-		writeDB = tx
-	} else {
-		writeDB = d.stateDB
-	}
-
 	d.stagedSyncState, err = d.stagedSync.Prepare(
 		d,
 		d.chainConfig,
 		d.engine,
 		d.vmConfig,
 		d.stateDB,
-		writeDB,
 		p.id,
 		d.storageMode,
 		d.tmpdir,
@@ -458,59 +443,55 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	// begin tx at stage right after head/body download Or at first unwind stage
 	// it's temporary solution
-	d.stagedSyncState.BeforeStageRun(stages.Senders, func() error {
+	d.stagedSyncState.BeforeStageRun(stages.Senders, func(tx ethdb.RwTx) (ethdb.RwTx, error) {
 		if !canRunCycleInOneTransaction {
-			return nil
+			return tx, nil
 		}
 
-		var errTx error
 		log.Debug("Begin tx")
-		tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-		return errTx
+		return d.stateDB.RwKV().BeginRw(context.Background())
 	})
-	d.stagedSyncState.BeforeStageRun(stages.Finish, func() error {
+	d.stagedSyncState.BeforeStageRun(stages.Finish, func(tx ethdb.RwTx) (ethdb.RwTx, error) {
 		if !canRunCycleInOneTransaction {
-			return nil
+			return tx, nil
 		}
 
 		commitStart := time.Now()
 		if errTx := tx.Commit(); errTx != nil {
-			return errTx
+			return tx, errTx
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
-		return nil
+		return nil, nil
 	})
-	d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
+	d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage, tx ethdb.RwTx) (ethdb.RwTx, error) {
 		if !canRunCycleInOneTransaction {
-			return nil
+			return tx, nil
 		}
 		if d.stagedSyncState.IsBefore(id, stages.Bodies) || d.stagedSyncState.IsAfter(id, stages.TxPool) {
-			return nil
+			return tx, nil
 		}
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-			return nil
+		if tx != nil {
+			return tx, nil
 		}
-		var errTx error
 		log.Debug("Begin tx")
-		tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-		return errTx
+		return d.stateDB.RwKV().BeginRw(context.Background())
 	})
-	d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
+	d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func(tx ethdb.RwTx) (ethdb.RwTx, error) {
 		if !canRunCycleInOneTransaction {
-			return nil
+			return tx, nil
 		}
-		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-			return nil
+		if tx == nil {
+			return nil, nil
 		}
 		commitStart := time.Now()
 		if errTx := tx.Commit(); errTx != nil {
-			return errTx
+			return nil, errTx
 		}
 		log.Info("Commit unwind cycle", "in", time.Since(commitStart))
-		return nil
+		return nil, nil
 	})
 
-	err = d.stagedSyncState.Run(d.stateDB, writeDB)
+	err = d.stagedSyncState.Run(d.stateDB, nil)
 	if err != nil {
 		return err
 	}

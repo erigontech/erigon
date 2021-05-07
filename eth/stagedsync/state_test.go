@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -16,7 +17,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -25,7 +26,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return nil
@@ -34,7 +35,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -44,7 +45,10 @@ func TestStateStagesSuccess(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -59,7 +63,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -68,7 +72,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return nil
@@ -78,7 +82,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -88,7 +92,10 @@ func TestStateDisabledStages(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -104,7 +111,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -113,7 +120,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				repeatStageTwo--
 				if repeatStageTwo < 0 {
@@ -125,7 +132,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -135,7 +142,10 @@ func TestStateRepeatedStage(t *testing.T) {
 	state := NewState(s)
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -151,7 +161,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -160,7 +170,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return expectedErr
@@ -169,7 +179,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -180,7 +190,10 @@ func TestStateErroredStage(t *testing.T) {
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -198,77 +211,80 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 1000)
+					return s.DoneAndUpdate(tx, 1000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				if s.BlockNumber == 0 {
-					if err := s.Update(db, 1700); err != nil {
+					if err := s.Update(tx, 1700); err != nil {
 						return err
 					}
 				}
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, db, db)
+					return u.UnwindTo(1500, db, tx)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -279,15 +295,15 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	}
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, db)
+	stageState, err := state.StageState(stages.Headers, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 1500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, db)
+	stageState, err = state.StageState(stages.Bodies, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 1000, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, db)
+	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 1500, int(stageState.BlockNumber))
 }
@@ -301,76 +317,79 @@ func TestStateUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, db)
+					err := u.UnwindTo(500, db, tx)
 					if err != nil {
 						return err
 					}
-					return s.DoneAndUpdate(db, 3000)
+					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -381,15 +400,15 @@ func TestStateUnwind(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, db)
+	stageState, err := state.StageState(stages.Headers, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, db)
+	stageState, err = state.StageState(stages.Bodies, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, db)
+	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
@@ -404,26 +423,26 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
@@ -432,28 +451,31 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, db)
+					err := u.UnwindTo(500, db, tx)
 					if err != nil {
 						return err
 					}
-					return s.DoneAndUpdate(db, 3000)
+					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -464,15 +486,15 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, db)
+	stageState, err := state.StageState(stages.Headers, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, db)
+	stageState, err = state.StageState(stages.Bodies, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 2000, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, db)
+	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 }
@@ -486,35 +508,38 @@ func TestStateSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
-				return s.DoneAndUpdate(db, s.BlockNumber+100)
+				return s.DoneAndUpdate(tx, s.BlockNumber+100)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
-				return s.DoneAndUpdate(db, s.BlockNumber+200)
+				return s.DoneAndUpdate(tx, s.BlockNumber+200)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
-				return s.DoneAndUpdate(db, s.BlockNumber+300)
+				return s.DoneAndUpdate(tx, s.BlockNumber+300)
 			},
 		},
 	}
 
 	state := NewState(s)
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	state = NewState(s)
-	err = state.Run(db, db)
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -523,15 +548,15 @@ func TestStateSyncDoTwice(t *testing.T) {
 	}
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, db)
+	stageState, err := state.StageState(stages.Headers, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 200, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, db)
+	stageState, err = state.StageState(stages.Bodies, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 400, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, db)
+	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 600, int(stageState.BlockNumber))
 }
@@ -543,7 +568,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -552,7 +577,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return expectedErr
@@ -561,7 +586,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -572,13 +597,16 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	defer db.Close()
 
 	state := NewState(s)
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
 	state = NewState(s)
-	err = state.Run(db, db)
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -601,72 +629,75 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.DoneAndUpdate(db, 2000)
+					return s.DoneAndUpdate(tx, 2000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(s *StageState, u Unwinder) error {
+			ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, db)
+					err := u.UnwindTo(500, db, tx)
 					if err != nil {
 						return err
 					}
-					return s.DoneAndUpdate(db, 3000)
+					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
+			UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				if !interrupted {
 					interrupted = true
 					return errInterrupted
 				}
 				assert.Equal(t, 500, int(u.UnwindPoint))
-				return u.Done(db)
+				return u.Done(tx)
 			},
 		},
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err := state.Run(db, db)
+	tx, err := db.RwKV().BeginRw(context.Background())
+	assert.NoError(t, err)
+	defer tx.Rollback()
+	err = state.Run(db, tx)
 	assert.Error(t, errInterrupted, err)
 
 	state = NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err = state.LoadUnwindInfo(db)
+	err = state.LoadUnwindInfo(tx)
 	assert.NoError(t, err)
-	err = state.Run(db, db)
+	err = state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -678,15 +709,15 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, db)
+	stageState, err := state.StageState(stages.Headers, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, db)
+	stageState, err = state.StageState(stages.Bodies, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, db)
+	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 }
