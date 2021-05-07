@@ -252,7 +252,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, db, tx)
+					return u.UnwindTo(1500, tx)
 				}
 				s.Done()
 				return nil
@@ -353,7 +353,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, tx)
+					err := u.UnwindTo(500, tx)
 					if err != nil {
 						return err
 					}
@@ -455,7 +455,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, tx)
+					err := u.UnwindTo(500, tx)
 					if err != nil {
 						return err
 					}
@@ -665,7 +665,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, db, tx)
+					err := u.UnwindTo(500, tx)
 					if err != nil {
 						return err
 					}
