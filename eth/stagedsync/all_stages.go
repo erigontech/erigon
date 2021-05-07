@@ -267,7 +267,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err
 	}
 	var tx ethdb.RwTx
-	tx = db.(ethdb.HasTx).Tx().(ethdb.RwTx)
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = hasTx.Tx().(ethdb.RwTx)
+	}
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
