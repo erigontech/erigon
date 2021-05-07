@@ -22,7 +22,7 @@ RUN make all
 
 FROM alpine:3.13
 
-RUN apk add --no-cache ca-certificates libgcc libstdc++
+RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 EXPOSE 8545 8546 30303 30303/udp 8080 9090 6060

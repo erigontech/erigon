@@ -38,6 +38,7 @@ require (
 	github.com/huin/goupnp v1.0.1-0.20200620063722-49508fba0031
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
+	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/lmdb-go v1.17.4

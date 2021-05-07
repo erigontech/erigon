@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -77,6 +76,7 @@ func (lq *LinkQueue) Pop() interface{} {
 type Anchor struct {
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
+	peerID      string
 	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
 	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 	links       []*Link // Links attached immediately to this anchor
@@ -134,6 +134,7 @@ const (
 	InvalidSealPenalty
 	TooFarFuturePenalty
 	TooFarPastPenalty
+	AbandonedAnchorPenalty
 )
 
 type PeerPenalty struct {
@@ -152,6 +153,10 @@ type HeaderRequest struct {
 	Reverse bool
 }
 
+type PenaltyItem struct {
+	Reason Penalty
+	PeerID string
+}
 type Announce struct {
 	Hash   common.Hash
 	Number uint64
@@ -248,7 +253,6 @@ func (pp PeerPenalty) String() string {
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
 	logPrefix      string
-	batch          ethdb.DbWithPendingMutations
 	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
 	prevHeight     uint64
 	newCanonical   bool
@@ -259,10 +263,9 @@ type HeaderInserter struct {
 	headerProgress uint64
 }
 
-func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
 		logPrefix:      logPrefix,
-		batch:          batch,
 		localTd:        localTd,
 		headerProgress: headerProgress,
 		unwindPoint:    headerProgress,

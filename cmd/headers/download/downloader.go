@@ -308,6 +308,7 @@ func NewStagedSync(
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
+			controlServer.penalize,
 			controlServer.requestWakeUpBodies,
 			batchSize,
 		),
@@ -435,7 +436,10 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = networkID
 	var err error
-	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
+	err = db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
+		return err
+	})
 	return cs, err
 }
 
@@ -477,9 +481,9 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 	return nil
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, in *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
+	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
@@ -503,7 +507,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket66
-	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
 		return fmt.Errorf("decode 5 BlockHeadersPacket66: %v", err)
 	}
 	headers := request.BlockHeadersPacket
@@ -518,23 +522,24 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */)
+				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
 			}
 
 			if canRequestMore {
 				currentTime := uint64(time.Now().Unix())
-				if req := cs.hd.RequestMoreHeaders(currentTime); req != nil {
+				req, penalties := cs.hd.RequestMoreHeaders(currentTime)
+				if req != nil {
 					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
 						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
 						log.Debug("Sent request", "height", req.Number)
 					}
 				}
+				cs.penalize(ctx, penalties)
 			}
-
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  req.PeerId,
+				PeerId:  in.PeerId,
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
@@ -545,13 +550,28 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   req.PeerId,
+		PeerId:   in.PeerId,
 		MinBlock: heighestBlock,
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
+}
+
+// sending list of penalties to all sentries
+func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
+	for i := range penalties {
+		outreq := proto_sentry.PenalizePeerRequest{
+			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
+			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+		}
+		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
+			}
+		}
+	}
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -576,7 +596,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.hd.ProcessSegment(segments[0], true /* newBlock */) // There is only one segment in this case
+			cs.hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,

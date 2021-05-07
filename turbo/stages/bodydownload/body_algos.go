@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -18,7 +19,7 @@ import (
 const BlockBufferSize = 1024
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
@@ -62,7 +63,8 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	return headHeight, headHash, headTd256, nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64) {
+// RequestMoreBodies - returns nil if nothing to request
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
@@ -96,47 +98,48 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		if bd.deliveries[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveries[blockNum-bd.requestedLow].Header()
+			if header == nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+			}
 			hash = header.Hash()
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
-			if err == nil {
-				header = rawdb.ReadHeader(db, hash, blockNum)
-			} else {
-				log.Error("Could not find canonical header", "block number", blockNum)
+			if err != nil {
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
-			if header != nil {
-				if block := bd.prefetchedBlocks.Pop(hash); block != nil {
-					// Block is prefetched, no need to request
-					bd.deliveries[blockNum-bd.requestedLow] = block
+			header = rawdb.ReadHeader(db, hash, blockNum)
+			if header == nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+			}
 
-					// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-					var td *big.Int
-					if parent, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1); err != nil {
-						log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
-					} else if parent != nil {
-						td = new(big.Int).Add(block.Difficulty(), parent)
-						go blockPropagator.BroadcastNewBlock(context.Background(), block, td)
-					} else {
-						log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
-					}
-					request = false
+			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
+				// Block is prefetched, no need to request
+				bd.deliveries[blockNum-bd.requestedLow] = block
+
+				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
+				var td *big.Int
+				if parent, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1); err != nil {
+					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
+				} else if parent != nil {
+					td = new(big.Int).Add(block.Difficulty(), parent)
+					go blockPropagator.BroadcastNewBlock(context.Background(), block, td)
 				} else {
-					bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
-					if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-						var doubleHash DoubleHash
-						copy(doubleHash[:], header.UncleHash.Bytes())
-						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = blockNum
-					} else {
-						request = false
-					}
+					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
+				}
+				request = false
+			} else {
+				bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
+				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+					var doubleHash DoubleHash
+					copy(doubleHash[:], header.UncleHash.Bytes())
+					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+					bd.requestedMap[doubleHash] = blockNum
+				} else {
+					request = false
 				}
 			}
 		}
-		if header == nil {
-			log.Error("Header not found", "block number", blockNum)
-			panic("")
-		} else if request {
+		if request {
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
@@ -150,7 +153,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 			bd.requests[blockNum-bd.requestedLow] = bodyReq
 		}
 	}
-	return bodyReq, blockNum
+	return bodyReq, blockNum, nil
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {

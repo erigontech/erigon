@@ -19,12 +19,14 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -91,12 +93,12 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
 	}
-	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe))
+	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe")
 	return h
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
@@ -119,7 +121,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	h.startCallProc(func(cp *callProc) {
 		answers := make([]*jsonrpcMessage, 0, len(msgs))
 		for _, msg := range calls {
-			if answer := h.handleCallMsg(cp, msg); answer != nil {
+			if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
 				answers = append(answers, answer)
 			}
 		}
@@ -134,12 +136,12 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		answer := h.handleCallMsg(cp, msg)
+		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
 			h.conn.writeJSON(cp.ctx, answer)
@@ -290,18 +292,18 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 }
 
 // handleCallMsg executes a call message and returns the answer.
-func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	start := time.Now()
 	switch {
 	case msg.isNotification():
-		h.handleCall(ctx, msg)
+		h.handleCall(ctx, msg, stream)
 		h.log.Debug("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		return nil
 	case msg.isCall():
-		resp := h.handleCall(ctx, msg)
+		resp := h.handleCall(ctx, msg, stream)
 		var ctx []interface{}
 		ctx = append(ctx, "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start))
-		if resp.Error != nil {
+		if resp != nil && resp.Error != nil {
 			ctx = append(ctx, "err", resp.Error.Message)
 			if resp.Error.Data != nil {
 				ctx = append(ctx, "errdata", resp.Error.Data)
@@ -326,9 +328,9 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	if msg.isSubscribe() {
-		return h.handleSubscribe(cp, msg)
+		return h.handleSubscribe(cp, msg, stream)
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
@@ -344,25 +346,25 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 		return msg.errorResponse(&invalidParamsError{err.Error()})
 	}
 	start := time.Now()
-	answer := h.runMethod(cp.ctx, msg, callb, args)
+	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
 
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
 		rpcRequestGauge.Inc(1)
-		if answer.Error != nil {
+		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc(1)
 		} else {
 			successfulRequestGauge.Inc(1)
 		}
 		rpcServingTimer.UpdateSince(start)
-		newRPCServingTimer(msg.Method, answer.Error == nil).UpdateSince(start)
+		newRPCServingTimer(msg.Method, answer == nil || answer.Error == nil).UpdateSince(start)
 	}
 	return answer
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jsoniter.Stream) *jsonrpcMessage {
 	if !h.allowSubscribe {
 		return msg.errorResponse(ErrNotificationsUnsupported)
 	}
@@ -391,16 +393,56 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage) *jsonrpcMes
 	cp.notifiers = append(cp.notifiers, n)
 	ctx := context.WithValue(cp.ctx, notifierKey{}, n)
 
-	return h.runMethod(ctx, msg, callb, args)
+	return h.runMethod(ctx, msg, callb, args, stream)
 }
 
 // runMethod runs the Go callback for an RPC method.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value) *jsonrpcMessage {
-	result, err := callb.call(ctx, msg.Method, args)
-	if err != nil {
-		return msg.errorResponse(err)
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
+	if callb.streamable {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("jsonrpc")
+		stream.WriteString("2.0")
+		stream.WriteMore()
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+		stream.WriteObjectField("result")
+		_, err := callb.call(ctx, msg.Method, args, stream)
+		if err != nil {
+			stream.WriteMore()
+			stream.WriteObjectField("error")
+			stream.WriteObjectStart()
+			stream.WriteObjectField("code")
+			ec, ok := err.(Error)
+			if ok {
+				stream.WriteInt(ec.ErrorCode())
+			} else {
+				stream.WriteInt(defaultErrorCode)
+			}
+			de, ok := err.(DataError)
+			if ok {
+				stream.WriteMore()
+				stream.WriteObjectField("data")
+				data, derr := json.Marshal(de.ErrorData())
+				if derr == nil {
+					stream.Write(data)
+				} else {
+					stream.WriteString(fmt.Sprintf("%v", derr))
+				}
+			}
+			stream.WriteObjectEnd()
+		}
+		stream.WriteObjectEnd()
+		stream.Write([]byte("\n"))
+		stream.Flush()
+		return nil
+	} else {
+		result, err := callb.call(ctx, msg.Method, args, stream)
+		if err != nil {
+			return msg.errorResponse(err)
+		}
+		return msg.response(result)
 	}
-	return msg.response(result)
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

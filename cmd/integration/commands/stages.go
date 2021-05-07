@@ -231,6 +231,16 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
+var cmdSetStorageMode = &cobra.Command{
+	Use:   "set_storage_mode",
+	Short: "Override storage mode (if you know what you are doing)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+		return overrideStorageMode(db)
+	},
+}
+
 func init() {
 	withDatadir(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
@@ -311,6 +321,10 @@ func init() {
 
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+
+	withDatadir(cmdSetStorageMode)
+	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htr", "Storage mode to override database")
+	rootCmd.AddCommand(cmdSetStorageMode)
 }
 
 func stageBodies(db ethdb.Database, ctx context.Context) error {
@@ -432,12 +446,12 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	cfg := stagedsync.StageExecuteBlocksCfg(kv, sm.Receipts, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		err = stagedsync.UnwindExecutionStage(u, stage4, ethdb.WrapIntoTxDB(tx), ch, cfg)
+		err = stagedsync.UnwindExecutionStage(u, stage4, tx, ch, cfg)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, ethdb.WrapIntoTxDB(tx), block, ch, cfg)
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, block, ch, cfg)
 		if err != nil {
 			return err
 		}
@@ -614,12 +628,12 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
-		err = stagedsync.UnwindCallTraces(u, s, ethdb.WrapIntoTxDB(tx), ch, cfg)
+		err = stagedsync.UnwindCallTraces(u, s, tx, ch, cfg)
 		if err != nil {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnCallTraces(s, ethdb.WrapIntoTxDB(tx), ch, cfg); err != nil {
+		if err := stagedsync.SpawnCallTraces(s, tx, ch, cfg); err != nil {
 			return err
 		}
 	}
@@ -851,5 +865,21 @@ func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.Snap
 		}
 		db.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 	}
+	return nil
+}
+
+func overrideStorageMode(db ethdb.Database) error {
+	sm, err := ethdb.StorageModeFromString(storageMode)
+	if err != nil {
+		return err
+	}
+	if err = ethdb.OverrideStorageMode(db, sm); err != nil {
+		return err
+	}
+	sm, err = ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
+	log.Info("Storage mode in DB", "mode", sm.ToString())
 	return nil
 }

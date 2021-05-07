@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -188,10 +189,10 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error) {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
-		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
+		return fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
 	defer dbtx.Rollback()
 
@@ -211,7 +212,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 
 	if fromBlock > toBlock {
-		return nil, fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
+		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
@@ -256,7 +257,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	for _, addr := range req.FromAddress {
 		if addr != nil {
 			if err := loadFromAddresses(*addr); err != nil {
-				return nil, err
+				return err
 			}
 
 			fromAddresses[*addr] = struct{}{}
@@ -266,7 +267,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	for _, addr := range req.ToAddress {
 		if addr != nil {
 			if err := loadToAddresses(*addr); err != nil {
-				return nil, err
+				return err
 			}
 
 			toAddresses[*addr] = struct{}{}
@@ -285,71 +286,144 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, uint64(b))
 		if hashErr != nil {
-			return nil, hashErr
+			return hashErr
 		}
 
 		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, uint64(b))
 		if bErr != nil {
-			return nil, bErr
+			return bErr
 		}
 		if block == nil {
-			return nil, fmt.Errorf("could not find block %x %d", hash, uint64(b))
+			return fmt.Errorf("could not find block %x %d", hash, uint64(b))
 		}
 
 		blocks = append(blocks, block)
 	}
+	chainConfig, err := api.chainConfig(dbtx)
+	if err != nil {
+		return err
+	}
 
-	traces := []ParityTrace{}
-
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	stream.WriteArrayStart()
+	first := true
 	// Execute all transactions in picked blocks
 	for _, block := range blocks {
-		t, tErr := api.callManyTransactions(ctx, dbtx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
+		blockHash := block.Hash()
+		blockNumber := block.NumberU64()
+		txs := block.Transactions()
+		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
 		if tErr != nil {
-			return nil, tErr
+			return tErr
 		}
-		for _, trace := range t {
+		for i, trace := range t {
+			txPosition := uint64(i)
+			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
-			if filter_trace(trace, fromAddresses, toAddresses) {
-				for _, pt := range trace.Trace {
-					traces = append(traces, *pt)
+			for _, pt := range trace.Trace {
+				if filter_trace(pt, fromAddresses, toAddresses) {
+					pt.BlockHash = &blockHash
+					pt.BlockNumber = &blockNumber
+					pt.TransactionHash = &txHash
+					pt.TransactionPosition = &txPosition
+					b, err := json.Marshal(pt)
+					if err != nil {
+						return err
+					}
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.Write(b)
+				}
+			}
+		}
+		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+		if _, ok := toAddresses[block.Coinbase()]; ok {
+			var tr ParityTrace
+			var rewardAction = &RewardTraceAction{}
+			rewardAction.Author = block.Coinbase()
+			rewardAction.RewardType = "block" // nolint: goconst
+			rewardAction.Value.ToInt().Set(minerReward.ToBig())
+			tr.Action = rewardAction
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
+			tr.Type = "reward" // nolint: goconst
+			tr.TraceAddress = []int{}
+			b, err := json.Marshal(tr)
+			if err != nil {
+				return err
+			}
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.Write(b)
+		}
+		for i, uncle := range block.Uncles() {
+			if _, ok := toAddresses[uncle.Coinbase]; ok {
+				if i < len(uncleRewards) {
+					var tr ParityTrace
+					rewardAction := &RewardTraceAction{}
+					rewardAction.Author = uncle.Coinbase
+					rewardAction.RewardType = "uncle" // nolint: goconst
+					rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
+					tr.Action = rewardAction
+					tr.BlockHash = &common.Hash{}
+					copy(tr.BlockHash[:], block.Hash().Bytes())
+					tr.BlockNumber = new(uint64)
+					*tr.BlockNumber = block.NumberU64()
+					tr.Type = "reward" // nolint: goconst
+					tr.TraceAddress = []int{}
+					b, err := json.Marshal(tr)
+					if err != nil {
+						return err
+					}
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.Write(b)
 				}
 			}
 		}
 	}
-
-	return traces, nil
+	stream.WriteArrayEnd()
+	return stream.Flush()
 }
 
-func filter_trace(trace *TraceCallResult, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
-	for _, pt := range trace.Trace {
-		switch action := pt.Action.(type) {
-		case *CallTraceAction:
-			_, f := fromAddresses[action.From]
-			_, t := toAddresses[action.To]
-			if f || t {
-				return true
-			}
-		case *CreateTraceAction:
-			_, f := fromAddresses[action.From]
-			if f {
-				return true
-			}
-
-			if res, ok := pt.Result.(CreateTraceResult); ok {
-				if res.Address != nil {
-					if _, t := fromAddresses[*res.Address]; t {
-						return true
-					}
-				}
-			}
-		case *SuicideTraceAction:
-			_, f := fromAddresses[action.RefundAddress]
-			_, t := toAddresses[action.Address]
-			if f || t {
-				return true
-			}
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
+	switch action := pt.Action.(type) {
+	case *CallTraceAction:
+		_, f := fromAddresses[action.From]
+		_, t := toAddresses[action.To]
+		if f || t {
+			return true
+		}
+	case *CreateTraceAction:
+		_, f := fromAddresses[action.From]
+		if f {
+			return true
 		}
 
+		if res, ok := pt.Result.(*CreateTraceResult); ok {
+			if res.Address != nil {
+				if _, t := toAddresses[*res.Address]; t {
+					return true
+				}
+			}
+		}
+	case *SuicideTraceAction:
+		_, f := fromAddresses[action.Address]
+		_, t := toAddresses[action.RefundAddress]
+		if f || t {
+			return true
+		}
 	}
 
 	return false

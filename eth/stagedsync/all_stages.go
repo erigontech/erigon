@@ -80,10 +80,18 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX, 0, world.QuitCh, execCfg)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, execCfg)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg)
 					},
 				}
 			},
@@ -226,10 +234,18 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.QuitCh, callTracesCfg)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnCallTraces(s, tx, world.QuitCh, callTracesCfg)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.QuitCh, callTracesCfg)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindCallTraces(u, s, tx, world.QuitCh, callTracesCfg)
 					},
 				}
 			},
@@ -283,7 +299,7 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, false, 0, err
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, 0)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -321,7 +337,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		}
 		defer tx.Rollback()
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers, 0)
 	if err != nil {
 		return false, err
 	}

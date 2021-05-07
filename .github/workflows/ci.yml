@@ -1,5 +1,5 @@
 name: Continuous integration
-on: [ push ]
+on: [ pull_request ]
 jobs:
   tests:
     strategy:

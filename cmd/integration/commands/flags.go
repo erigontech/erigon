@@ -29,6 +29,7 @@ var (
 	silkwormPath       string
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
+	storageMode        string
 )
 
 func must(err error) {
