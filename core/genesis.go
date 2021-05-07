@@ -158,10 +158,6 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, history, overwrite)
-}
-
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideBerlin *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, ErrGenesisNoConfig
 	}
@@ -199,9 +195,6 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	}
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
-	if overrideBerlin != nil {
-		newcfg.BerlinBlock = overrideBerlin
-	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, err
 	}

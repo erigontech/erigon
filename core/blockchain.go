@@ -85,27 +85,6 @@ const (
 	TriesInMemory      = 128
 )
 
-// CacheConfig contains the configuration values for the trie caching/pruning
-// that's resident in a blockchain.
-type CacheConfig struct {
-	Pruning bool
-
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruneTimeout        time.Duration
-	DownloadOnly        bool
-	NoHistory           bool
-}
-
-// defaultCacheConfig are the default caching values if none are specified by the
-// user (also used during testing).
-var defaultCacheConfig = &CacheConfig{
-	Pruning:             false,
-	BlocksBeforePruning: 1024,
-	DownloadOnly:        false,
-	NoHistory:           false,
-}
-
 // BlockChain represents the canonical chain given a database with a genesis
 // block. The Blockchain manages chain imports, reverts, chain reorganisations.
 //
@@ -122,7 +101,6 @@ var defaultCacheConfig = &CacheConfig{
 // canonical chain.
 type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
-	cacheConfig *CacheConfig        // Cache configuration for pruning
 
 	db ethdb.Database // Low level persistent database to store final content in
 
@@ -165,17 +143,12 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
-	if cacheConfig == nil {
-		cacheConfig = defaultCacheConfig
-	}
-
+func NewBlockChain(db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
 
 	bc := &BlockChain{
 		chainConfig:         chainConfig,
-		cacheConfig:         cacheConfig,
 		db:                  db,
 		quit:                make(chan struct{}),
 		shouldPreserve:      shouldPreserve,
@@ -511,10 +484,6 @@ func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscr
 
 func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
-}
-
-func (bc *BlockChain) NoHistory() bool {
-	return bc.cacheConfig.NoHistory
 }
 
 type Pruner interface {
