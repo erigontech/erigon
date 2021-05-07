@@ -34,7 +34,7 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
 	txPoolLocals := txPool.Locals()
 	pendingTxs, err := txPool.Pending()
 	if err != nil {
@@ -63,18 +63,18 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	blockNum := executionAt + 1
 	signer := types.MakeSigner(chainConfig, blockNum)
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx.(ethdb.HasTx).Tx(), blockNum, engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: chainConfig, Db: tx}
+	chain := ChainReader{Cfg: chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlockWithoutTransactions(tx.(ethdb.HasTx).Tx(), hash, *number)
+			block := rawdb.ReadBlockWithoutTransactions(tx, hash, *number)
 			if block == nil {
 				break
 			}
