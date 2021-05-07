@@ -76,6 +76,7 @@ func (lq *LinkQueue) Pop() interface{} {
 type Anchor struct {
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
+	peerID      string
 	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
 	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 	links       []*Link // Links attached immediately to this anchor
@@ -133,6 +134,7 @@ const (
 	InvalidSealPenalty
 	TooFarFuturePenalty
 	TooFarPastPenalty
+	AbandonedAnchorPenalty
 )
 
 type PeerPenalty struct {
@@ -151,6 +153,10 @@ type HeaderRequest struct {
 	Reverse bool
 }
 
+type PenaltyItem struct {
+	Reason Penalty
+	PeerID string
+}
 type Announce struct {
 	Hash   common.Hash
 	Number uint64
