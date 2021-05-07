@@ -136,23 +136,23 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	var torrentClient *snapshotsync.Client
 	snapshotsDir := stack.Config().ResolvePath("snapshots")
-	v, err := chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("Get bittorrent peer", "err", err)
-	}
-	torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, string(v))
-	if err != nil {
-		return nil, err
-	}
-	if len(v) == 0 {
-		log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-		err = torrentClient.SavePeerID(chainDb)
-		if err != nil {
-			log.Error("Bittorrent peerID haven't saved", "err", err)
-		}
-	}
-
 	if config.SnapshotLayout {
+		v, err := chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			log.Error("Get bittorrent peer", "err", err)
+		}
+		torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, string(v))
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 {
+			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
+			err = torrentClient.SavePeerID(chainDb)
+			if err != nil {
+				log.Error("Bittorrent peerID haven't saved", "err", err)
+			}
+		}
+
 		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
 		if err != nil {
 			return nil, err
