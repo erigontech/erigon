@@ -387,10 +387,11 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 }
 
 type MdbxTx struct {
-	readOnly bool
-	tx       *mdbx.Txn
-	db       *MdbxKV
-	cursors  []*mdbx.Cursor
+	readOnly         bool
+	tx               *mdbx.Txn
+	db               *MdbxKV
+	cursors          []*mdbx.Cursor
+	statelessCursors map[string]Cursor
 }
 
 type MdbxCursor struct {
@@ -752,32 +753,36 @@ func (tx *MdbxTx) closeCursors() {
 	tx.cursors = []*mdbx.Cursor{}
 }
 
-func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		c, err := tx.RwCursor(bucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return c.Put(k, v)
+func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
+	if tx.statelessCursors == nil {
+		tx.statelessCursors = make(map[string]Cursor)
 	}
+	c, ok := tx.statelessCursors[bucket]
+	if !ok {
+		var err error
+		c, err = tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		tx.statelessCursors[bucket] = c
+	}
+	return c.(RwCursor), nil
+}
 
-	return tx.tx.Put(mdbx.DBI(b.DBI), k, v, mdbx.Upsert)
+func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
+	}
+	return c.Put(k, v)
 }
 
 func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		c, err := tx.RwCursor(bucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return c.Delete(k, v)
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
 	}
-
-	err := tx.tx.Del(mdbx.DBI(b.DBI), k, v)
+	err = c.Delete(k, v)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -787,48 +792,45 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 	return nil
 }
 
-func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
+func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
+	c1, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		c1, err := tx.Cursor(bucket)
-		if err != nil {
-			return nil, err
-		}
-		defer c1.Close()
 		c := c1.(*MdbxCursor)
-		v, err := c.getBothRange(key[:to], key[to:])
+		v, err := c.getBothRange(k[:to], k[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if !bytes.Equal(key[to:], v[:from-to]) {
+		if !bytes.Equal(k[to:], v[:from-to]) {
 			return nil, nil
 		}
 		return v[from-to:], nil
 	}
-
-	val, err := tx.get(mdbx.DBI(b.DBI), key)
+	_, v, err := c1.SeekExact(k)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return val, nil
+	return v, nil
 }
 
 func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
+	c1, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return false, err
+	}
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		c1, err := tx.Cursor(bucket)
-		if err != nil {
-			return false, err
-		}
-		defer c1.Close()
 		c := c1.(*MdbxCursor)
 		v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
@@ -840,18 +842,22 @@ func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 		return bytes.Equal(key[to:], v[:from-to]), nil
 	}
 
-	if _, err := tx.get(mdbx.DBI(b.DBI), key); err == nil {
-		return true, nil
-	} else if mdbx.IsNotFound(err) {
-		return false, nil
-	} else {
+	_, _, err = c1.SeekExact(key)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return false, nil
+		}
 		return false, err
 	}
+
+	return true, nil
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c, _ := tx.RwCursor(dbutils.Sequence)
-	defer c.Close()
+	c, err := tx.statelessCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !mdbx.IsNotFound(err) {
 		return 0, err
@@ -872,8 +878,10 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, _ := tx.Cursor(dbutils.Sequence)
-	defer c.Close()
+	c, err := tx.statelessCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !mdbx.IsNotFound(err) {
 		return 0, err
