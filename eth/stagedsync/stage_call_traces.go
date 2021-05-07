@@ -191,12 +191,18 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			m.Add(uint32(blockNum))
 		}
 	}
-
-	if err := flushBitmaps(collectorFrom, froms); err != nil {
+	if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
+	return nil
+}
+
+func finaliseCallTraces(froms, tos map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
+	if err := flushBitmaps(collectorFrom, froms); err != nil {
+		return err
+	}
 	if err := flushBitmaps(collectorTo, tos); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	var currentBitmap = roaring.New()
@@ -207,14 +213,14 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil {
-			return fmt.Errorf("%s: find last chunk failed: %w", logPrefix, err)
+			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 
 		lastChunk := roaring.New()
 		if len(lastChunkBytes) > 0 {
 			_, err = lastChunk.FromBuffer(lastChunkBytes)
 			if err != nil {
-				return fmt.Errorf("%s: couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", logPrefix, err, len(lastChunkBytes))
+				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 		}
 
@@ -236,11 +242,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	}
 
 	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 	return nil
 }
