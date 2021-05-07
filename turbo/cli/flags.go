@@ -131,6 +131,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	cfg.StorageMode = mode
 	cfg.StorageMode.Pruning = ctx.GlobalBool(PruningFlag.Name)
+	if cfg.StorageMode.Pruning && !cfg.EnableDownloadV2 {
+		log.Info("Pruning is on, switching to new downloader")
+		cfg.EnableDownloadV2 = true
+	}
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
