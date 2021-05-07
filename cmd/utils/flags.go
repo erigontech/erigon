@@ -146,10 +146,6 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	GCModePruningFlag = cli.BoolFlag{
-		Name:  "pruning",
-		Usage: `Enable storage pruning`,
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",

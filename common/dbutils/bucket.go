@@ -219,9 +219,6 @@ const (
 
 // Keys
 var (
-	// last  block that was pruned
-	// it's saved one in 5 minutes
-	LastPrunedBlockKey = []byte("LastPrunedBlock")
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
