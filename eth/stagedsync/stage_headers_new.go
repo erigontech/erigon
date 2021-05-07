@@ -96,7 +96,12 @@ func HeadersForward(
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
+	incrementalTarget := headerProgress + cfg.increment
+	if cfg.increment > 0 {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "incremental target", incrementalTarget)
+	} else {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
+	}
 	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
@@ -116,7 +121,7 @@ func HeadersForward(
 
 	// FIXME: remove this hack
 	if cfg.increment > 0 {
-		if cfg.hd.TopSeenHeight()-headerProgress > cfg.increment {
+		if cfg.hd.TopSeenHeight() > incrementalTarget {
 			initialCycle = true
 		}
 	}
@@ -124,9 +129,8 @@ func HeadersForward(
 	for !stopped {
 		if cfg.increment > 0 {
 			progress := cfg.hd.Progress()
-			limit := headerProgress + cfg.increment
-			if progress > limit {
-				log.Info(fmt.Sprintf("Increment limit reached (%d > %d), quitting download cycle", progress, limit))
+			if progress > incrementalTarget {
+				log.Info("Increment limit reached, quitting download cycle", "progress", progress, "limit", incrementalTarget)
 				break
 			}
 		}
