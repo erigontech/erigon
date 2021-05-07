@@ -714,12 +714,18 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 
 func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	sealCancel := make(chan struct{})
+	tx, err := s.chainKV.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	miningState, err := mining.Prepare(
 		nil,
 		s.chainConfig,
 		s.engine,
 		&vm.Config{},
 		nil,
+		tx,
 		"",
 		ethdb.DefaultStorageMode,
 		tmpdir,
@@ -733,11 +739,6 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	if err != nil {
 		return err
 	}
-	tx, err := s.chainKV.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	if err = miningState.Run(nil, tx); err != nil {
 		return err
 	}

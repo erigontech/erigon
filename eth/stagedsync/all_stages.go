@@ -307,6 +307,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		engine,
 		vmConfig,
 		db,
+		tx,
 		"1",
 		storageMode,
 		"",

@@ -85,7 +85,12 @@ func StageLoopStep(
 		}
 	}()
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, "downloader", ethdb.DefaultStorageMode, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
+
+	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}

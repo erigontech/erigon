@@ -427,6 +427,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		d.engine,
 		d.vmConfig,
 		d.stateDB,
+		nil,
 		p.id,
 		d.storageMode,
 		d.tmpdir,

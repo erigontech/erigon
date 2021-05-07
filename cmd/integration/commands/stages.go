@@ -354,17 +354,17 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetSenders(tx)
@@ -412,18 +412,17 @@ func silkwormExecutionFunc() unsafe.Pointer {
 
 func stageExec(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
-	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	tmpdir := path.Join(datadir, etl.TmpDirName)
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetExec(tx)
@@ -462,19 +461,19 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 
 func stageTrie(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
-	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	tmpdir := path.Join(datadir, etl.TmpDirName)
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = stagedsync.ResetIH(tx)
@@ -508,17 +507,17 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = stagedsync.ResetHashState(tx)
@@ -553,17 +552,17 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetLogIndex(tx)
@@ -598,17 +597,17 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetCallTraces(tx)
@@ -648,18 +647,17 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 func stageHistory(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetHistory(tx)
@@ -702,17 +700,17 @@ func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	kv := db.RwKV()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	if reset {
 		err = resetTxLookup(tx)
@@ -769,12 +767,20 @@ func removeMigration(db ethdb.Deleter, _ context.Context) error {
 	return nil
 }
 
-func newSync2(db ethdb.Database) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync) {
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		panic(err)
+func newSync2(db ethdb.Database, tx ethdb.RwTx) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.StagedSync, *stagedsync.StagedSync) {
+	var sm ethdb.StorageMode
+	var err error
+	if tx != nil {
+		sm, err = ethdb.GetStorageModeFromDB(tx)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		sm, err = ethdb.GetStorageModeFromDB(db)
+		if err != nil {
+			panic(err)
+		}
 	}
-
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
 	chainConfig := params.MainnetChainConfig
 	events := remotedbserver.NewEvents()

@@ -189,18 +189,18 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
-	if err != nil {
-		return nil
-	}
-
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	tmpdir := path.Join(datadir, etl.TmpDirName)
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	if err != nil {
+		return nil
+	}
 
 	sync.DisableStages(stages.Headers,
 		stages.BlockHashes,
