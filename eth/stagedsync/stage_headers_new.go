@@ -114,9 +114,11 @@ func HeadersForward(
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 	for !stopped {
-		if cfg.increment != nil && cfg.hd.Progress() > (prevProgress+*cfg.increment) {
+		if cfg.increment != nil && cfg.hd.Progress() > (headerProgress+(*cfg.increment)) {
+			log.Info("Increment limit reached, quitting download cycle")
 			break
 		}
+
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
