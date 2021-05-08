@@ -763,11 +763,9 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		log.Debug("Duplicate segment")
 		return
 	}
-	if newBlock {
-		height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-		if height > hd.topSeenHeight {
-			hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
-		}
+	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
+	if height > hd.topSeenHeight {
+		hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
 	}
 	startNum := segment.Headers[start].Number.Uint64()
 	endNum := segment.Headers[end-1].Number.Uint64()
