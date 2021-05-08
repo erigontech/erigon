@@ -203,8 +203,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	if err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(sm, config.StorageMode) {
-		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+	if config.StorageMode.Initialised {
+		// If storage mode is not explicitely specified, we take whatever is in the database
+		if !reflect.DeepEqual(sm, config.StorageMode) {
+			return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+		}
 	}
 
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
@@ -367,7 +370,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		eth.stagedSync2, err = download.NewStagedSync(
 			eth.downloadV2Ctx,
 			eth.chainKV,
-			eth.config.StorageMode,
+			sm,
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
 			eth.downloadServer,

@@ -100,7 +100,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 }
 
 func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg,
-	froms, tos map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, bitmapCounter *int) error {
+	froms, tos *map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, bitmapCounter *int) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -149,34 +149,35 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 		}
 
 		for addr := range callTracer.froms {
-			m, ok := froms[string(addr[:])]
+			m, ok := (*froms)[string(addr[:])]
 			if !ok {
 				m = roaring.New()
 				a := addr // To copy addr
-				froms[string(a[:])] = m
+				(*froms)[string(a[:])] = m
 			}
 			m.Add(uint32(blockNum))
 			*bitmapCounter++
 		}
 		for addr := range callTracer.tos {
-			m, ok := tos[string(addr[:])]
+			m, ok := (*tos)[string(addr[:])]
 			if !ok {
 				m = roaring.New()
 				a := addr // To copy addr
-				tos[string(a[:])] = m
+				(*tos)[string(a[:])] = m
 			}
 			m.Add(uint32(blockNum))
 			*bitmapCounter++
 		}
 
 		if *bitmapCounter > 1000000 {
-			if err := flushBitmaps(collectorFrom, froms); err != nil {
+			if err := flushBitmaps(collectorFrom, *froms); err != nil {
 				return err
 			}
-			if err := flushBitmaps(collectorTo, tos); err != nil {
+			if err := flushBitmaps(collectorTo, *tos); err != nil {
 				return err
 			}
-			log.Info("Flushed bitmaps to collectors")
+			*froms = map[string]*roaring.Bitmap{}
+			*tos = map[string]*roaring.Bitmap{}
 			*bitmapCounter = 0
 		}
 	}
@@ -257,7 +258,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg, froms, tos, collectorFrom, collectorTo, &bitmapCounter); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg, &froms, &tos, collectorFrom, collectorTo, &bitmapCounter); err != nil {
 				return err
 			}
 		}

@@ -14,11 +14,12 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, StorageMode{}) {
+	if !reflect.DeepEqual(sm, StorageMode{Initialised: true}) {
 		t.Fatal()
 	}
 
 	err = SetStorageModeIfNotExist(db, StorageMode{
+		true,
 		true,
 		true,
 		true,
@@ -35,6 +36,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(sm, StorageMode{
+		true,
 		true,
 		true,
 		true,
