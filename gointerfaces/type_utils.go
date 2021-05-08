@@ -48,6 +48,7 @@ func ConvertAddressToH160(addr common.Address) *types.H160 {
 }
 
 func ConvertH256ToUint256Int(h256 *types.H256) *uint256.Int {
+	// Note: uint256.Int is an array of 4 uint64 in little-endian order, i.e. most significant word is [3]
 	var i uint256.Int
 	i[3] = h256.Hi.Hi
 	i[2] = h256.Hi.Lo
@@ -57,6 +58,7 @@ func ConvertH256ToUint256Int(h256 *types.H256) *uint256.Int {
 }
 
 func ConvertUint256IntToH256(i *uint256.Int) *types.H256 {
+	// Note: uint256.Int is an array of 4 uint64 in little-endian order, i.e. most significant word is [3]
 	return &types.H256{
 		Lo: &types.H128{Lo: i[0], Hi: i[1]},
 		Hi: &types.H128{Lo: i[2], Hi: i[3]},
