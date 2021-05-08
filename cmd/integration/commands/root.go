@@ -57,9 +57,6 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 		}
 	}
 	metrics.AddCallback(db.RwKV().CollectMetrics)
-	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
-		panic(err)
-	}
 	return db
 }
 
