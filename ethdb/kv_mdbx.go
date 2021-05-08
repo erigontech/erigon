@@ -782,75 +782,28 @@ func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
 	if err != nil {
 		return err
 	}
-	err = c.Delete(k, v)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return c.Delete(k, v)
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
-	b := tx.db.buckets[bucket]
-	c1, err := tx.statelessCursor(bucket)
+	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return nil, err
 	}
-	if b.AutoDupSortKeysConversion && len(k) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		c := c1.(*MdbxCursor)
-		v, err := c.getBothRange(k[:to], k[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if !bytes.Equal(k[to:], v[:from-to]) {
-			return nil, nil
-		}
-		return v[from-to:], nil
-	}
-	_, v, err := c1.SeekExact(k)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return v, nil
+	_, v, err := c.SeekExact(k)
+	return v, err
 }
 
 func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
-	b := tx.db.buckets[bucket]
-	c1, err := tx.statelessCursor(bucket)
+	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return false, err
 	}
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		c := c1.(*MdbxCursor)
-		v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		return bytes.Equal(key[to:], v[:from-to]), nil
-	}
-
-	_, _, err = c1.SeekExact(key)
+	k, _, err := c.Seek(key)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return false, nil
-		}
 		return false, err
 	}
-
-	return true, nil
+	return bytes.Equal(key, k), nil
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
@@ -859,7 +812,7 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 		return 0, err
 	}
 	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil && !mdbx.IsNotFound(err) {
+	if err != nil {
 		return 0, err
 	}
 
