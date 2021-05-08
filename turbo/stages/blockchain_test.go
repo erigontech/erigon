@@ -78,17 +78,6 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 		panic(err)
 	}
 
-	// Initialize a fresh chain with only a genesis block
-	//cacheConfig := &core.CacheConfig{
-	//	TrieCleanLimit: 256,
-	//	TrieDirtyLimit: 256,
-	//	TrieTimeLimit:  5 * time.Minute,
-	//	NoHistory:      false,
-	//	Pruning:        false,
-	//}
-	//txCacher := core.NewTxSenderCacher(1)
-	//blockchain, _ := core.NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, txCacher)
-
 	// Create and inject the requested chain
 	if n == 0 {
 		return db, genesis, nil
@@ -693,12 +682,8 @@ func TestLogReorgs(t *testing.T) {
 		signer  = types.LatestSigner(gspec.Config)
 	)
 
-	cacheConfig := &core.CacheConfig{
-		NoHistory: false,
-		Pruning:   false,
-	}
 	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
@@ -764,7 +749,7 @@ func TestLogRebirth(t *testing.T) {
 		genesis       = gspec.MustCommit(db)
 		signer        = types.LatestSigner(gspec.Config)
 		engine        = ethash.NewFaker()
-		blockchain, _ = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
+		blockchain, _ = core.NewBlockChain(db, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	)
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
@@ -850,7 +835,7 @@ func TestSideLogRebirth(t *testing.T) {
 	)
 
 	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
 	newLogCh := make(chan []*types.Log, 10)
@@ -974,7 +959,7 @@ func TestEIP155Transition(t *testing.T) {
 	)
 
 	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
 	blocks, _, chainErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 4, func(i int, block *core.BlockGen) {
@@ -1090,15 +1075,8 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 		genesis, _, _ = gspec.Commit(db, history)
 	)
 
-	cacheConfig := &core.CacheConfig{
-		Pruning:             false,
-		BlocksBeforePruning: 1024,
-		DownloadOnly:        false,
-		NoHistory:           !history,
-	}
-
 	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	blockchain.EnableReceipts(receipts)
 	blockchain.EnablePreimages(preimages)
 	blockchain.EnableTxLookupIndex(txlookup)
@@ -1314,7 +1292,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	)
 
 	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
 	var theAddr common.Address

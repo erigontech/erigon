@@ -264,7 +264,7 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		}
 	}
 	var genesisBlock *types.Block
-	if genesisBlock, _, err = genesis.ToBlock(false /* history */); err != nil {
+	if genesisBlock, _, err = genesis.ToBlock(); err != nil {
 		return fmt.Errorf("creating genesis block: %w", err)
 	}
 	log.Info("Created genesis block", "hash", genesisBlock.Hash())

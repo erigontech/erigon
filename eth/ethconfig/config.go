@@ -105,7 +105,7 @@ func init() {
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
-// Config contains configuration options for of the ETH and LES protocols.
+// Config contains configuration options for ETH protocol.
 type Config struct {
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -118,7 +118,7 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	Pruning bool // Whether to disable pruning and flush everything to disk
+	Pruning bool
 
 	EnableDownloadV2 bool
 	P2PEnabled       bool
@@ -132,13 +132,6 @@ type Config struct {
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
 	ExternalSnapshotDownloaderAddr string
-
-	// DownloadOnly is set when the node does not need to process the blocks, but simply
-	// download them
-	DownloadOnly        bool
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruningTimeout      time.Duration
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
@@ -182,8 +175,7 @@ type Config struct {
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	// Berlin block override (TODO: remove after the fork)
-	StagedSync     *stagedsync.StagedSync `toml:"-"`
-	OverrideBerlin *big.Int               `toml:",omitempty"`
+	StagedSync *stagedsync.StagedSync `toml:"-"`
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {

@@ -81,7 +81,7 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 	txconfig := core.DefaultTxPoolConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
-	chain, _ := core.NewBlockChain(db, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+	chain, _ := core.NewBlockChain(db, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	txCacher := core.NewTxSenderCacher(1)
 	return &testBackend{
 		db:        db,

@@ -175,7 +175,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, tx ethdb.Database, subtest 
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := t.genesis(config).ToBlock(false)
+	block, _, err := t.genesis(config).ToBlock()
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
