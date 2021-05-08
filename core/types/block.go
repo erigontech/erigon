@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"math/bits"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1201,50 +1200,3 @@ func (b *Block) Hash() common.Hash {
 }
 
 type Blocks []*Block
-
-// BlocksPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
-type BlocksPubSub struct {
-	sync.Mutex
-	id    uint
-	last  *Block
-	chans map[uint]chan *Block
-}
-
-func (s *BlocksPubSub) Sub() (ch chan *Block, unsubscribe func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]chan *Block)
-	}
-	s.id++
-	id := s.id
-	ch = make(chan *Block, 1)
-	s.chans[id] = ch
-	return ch, func() { s.unsubscribe(id) }
-}
-
-func (s *BlocksPubSub) Pub(v *Block) {
-	s.Lock()
-	defer s.Unlock()
-	s.last = v
-	for _, ch := range s.chans {
-		ch <- v
-	}
-}
-
-func (s *BlocksPubSub) Last() *Block {
-	s.Lock()
-	defer s.Unlock()
-	return s.last
-}
-
-func (s *BlocksPubSub) unsubscribe(id uint) {
-	s.Lock()
-	defer s.Unlock()
-	ch, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	close(ch)
-	delete(s.chans, id)
-}

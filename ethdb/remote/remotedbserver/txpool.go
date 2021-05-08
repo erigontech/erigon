@@ -25,8 +25,7 @@ type TxPoolServer struct {
 	proto_txpool.UnimplementedTxpoolServer
 	ctx                 context.Context
 	txPool              txPool
-	pendingBlocksPubSub types.BlocksPubSub
-	minedBlocksPubSub   types.BlocksPubSub
+	pendingBlockStreams PendingBlockStreams
 	minedBlockStreams   MinedBlockStreams
 }
 
@@ -131,30 +130,21 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 }
 
 func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Txpool_OnPendingBlockServer) error {
-	ch, unsubscribe := s.pendingBlocksPubSub.Sub()
-	defer unsubscribe()
+	remove := s.pendingBlockStreams.Add(reply)
+	defer remove()
+	<-reply.Context().Done()
+	return reply.Context().Err()
+}
 
-	// send last saw block on hand-shake
+func (s *TxPoolServer) BroadcastPendingBlock(block *types.Block) error {
 	var buf bytes.Buffer
-	b := s.pendingBlocksPubSub.Last()
-	buf.Reset()
-	if err := b.EncodeRLP(&buf); err != nil {
+	if err := block.EncodeRLP(&buf); err != nil {
 		return err
 	}
-
-	for b = range ch {
-		buf.Reset()
-		if err := b.EncodeRLP(&buf); err != nil {
-			return err
-		}
-
-		if err := reply.Send(&proto_txpool.OnPendingBlockReply{RplBlock: common.CopyBytes(buf.Bytes())}); err != nil {
-			return err
-		}
-	}
+	reply := &proto_txpool.OnPendingBlockReply{RplBlock: buf.Bytes()}
+	s.pendingBlockStreams.Broadcast(reply)
 	return nil
 }
-func (s *TxPoolServer) SendPendingBlock(block *types.Block) { s.pendingBlocksPubSub.Pub(block) }
 
 func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
 	remove := s.minedBlockStreams.Add(reply)
@@ -163,13 +153,13 @@ func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply
 	return reply.Context().Err()
 }
 
-func (s *TxPoolServer) SendMinedBlock(block *types.Block) error {
+func (s *TxPoolServer) BroadcastMinedBlock(block *types.Block) error {
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
 	}
 	reply := &proto_txpool.OnMinedBlockReply{RplBlock: buf.Bytes()}
-	s.minedBlockStreams.Send(reply)
+	s.minedBlockStreams.Broadcast(reply)
 	return nil
 }
 
@@ -192,7 +182,7 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Txpool_OnMinedBlockServer) (
 	return func() { s.remove(id) }
 }
 
-func (s *MinedBlockStreams) Send(reply *proto_txpool.OnMinedBlockReply) {
+func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
 	s.Lock()
 	defer s.Unlock()
 	for id, stream := range s.chans {
@@ -237,7 +227,7 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Txpool_OnPendingBlockServe
 	return func() { s.remove(id) }
 }
 
-func (s *PendingBlockStreams) Send(reply *proto_txpool.OnPendingBlockReply) {
+func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
 	s.Lock()
 	defer s.Unlock()
 	for id, stream := range s.chans {

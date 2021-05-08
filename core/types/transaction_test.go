@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/stretchr/testify/require"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -526,31 +525,4 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 		}
 	}
 	return nil
-}
-
-func TestTransactionsPubSub(t *testing.T) {
-	type NonPointerUse struct {
-		sub TransactionsPubSub
-	}
-	ps := NonPointerUse{}
-	c1 := uint64(1289)
-	ps.sub.Pub(&AccessListTx{ChainID: uint256.NewInt().SetUint64(c1)})
-	ch1, unsubscribe := ps.sub.Sub()
-	defer unsubscribe()
-	ch2, unsubscribe2 := ps.sub.Sub()
-	defer unsubscribe2()
-
-	c2 := uint64(8877)
-	ps.sub.Pub(&AccessListTx{ChainID: uint256.NewInt().SetUint64(c2)})
-	got1 := <-ch1
-	require.Equal(t, len(ch1), 0)
-	require.Equal(t, got1.GetChainID().Uint64(), c2)
-
-	got2 := <-ch2
-	require.Equal(t, len(ch2), 0)
-	require.Equal(t, got2.GetChainID().Uint64(), c2)
-	unsubscribe()
-	unsubscribe() // double unsubscribe must be safe
-	unsubscribe2()
-	require.Equal(t, len(ps.sub.chans), 0)
 }

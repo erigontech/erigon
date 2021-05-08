@@ -21,10 +21,8 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -269,31 +267,4 @@ func makeBenchBlock() *Block {
 		}
 	}
 	return NewBlock(header, txs, uncles, receipts)
-}
-
-func TestBlocksPubSub(t *testing.T) {
-	type NonPointerUse struct {
-		sub BlocksPubSub
-	}
-	ps := NonPointerUse{}
-	t1 := time.Now()
-	ps.sub.Pub(&Block{ReceivedAt: t1})
-	ch1, unsubscribe := ps.sub.Sub()
-	defer unsubscribe()
-	ch2, unsubscribe2 := ps.sub.Sub()
-	defer unsubscribe2()
-
-	t2 := time.Now()
-	ps.sub.Pub(&Block{ReceivedAt: t2})
-	got1 := <-ch1
-	require.Equal(t, len(ch1), 0)
-	require.Equal(t, got1.ReceivedAt, t2)
-
-	got2 := <-ch2
-	require.Equal(t, len(ch2), 0)
-	require.Equal(t, got2.ReceivedAt, t2)
-	unsubscribe()
-	unsubscribe() // double unsubscribe must be safe
-	unsubscribe2()
-	require.Equal(t, len(ps.sub.chans), 0)
 }

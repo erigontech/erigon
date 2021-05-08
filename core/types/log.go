@@ -18,7 +18,6 @@ package types
 
 import (
 	"io"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -148,51 +147,4 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 		}
 	}
 	return err
-}
-
-// LogsPubSub - it's safe to use this class as non-pointer, do double-unsubscribe
-type LogsPubSub struct {
-	sync.Mutex
-	id    uint
-	last  Logs
-	chans map[uint]chan Logs
-}
-
-func (s *LogsPubSub) Sub() (ch chan Logs, unsubscribe func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]chan Logs)
-	}
-	s.id++
-	id := s.id
-	ch = make(chan Logs, 1)
-	s.chans[id] = ch
-	return ch, func() { s.unsubscribe(id) }
-}
-
-func (s *LogsPubSub) Pub(v Logs) {
-	s.Lock()
-	defer s.Unlock()
-	s.last = v
-	for _, ch := range s.chans {
-		ch <- v
-	}
-}
-
-func (s *LogsPubSub) Last() Logs {
-	s.Lock()
-	defer s.Unlock()
-	return s.last
-}
-
-func (s *LogsPubSub) unsubscribe(id uint) {
-	s.Lock()
-	defer s.Unlock()
-	ch, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	close(ch)
-	delete(s.chans, id)
 }
