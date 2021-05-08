@@ -149,7 +149,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.DB, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.DB.RwKV(), nil, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.DB)
@@ -428,11 +428,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						var tx ethdb.RwTx
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
-							tx = hasTx.Tx().(ethdb.RwTx)
-						}
-						return FinishForward(s, world.DB, world.notifier, tx, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, world.DB, world.notifier, nil, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						var tx ethdb.RwTx
