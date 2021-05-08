@@ -2,13 +2,14 @@ package stagedsync
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier) error {
+func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.Database, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(db); err != nil {
@@ -27,6 +28,10 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 		return err
 	}
 
+	err = MigrateSnapshot(executionAt, tx, db, btClient, snBuilder)
+	if err != nil {
+		return err
+	}
 	return s.DoneAndUpdate(db, executionAt)
 }
 
@@ -46,5 +51,15 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 		}
 		notifier.OnNewHeader(header)
 	}
+
 	return nil
+}
+
+func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
+	if mg == nil {
+		return nil
+	}
+
+	snBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
+	return mg.Migrate(db, tx, snBlock, btClient)
 }

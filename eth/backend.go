@@ -36,6 +36,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
@@ -62,7 +63,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -95,7 +95,7 @@ type Ethereum struct {
 
 	p2pServer *p2p.Server
 
-	torrentClient *bittorrent.Client
+	torrentClient *snapshotsync.Client
 
 	lock        sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	events      *remotedbserver.Events
@@ -134,138 +134,40 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
+	var torrentClient *snapshotsync.Client
+	snapshotsDir := stack.Config().ResolvePath("snapshots")
+	if config.SnapshotLayout {
+		v, err := chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			log.Error("Get bittorrent peer", "err", err)
+		}
+		torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, string(v))
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 {
+			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
+			err = torrentClient.SavePeerID(chainDb)
+			if err != nil {
+				log.Error("Bittorrent peerID haven't saved", "err", err)
+			}
+		}
+
+		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
+		if err != nil {
+			return nil, err
+		}
+		err = snapshotsync.SnapshotSeeding(chainDb, torrentClient, "headers", snapshotsDir)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
-
-	var torrentClient *bittorrent.Client
-	if config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		if config.ExternalSnapshotDownloaderAddr != "" {
-			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
-			if innerErr != nil {
-				return nil, innerErr
-			}
-			defer cl() //nolint
-
-			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
-				NetworkId: config.NetworkID,
-				Type:      config.SnapshotMode.ToSnapshotTypes(),
-			})
-			if innerErr != nil {
-				return nil, innerErr
-			}
-
-			waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
-				snapshotReadinessCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
-					if mp[tp].Readiness != int32(100) {
-						log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
-						return false
-					}
-					return true
-				}
-				for {
-					mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
-					snapshots, err1 := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
-					if err1 != nil {
-						return nil, err1
-					}
-					for i := range snapshots.Info {
-						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock && snapshots.Info[i] != nil {
-							mp[snapshots.Info[i].Type] = snapshots.Info[i]
-						}
-					}
-
-					downloaded := true
-					if config.SnapshotMode.Headers {
-						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_headers) {
-							downloaded = false
-						}
-					}
-					if config.SnapshotMode.Bodies {
-						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_bodies) {
-							downloaded = false
-						}
-					}
-					if config.SnapshotMode.State {
-						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_state) {
-							downloaded = false
-						}
-					}
-					if config.SnapshotMode.Receipts {
-						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_receipts) {
-							downloaded = false
-						}
-					}
-					if downloaded {
-						return mp, nil
-					}
-					time.Sleep(time.Second * 10)
-				}
-			}
-			downloadedSnapshots, innerErr := waitDownload()
-			if innerErr != nil {
-				return nil, innerErr
-			}
-			snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
-
-			snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
-			if innerErr != nil {
-				return nil, innerErr
-			}
-			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-
-			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
-			if innerErr != nil {
-				return nil, innerErr
-			}
-		} else {
-			var dbPath string
-			dbPath, err = stack.Config().ResolvePath("snapshots")
-			if err != nil {
-				return nil, err
-			}
-			torrentClient, err = bittorrent.New(dbPath, config.SnapshotSeeding)
-			if err != nil {
-				return nil, err
-			}
-
-			err = torrentClient.Load(chainDb)
-			if err != nil {
-				return nil, err
-			}
-			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
-			if err == nil {
-				torrentClient.Download()
-				snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
-				mp, innerErr := torrentClient.GetSnapshots(chainDb, config.NetworkID)
-				if innerErr != nil {
-					return nil, innerErr
-				}
-
-				snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, mp)
-				if innerErr != nil {
-					return nil, innerErr
-				}
-				chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-				tx, err := chainDb.Begin(context.Background(), ethdb.RW)
-				if err != nil {
-					return nil, err
-				}
-				defer tx.Rollback()
-				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
-				if err = tx.Commit(); err != nil {
-					return nil, err
-				}
-				if innerErr != nil {
-					return nil, innerErr
-				}
-			} else {
-				log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
-			}
-		}
-	}
 
 	eth := &Ethereum{
 		config:        config,
@@ -313,10 +215,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
-		if err != nil {
-			return nil, err
-		}
+		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
@@ -325,13 +224,33 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// setting notifier to support streaming events to rpc daemon
 	eth.events = remotedbserver.NewEvents()
+	var mg *snapshotsync.SnapshotMigrator
+	if config.SnapshotLayout {
+		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
+		if err != nil {
+			return nil, err
+		}
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
+		err = mg.RemoveNonCurrentSnapshots()
+		if err != nil {
+			log.Error("Remove non current snapshot", "err", err)
+		}
+	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
+		if config.SnapshotLayout {
+			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: eth.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
+		} else {
+			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
+		}
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
 			stagedSync.Notifier = eth.events
+		}
+		if config.SnapshotLayout {
+			stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
+			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 		}
 	}
 

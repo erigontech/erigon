@@ -12,7 +12,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
@@ -50,6 +52,10 @@ type StageParameters struct {
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
 	mining                *MiningCfg
+
+	snapshotsDir    string
+	btClient        *snapshotsync.Client
+	SnapshotBuilder *snapshotsync.SnapshotMigrator
 }
 
 type MiningCfg struct {
@@ -422,7 +428,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return FinishForward(s, world.DB, world.notifier)
+						return FinishForward(s, world.DB, world.notifier, world.TX, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindFinish(u, s, world.DB)
@@ -566,6 +572,92 @@ func DefaultUnwindOrder() UnwindOrder {
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 5,
 		7, 8, 9, 10, 11,
+	}
+}
+
+func WithSnapshotsStages() StageBuilders {
+	defaultStages := DefaultStages()
+	blockHashesStageIndex := -1
+	sendersStageIndex := -1
+	hashedStateStageIndex := -1
+	for i := range defaultStages {
+		if defaultStages[i].ID == stages.Bodies {
+			blockHashesStageIndex = i
+		}
+		if defaultStages[i].ID == stages.Senders {
+			sendersStageIndex = i
+		}
+		if defaultStages[i].ID == stages.HashState {
+			hashedStateStageIndex = i
+		}
+	}
+	if blockHashesStageIndex < 0 || sendersStageIndex < 0 || hashedStateStageIndex < 0 {
+		log.Error("Unrecognized block hashes stage", "blockHashesStageIndex < 0", blockHashesStageIndex < 0, "sendersStageIndex < 0", sendersStageIndex < 0, "hashedStateStageIndex < 0", hashedStateStageIndex < 0)
+		return DefaultStages()
+	}
+
+	stagesWithSnapshots := make(StageBuilders, 0, len(defaultStages)+1)
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[:blockHashesStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateHeadersSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateHeadersSnapshot,
+				Description: "Create headers snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[blockHashesStageIndex:sendersStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateBodiesSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateBodiesSnapshot,
+				Description: "Create bodies snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnBodiesSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[sendersStageIndex:hashedStateStageIndex]...)
+	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
+		ID: stages.CreateStateSnapshot,
+		Build: func(world StageParameters) *Stage {
+			return &Stage{
+				ID:          stages.CreateStateSnapshot,
+				Description: "Create state snapshot",
+				ExecFunc: func(s *StageState, u Unwinder) error {
+					return SpawnStateSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
+				},
+				UnwindFunc: func(u *UnwindState, s *StageState) error {
+					return u.Done(world.DB)
+				},
+			}
+		},
+	})
+	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[hashedStateStageIndex:]...)
+	return stagesWithSnapshots
+}
+
+func UnwindOrderWithSnapshots() UnwindOrder {
+	return []int{
+		0, 1, 2,
+		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// also tx pool is before senders because senders unwind is inside cycle transaction
+		15,
+		// Unwinding of IHashes needs to happen after unwinding HashState
+		3, 4, 6, 5,
+		7, 9, 10, 12, 14,
 	}
 }
 

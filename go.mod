@@ -9,7 +9,7 @@ require (
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
-	github.com/blend/go-sdk v1.1.1 // indirect
+	github.com/blend/go-sdk v0.0.0-20190205012150-4a150f307fcb // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/cloudflare/cloudflare-go v0.13.2
@@ -70,4 +70,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	pgregory.net/rapid v0.4.6
 )

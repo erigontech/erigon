@@ -13,10 +13,14 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func Seed(ctx context.Context, datadir string) error {
+	defer func() {
+		//hack origin lib don't have proper close handling
+		time.Sleep(time.Second * 5)
+	}()
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -33,7 +37,6 @@ func Seed(ctx context.Context, datadir string) error {
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
 		cfg.DataDir + "/state",
-		//cfg.DataDir+"/receipts",
 	}
 
 	cl, err := torrent.NewClient(cfg)
@@ -61,7 +64,7 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-		info, err := trnt.BuildInfoBytesForLMDBSnapshot(v)
+		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.LmdbFilename)
 		if err != nil {
 			return err
 		}
@@ -90,8 +93,6 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-
-		torrents[i].VerifyData()
 	}
 
 	go func() {

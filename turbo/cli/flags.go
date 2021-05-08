@@ -82,6 +82,11 @@ var (
 		Name:  "snapshot.seed",
 		Usage: `Seed snapshot seeding(default: true)`,
 	}
+	//todo replace to BoolT
+	SnapshotDatabaseLayoutFlag = cli.BoolFlag{
+		Name:  "snapshot.layout",
+		Usage: `Enable snapshot db layout(default: false)`,
+	}
 
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
 		Name:  "snapshot.downloader.addr",
@@ -141,6 +146,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+	cfg.SnapshotLayout = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))

@@ -142,6 +142,7 @@ const (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket        = "DBINFO"
 	SnapshotInfoBucket        = "SNINFO"
+	BittorrentInfoBucket      = "BTINFO"
 	HeadersSnapshotInfoBucket = "hSNINFO"
 	BodiesSnapshotInfoBucket  = "bSNINFO"
 	StateSnapshotInfoBucket   = "sSNINFO"
@@ -238,6 +239,10 @@ var (
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
+
+	BittorrentPeerID            = "peerID"
+	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
+	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -288,7 +293,7 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
-
+	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,

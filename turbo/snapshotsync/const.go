@@ -1,47 +1,50 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"errors"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 const (
 	DefaultChunkSize = 1024 * 1024
-	SnapshotBlock    = 11_000_000
 	LmdbFilename     = "data.mdb"
+	MdbxFilename     = "mdbx.dat"
+	EpochSize        = 500_000
 
-	HeadersSnapshotHash  = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //11кk block 1mb chunk
-	BlocksSnapshotHash   = "6353d013d614f1f8145d71e1479de9b4361d273f" //11кk block 1mb chunk
-	StateSnapshotHash    = "fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78"
-	ReceiptsSnapshotHash = ""
+	//todo It'll be changed after enabling new snapshot generation mechanism
+	HeadersSnapshotHash = "0000000000000000000000000000000000000000"
+	BlocksSnapshotHash  = "0000000000000000000000000000000000000000"
+	StateSnapshotHash   = "0000000000000000000000000000000000000000"
 
 	SnapshotInfoHashPrefix  = "ih"
 	SnapshotInfoBytesPrefix = "ib"
 )
 
 var (
-	TorrentHashes = map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
+	TorrentHashes = map[uint64]map[SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
-			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
-			snapshotsync.SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
+			SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
+			SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
-func GetAvailableSnapshotTypes(networkID uint64) []snapshotsync.SnapshotType {
-	types := make([]snapshotsync.SnapshotType, 0, len(TorrentHashes[networkID]))
-	for k := range TorrentHashes[networkID] {
-		types = append(types, k)
+func GetAvailableSnapshotTypes(chainID uint64) []SnapshotType {
+	v := TorrentHashes[chainID]
+	res := make([]SnapshotType, 0, len(v))
+	for i := range v {
+		res = append(res, i)
 	}
-	return types
+	return res
 }
 
 var Trackers = [][]string{{
+	"http://35.189.110.210:80/announce",
+}, {
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.publicbt.com:80",

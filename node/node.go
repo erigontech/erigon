@@ -127,10 +127,7 @@ func New(conf *Config) (*Node, error) {
 		}
 	}
 	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase, err = node.config.NodeDB()
-		if err != nil {
-			return nil, err
-		}
+		node.server.Config.NodeDatabase = node.config.NodeDB()
 	}
 
 	// Check HTTP/WS prefixes are valid.
@@ -567,10 +564,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
-		dbPath, err := n.config.ResolvePath(name)
-		if err != nil {
-			return nil, err
-		}
+		dbPath := n.config.ResolvePath(name)
 
 		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
 		if n.config.MDBX {
@@ -600,7 +594,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 				return ethdb.NewObjectDatabase(kv), nil
 			}
 		}
-
+		var err error
 		db, err = openFunc(false)
 		if err != nil {
 			return nil, err
@@ -633,6 +627,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
-func (n *Node) ResolvePath(x string) (string, error) {
+func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
 }

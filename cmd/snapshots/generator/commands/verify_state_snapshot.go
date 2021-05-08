@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -35,25 +34,6 @@ var verifyStateSnapshotCmd = &cobra.Command{
 }
 
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
-	db, err := ethdb.Open(dbPath, true)
-	if err != nil {
-		return fmt.Errorf("open err: %w", err)
-	}
-
-	kv := db.RwKV()
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
-	db.SetRwKV(kv)
-
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
@@ -69,7 +49,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	tmpDB := ethdb.NewLMDB().Path(tmpPath).MustOpen()
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).MustOpen()
+	snkv = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()
 	sndb := ethdb.NewObjectDatabase(snkv)
 	tx, err := sndb.Begin(context.Background(), ethdb.RW)
 	if err != nil {
@@ -87,13 +67,13 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	}
 	expectedRootHash := syncHeadHeader.Root
 	tt := time.Now()
-	err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(db.RwKV(), os.TempDir()), ctx.Done())
+	err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(sndb.RwKV(), os.TempDir()), ctx.Done())
 	fmt.Println("Promote took", time.Since(tt))
 	if err != nil {
 		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(db.RwKV(), true, true, os.TempDir()), expectedRootHash, ctx.Done())
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(sndb.RwKV(), true, true, os.TempDir()), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}

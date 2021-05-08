@@ -37,7 +37,7 @@ docker-compose:
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth:
+geth: mdbx
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -93,6 +93,21 @@ evm:
 	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
+
+seeder:
+	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
+
+sndownloader:
+	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
+
+tracker:
+	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
 db-tools: mdbx
 	@echo "Building bb-tools"
@@ -199,4 +214,3 @@ prometheus:
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
-

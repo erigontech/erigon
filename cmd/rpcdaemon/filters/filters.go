@@ -62,7 +62,7 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 			return
 		}
 		if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
-			log.Warn("rpc filters: error subscribing to events", "err", err)
+			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 			time.Sleep(time.Second)
 		}
 	}()
