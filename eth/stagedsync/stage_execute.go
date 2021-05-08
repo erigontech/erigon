@@ -176,7 +176,8 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 			if err := flushBitmaps(collectorTo, tos); err != nil {
 				return err
 			}
-			log.Info("Flushed bitmaps to collectors")
+			froms = map[string]*roaring.Bitmap{}
+			tos = map[string]*roaring.Bitmap{}
 			*bitmapCounter = 0
 		}
 	}
