@@ -57,7 +57,7 @@ func TestMatreshkaStream(t *testing.T) {
 	}
 
 	tmpDb := ethdb.NewObjectDatabase(kv)
-	chainConfig, _, genesisErr := core.SetupGenesisBlockWithOverride(tmpDb, core.DefaultGenesisBlock(), nil, true, false /* overwrite */)
+	chainConfig, _, genesisErr := core.SetupGenesisBlock(tmpDb, core.DefaultGenesisBlock(), true, false /* overwrite */)
 	if genesisErr != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestMatreshkaStream(t *testing.T) {
 	fmt.Println("currentBlock", currentBlock.Number.Uint64())
 	blockNum := uint64(1)
 	limit := currentBlock.Number.Uint64()
-	blockchain, err := core.NewBlockChain(db, nil, chainConfig, ethash.NewFaker(), vm.Config{
+	blockchain, err := core.NewBlockChain(db, chainConfig, ethash.NewFaker(), vm.Config{
 		NoReceipts: true,
 	}, nil, nil)
 	if err != nil {
