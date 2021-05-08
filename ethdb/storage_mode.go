@@ -7,16 +7,20 @@ import (
 )
 
 type StorageMode struct {
-	Pruning    bool
-	History    bool
-	Receipts   bool
-	TxIndex    bool
-	CallTraces bool
+	Initialised bool // Set when the values are initialised (not default)
+	Pruning     bool
+	History     bool
+	Receipts    bool
+	TxIndex     bool
+	CallTraces  bool
 }
 
-var DefaultStorageMode = StorageMode{Pruning: false, History: true, Receipts: true, TxIndex: true, CallTraces: false}
+var DefaultStorageMode = StorageMode{Initialised: true, Pruning: false, History: true, Receipts: true, TxIndex: true, CallTraces: false}
 
 func (m StorageMode) ToString() string {
+	if !m.Initialised {
+		return "default"
+	}
 	modeString := ""
 	if m.Pruning {
 		modeString += "p"
@@ -38,6 +42,10 @@ func (m StorageMode) ToString() string {
 
 func StorageModeFromString(flags string) (StorageMode, error) {
 	mode := StorageMode{}
+	if flags == "default" {
+		return mode, nil
+	}
+	mode.Initialised = true
 	for _, flag := range flags {
 		switch flag {
 		case 'h':
@@ -62,6 +70,7 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 		v   []byte
 		err error
 	)
+	sm.Initialised = true
 	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModePruning)
 	if err != nil {
 		return StorageMode{}, err
@@ -130,6 +139,9 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 	var (
 		err error
 	)
+	if !sm.Initialised {
+		sm = DefaultStorageMode
+	}
 	err = setModeOnEmpty(db, dbutils.StorageModePruning, sm.Pruning)
 	if err != nil {
 		return err
