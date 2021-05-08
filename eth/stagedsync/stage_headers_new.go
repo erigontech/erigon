@@ -242,7 +242,7 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest())
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}

@@ -723,6 +723,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 	if blockHeight > hi.highest {
 		hi.highest = blockHeight
 		hi.highestHash = hash
+		hi.highestTimestamp = header.Time
 	}
 	return nil
 }
@@ -733,6 +734,10 @@ func (hi *HeaderInserter) GetHighest() uint64 {
 
 func (hi *HeaderInserter) GetHighestHash() common.Hash {
 	return hi.highestHash
+}
+
+func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
+	return hi.highestTimestamp
 }
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
