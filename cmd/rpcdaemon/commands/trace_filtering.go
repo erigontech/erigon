@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"sort"
 
+	"github.com/RoaringBitmap/roaring"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -218,97 +218,56 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
-	blocksMap := map[uint32]struct{}{}
-	var loadFromAddresses = func(addr common.Address) error {
-		// Load bitmap for address from trace index
-		b, err := bitmapdb.Get(dbtx, dbutils.CallFromIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
-		if err != nil {
-			return err
-		}
-
-		// Extract block numbers from bitmap
-		for _, block := range b.ToArray() {
-			// Observe the limits
-			if uint64(block) >= fromBlock && uint64(block) <= toBlock {
-				blocksMap[block] = struct{}{}
-			}
-		}
-
-		return nil
-	}
-	var loadToAddresses = func(addr common.Address) error {
-		// Load bitmap for address from trace index
-		b, err := bitmapdb.Get(dbtx, dbutils.CallToIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
-		if err != nil {
-			return err
-		}
-
-		// Extract block numbers from bitmap
-		for _, block := range b.ToArray() {
-			// Observe the limits
-			if uint64(block) >= fromBlock && uint64(block) <= toBlock {
-				blocksMap[block] = struct{}{}
-			}
-		}
-
-		return nil
-	}
-
+	var allBlocks roaring.Bitmap
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			if err := loadFromAddresses(*addr); err != nil {
+			b, err := bitmapdb.Get(dbtx, dbutils.CallFromIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
+			if err != nil {
 				return err
 			}
-
+			allBlocks.Or(b)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
-
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			if err := loadToAddresses(*addr); err != nil {
+			b, err := bitmapdb.Get(dbtx, dbutils.CallToIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
+			if err != nil {
 				return err
 			}
-
+			allBlocks.Or(b)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
+	allBlocks.RemoveRange(0, fromBlock)
+	allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
 
-	// Sort blocks
-	blockSet := make([]int, 0, len(blocksMap))
-	for blk := range blocksMap {
-		blockSet = append(blockSet, int(blk))
-	}
-	sort.Ints(blockSet)
-
-	blocks := make([]*types.Block, 0, len(blocksMap))
-	for _, b := range blockSet {
-		// Extract transactions from block
-		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, uint64(b))
-		if hashErr != nil {
-			return hashErr
-		}
-
-		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, uint64(b))
-		if bErr != nil {
-			return bErr
-		}
-		if block == nil {
-			return fmt.Errorf("could not find block %x %d", hash, uint64(b))
-		}
-
-		blocks = append(blocks, block)
-	}
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return err
 	}
-
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
-	for _, block := range blocks {
+
+	it := allBlocks.Iterator()
+	for it.HasNext() {
+		b := uint64(it.Next())
+		// Extract transactions from block
+		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
+		if hashErr != nil {
+			return hashErr
+		}
+
+		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, b)
+		if bErr != nil {
+			return bErr
+		}
+		if block == nil {
+			return fmt.Errorf("could not find block %x %d", hash, b)
+		}
+
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()

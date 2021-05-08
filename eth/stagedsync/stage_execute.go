@@ -8,6 +8,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -47,6 +48,7 @@ type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNu
 type ExecuteBlockCfg struct {
 	db                    ethdb.RwKV
 	writeReceipts         bool
+	writeCallTraces       bool
 	batchSize             datasize.ByteSize
 	changeSetHook         ChangeSetHook
 	readerBuilder         StateReaderBuilder
@@ -61,6 +63,7 @@ type ExecuteBlockCfg struct {
 func StageExecuteBlocksCfg(
 	kv ethdb.RwKV,
 	WriteReceipts bool,
+	WriteCallTraces bool,
 	BatchSize datasize.ByteSize,
 	ReaderBuilder StateReaderBuilder,
 	WriterBuilder StateWriterBuilder,
@@ -74,6 +77,7 @@ func StageExecuteBlocksCfg(
 	return ExecuteBlockCfg{
 		db:                    kv,
 		writeReceipts:         WriteReceipts,
+		writeCallTraces:       WriteCallTraces,
 		batchSize:             BatchSize,
 		changeSetHook:         ChangeSetHook,
 		readerBuilder:         ReaderBuilder,
@@ -95,7 +99,8 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg,
+	froms, tos map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, bitmapCounter *int) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -114,6 +119,12 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	var callTracer *CallTracer
+	if params.writeCallTraces {
+		callTracer = NewCallTracer()
+		params.vmConfig.Debug = true
+		params.vmConfig.Tracer = callTracer
+	}
 	receipts, err := core.ExecuteBlockEphemerally(params.chainConfig, params.vmConfig, getHeader, params.engine, block, stateReader, stateWriter)
 	if err != nil {
 		return err
@@ -128,6 +139,45 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 	if params.changeSetHook != nil {
 		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
 			params.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		}
+	}
+
+	if params.writeCallTraces {
+		callTracer.tos[block.Coinbase()] = struct{}{}
+		for _, uncle := range block.Uncles() {
+			callTracer.tos[uncle.Coinbase] = struct{}{}
+		}
+
+		for addr := range callTracer.froms {
+			m, ok := froms[string(addr[:])]
+			if !ok {
+				m = roaring.New()
+				a := addr // To copy addr
+				froms[string(a[:])] = m
+			}
+			m.Add(uint32(blockNum))
+			*bitmapCounter++
+		}
+		for addr := range callTracer.tos {
+			m, ok := tos[string(addr[:])]
+			if !ok {
+				m = roaring.New()
+				a := addr // To copy addr
+				tos[string(a[:])] = m
+			}
+			m.Add(uint32(blockNum))
+			*bitmapCounter++
+		}
+
+		if *bitmapCounter > 1000000 {
+			if err := flushBitmaps(collectorFrom, froms); err != nil {
+				return err
+			}
+			if err := flushBitmaps(collectorTo, tos); err != nil {
+				return err
+			}
+			log.Info("Flushed bitmaps to collectors")
+			*bitmapCounter = 0
 		}
 	}
 
@@ -159,6 +209,16 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	}
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+
+	var froms, tos map[string]*roaring.Bitmap
+	var collectorFrom, collectorTo *etl.Collector
+	var bitmapCounter int
+	if cfg.writeCallTraces {
+		froms = map[string]*roaring.Bitmap{}
+		tos = map[string]*roaring.Bitmap{}
+		collectorFrom = etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collectorTo = etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	}
 
 	useSilkworm := cfg.silkwormExecutionFunc != nil
 	if useSilkworm && cfg.changeSetHook != nil {
@@ -197,7 +257,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg, froms, tos, collectorFrom, collectorTo, &bitmapCounter); err != nil {
 				return err
 			}
 		}
@@ -251,6 +311,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			return err
 		}
 	}
+
+	if cfg.writeCallTraces {
+		if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
+			return fmt.Errorf("[%s] %w", logPrefix, err)
+		}
+	}
+
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
 	return nil
@@ -375,6 +442,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	if cfg.writeReceipts {
 		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
+		}
+	}
+
+	if cfg.writeCallTraces {
+		if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quit, CallTracesCfg{engine: cfg.engine, chainConfig: cfg.chainConfig}); err != nil {
+			return fmt.Errorf("%s: unwinding call traces: %v", logPrefix, err)
 		}
 	}
 
