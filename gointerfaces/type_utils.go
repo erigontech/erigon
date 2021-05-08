@@ -49,17 +49,17 @@ func ConvertAddressToH160(addr common.Address) *types.H160 {
 
 func ConvertH256ToUint256Int(h256 *types.H256) *uint256.Int {
 	var i uint256.Int
-	i[0] = h256.Hi.Hi
-	i[1] = h256.Hi.Lo
-	i[2] = h256.Lo.Hi
-	i[3] = h256.Lo.Lo
+	i[3] = h256.Hi.Hi
+	i[2] = h256.Hi.Lo
+	i[1] = h256.Lo.Hi
+	i[0] = h256.Lo.Lo
 	return &i
 }
 
 func ConvertUint256IntToH256(i *uint256.Int) *types.H256 {
 	return &types.H256{
-		Lo: &types.H128{Lo: i[3], Hi: i[2]},
-		Hi: &types.H128{Lo: i[1], Hi: i[0]},
+		Lo: &types.H128{Lo: i[0], Hi: i[1]},
+		Hi: &types.H128{Lo: i[2], Hi: i[3]},
 	}
 }
 
