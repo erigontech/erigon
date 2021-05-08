@@ -19,6 +19,10 @@ func TestBlockHashStage(t *testing.T) {
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	var dbtx ethdb.RwTx
+	if hasTx, ok := tx.(ethdb.HasTx); ok {
+		dbtx = hasTx.Tx().(ethdb.RwTx)
+	}
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(tx, origin.Hash(), 0)
@@ -42,7 +46,7 @@ func TestBlockHashStage(t *testing.T) {
 	if err := stages.SaveStageProgress(tx, stages.Headers, headers[len(headers)-1].Number.Uint64()); err != nil {
 		t.Fatalf("setting headers progress: %v", err)
 	}
-	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, tx, "", nil)
+	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db.RwKV(), dbtx, "", nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(tx, h.Hash())
