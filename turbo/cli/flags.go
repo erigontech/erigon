@@ -65,8 +65,9 @@ var (
 		Usage: `Configures the storage mode of the app:
 * h - write history to the DB
 * r - write receipts to the DB
-* t - write tx lookup index to the DB`,
-		Value: ethdb.DefaultStorageMode.ToString(),
+* t - write tx lookup index to the DB
+* c - write call traces index to the DB`,
+		Value: "default",
 	}
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",

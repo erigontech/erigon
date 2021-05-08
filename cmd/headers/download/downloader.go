@@ -332,6 +332,7 @@ func NewStagedSync(
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,
+			sm.CallTraces,
 			batchSize,
 			nil,
 			nil,
