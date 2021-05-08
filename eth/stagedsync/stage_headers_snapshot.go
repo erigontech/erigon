@@ -2,14 +2,15 @@ package stagedsync
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"time"
 )
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *snapshotsync.SnapshotMigrator, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, tx ethdb.RwTx, sm *snapshotsync.SnapshotMigrator, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	to, err := stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -44,7 +45,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 		return nil
 	}
 
-	err = sm.Migrate(db, db, snapshotBlock, torrentClient)
+	err = sm.Migrate(db, tx, snapshotBlock, torrentClient)
 	if err != nil {
 		return err
 	}
@@ -54,7 +55,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, sm *s
 			break
 		default:
 			log.Info("Migrating to new snapshot", "stage", sm.GetStage())
-			err = sm.Migrate(db, db, snapshotBlock, torrentClient)
+			err = sm.Migrate(db, tx, snapshotBlock, torrentClient)
 			if err != nil {
 				return err
 			}

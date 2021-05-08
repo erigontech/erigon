@@ -428,10 +428,18 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return FinishForward(s, world.DB, world.notifier, world.TX, world.btClient, world.SnapshotBuilder)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return FinishForward(s, world.DB, world.notifier, tx, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindFinish(u, s, world.DB)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindFinish(u, s, world.DB, tx)
 					},
 				}
 			},
@@ -605,7 +613,11 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateHeadersSnapshot,
 				Description: "Create headers snapshot",
 				ExecFunc: func(s *StageState, u Unwinder) error {
-					return SpawnHeadersSnapshotGenerationStage(s, world.DB, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
+					var tx ethdb.RwTx
+					if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+						tx = hasTx.Tx().(ethdb.RwTx)
+					}
+					return SpawnHeadersSnapshotGenerationStage(s, world.DB, tx, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState) error {
 					return u.Done(world.DB)

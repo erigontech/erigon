@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -9,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.Database, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.RwTx, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(db); err != nil {
@@ -32,11 +33,17 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 	if err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(db, executionAt)
+	if tx == nil {
+		return s.DoneAndUpdate(db, executionAt)
+	}
+	return s.DoneAndUpdate(tx, executionAt)
 }
 
-func UnwindFinish(u *UnwindState, s *StageState, db ethdb.Database) error {
-	return u.Done(db)
+func UnwindFinish(u *UnwindState, s *StageState, db ethdb.Database, tx ethdb.RwTx) error {
+	if tx == nil {
+		return u.Done(db)
+	}
+	return u.Done(tx)
 }
 
 func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
@@ -55,7 +62,7 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 	return nil
 }
 
-func MigrateSnapshot(to uint64, tx ethdb.Database, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
+func MigrateSnapshot(to uint64, tx ethdb.RwTx, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
 	if mg == nil {
 		return nil
 	}

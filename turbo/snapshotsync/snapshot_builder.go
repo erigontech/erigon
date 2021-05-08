@@ -219,7 +219,7 @@ func (sm *SnapshotMigrator) GetStage() string {
 
 	}
 }
-func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBlock uint64, bittorrent *Client) error {
+func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.RwTx, toBlock uint64, bittorrent *Client) error {
 	switch atomic.LoadUint64(&sm.Stage) {
 	case StageStart:
 		log.Info("Snapshot generation block", "skip", atomic.LoadUint64(&sm.HeadersNewSnapshot) >= toBlock)
@@ -345,7 +345,7 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.Database, tx ethdb.Database, toBloc
 	case StageFinish:
 		tt := time.Now()
 		//todo check commited
-		v, err := tx.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil
 		}
