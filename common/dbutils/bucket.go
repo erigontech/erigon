@@ -171,6 +171,10 @@ const (
 	LogTopicIndex   = "log_topic_index"
 	LogAddressIndex = "log_address_index"
 
+	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
+	// touched by call traces. It is DupSort-ed table
+	// 8-byte BE block nunber -> account address -> two bits (one for "from", another for "to")
+	CallTraceSet = "call_trace_set"
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
 	CallFromIndex = "call_from_index"
@@ -283,6 +287,7 @@ var Buckets = []string{
 	HeadersSnapshotInfoBucket,
 	BodiesSnapshotInfoBucket,
 	StateSnapshotInfoBucket,
+	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
 	Log,
@@ -390,6 +395,9 @@ var BucketsConfigs = BucketsCfg{
 	IntermediateTrieHashBucketOld2: {
 		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
+	},
+	CallTraceSet: {
+		Flags: DupSort,
 	},
 	InvalidBlock: {},
 }

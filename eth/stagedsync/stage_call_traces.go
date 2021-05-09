@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -78,10 +79,6 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg Cal
 		return nil
 	}
 
-	if endBlock > s.BlockNumber+100000 {
-		endBlock = s.BlockNumber + 100000
-	}
-
 	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg); err != nil {
 		return err
 	}
@@ -109,6 +106,53 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
+
+	traceCursor, err := tx.RoCursorDupSort(dbutils.CallTraceSet)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
+	}
+
+	if err := ethdb.Walk(tx, dbutils.CallTraceSet, dbutils.EncodeBlockNumber(startBlock), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN >= stop {
+			return false, nil
+		}
+		if err := common.Stopped(quit); err != nil {
+			return false, err
+		}
+
+		k = dbutils.CompositeKeyWithoutIncarnation(k)
+
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		case <-checkFlushEvery.C:
+			if needFlush64(updates, cfg.bufLimit) {
+				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
+					return false, err
+				}
+				updates = map[string]*roaring64.Bitmap{}
+			}
+		}
+
+		kStr := string(k)
+		m, ok := updates[kStr]
+		if !ok {
+			m = roaring64.New()
+			updates[kStr] = m
+		}
+		m.Add(blockN)
+
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	if err := flushBitmaps64(collectorUpdates, updates); err != nil {
+		return err
+	}
 
 	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
