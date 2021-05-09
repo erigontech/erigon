@@ -161,7 +161,7 @@ func BodiesForward(
 					return err
 				}
 				if !useExternalTx {
-					if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
+					if err := s.Update(tx, bodyProgress); err != nil {
 						return err
 					}
 					if err = tx.Commit(); err != nil {
