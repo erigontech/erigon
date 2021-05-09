@@ -99,67 +99,46 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	froms := map[string]*roaring.Bitmap{}
-	tos := map[string]*roaring.Bitmap{}
+	froms := map[string]*roaring64.Bitmap{}
+	tos := map[string]*roaring64.Bitmap{}
 	collectorFrom := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	collectorTo := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
-	traceCursor, err := tx.RoCursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := tx.CursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
+		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
 
-	if err := ethdb.Walk(tx, dbutils.CallTraceSet, dbutils.EncodeBlockNumber(startBlock), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN >= stop {
-			return false, nil
-		}
-		if err := common.Stopped(quit); err != nil {
-			return false, err
-		}
-
-		k = dbutils.CompositeKeyWithoutIncarnation(k)
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-		case <-checkFlushEvery.C:
-			if needFlush64(updates, cfg.bufLimit) {
-				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
-					return false, err
-				}
-				updates = map[string]*roaring64.Bitmap{}
-			}
-		}
-
-		kStr := string(k)
-		m, ok := updates[kStr]
-		if !ok {
-			m = roaring64.New()
-			updates[kStr] = m
-		}
-		m.Add(blockN)
-
-		return true, nil
-	}); err != nil {
-		return err
-	}
-
-	if err := flushBitmaps64(collectorUpdates, updates); err != nil {
-		return err
-	}
-
+	var k, v []byte
 	prev := startBlock
-	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
-		if err := common.Stopped(quit); err != nil {
-			return err
+	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= endBlock {
+			break
 		}
-
+		if len(v) != common.AddressLength+1 {
+			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+		}
+		mapKey := string(common.CopyBytes(v[:common.AddressLength]))
+		if v[common.AddressLength]&1 > 0 {
+			m, ok := froms[mapKey]
+			if !ok {
+				m = roaring64.New()
+				froms[mapKey] = m
+			}
+			m.Add(blockNum)
+		}
+		if v[common.AddressLength]&2 > 0 {
+			m, ok := tos[mapKey]
+			if !ok {
+				m = roaring64.New()
+				froms[mapKey] = m
+			}
+			m.Add(blockNum)
+		}
 		select {
 		default:
 		case <-logEvery.C:
@@ -174,81 +153,41 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		case <-checkFlushEvery.C:
-			if needFlush(froms, bufLimit) {
-				if err := flushBitmaps(collectorFrom, froms); err != nil {
+			if needFlush64(froms, bufLimit) {
+				if err := flushBitmaps64(collectorFrom, froms); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
 
-				froms = map[string]*roaring.Bitmap{}
+				froms = map[string]*roaring64.Bitmap{}
 			}
 
-			if needFlush(tos, bufLimit) {
-				if err := flushBitmaps(collectorTo, tos); err != nil {
+			if needFlush64(tos, bufLimit) {
+				if err := flushBitmaps64(collectorTo, tos); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
 
-				tos = map[string]*roaring.Bitmap{}
+				tos = map[string]*roaring64.Bitmap{}
 			}
-		}
-		blockHash, err2 := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err2 != nil {
-			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
-		}
-		block, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
-		if block == nil {
-			return fmt.Errorf("no block: %d", blockNum)
-		}
-
-		stateReader := state.NewPlainKvState(tx, blockNum-1)
-		stateWriter := state.NewNoopWriter()
-		tracer := NewCallTracer()
-		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		if _, err := core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
-		}
-
-		tracer.tos[block.Coinbase()] = struct{}{}
-		for _, uncle := range block.Uncles() {
-			tracer.tos[uncle.Coinbase] = struct{}{}
-		}
-
-		for addr := range tracer.froms {
-			m, ok := froms[string(addr[:])]
-			if !ok {
-				m = roaring.New()
-				a := addr // To copy addr
-				froms[string(a[:])] = m
-			}
-			m.Add(uint32(blockNum))
-		}
-		for addr := range tracer.tos {
-			m, ok := tos[string(addr[:])]
-			if !ok {
-				m = roaring.New()
-				a := addr // To copy addr
-				tos[string(a[:])] = m
-			}
-			m.Add(uint32(blockNum))
 		}
 	}
+	if err != nil {
+		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
+	}
+
+	if err = flushBitmaps64(collectorFrom, froms); err != nil {
+		return err
+	}
+	if err = flushBitmaps64(collectorTo, tos); err != nil {
+		return err
+	}
+
 	if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	return nil
 }
 
-func finaliseCallTraces(froms, tos map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
-	if err := flushBitmaps(collectorFrom, froms); err != nil {
-		return err
-	}
-	if err := flushBitmaps(collectorTo, tos); err != nil {
-		return err
-	}
-
+func finaliseCallTraces(froms, tos map[string]*roaring64.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
 	var currentBitmap = roaring.New()
 	var buf = bytes.NewBuffer(nil)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
