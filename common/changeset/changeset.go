@@ -133,8 +133,12 @@ func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker fun
 	})
 }
 
-func Truncate(tx ethdb.RwTx, from uint64) error {
+func EraseRange(tx ethdb.RwTx, from uint64, to *uint64) error {
 	keyStart := dbutils.EncodeBlockNumber(from)
+	var keyEnd []byte
+	if to != nil {
+		keyEnd = dbutils.EncodeBlockNumber(*to)
+	}
 
 	{
 		c, err := tx.RwCursorDupSort(dbutils.AccountChangeSetBucket)
@@ -143,6 +147,11 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 		}
 		defer c.Close()
 		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if keyEnd != nil {
+				if bytes.Compare(k, keyEnd) >= 0 {
+					break
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -159,6 +168,11 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 		}
 		defer c.Close()
 		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if keyEnd != nil {
+				if bytes.Compare(k, keyEnd) >= 0 {
+					break
+				}
+			}
 			if err != nil {
 				return err
 			}

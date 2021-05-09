@@ -217,6 +217,27 @@ func ReplacementStages(ctx context.Context,
 			},
 		},
 		{
+			ID: stages.Pruning,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.Pruning,
+					Description:         "Remove ancient blocks",
+					Disabled:            !sm.Pruning,
+					DisabledDescription: "Enable by adding `--prune`",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnPruning(s, tx, ctx.Done(), exec)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return nil
+					},
+				}
+			},
+		},
+		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{

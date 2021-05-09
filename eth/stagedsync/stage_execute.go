@@ -444,7 +444,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return err
 	}
 
-	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
+	if err := changeset.EraseRange(tx, u.UnwindPoint+1, nil); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
