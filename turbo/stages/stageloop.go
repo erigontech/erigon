@@ -109,6 +109,10 @@ func StageLoopStep(
 	if err1 != nil {
 		return err1
 	}
+		finishProgressBefore, err1 := stages.GetStageProgress(db, stages.Finish) // TODO: shift this when more stages are added
+		if err1 != nil {
+			return err1
+		}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
@@ -119,6 +123,11 @@ func StageLoopStep(
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	unwindTo, err := st.GetUnwindTo(db)
+	if err != nil {
+		return err
 	}
 
 	err = st.Run(db, tx)
@@ -132,6 +141,11 @@ func StageLoopStep(
 			return errTx
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
+	}
+
+	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, unwindTo, sync.Notifier, db)
+	if err != nil {
+		return err
 	}
 	return nil
 }

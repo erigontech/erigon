@@ -85,6 +85,10 @@ func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb) error {
 	return nil
 }
 
+func (s *State) GetUnwindTo(db ethdb.KVGetter) (uint64, error) {
+	return stages.GetStageUnwind(db, stages.Finish)
+}
+
 func (s *State) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages)) && s.unwindStack.Empty()
 }

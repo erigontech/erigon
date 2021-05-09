@@ -417,6 +417,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	if err != nil {
 		return err
 	}
+	finishAtBefore, err := stages.GetStageProgress(d.stateDB, stages.Finish)
+	if err != nil {
+		return err
+	}
 
 	canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
 	//syncCycleStart := time.Now()
@@ -492,7 +496,17 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return nil, nil
 	})
 
+	unwindTo, err := d.stagedSyncState.GetUnwindTo(d.stateDB)
+	if err != nil {
+		return err
+	}
+
 	err = d.stagedSyncState.Run(d.stateDB, nil)
+	if err != nil {
+		return err
+	}
+
+	err = stagedsync.NotifyNewHeaders2(finishAtBefore, unwindTo, d.stagedSync.Notifier, d.stateDB)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -25,9 +26,6 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 	log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
 	err = NotifyNewHeaders(s.BlockNumber+1, executionAt, notifier, db)
-	if err != nil {
-		return err
-	}
 
 	err = MigrateSnapshot(executionAt, tx, db, btClient, snBuilder)
 	if err != nil {
@@ -46,6 +44,17 @@ func UnwindFinish(u *UnwindState, s *StageState, db ethdb.Database, tx ethdb.RwT
 	return u.Done(tx)
 }
 
+func NotifyNewHeaders2(finishStageBeforeSync, unwindTo uint64, notifier ChainEventNotifier, db ethdb.Database) error {
+	finishAt, err := stages.GetStageProgress(db, stages.Finish) // because later stages can be disabled
+	if err != nil {
+		return err
+	}
+	notifyFrom := finishStageBeforeSync + 1
+	if unwindTo < finishStageBeforeSync {
+		notifyFrom = unwindTo + 1
+	}
+	return NotifyNewHeaders(notifyFrom, finishAt, notifier, db)
+}
 func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
