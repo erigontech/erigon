@@ -20,19 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/params")
-
-
-// what we want are relative changes, what we have are absolute minStack and maxStack
-func pops(oper operation) int {
-	return op.minStack
-}
-func pushes(oper operation) int {
-	return -(oper.maxStack - int(params.StackLimit) - pops(oper))
-}
-func changes(oper operation) int {
-	return pushes(oper) - pops(oper)
-}
+)
 
 // fill in segment of operation information array for a block
 func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
@@ -44,16 +32,17 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	minHeight := 0
 	maxHeight := 0
 	for ; pc < uint64(len(code)); pc++ {
+		op := OpCode(code[pc])
 		oper := jumpTable[op]
 		if oper == nil {
 			continue
 		}
-		op := OpCode(code[pc])
 
 		// track low and high watermark relative to block entry
-		height += changes(*oper)
-		minHeight = min(minHeight, height)
-		maxHeight = max(maxHeight, height)
+		height -= oper.numPop
+		minHeight = min(minHeight, height)	// will be <= 0
+		height += oper.numPush
+		maxHeight = max(maxHeight, height)	// will be >= 0
 		blockInfo.constantGas += oper.constantGas
 
 		if PUSH1 <= op && op <= PUSH32 {
@@ -106,7 +95,7 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 
 	// min and max absolute stack length to avoid stack underflow or underflow
 	blockInfo.minStack = -minHeight
-	blockInfo.maxStack = int(params.StackLimit) - maxHeight
+	blockInfo.maxStack = maxHeight
 
 	ctx.contract.opsInfo[pc] = blockInfo
 	return blockInfo, nil
