@@ -619,12 +619,6 @@ macro(setup_compile_flags)
     endif()
   endif()
 
-  if(CMAKE_COMPILER_IS_GNU${CMAKE_PRIMARY_LANG}
-      AND CMAKE_${CMAKE_PRIMARY_LANG}_COMPILER_VERSION VERSION_LESS 5)
-    # G++ bug. http://gcc.gnu.org/bugzilla/show_bug.cgi?id=31488
-    add_compile_flags("CXX" "-Wno-invalid-offsetof")
-  endif()
-
   add_definitions("-D__STDC_FORMAT_MACROS=1")
   add_definitions("-D__STDC_LIMIT_MACROS=1")
   add_definitions("-D__STDC_CONSTANT_MACROS=1")
@@ -646,6 +640,19 @@ macro(setup_compile_flags)
     else()
       add_compile_flags("C;CXX" "-Werror")
     endif()
+  endif()
+
+
+  if(CMAKE_COMPILER_IS_GNU${CMAKE_PRIMARY_LANG}
+      AND CMAKE_${CMAKE_PRIMARY_LANG}_COMPILER_VERSION VERSION_LESS 5)
+    # G++ bug. http://gcc.gnu.org/bugzilla/show_bug.cgi?id=31488
+    add_compile_flags("CXX" "-Wno-invalid-offsetof")
+  endif()
+  if(MINGW)
+    # Disable junk MINGW's warnings that issued due to incompatibilities
+    # and shortcomings of MINGW,
+    # since the code is checked by builds with GCC, CLANG and MSVC.
+    add_compile_flags("C;CXX" "-Wno-format-extra-args" "-Wno-format" "-Wno-cast-function-type" "-Wno-implicit-fallthrough")
   endif()
 
   if(ENABLE_ASAN)
@@ -778,7 +785,7 @@ if(CMAKE_CXX_COMPILER_LOADED)
     elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
       set(LIBCXX_FILESYSTEM "stdc++fs")
     endif()
-  elseif(CMAKE_COMPILER_IS_GNUCXX)
+  elseif(CMAKE_COMPILER_IS_GNUCXX AND NOT MINGW)
     if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.3 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
       set(LIBCXX_FILESYSTEM "stdc++fs")
     endif()

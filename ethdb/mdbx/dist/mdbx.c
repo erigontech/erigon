@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY f3d117bd0bc35fdd62fe980d8c0004ea83fd2e6ceddcfa57d7bd96b28ec0bdb3_v0_9_3_193_g1275bdb6
+#define MDBX_BUILD_SOURCERY 10aa116f5f6a1fca4ccea1310d3d331a39161abc5b63b6a30e01812eab671e7c_v0_10_0_0_gaa1f6fbd
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -674,9 +674,18 @@ __extern_C key_t ftok(const char *, int);
 #endif /* SunOS/Solaris */
 
 #if defined(_WIN32) || defined(_WIN64)
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 /* Windows 7 */
+#elif _WIN32_WINNT < 0x0500
+#error At least 'Windows 2000' API is required for libmdbx.
+#endif /* _WIN32_WINNT */
+#if (defined(__MINGW32__) || defined(__MINGW64__)) &&                          \
+    !defined(__USE_MINGW_ANSI_STDIO)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif /* MinGW */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif
+#endif /* WIN32_LEAN_AND_MEAN */
 #include <excpt.h>
 #include <tlhelp32.h>
 #include <windows.h>
@@ -695,6 +704,15 @@ typedef struct {
   HANDLE event[2];
 } mdbx_condpair_t;
 typedef CRITICAL_SECTION mdbx_fastmutex_t;
+
+#if !defined(_MSC_VER) && !defined(__try)
+/* *INDENT-OFF* */
+/* clang-format off */
+#define __try
+#define __except(COND) if(false)
+/* *INDENT-ON* */
+/* clang-format on */
+#endif /* stub for MSVC's __try/__except */
 
 #if MDBX_WITHOUT_MSVC_CRT
 
@@ -718,9 +736,7 @@ static inline void *mdbx_realloc(void *ptr, size_t bytes) {
 #endif /* mdbx_realloc */
 
 #ifndef mdbx_free
-static inline void mdbx_free(void *ptr) {
-  return HeapFree(GetProcessHeap(), 0, ptr);
-}
+static inline void mdbx_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #endif /* mdbx_free */
 
 #else /* MDBX_WITHOUT_MSVC_CRT */
@@ -1368,6 +1384,52 @@ MDBX_INTERNAL_VAR MDBX_srwlock_function mdbx_srwlock_Init,
     mdbx_srwlock_AcquireShared, mdbx_srwlock_ReleaseShared,
     mdbx_srwlock_AcquireExclusive, mdbx_srwlock_ReleaseExclusive;
 
+#if _WIN32_WINNT < 0x0600 /* prior to Windows Vista */
+typedef enum _FILE_INFO_BY_HANDLE_CLASS {
+  FileBasicInfo,
+  FileStandardInfo,
+  FileNameInfo,
+  FileRenameInfo,
+  FileDispositionInfo,
+  FileAllocationInfo,
+  FileEndOfFileInfo,
+  FileStreamInfo,
+  FileCompressionInfo,
+  FileAttributeTagInfo,
+  FileIdBothDirectoryInfo,
+  FileIdBothDirectoryRestartInfo,
+  FileIoPriorityHintInfo,
+  FileRemoteProtocolInfo,
+  MaximumFileInfoByHandleClass
+} FILE_INFO_BY_HANDLE_CLASS,
+    *PFILE_INFO_BY_HANDLE_CLASS;
+
+typedef struct _FILE_END_OF_FILE_INFO {
+  LARGE_INTEGER EndOfFile;
+} FILE_END_OF_FILE_INFO, *PFILE_END_OF_FILE_INFO;
+
+#define REMOTE_PROTOCOL_INFO_FLAG_LOOPBACK 0x00000001
+#define REMOTE_PROTOCOL_INFO_FLAG_OFFLINE 0x00000002
+
+typedef struct _FILE_REMOTE_PROTOCOL_INFO {
+  USHORT StructureVersion;
+  USHORT StructureSize;
+  DWORD Protocol;
+  USHORT ProtocolMajorVersion;
+  USHORT ProtocolMinorVersion;
+  USHORT ProtocolRevision;
+  USHORT Reserved;
+  DWORD Flags;
+  struct {
+    DWORD Reserved[8];
+  } GenericReserved;
+  struct {
+    DWORD Reserved[16];
+  } ProtocolSpecificReserved;
+} FILE_REMOTE_PROTOCOL_INFO, *PFILE_REMOTE_PROTOCOL_INFO;
+
+#endif /* _WIN32_WINNT < 0x0600 (prior to Windows Vista) */
+
 typedef BOOL(WINAPI *MDBX_GetFileInformationByHandleEx)(
     _In_ HANDLE hFile, _In_ FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
     _Out_ LPVOID lpFileInformation, _In_ DWORD dwBufferSize);
@@ -1417,32 +1479,6 @@ typedef BOOL(WINAPI *MDBX_PrefetchVirtualMemory)(
     HANDLE hProcess, ULONG_PTR NumberOfEntries,
     PWIN32_MEMORY_RANGE_ENTRY VirtualAddresses, ULONG Flags);
 MDBX_INTERNAL_VAR MDBX_PrefetchVirtualMemory mdbx_PrefetchVirtualMemory;
-
-#if 0 /* LY: unused for now */
-#if !defined(_WIN32_WINNT_WIN81) || _WIN32_WINNT < _WIN32_WINNT_WIN81
-typedef enum OFFER_PRIORITY {
-  VmOfferPriorityVeryLow = 1,
-  VmOfferPriorityLow,
-  VmOfferPriorityBelowNormal,
-  VmOfferPriorityNormal
-} OFFER_PRIORITY;
-#endif /* Windows 8.1 */
-
-typedef DWORD(WINAPI *MDBX_DiscardVirtualMemory)(PVOID VirtualAddress,
-                                                 SIZE_T Size);
-MDBX_INTERNAL_VAR MDBX_DiscardVirtualMemory mdbx_DiscardVirtualMemory;
-
-typedef DWORD(WINAPI *MDBX_ReclaimVirtualMemory)(PVOID VirtualAddress,
-                                                 SIZE_T Size);
-MDBX_INTERNAL_VAR MDBX_ReclaimVirtualMemory mdbx_ReclaimVirtualMemory;
-
-typedef DWORD(WINAPI *MDBX_OfferVirtualMemory(
-  PVOID          VirtualAddress,
-  SIZE_T         Size,
-  OFFER_PRIORITY Priority
-);
-MDBX_INTERNAL_VAR MDBX_OfferVirtualMemory mdbx_OfferVirtualMemory;
-#endif /* unused for now */
 
 typedef enum _SECTION_INHERIT { ViewShare = 1, ViewUnmap = 2 } SECTION_INHERIT;
 
@@ -1655,7 +1691,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 /** Forces assertion checking */
 #ifndef MDBX_FORCE_ASSERTIONS
-#define MDBX_FORCE_ASSERTIONS 1
+#define MDBX_FORCE_ASSERTIONS 0
 #elif !(MDBX_FORCE_ASSERTIONS == 0 || MDBX_FORCE_ASSERTIONS == 1)
 #error MDBX_FORCE_ASSERTIONS must be defined as 0 or 1
 #endif /* MDBX_FORCE_ASSERTIONS */
@@ -2969,10 +3005,9 @@ struct MDBX_env {
 #endif /* xMDBX_DEBUG_SPILLING */
 
   /* ------------------------------------------------- stub for lck-less mode */
-  alignas(MDBX_CACHELINE_SIZE) uint64_t
-      me_lckless_stub[((sizeof(MDBX_lockinfo) + MDBX_CACHELINE_SIZE - 1) &
-                       ~(MDBX_CACHELINE_SIZE - 1)) /
-                      8];
+  MDBX_atomic_uint64_t
+      x_lckless_stub[(sizeof(MDBX_lockinfo) + MDBX_CACHELINE_SIZE - 1) /
+                     sizeof(MDBX_atomic_uint64_t)];
 };
 
 #ifndef __cplusplus
@@ -3365,7 +3400,7 @@ log2n_powerof2(size_t value) {
    MDBX_LIFORECLAIM | MDBX_EXCLUSIVE)
 #define ENV_USABLE_FLAGS (ENV_CHANGEABLE_FLAGS | ENV_CHANGELESS_FLAGS)
 
-#if !defined(__cplusplus) || defined(__cpp_constexpr)
+#if !defined(__cplusplus) || CONSTEXPR_ENUM_FLAGS_OPERATIONS
 static __maybe_unused void static_checks(void) {
   STATIC_ASSERT_MSG(INT16_MAX - CORE_DBS == MDBX_MAX_DBI,
                     "Oops, MDBX_MAX_DBI or CORE_DBS?");
@@ -13813,7 +13848,7 @@ static MDBX_meta *__cold mdbx_init_metas(const MDBX_env *env, void *buffer) {
   return page_meta(page2);
 }
 
-#if MDBX_ENABLE_MADVISE
+#if MDBX_ENABLE_MADVISE && !(defined(_WIN32) || defined(_WIN64))
 static size_t mdbx_madvise_threshold(const MDBX_env *env,
                                      const size_t largest_bytes) {
   /* TODO: use options */
@@ -14234,6 +14269,14 @@ static void __cold mdbx_setup_pagesize(MDBX_env *env, const size_t pagesize) {
     env->me_options.dp_initial = env->me_options.dp_limit;
 }
 
+static __inline MDBX_CONST_FUNCTION MDBX_lockinfo *
+lckless_stub(const MDBX_env *env) {
+  uintptr_t stub = (uintptr_t)&env->x_lckless_stub;
+  /* align to avoid false-positive alarm from UndefinedBehaviorSanitizer */
+  stub = (stub + MDBX_CACHELINE_SIZE - 1) & ~(MDBX_CACHELINE_SIZE - 1);
+  return (MDBX_lockinfo *)stub;
+}
+
 __cold int mdbx_env_create(MDBX_env **penv) {
   MDBX_env *env = mdbx_calloc(1, sizeof(MDBX_env));
   if (unlikely(!env))
@@ -14287,7 +14330,7 @@ __cold int mdbx_env_create(MDBX_env **penv) {
   }
 
 #if MDBX_LOCKING > MDBX_LOCKING_SYSV
-  MDBX_lockinfo *const stub = (MDBX_lockinfo *)&env->me_lckless_stub;
+  MDBX_lockinfo *const stub = lckless_stub(env);
   rc = mdbx_ipclock_stub(&stub->mti_wlock);
 #endif /* MDBX_LOCKING */
   if (unlikely(rc != MDBX_SUCCESS)) {
@@ -15220,7 +15263,7 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
     lcklist_unlock();
     /* end of a locked section ---------------------------------------------- */
 
-    env->me_lck = (MDBX_lockinfo *)&env->me_lckless_stub;
+    env->me_lck = lckless_stub(env);
     env->me_maxreaders = UINT_MAX;
     mdbx_debug("lck-setup:%s%s%s", " lck-less",
                (env->me_flags & MDBX_RDONLY) ? " readonly" : "",
@@ -15622,28 +15665,32 @@ __cold int mdbx_env_delete(const char *pathname, MDBX_env_delete_mode_t mode) {
     break;
   }
 
-  MDBX_env dummy_env;
-  memset(&dummy_env, 0, sizeof(dummy_env));
-  dummy_env.me_flags =
+#ifdef __e2k__ /* https://bugs.mcst.ru/bugzilla/show_bug.cgi?id=6011 */
+  MDBX_env *const dummy_env = alloca(sizeof(MDBX_env));
+#else
+  MDBX_env dummy_env_silo, *const dummy_env = &dummy_env_silo;
+#endif
+  memset(dummy_env, 0, sizeof(*dummy_env));
+  dummy_env->me_flags =
       (mode == MDBX_ENV_ENSURE_UNUSED) ? MDBX_EXCLUSIVE : MDBX_ENV_DEFAULTS;
-  dummy_env.me_os_psize = (unsigned)mdbx_syspagesize();
-  dummy_env.me_psize = (unsigned)mdbx_default_pagesize();
-  dummy_env.me_pathname = (char *)pathname;
+  dummy_env->me_os_psize = (unsigned)mdbx_syspagesize();
+  dummy_env->me_psize = (unsigned)mdbx_default_pagesize();
+  dummy_env->me_pathname = (char *)pathname;
 
   MDBX_handle_env_pathname env_pathname;
-  STATIC_ASSERT(sizeof(dummy_env.me_flags) == sizeof(MDBX_env_flags_t));
+  STATIC_ASSERT(sizeof(dummy_env->me_flags) == sizeof(MDBX_env_flags_t));
   int rc = MDBX_RESULT_TRUE,
       err = mdbx_handle_env_pathname(
-          &env_pathname, pathname, (MDBX_env_flags_t *)&dummy_env.me_flags, 0);
+          &env_pathname, pathname, (MDBX_env_flags_t *)&dummy_env->me_flags, 0);
   if (likely(err == MDBX_SUCCESS)) {
     mdbx_filehandle_t clk_handle = INVALID_HANDLE_VALUE,
                       dxb_handle = INVALID_HANDLE_VALUE;
     if (mode > MDBX_ENV_JUST_DELETE) {
-      err = mdbx_openfile(MDBX_OPEN_DELETE, &dummy_env, env_pathname.dxb,
+      err = mdbx_openfile(MDBX_OPEN_DELETE, dummy_env, env_pathname.dxb,
                           &dxb_handle, 0);
       err = (err == MDBX_ENOFILE) ? MDBX_SUCCESS : err;
       if (err == MDBX_SUCCESS) {
-        err = mdbx_openfile(MDBX_OPEN_DELETE, &dummy_env, env_pathname.lck,
+        err = mdbx_openfile(MDBX_OPEN_DELETE, dummy_env, env_pathname.lck,
                             &clk_handle, 0);
         err = (err == MDBX_ENOFILE) ? MDBX_SUCCESS : err;
       }
@@ -15669,7 +15716,7 @@ __cold int mdbx_env_delete(const char *pathname, MDBX_env_delete_mode_t mode) {
         err = MDBX_SUCCESS;
     }
 
-    if (err == MDBX_SUCCESS && !(dummy_env.me_flags & MDBX_NOSUBDIR)) {
+    if (err == MDBX_SUCCESS && !(dummy_env->me_flags & MDBX_NOSUBDIR)) {
       err = mdbx_removedirectory(pathname);
       if (err == MDBX_SUCCESS)
         rc = MDBX_SUCCESS;
@@ -16073,7 +16120,7 @@ __cold int mdbx_env_close_ex(MDBX_env *env, bool dont_sync) {
 #endif /* Windows */
 
 #if MDBX_LOCKING > MDBX_LOCKING_SYSV
-  MDBX_lockinfo *const stub = (MDBX_lockinfo *)&env->me_lckless_stub;
+  MDBX_lockinfo *const stub = lckless_stub(env);
   mdbx_ensure(env, mdbx_ipclock_destroy(&stub->mti_wlock) == 0);
 #endif /* MDBX_LOCKING */
 
@@ -16290,18 +16337,6 @@ static struct node_result __hot mdbx_node_search(MDBX_cursor *mc,
                  : /* There is no entry larger or equal to the key. */ NULL;
   return ret;
 }
-
-#if 0 /* unused for now */
-static void mdbx_cursor_adjust(MDBX_cursor *mc, func) {
-  MDBX_cursor *m2;
-
-  for (m2 = mc->mc_txn->tw.cursors[mc->mc_dbi]; m2; m2 = m2->mc_next) {
-    if (m2->mc_pg[m2->mc_top] == mc->mc_pg[mc->mc_top]) {
-      func(mc, m2);
-    }
-  }
-}
-#endif
 
 /* Pop a page off the top of the cursor's stack. */
 static __inline void mdbx_cursor_pop(MDBX_cursor *mc) {
@@ -25446,8 +25481,10 @@ __dll_export
 #endif /* MacOS */
 #if defined(_WIN32) || defined(_WIN64)
     " MDBX_WITHOUT_MSVC_CRT=" STRINGIFY(MDBX_AVOID_CRT)
-    " MDBX_CONFIG_MANUAL_TLS_CALLBACK=" STRINGIFY(MDBX_CONFIG_MANUAL_TLS_CALLBACK)
     " MDBX_BUILD_SHARED_LIBRARY=" STRINGIFY(MDBX_BUILD_SHARED_LIBRARY)
+#if !MDBX_BUILD_SHARED_LIBRARY
+    " MDBX_MANUAL_MODULE_HANDLER=" STRINGIFY(MDBX_MANUAL_MODULE_HANDLER)
+#endif
     " WINVER=" STRINGIFY(WINVER)
 #else /* Windows */
     " MDBX_LOCKING=" MDBX_LOCKING_CONFIG
@@ -25558,7 +25595,7 @@ static int waitstatus2errcode(DWORD result) {
   case WAIT_OBJECT_0:
     return MDBX_SUCCESS;
   case WAIT_FAILED:
-    return GetLastError();
+    return (int)GetLastError();
   case WAIT_ABANDONED:
     return ERROR_ABANDONED_WAIT_0;
   case WAIT_IO_COMPLETION:
@@ -25577,7 +25614,7 @@ static int ntstatus2errcode(NTSTATUS status) {
   memset(&ov, 0, sizeof(ov));
   ov.Internal = status;
   return GetOverlappedResult(NULL, &ov, &dummy, FALSE) ? MDBX_SUCCESS
-                                                       : GetLastError();
+                                                       : (int)GetLastError();
 }
 
 /* We use native NT APIs to setup the memory map, so that we can
@@ -25664,6 +25701,10 @@ typedef struct _FILE_PROVIDER_EXTERNAL_INFO_V1 {
 #ifndef FSCTL_GET_EXTERNAL_BACKING
 #define FSCTL_GET_EXTERNAL_BACKING                                             \
   CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 196, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#endif
+
+#ifndef ERROR_NOT_CAPABLE
+#define ERROR_NOT_CAPABLE 775L
 #endif
 
 #endif /* _WIN32 || _WIN64 */
@@ -25913,17 +25954,17 @@ MDBX_INTERNAL_FUNC int mdbx_condpair_init(mdbx_condpair_t *condpair) {
   memset(condpair, 0, sizeof(mdbx_condpair_t));
 #if defined(_WIN32) || defined(_WIN64)
   if ((condpair->mutex = CreateMutexW(NULL, FALSE, NULL)) == NULL) {
-    rc = GetLastError();
+    rc = (int)GetLastError();
     goto bailout_mutex;
   }
   if ((condpair->event[0] = CreateEventW(NULL, FALSE, FALSE, NULL)) == NULL) {
-    rc = GetLastError();
+    rc = (int)GetLastError();
     goto bailout_event;
   }
   if ((condpair->event[1] = CreateEventW(NULL, FALSE, FALSE, NULL)) != NULL)
     return MDBX_SUCCESS;
 
-  rc = GetLastError();
+  rc = (int)GetLastError();
   (void)CloseHandle(condpair->event[0]);
 bailout_event:
   (void)CloseHandle(condpair->mutex);
@@ -25949,9 +25990,9 @@ bailout_mutex:
 
 MDBX_INTERNAL_FUNC int mdbx_condpair_destroy(mdbx_condpair_t *condpair) {
 #if defined(_WIN32) || defined(_WIN64)
-  int rc = CloseHandle(condpair->mutex) ? MDBX_SUCCESS : GetLastError();
-  rc = CloseHandle(condpair->event[0]) ? rc : GetLastError();
-  rc = CloseHandle(condpair->event[1]) ? rc : GetLastError();
+  int rc = CloseHandle(condpair->mutex) ? MDBX_SUCCESS : (int)GetLastError();
+  rc = CloseHandle(condpair->event[0]) ? rc : (int)GetLastError();
+  rc = CloseHandle(condpair->event[1]) ? rc : (int)GetLastError();
 #else
   int err, rc = pthread_mutex_destroy(&condpair->mutex);
   rc = (err = pthread_cond_destroy(&condpair->cond[0])) ? err : rc;
@@ -25972,7 +26013,7 @@ MDBX_INTERNAL_FUNC int mdbx_condpair_lock(mdbx_condpair_t *condpair) {
 
 MDBX_INTERNAL_FUNC int mdbx_condpair_unlock(mdbx_condpair_t *condpair) {
 #if defined(_WIN32) || defined(_WIN64)
-  return ReleaseMutex(condpair->mutex) ? MDBX_SUCCESS : GetLastError();
+  return ReleaseMutex(condpair->mutex) ? MDBX_SUCCESS : (int)GetLastError();
 #else
   return pthread_mutex_unlock(&condpair->mutex);
 #endif
@@ -25981,7 +26022,7 @@ MDBX_INTERNAL_FUNC int mdbx_condpair_unlock(mdbx_condpair_t *condpair) {
 MDBX_INTERNAL_FUNC int mdbx_condpair_signal(mdbx_condpair_t *condpair,
                                             bool part) {
 #if defined(_WIN32) || defined(_WIN64)
-  return SetEvent(condpair->event[part]) ? MDBX_SUCCESS : GetLastError();
+  return SetEvent(condpair->event[part]) ? MDBX_SUCCESS : (int)GetLastError();
 #else
   return pthread_cond_signal(&condpair->cond[part]);
 #endif
@@ -26059,7 +26100,7 @@ MDBX_INTERNAL_FUNC int mdbx_removefile(const char *pathname) {
   wchar_t *const pathnameW = _alloca((wlen + 1) * sizeof(wchar_t));
   if (wlen != mbstowcs(pathnameW, pathname, wlen + 1))
     return ERROR_INVALID_NAME;
-  return DeleteFileW(pathnameW) ? MDBX_SUCCESS : GetLastError();
+  return DeleteFileW(pathnameW) ? MDBX_SUCCESS : (int)GetLastError();
 #else
   return unlink(pathname) ? errno : MDBX_SUCCESS;
 #endif
@@ -26077,7 +26118,7 @@ MDBX_INTERNAL_FUNC int mdbx_removedirectory(const char *pathname) {
   wchar_t *const pathnameW = _alloca((wlen + 1) * sizeof(wchar_t));
   if (wlen != mbstowcs(pathnameW, pathname, wlen + 1))
     return ERROR_INVALID_NAME;
-  return RemoveDirectoryW(pathnameW) ? MDBX_SUCCESS : GetLastError();
+  return RemoveDirectoryW(pathnameW) ? MDBX_SUCCESS : (int)GetLastError();
 #else
   return rmdir(pathname) ? errno : MDBX_SUCCESS;
 #endif
@@ -26144,11 +26185,11 @@ MDBX_INTERNAL_FUNC int mdbx_openfile(const enum mdbx_openfile_purpose purpose,
   *fd = CreateFileW(pathnameW, DesiredAccess, ShareMode, NULL,
                     CreationDisposition, FlagsAndAttributes, NULL);
   if (*fd == INVALID_HANDLE_VALUE)
-    return GetLastError();
+    return (int)GetLastError();
 
   BY_HANDLE_FILE_INFORMATION info;
   if (!GetFileInformationByHandle(*fd, &info)) {
-    int err = GetLastError();
+    int err = (int)GetLastError();
     CloseHandle(*fd);
     *fd = INVALID_HANDLE_VALUE;
     return err;
@@ -26298,7 +26339,7 @@ MDBX_INTERNAL_FUNC int mdbx_openfile(const enum mdbx_openfile_purpose purpose,
 
 MDBX_INTERNAL_FUNC int mdbx_closefile(mdbx_filehandle_t fd) {
 #if defined(_WIN32) || defined(_WIN64)
-  return CloseHandle(fd) ? MDBX_SUCCESS : GetLastError();
+  return CloseHandle(fd) ? MDBX_SUCCESS : (int)GetLastError();
 #else
   assert(fd > STDERR_FILENO);
   return (close(fd) == 0) ? MDBX_SUCCESS : errno;
@@ -26317,7 +26358,7 @@ MDBX_INTERNAL_FUNC int mdbx_pread(mdbx_filehandle_t fd, void *buf, size_t bytes,
 
   DWORD read = 0;
   if (unlikely(!ReadFile(fd, buf, (DWORD)bytes, &read, &ov))) {
-    int rc = GetLastError();
+    int rc = (int)GetLastError();
     return (rc == MDBX_SUCCESS) ? /* paranoia */ ERROR_READ_FAULT : rc;
   }
 #else
@@ -26345,7 +26386,7 @@ MDBX_INTERNAL_FUNC int mdbx_pwrite(mdbx_filehandle_t fd, const void *buf,
     if (unlikely(!WriteFile(
             fd, buf, likely(bytes <= MAX_WRITE) ? (DWORD)bytes : MAX_WRITE,
             &written, &ov)))
-      return GetLastError();
+      return (int)GetLastError();
     if (likely(bytes == written))
       return MDBX_SUCCESS;
 #else
@@ -26376,7 +26417,7 @@ MDBX_INTERNAL_FUNC int mdbx_write(mdbx_filehandle_t fd, const void *buf,
     if (unlikely(!WriteFile(
             fd, buf, likely(bytes <= MAX_WRITE) ? (DWORD)bytes : MAX_WRITE,
             &written, nullptr)))
-      return GetLastError();
+      return (int)GetLastError();
     if (likely(bytes == written))
       return MDBX_SUCCESS;
 #else
@@ -26431,7 +26472,7 @@ MDBX_INTERNAL_FUNC int mdbx_fsync(mdbx_filehandle_t fd,
                                   enum mdbx_syncmode_bits mode_bits) {
 #if defined(_WIN32) || defined(_WIN64)
   if ((mode_bits & (MDBX_SYNC_DATA | MDBX_SYNC_IODQ)) && !FlushFileBuffers(fd))
-    return GetLastError();
+    return (int)GetLastError();
   return MDBX_SUCCESS;
 #else
 
@@ -26478,7 +26519,7 @@ int mdbx_filesize(mdbx_filehandle_t fd, uint64_t *length) {
 #if defined(_WIN32) || defined(_WIN64)
   BY_HANDLE_FILE_INFORMATION info;
   if (!GetFileInformationByHandle(fd, &info))
-    return GetLastError();
+    return (int)GetLastError();
   *length = info.nFileSizeLow | (uint64_t)info.nFileSizeHigh << 32;
 #else
   struct stat st;
@@ -26502,7 +26543,7 @@ MDBX_INTERNAL_FUNC int mdbx_is_pipe(mdbx_filehandle_t fd) {
   case FILE_TYPE_PIPE:
     return MDBX_RESULT_TRUE;
   default:
-    return GetLastError();
+    return (int)GetLastError();
   }
 #else
   struct stat info;
@@ -26533,13 +26574,13 @@ MDBX_INTERNAL_FUNC int mdbx_ftruncate(mdbx_filehandle_t fd, uint64_t length) {
                                            &EndOfFileInfo,
                                            sizeof(FILE_END_OF_FILE_INFO))
                ? MDBX_SUCCESS
-               : GetLastError();
+               : (int)GetLastError();
   } else {
     LARGE_INTEGER li;
     li.QuadPart = length;
     return (SetFilePointerEx(fd, li, NULL, FILE_BEGIN) && SetEndOfFile(fd))
                ? MDBX_SUCCESS
-               : GetLastError();
+               : (int)GetLastError();
   }
 #else
   STATIC_ASSERT_MSG(sizeof(off_t) >= sizeof(size_t),
@@ -26553,7 +26594,7 @@ MDBX_INTERNAL_FUNC int mdbx_fseek(mdbx_filehandle_t fd, uint64_t pos) {
   LARGE_INTEGER li;
   li.QuadPart = pos;
   return SetFilePointerEx(fd, li, NULL, FILE_BEGIN) ? MDBX_SUCCESS
-                                                    : GetLastError();
+                                                    : (int)GetLastError();
 #else
   STATIC_ASSERT_MSG(sizeof(off_t) >= sizeof(size_t),
                     "libmdbx requires 64-bit file I/O on 64-bit systems");
@@ -26569,7 +26610,7 @@ mdbx_thread_create(mdbx_thread_t *thread,
                    void *arg) {
 #if defined(_WIN32) || defined(_WIN64)
   *thread = CreateThread(NULL, 0, start_routine, arg, 0, NULL);
-  return *thread ? MDBX_SUCCESS : GetLastError();
+  return *thread ? MDBX_SUCCESS : (int)GetLastError();
 #else
   return pthread_create(thread, NULL, start_routine, arg);
 #endif
@@ -26593,7 +26634,7 @@ MDBX_INTERNAL_FUNC int mdbx_msync(mdbx_mmap_t *map, size_t offset,
   uint8_t *ptr = (uint8_t *)map->address + offset;
 #if defined(_WIN32) || defined(_WIN64)
   if (!FlushViewOfFile(ptr, length))
-    return GetLastError();
+    return (int)GetLastError();
 #else
 #if defined(__linux__) || defined(__gnu_linux__)
   if (mode_bits == MDBX_SYNC_NONE && mdbx_linux_kernel_version > 0x02061300)
@@ -26618,7 +26659,7 @@ MDBX_INTERNAL_FUNC int mdbx_check_fs_rdonly(mdbx_filehandle_t handle,
   DWORD unused, flags;
   if (!mdbx_GetVolumeInformationByHandleW(handle, nullptr, 0, nullptr, &unused,
                                           &flags, nullptr, 0))
-    return GetLastError();
+    return (int)GetLastError();
   if ((flags & FILE_READ_ONLY_VOLUME) == 0)
     return MDBX_EACCESS;
 #else
@@ -26693,7 +26734,7 @@ static int mdbx_check_fs_local(mdbx_filehandle_t handle, int flags) {
     if (!mdbx_GetVolumeInformationByHandleW(handle, PathBuffer, INT16_MAX,
                                             &VolumeSerialNumber, NULL,
                                             &FileSystemFlags, NULL, 0)) {
-      rc = GetLastError();
+      rc = (int)GetLastError();
       goto bailout;
     }
 
@@ -26709,7 +26750,7 @@ static int mdbx_check_fs_local(mdbx_filehandle_t handle, int flags) {
     if (!mdbx_GetFinalPathNameByHandleW(handle, PathBuffer, INT16_MAX,
                                         FILE_NAME_NORMALIZED |
                                             VOLUME_NAME_NT)) {
-      rc = GetLastError();
+      rc = (int)GetLastError();
       goto bailout;
     }
 
@@ -27092,7 +27133,7 @@ MDBX_INTERNAL_FUNC int mdbx_mresize(int flags, mdbx_mmap_t *map, size_t size,
     SIZE_T RegionSize = limit - map->limit;
     status = NtAllocateVirtualMemory(GetCurrentProcess(), &BaseAddress, 0,
                                      &RegionSize, MEM_RESERVE, PAGE_NOACCESS);
-    if (status == /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018)
+    if (status == (NTSTATUS) /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018)
       return MDBX_UNABLE_EXTEND_MAPSIZE;
     if (!NT_SUCCESS(status))
       return ntstatus2errcode(status);
@@ -27140,7 +27181,7 @@ retry_file_and_section:
                                    &ReservedSize, MEM_RESERVE, PAGE_NOACCESS);
   if (!NT_SUCCESS(status)) {
     ReservedAddress = NULL;
-    if (status != /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018)
+    if (status != (NTSTATUS) /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018)
       goto bailout_ntstatus /* no way to recovery */;
 
     if (may_move)
@@ -27200,7 +27241,7 @@ retry_mapview:;
       (flags & MDBX_WRITEMAP) ? PAGE_READWRITE : PAGE_READONLY);
 
   if (!NT_SUCCESS(status)) {
-    if (status == /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018 &&
+    if (status == (NTSTATUS) /* STATUS_CONFLICTING_ADDRESSES */ 0xC0000018 &&
         map->address && may_move) {
       /* try remap at another base address */
       map->address = NULL;
@@ -27951,7 +27992,7 @@ __cold int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
   memset(&info, 0, sizeof(info));
   info.dwLength = sizeof(info);
   if (!GlobalMemoryStatusEx(&info))
-    return GetLastError();
+    return (int)GetLastError();
 #endif
 
   if (total_pages) {
@@ -28052,7 +28093,7 @@ __cold int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
 
 
 #if MDBX_VERSION_MAJOR != 0 ||                             \
-    MDBX_VERSION_MINOR != 9
+    MDBX_VERSION_MINOR != 10
 #error "API version mismatch! Had `git fetch --tags` done?"
 #endif
 
@@ -28072,11 +28113,11 @@ __dll_export
 #endif
     const struct MDBX_version_info mdbx_version = {
         0,
-        9,
-        3,
-        193,
-        {"2021-05-06T02:05:33+03:00", "b0c05720dac4eabc77a664b84ad463110480901d", "1275bdb6234ebaf6317c3e4d0961961b95d595e2",
-         "v0.9.3-193-g1275bdb6"},
+        10,
+        0,
+        0,
+        {"2021-05-09T03:01:59+03:00", "794e1a9437599eaf67ef14c38adfc811ebba47cd", "aa1f6fbd5f6d39f92c5dd771fb521ea533a2358a",
+         "v0.10.0-0-gaa1f6fbd"},
         sourcery};
 
 __dll_export
@@ -28130,11 +28171,11 @@ static void mdbx_winnt_import(void);
 
 BOOL APIENTRY DllMain(HANDLE module, DWORD reason, LPVOID reserved)
 #else
-#if !MDBX_CONFIG_MANUAL_TLS_CALLBACK
+#if !MDBX_MANUAL_MODULE_HANDLER
 static
-#endif /* !MDBX_CONFIG_MANUAL_TLS_CALLBACK */
+#endif /* !MDBX_MANUAL_MODULE_HANDLER */
     void NTAPI
-    mdbx_dll_handler(PVOID module, DWORD reason, PVOID reserved)
+    mdbx_module_handler(PVOID module, DWORD reason, PVOID reserved)
 #endif /* MDBX_BUILD_SHARED_LIBRARY */
 {
   (void)reserved;
@@ -28158,7 +28199,7 @@ static
 #endif
 }
 
-#if !MDBX_BUILD_SHARED_LIBRARY && !MDBX_CONFIG_MANUAL_TLS_CALLBACK
+#if !MDBX_BUILD_SHARED_LIBRARY && !MDBX_MANUAL_MODULE_HANDLER
 /* *INDENT-OFF* */
 /* clang-format off */
 #if defined(_MSC_VER)
@@ -28182,7 +28223,7 @@ static
 #    pragma data_seg(".CRT$XLB")
 #  endif
 
-   __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK mdbx_tls_anchor = mdbx_dll_handler;
+   __declspec(allocate(".CRT$XLB")) PIMAGE_TLS_CALLBACK mdbx_tls_anchor = mdbx_module_handler;
 #  pragma data_seg(pop)
 #  pragma const_seg(pop)
 
@@ -28190,13 +28231,13 @@ static
 #  ifdef _WIN64
      const
 #  endif
-   PIMAGE_TLS_CALLBACK mdbx_tls_anchor __attribute__((__section__(".CRT$XLB"), used)) = mdbx_dll_handler;
+   PIMAGE_TLS_CALLBACK mdbx_tls_anchor __attribute__((__section__(".CRT$XLB"), used)) = mdbx_module_handler;
 #else
 #  error FIXME
 #endif
 /* *INDENT-ON* */
 /* clang-format on */
-#endif /* !MDBX_BUILD_SHARED_LIBRARY && !MDBX_CONFIG_MANUAL_TLS_CALLBACK */
+#endif /* !MDBX_BUILD_SHARED_LIBRARY && !MDBX_MANUAL_MODULE_HANDLER */
 
 /*----------------------------------------------------------------------------*/
 
@@ -28224,7 +28265,7 @@ static __inline BOOL funlock(mdbx_filehandle_t fd, uint64_t offset,
 /* global `write` lock for write-txt processing,
  * exclusive locking both meta-pages) */
 
-#define LCK_MAXLEN (1u + (size_t)(MAXSSIZE_T))
+#define LCK_MAXLEN (1u + ((~(size_t)0) >> 1))
 #define LCK_META_OFFSET 0
 #define LCK_META_LEN (MAX_PAGESIZE * NUM_METAS)
 #define LCK_BODY_OFFSET LCK_META_LEN
@@ -28254,7 +28295,7 @@ int mdbx_txn_lock(MDBX_env *env, bool dontwait) {
                      : (LCK_EXCLUSIVE | LCK_WAITFOR),
             LCK_BODY))
     return MDBX_SUCCESS;
-  int rc = GetLastError();
+  int rc = (int)GetLastError();
   LeaveCriticalSection(&env->me_windowsbug_lock);
   return (!dontwait || rc != ERROR_LOCK_VIOLATION) ? rc : MDBX_BUSY;
 }
@@ -28265,7 +28306,7 @@ void mdbx_txn_unlock(MDBX_env *env) {
                : funlock(env->me_lazy_fd, LCK_BODY);
   LeaveCriticalSection(&env->me_windowsbug_lock);
   if (!rc)
-    mdbx_panic("%s failed: err %u", __func__, GetLastError());
+    mdbx_panic("%s failed: err %u", __func__, (int)GetLastError());
 }
 
 /*----------------------------------------------------------------------------*/
@@ -28290,7 +28331,7 @@ MDBX_INTERNAL_FUNC int mdbx_rdt_lock(MDBX_env *env) {
       flock(env->me_lfd, LCK_EXCLUSIVE | LCK_WAITFOR, LCK_UPPER))
     return MDBX_SUCCESS;
 
-  int rc = GetLastError();
+  int rc = (int)GetLastError();
   mdbx_srwlock_ReleaseShared(&env->me_remap_guard);
   return rc;
 }
@@ -28300,7 +28341,7 @@ MDBX_INTERNAL_FUNC void mdbx_rdt_unlock(MDBX_env *env) {
     /* transition from S-E (locked) to S-? (used), e.g. unlock upper-part */
     if ((env->me_flags & MDBX_EXCLUSIVE) == 0 &&
         !funlock(env->me_lfd, LCK_UPPER))
-      mdbx_panic("%s failed: err %u", __func__, GetLastError());
+      mdbx_panic("%s failed: err %u", __func__, (int)GetLastError());
   }
   mdbx_srwlock_ReleaseShared(&env->me_remap_guard);
 }
@@ -28311,7 +28352,7 @@ MDBX_INTERNAL_FUNC int mdbx_lockfile(mdbx_filehandle_t fd, bool wait) {
                     : LCK_EXCLUSIVE | LCK_DONTWAIT,
                0, LCK_MAXLEN)
              ? MDBX_SUCCESS
-             : GetLastError();
+             : (int)GetLastError();
 }
 
 static int suspend_and_append(mdbx_handle_array_t **array,
@@ -28335,10 +28376,10 @@ static int suspend_and_append(mdbx_handle_array_t **array,
   HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
                               FALSE, ThreadId);
   if (hThread == NULL)
-    return GetLastError();
+    return (int)GetLastError();
 
-  if (SuspendThread(hThread) == -1) {
-    int err = GetLastError();
+  if (SuspendThread(hThread) == (DWORD)-1) {
+    int err = (int)GetLastError();
     DWORD ExitCode;
     if (err == /* workaround for Win10 UCRT bug */ ERROR_ACCESS_DENIED ||
         !GetExitCodeThread(hThread, &ExitCode) || ExitCode != STILL_ACTIVE)
@@ -28395,13 +28436,13 @@ mdbx_suspend_threads_before_remap(MDBX_env *env, mdbx_handle_array_t **array) {
     mdbx_assert(env, env->me_flags & (MDBX_EXCLUSIVE | MDBX_RDONLY));
     const HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE)
-      return GetLastError();
+      return (int)GetLastError();
 
     THREADENTRY32 entry;
     entry.dwSize = sizeof(THREADENTRY32);
 
     if (!Thread32First(hSnapshot, &entry)) {
-      rc = GetLastError();
+      rc = (int)GetLastError();
     bailout_toolhelp:
       CloseHandle(hSnapshot);
       (void)mdbx_resume_threads_after_remap(*array);
@@ -28419,7 +28460,7 @@ mdbx_suspend_threads_before_remap(MDBX_env *env, mdbx_handle_array_t **array) {
 
     } while (Thread32Next(hSnapshot, &entry));
 
-    rc = GetLastError();
+    rc = (int)GetLastError();
     if (rc != ERROR_NO_MORE_FILES)
       goto bailout_toolhelp;
     CloseHandle(hSnapshot);
@@ -28433,8 +28474,8 @@ mdbx_resume_threads_after_remap(mdbx_handle_array_t *array) {
   int rc = MDBX_SUCCESS;
   for (unsigned i = 0; i < array->count; ++i) {
     const HANDLE hThread = array->handles[i];
-    if (ResumeThread(hThread) == -1) {
-      const int err = GetLastError();
+    if (ResumeThread(hThread) == (DWORD)-1) {
+      const int err = (int)GetLastError();
       DWORD ExitCode;
       if (err != /* workaround for Win10 UCRT bug */ ERROR_ACCESS_DENIED &&
           GetExitCodeThread(hThread, &ExitCode) && ExitCode == STILL_ACTIVE)
@@ -28486,7 +28527,7 @@ static void lck_unlock(MDBX_env *env) {
     /* double `unlock` for robustly remove overlapped shared/exclusive locks */
     while (funlock(env->me_lfd, LCK_LOWER))
       ;
-    err = GetLastError();
+    err = (int)GetLastError();
     assert(err == ERROR_NOT_LOCKED ||
            (mdbx_RunningUnderWine() && err == ERROR_LOCK_VIOLATION));
     (void)err;
@@ -28494,7 +28535,7 @@ static void lck_unlock(MDBX_env *env) {
 
     while (funlock(env->me_lfd, LCK_UPPER))
       ;
-    err = GetLastError();
+    err = (int)GetLastError();
     assert(err == ERROR_NOT_LOCKED ||
            (mdbx_RunningUnderWine() && err == ERROR_LOCK_VIOLATION));
     (void)err;
@@ -28506,7 +28547,7 @@ static void lck_unlock(MDBX_env *env) {
      * releases such locks via deferred queues) */
     while (funlock(env->me_lazy_fd, LCK_BODY))
       ;
-    err = GetLastError();
+    err = (int)GetLastError();
     assert(err == ERROR_NOT_LOCKED ||
            (mdbx_RunningUnderWine() && err == ERROR_LOCK_VIOLATION));
     (void)err;
@@ -28514,7 +28555,7 @@ static void lck_unlock(MDBX_env *env) {
 
     while (funlock(env->me_lazy_fd, LCK_WHOLE))
       ;
-    err = GetLastError();
+    err = (int)GetLastError();
     assert(err == ERROR_NOT_LOCKED ||
            (mdbx_RunningUnderWine() && err == ERROR_LOCK_VIOLATION));
     (void)err;
@@ -28532,7 +28573,7 @@ static int internal_seize_lck(HANDLE lfd) {
   /* 1) now on ?-? (free), get ?-E (middle) */
   mdbx_jitter4testing(false);
   if (!flock(lfd, LCK_EXCLUSIVE | LCK_WAITFOR, LCK_UPPER)) {
-    rc = GetLastError() /* 2) something went wrong, give up */;
+    rc = (int)GetLastError() /* 2) something went wrong, give up */;
     mdbx_error("%s, err %u", "?-?(free) >> ?-E(middle)", rc);
     return rc;
   }
@@ -28543,20 +28584,20 @@ static int internal_seize_lck(HANDLE lfd) {
     return MDBX_RESULT_TRUE /* 4) got E-E (exclusive-write), done */;
 
   /* 5) still on ?-E (middle) */
-  rc = GetLastError();
+  rc = (int)GetLastError();
   mdbx_jitter4testing(false);
   if (rc != ERROR_SHARING_VIOLATION && rc != ERROR_LOCK_VIOLATION) {
     /* 6) something went wrong, give up */
     if (!funlock(lfd, LCK_UPPER))
       mdbx_panic("%s(%s) failed: err %u", __func__, "?-E(middle) >> ?-?(free)",
-                 GetLastError());
+                 (int)GetLastError());
     return rc;
   }
 
   /* 7) still on ?-E (middle), try S-E (locked) */
   mdbx_jitter4testing(false);
   rc = flock(lfd, LCK_SHARED | LCK_DONTWAIT, LCK_LOWER) ? MDBX_RESULT_FALSE
-                                                        : GetLastError();
+                                                        : (int)GetLastError();
 
   mdbx_jitter4testing(false);
   if (rc != MDBX_RESULT_FALSE)
@@ -28566,7 +28607,7 @@ static int internal_seize_lck(HANDLE lfd) {
    *    transition to S-? (used) or ?-? (free) */
   if (!funlock(lfd, LCK_UPPER))
     mdbx_panic("%s(%s) failed: err %u", __func__,
-               "X-E(locked/middle) >> X-?(used/free)", GetLastError());
+               "X-E(locked/middle) >> X-?(used/free)", (int)GetLastError());
 
   /* 9) now on S-? (used, DONE) or ?-? (free, FAILURE) */
   return rc;
@@ -28585,7 +28626,7 @@ MDBX_INTERNAL_FUNC int mdbx_lck_seize(MDBX_env *env) {
     /* LY: without-lck mode (e.g. on read-only filesystem) */
     mdbx_jitter4testing(false);
     if (!flock(env->me_lazy_fd, LCK_SHARED | LCK_DONTWAIT, LCK_WHOLE)) {
-      rc = GetLastError();
+      rc = (int)GetLastError();
       mdbx_error("%s, err %u", "without-lck", rc);
       return rc;
     }
@@ -28602,7 +28643,7 @@ MDBX_INTERNAL_FUNC int mdbx_lck_seize(MDBX_env *env) {
      *  - we can't lock meta-pages, otherwise other process could get an error
      *    while opening db in valid (non-conflict) mode. */
     if (!flock(env->me_lazy_fd, LCK_EXCLUSIVE | LCK_DONTWAIT, LCK_BODY)) {
-      rc = GetLastError();
+      rc = (int)GetLastError();
       mdbx_error("%s, err %u", "lock-against-without-lck", rc);
       mdbx_jitter4testing(false);
       lck_unlock(env);
@@ -28610,7 +28651,7 @@ MDBX_INTERNAL_FUNC int mdbx_lck_seize(MDBX_env *env) {
       mdbx_jitter4testing(false);
       if (!funlock(env->me_lazy_fd, LCK_BODY))
         mdbx_panic("%s(%s) failed: err %u", __func__,
-                   "unlock-against-without-lck", GetLastError());
+                   "unlock-against-without-lck", (int)GetLastError());
     }
   }
 
@@ -28628,11 +28669,11 @@ MDBX_INTERNAL_FUNC int mdbx_lck_downgrade(MDBX_env *env) {
   /* 1) now at E-E (exclusive-write), transition to ?_E (middle) */
   if (!funlock(env->me_lfd, LCK_LOWER))
     mdbx_panic("%s(%s) failed: err %u", __func__,
-               "E-E(exclusive-write) >> ?-E(middle)", GetLastError());
+               "E-E(exclusive-write) >> ?-E(middle)", (int)GetLastError());
 
   /* 2) now at ?-E (middle), transition to S-E (locked) */
   if (!flock(env->me_lfd, LCK_SHARED | LCK_DONTWAIT, LCK_LOWER)) {
-    int rc = GetLastError() /* 3) something went wrong, give up */;
+    int rc = (int)GetLastError() /* 3) something went wrong, give up */;
     mdbx_error("%s, err %u", "?-E(middle) >> S-E(locked)", rc);
     return rc;
   }
@@ -28640,7 +28681,7 @@ MDBX_INTERNAL_FUNC int mdbx_lck_downgrade(MDBX_env *env) {
   /* 4) got S-E (locked), continue transition to S-? (used) */
   if (!funlock(env->me_lfd, LCK_UPPER))
     mdbx_panic("%s(%s) failed: err %u", __func__, "S-E(locked) >> S-?(used)",
-               GetLastError());
+               (int)GetLastError());
 
   return MDBX_SUCCESS /* 5) now at S-? (used), done */;
 }
@@ -28657,7 +28698,7 @@ MDBX_INTERNAL_FUNC int mdbx_lck_upgrade(MDBX_env *env) {
   /* 1) now on S-? (used), try S-E (locked) */
   mdbx_jitter4testing(false);
   if (!flock(env->me_lfd, LCK_EXCLUSIVE | LCK_DONTWAIT, LCK_UPPER)) {
-    rc = GetLastError() /* 2) something went wrong, give up */;
+    rc = (int)GetLastError() /* 2) something went wrong, give up */;
     mdbx_verbose("%s, err %u", "S-?(used) >> S-E(locked)", rc);
     return rc;
   }
@@ -28665,12 +28706,12 @@ MDBX_INTERNAL_FUNC int mdbx_lck_upgrade(MDBX_env *env) {
   /* 3) now on S-E (locked), transition to ?-E (middle) */
   if (!funlock(env->me_lfd, LCK_LOWER))
     mdbx_panic("%s(%s) failed: err %u", __func__, "S-E(locked) >> ?-E(middle)",
-               GetLastError());
+               (int)GetLastError());
 
   /* 4) now on ?-E (middle), try E-E (exclusive-write) */
   mdbx_jitter4testing(false);
   if (!flock(env->me_lfd, LCK_EXCLUSIVE | LCK_DONTWAIT, LCK_LOWER)) {
-    rc = GetLastError() /* 5) something went wrong, give up */;
+    rc = (int)GetLastError() /* 5) something went wrong, give up */;
     mdbx_verbose("%s, err %u", "?-E(middle) >> E-E(exclusive-write)", rc);
     return rc;
   }
@@ -28730,11 +28771,11 @@ MDBX_INTERNAL_FUNC int mdbx_rpid_check(MDBX_env *env, uint32_t pid) {
   int rc;
   if (likely(hProcess)) {
     rc = WaitForSingleObject(hProcess, 0);
-    if (unlikely(rc == WAIT_FAILED))
-      rc = GetLastError();
+    if (unlikely(rc == (int)WAIT_FAILED))
+      rc = (int)GetLastError();
     CloseHandle(hProcess);
   } else {
-    rc = GetLastError();
+    rc = (int)GetLastError();
   }
 
   switch (rc) {
@@ -28826,21 +28867,6 @@ static void WINAPI stub_srwlock_ReleaseExclusive(MDBX_srwlock *srwl) {
   srwl->writerCount = 0;
 }
 
-MDBX_srwlock_function mdbx_srwlock_Init, mdbx_srwlock_AcquireShared,
-    mdbx_srwlock_ReleaseShared, mdbx_srwlock_AcquireExclusive,
-    mdbx_srwlock_ReleaseExclusive;
-
-/*----------------------------------------------------------------------------*/
-
-#if 0  /* LY: unused for now */
-static DWORD WINAPI stub_DiscardVirtualMemory(PVOID VirtualAddress,
-                                              SIZE_T Size) {
-  return VirtualAlloc(VirtualAddress, Size, MEM_RESET, PAGE_NOACCESS)
-             ? ERROR_SUCCESS
-	  : GetLastError();
-}
-#endif /* unused for now */
-
 static uint64_t WINAPI stub_GetTickCount64(void) {
   LARGE_INTEGER Counter, Frequency;
   return (QueryPerformanceFrequency(&Frequency) &&
@@ -28850,7 +28876,12 @@ static uint64_t WINAPI stub_GetTickCount64(void) {
 }
 
 /*----------------------------------------------------------------------------*/
+
 #ifndef xMDBX_ALLOY
+MDBX_srwlock_function mdbx_srwlock_Init, mdbx_srwlock_AcquireShared,
+    mdbx_srwlock_ReleaseShared, mdbx_srwlock_AcquireExclusive,
+    mdbx_srwlock_ReleaseExclusive;
+
 MDBX_NtExtendSection mdbx_NtExtendSection;
 MDBX_GetFileInformationByHandleEx mdbx_GetFileInformationByHandleEx;
 MDBX_GetVolumeInformationByHandleW mdbx_GetVolumeInformationByHandleW;
@@ -28860,11 +28891,6 @@ MDBX_NtFsControlFile mdbx_NtFsControlFile;
 MDBX_PrefetchVirtualMemory mdbx_PrefetchVirtualMemory;
 MDBX_GetTickCount64 mdbx_GetTickCount64;
 MDBX_RegGetValueA mdbx_RegGetValueA;
-#if 0  /* LY: unused for now */
-MDBX_DiscardVirtualMemory mdbx_DiscardVirtualMemory;
-MDBX_OfferVirtualMemory mdbx_OfferVirtualMemory;
-MDBX_ReclaimVirtualMemory mdbx_ReclaimVirtualMemory;
-#endif /* unused for now */
 #endif /* xMDBX_ALLOY */
 
 static void mdbx_winnt_import(void) {
@@ -28895,21 +28921,6 @@ static void mdbx_winnt_import(void) {
 
   const HINSTANCE hAdvapi32dll = GetModuleHandleA("advapi32.dll");
   GET_PROC_ADDR(hAdvapi32dll, RegGetValueA);
-
-#if 0  /* LY: unused for now */
-  if (!mdbx_RunningUnderWine()) {
-    GET_PROC_ADDR(hKernel32dll, DiscardVirtualMemory);
-    GET_PROC_ADDR(hKernel32dll, OfferVirtualMemory);
-    GET_PROC_ADDR(hKernel32dll, ReclaimVirtualMemory);
-  }
-  if (!mdbx_DiscardVirtualMemory)
-    mdbx_DiscardVirtualMemory = stub_DiscardVirtualMemory;
-  if (!mdbx_OfferVirtualMemory)
-    mdbx_OfferVirtualMemory = stub_OfferVirtualMemory;
-  if (!mdbx_ReclaimVirtualMemory)
-    mdbx_ReclaimVirtualMemory = stub_ReclaimVirtualMemory;
-#endif /* unused for now */
-
 #undef GET_PROC_ADDR
 
   const MDBX_srwlock_function init =

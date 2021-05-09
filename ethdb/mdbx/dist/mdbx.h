@@ -531,9 +531,9 @@ typedef mode_t mdbx_mode_t;
 extern "C" {
 #endif
 
-/* MDBX version 0.9.x */
+/* MDBX version 0.10.x */
 #define MDBX_VERSION_MAJOR 0
-#define MDBX_VERSION_MINOR 9
+#define MDBX_VERSION_MINOR 10
 
 #ifndef LIBMDBX_API
 #if defined(LIBMDBX_EXPORTS)
@@ -587,9 +587,7 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
   const char *flags;    /**< CFLAGS and CXXFLAGS */
 } /** \brief libmdbx build information */ mdbx_build;
 
-#if defined(_WIN32) || defined(_WIN64)
-#if !MDBX_BUILD_SHARED_LIBRARY
-
+#if (defined(_WIN32) || defined(_WIN64)) && !MDBX_BUILD_SHARED_LIBRARY
 /* MDBX internally uses global and thread local storage destructors to
  * automatically (de)initialization, releasing reader lock table slots
  * and so on.
@@ -600,39 +598,41 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
  *
  * Otherwise, if MDBX was builded not as a DLL, some black magic
  * may be required depending of Windows version:
+ *
  *  - Modern Windows versions, including Windows Vista and later, provides
  *    support for "TLS Directory" (e.g .CRT$XL[A-Z] sections in executable
  *    or dll file). In this case, MDBX capable of doing all automatically,
- *    and you do not need to call mdbx_dll_handler().
+ *    therefore you DON'T NEED to call mdbx_module_handler()
+ *    so the MDBX_MANUAL_MODULE_HANDLER defined as 0.
+ *
  *  - Obsolete versions of Windows, prior to Windows Vista, REQUIRES calling
- *    mdbx_dll_handler() manually from corresponding DllMain() or WinMain()
- *    of your DLL or application.
- *  - This behavior is under control of the MODX_CONFIG_MANUAL_TLS_CALLBACK
- *    option, which is determined by default according to the target version
- *    of Windows at build time.
- *    But you may override MODX_CONFIG_MANUAL_TLS_CALLBACK in special cases.
+ *    mdbx_module_handler() manually from corresponding DllMain() or WinMain()
+ *    of your DLL or application,
+ *    so the MDBX_MANUAL_MODULE_HANDLER defined as 1.
  *
  * Therefore, building MDBX as a DLL is recommended for all version of Windows.
- * So, if you doubt, just build MDBX as the separate DLL and don't worry. */
+ * So, if you doubt, just build MDBX as the separate DLL and don't care about
+ * the MDBX_MANUAL_MODULE_HANDLER. */
 
-#ifndef MDBX_CONFIG_MANUAL_TLS_CALLBACK
-#if defined(_WIN32_WINNT_VISTA) && WINVER >= _WIN32_WINNT_VISTA
-/* As described above mdbx_dll_handler() is NOT needed forWindows Vista
+#ifndef _WIN32_WINNT
+#error Non-dll build libmdbx requires target Windows version \
+  to be explicitly defined via _WIN32_WINNT for properly \
+  handling thread local storage destructors.
+#endif /* _WIN32_WINNT */
+
+#if _WIN32_WINNT >= 0x0600 /* Windows Vista */
+/* As described above mdbx_module_handler() is NOT needed for Windows Vista
  * and later. */
-#define MDBX_CONFIG_MANUAL_TLS_CALLBACK 0
+#define MDBX_MANUAL_MODULE_HANDLER 0
 #else
-/* As described above mdbx_dll_handler() IS REQUIRED for Windows versions
+/* As described above mdbx_module_handler() IS REQUIRED for Windows versions
  * prior to Windows Vista. */
-#define MDBX_CONFIG_MANUAL_TLS_CALLBACK 1
+#define MDBX_MANUAL_MODULE_HANDLER 1
+void LIBMDBX_API NTAPI mdbx_module_handler(PVOID module, DWORD reason,
+                                           PVOID reserved);
 #endif
-#endif /* MDBX_CONFIG_MANUAL_TLS_CALLBACK */
 
-#if MDBX_CONFIG_MANUAL_TLS_CALLBACK
-void LIBMDBX_API NTAPI mdbx_dll_handler(PVOID module, DWORD reason,
-                                        PVOID reserved);
-#endif /* MDBX_CONFIG_MANUAL_TLS_CALLBACK */
-#endif /* !MDBX_BUILD_SHARED_LIBRARY */
-#endif /* Windows */
+#endif /* Windows && !DLL && MDBX_MANUAL_MODULE_HANDLER */
 
 /* OPACITY STRUCTURES *********************************************************/
 

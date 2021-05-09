@@ -29,7 +29,6 @@
 #cmakedefine01 MDBX_DISABLE_PAGECHECKS
 
 /* Windows */
-#cmakedefine01 MDBX_CONFIG_MANUAL_TLS_CALLBACK
 #cmakedefine01 MDBX_WITHOUT_MSVC_CRT
 
 /* MacOS & iOS */
