@@ -190,9 +190,9 @@ func BodiesForward(
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 		case <-timer.C:
-		//log.Info("RequestQueueTime (bodies) ticked")
+			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.wakeUpChan:
-			//log.Info("bodyLoop woken up by the incoming request")
+			log.Debug("bodyLoop woken up by the incoming request")
 		}
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
@@ -216,7 +216,7 @@ func BodiesForward(
 			return err
 		}
 	}
-	log.Info("Processed", "highest", bodyProgress)
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 	return nil
 }
 
