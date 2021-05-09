@@ -21,10 +21,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-//What number should we use?
-const maxReorgDepth = 90000
+const maxReorgDepth = params.FullImmutabilityThreshold
 
 func CalculateEpoch(block, epochSize uint64) uint64 {
 	return block - (block+maxReorgDepth)%epochSize //Epoch
@@ -184,7 +184,8 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 }
 
 func (sm *SnapshotMigrator) Finished(block uint64) bool {
-	return atomic.LoadUint64(&sm.HeadersNewSnapshot) == atomic.LoadUint64(&sm.HeadersCurrentSnapshot) && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) > 0 && atomic.LoadUint64(&sm.Stage) == StageStart && atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == block
+	new, current := atomic.LoadUint64(&sm.HeadersNewSnapshot), atomic.LoadUint64(&sm.HeadersCurrentSnapshot)
+	return new == current && current > 0 && atomic.LoadUint64(&sm.Stage) == StageStart && current == block
 }
 
 const (

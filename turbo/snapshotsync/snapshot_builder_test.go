@@ -15,11 +15,33 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+func migrate(db ethdb.Database, currentSnapshotBlock *uint64, btCli *Client, sb *SnapshotMigrator) error {
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var dbtx ethdb.RwTx
+	if hasTx, ok := tx.(ethdb.HasTx); ok {
+		dbtx = hasTx.Tx().(ethdb.RwTx)
+	}
+
+	//	if err = GenerateHeaderData(tx, int(*currentSnapshotBlock), newHeight); err != nil {
+	//		return err
+	//	}
+	//	*currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
+
+	if err = sb.Migrate(db, dbtx, *currentSnapshotBlock, btCli); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func TestSnapshotMigratorStage(t *testing.T) {
-	t.Skip("Cannot fix this")
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	dir, err := ioutil.TempDir(os.TempDir(), "tst")
 	if err != nil {
 		t.Fatal(err)
@@ -49,55 +71,25 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		snapshotsDir: snapshotsDir,
 	}
 	generateChan := make(chan int)
-	currentSnapshotBlock := uint64(10)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	err = GenerateHeaderData(tx, 0, 11)
-	if err != nil {
+	if err = GenerateHeaderData(tx, 0, 11); err != nil {
 		t.Fatal(err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
+	if err = tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+	currentSnapshotBlock := uint64(10)
 
-	for !sb.Finished(10) {
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			tx.Rollback()
-			t.Error(err)
-		}
-		var dbtx ethdb.RwTx
-		if hasTx, ok := tx.(ethdb.HasTx); ok {
-			dbtx = hasTx.Tx().(ethdb.RwTx)
-		}
-
-		select {
-		case newHeight := <-generateChan:
-			err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
-			if err != nil {
-				tx.Rollback()
-				t.Fatal(err)
-			}
-			currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
-		default:
-
-		}
-
-		err = sb.Migrate(db, dbtx, currentSnapshotBlock, btCli)
-		if err != nil {
-			tx.Rollback()
-			t.Fatal(err)
-		}
-		err = tx.Commit()
-		if err != nil {
-			t.Fatal(err)
-		}
-		tx.Rollback()
+	if err = migrate(db, &currentSnapshotBlock, btCli, sb); err != nil {
+		t.Fatal(err)
+	}
+	for !(sb.Finished(10)) {
+		time.Sleep(time.Second)
 	}
 
 	sa := db.RwKV().(ethdb.SnapshotUpdater)
