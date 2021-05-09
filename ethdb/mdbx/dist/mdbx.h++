@@ -208,7 +208,9 @@ using filehandle = ::mdbx_filehandle_t;
 #if defined(DOXYGEN) ||                                                        \
     (defined(__cpp_lib_filesystem) && __cpp_lib_filesystem >= 201703L &&       \
      (!defined(__MAC_OS_X_VERSION_MIN_REQUIRED) ||                             \
-      __MAC_OS_X_VERSION_MIN_REQUIRED >= 101500))
+      __MAC_OS_X_VERSION_MIN_REQUIRED >= 101500) &&                            \
+     (!defined(__IPHONE_OS_VERSION_MIN_REQUIRED) ||                            \
+      __IPHONE_OS_VERSION_MIN_REQUIRED >= 130100))
 #define MDBX_STD_FILESYSTEM_PATH
 using path = ::std::filesystem::path;
 #elif defined(_WIN32) || defined(_WIN64)
@@ -1650,8 +1652,18 @@ struct LIBMDBX_API_TYPE map_handle {
                               map_handle::state state) noexcept;
     info(const info &) noexcept = default;
     info &operator=(const info &) noexcept = default;
-    MDBX_CXX11_CONSTEXPR ::mdbx::key_mode key_mode() const noexcept;
-    MDBX_CXX11_CONSTEXPR ::mdbx::value_mode value_mode() const noexcept;
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+    MDBX_CXX11_CONSTEXPR
+#else
+    inline
+#endif
+    ::mdbx::key_mode key_mode() const noexcept;
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+    MDBX_CXX11_CONSTEXPR
+#else
+    inline
+#endif
+    ::mdbx::value_mode value_mode() const noexcept;
   };
 };
 
@@ -3261,13 +3273,17 @@ MDBX_CXX11_CONSTEXPR map_handle::info::info(map_handle::flags flags,
                                             map_handle::state state) noexcept
     : flags(flags), state(state) {}
 
-MDBX_CXX11_CONSTEXPR ::mdbx::key_mode
-map_handle::info::key_mode() const noexcept {
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+MDBX_CXX11_CONSTEXPR
+#endif
+::mdbx::key_mode map_handle::info::key_mode() const noexcept {
   return ::mdbx::key_mode(flags & (MDBX_REVERSEKEY | MDBX_INTEGERKEY));
 }
 
-MDBX_CXX11_CONSTEXPR ::mdbx::value_mode
-map_handle::info::value_mode() const noexcept {
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+MDBX_CXX11_CONSTEXPR
+#endif
+::mdbx::value_mode map_handle::info::value_mode() const noexcept {
   return ::mdbx::value_mode(flags & (MDBX_DUPSORT | MDBX_REVERSEDUP |
                                      MDBX_DUPFIXED | MDBX_INTEGERDUP));
 }

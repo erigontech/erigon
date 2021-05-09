@@ -1,35 +1,35 @@
 ChangeLog
 ---------
 
-## v0.9.5 (in development)
+## v0.10.1 (in development)
 
 TODO:
 
+ - [Get rid of dirty-pages list in MDBX_WRITEMAP mode](https://github.com/erthink/libmdbx/issues/193).
+ - [Large/Overflow pages accounting for dirty-room](https://github.com/erthink/libmdbx/issues/192).
+ - [C++ Buffer issue](https://github.com/erthink/libmdbx/issues/191).
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - [Support for RAW devices](https://github.com/erthink/libmdbx/issues/124).
- - [Fix test framework issue](https://github.com/erthink/libmdbx/issues/127).
+ - [Test framework issue](https://github.com/erthink/libmdbx/issues/127).
  - [Support MessagePack for Keys & Values](https://github.com/erthink/libmdbx/issues/115).
  - [Engage new terminology](https://github.com/erthink/libmdbx/issues/137).
  - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), Fedora/RHEL, Debian/Ubuntu.
 
-## v0.9.4 scheduled at 2021-05-09
 
-TODO:
-
- - [Documentation issue](https://github.com/erthink/libmdbx/issues/177).
- - [C++ Buffer issue](https://github.com/erthink/libmdbx/issues/191).
+## v0.10.0 at 2021-05-09
 
 Acknowledgements:
 
  - [Mahlon E. Smith](https://github.com/mahlonsmith) for [Ruby bindings](https://rubygems.org/gems/mdbx/).
- - [Alex Sharov](https://github.com/AskAlexSharov) for [mdbx-go](https://github.com/torquem-ch/mdbx-go) , bug reporting and testing.
+ - [Alex Sharov](https://github.com/AskAlexSharov) for [mdbx-go](https://github.com/torquem-ch/mdbx-go), bug reporting and testing.
  - [Artem Vorotnikov](https://github.com/vorot93) for bug reporting and PR.
  - [Paolo Rebuffo](https://www.linkedin.com/in/paolo-rebuffo-8255766/), [Alexey Akhunov](https://github.com/AlexeyAkhunov) and Mark Grosberg for donations.
  - [Noel Kuntze](https://github.com/Thermi) for preliminary [Python bindings](https://github.com/Thermi/libmdbx/tree/python-bindings)
 
 New features:
 
- - Added `mdbx_env_set_option()` and `mdbx_env_get_option()` for controls various runtime options for an environment (announce of this feature was missed in a previous news).
+ - Added `mdbx_env_set_option()` and `mdbx_env_get_option()` for controls
+   various runtime options for an environment (announce of this feature  was missed in a previous news).
  - Added `MDBX_DISABLE_PAGECHECKS` build option to disable some checks to reduce an overhead
    and detection probability of database corruption to a values closer to the LMDB.
    The `MDBX_DISABLE_PAGECHECKS=1` provides a performance boost of about 10% in CRUD scenarios,
@@ -42,7 +42,8 @@ New features:
  - Added the `mdbx_drop` similar to LMDB command-line tool to purge or delete (sub)database(s).
  - [Ruby bindings](https://rubygems.org/gems/mdbx/) is available now by [Mahlon E. Smith](https://github.com/mahlonsmith).
  - Added `MDBX_ENABLE_MADVISE` build option which controls the use of POSIX `madvise()` hints and friends.
- - The internal node sizes were refined, resulting in a reduction in large/overflow pages in some use cases and a slight increase in limits for a keys size to ≈½ of page size.
+ - The internal node sizes were refined, resulting in a reduction in large/overflow pages in some use cases
+   and a slight increase in limits for a keys size to ≈½ of page size.
  - Added to `mdbx_chk` output number of keys/items on pages.
  - Added explicit `install-strip` and `install-no-strip` targets to the `Makefile` (https://github.com/erthink/libmdbx/pull/180).
  - Major rework page splitting (af9b7b560505684249b76730997f9e00614b8113) for
@@ -60,20 +61,26 @@ New features:
    to DB file without further penalty during transaction commit.
    As a result, page swapping and I/O could be significantly reduced during extra large transactions and/or lack of memory.
  - Minimized reading leaf-pages during dropping subDB(s) and nested trees.
- - Major rework a spilling of dirty pages to support [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) policy and prioritization for a large/overflow pages.
+ - Major rework a spilling of dirty pages to support [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU))
+   policy and prioritization for a large/overflow pages.
  - Statistics of page operations (split, merge, copy, spill, etc) now available through `mdbx_env_info_ex()`.
  - Auto-setup limit for length of dirty pages list (`MDBX_opt_txn_dp_limit` option).
  - Support `make options` to list available build options.
  - Support `make help` to list available make targets.
  - Silently `make`'s build by default.
- - Preliminary [Python bindings](https://github.com/Thermi/libmdbx/tree/python-bindings) is available now by [Noel Kuntze](https://github.com/Thermi) (https://github.com/erthink/libmdbx/issues/147).
+ - Preliminary [Python bindings](https://github.com/Thermi/libmdbx/tree/python-bindings) is available now
+   by [Noel Kuntze](https://github.com/Thermi) (https://github.com/erthink/libmdbx/issues/147).
 
 Backward compatibility break:
 
  - The `MDBX_AVOID_CRT` build option was renamed to `MDBX_WITHOUT_MSVC_CRT`.
    This option is only relevant when building for Windows.
- - The `mdbx_env_stat()` always, and `mdbx_env_stat_ex()` when called with the zeroed transaction parameter, now internally start temporary read transaction and thus may returns `MDBX_BAD_RSLOT` error.
+ - The `mdbx_env_stat()` always, and `mdbx_env_stat_ex()` when called with the zeroed transaction parameter,
+   now internally start temporary read transaction and thus may returns `MDBX_BAD_RSLOT` error.
    So, just never use deprecated `mdbx_env_stat()' and call `mdbx_env_stat_ex()` with transaction parameter.
+ - The build option `MDBX_CONFIG_MANUAL_TLS_CALLBACK` was removed and now just a non-zero value of
+   the `MDBX_MANUAL_MODULE_HANDLER` macro indicates the requirement to manually call `mdbx_module_handler()`
+   when loading libraries and applications uses statically linked libmdbx on an obsolete Windows versions.
 
 Fixes:
 
@@ -90,6 +97,10 @@ Fixes:
  - Switched to using Heap-functions instead of LocalAlloc/LocalFree on Windows.
  - Fixed `mdbx_env_stat_ex()` to returning statistics of the whole environment instead of MainDB only (https://github.com/erthink/libmdbx/issues/190).
  - Fixed building by GCC 4.8.5 (added workaround for a preprocessor's bug).
+ - Fixed building C++ part for iOS <= 13.0 (unavailability of  `std::filesystem::path`).
+ - Fixed building for Windows target versions prior to Windows Vista (`WIN32_WINNT < 0x0600`).
+ - Fixed building by MinGW for Windows (https://github.com/erthink/libmdbx/issues/155).
+
 
 ## v0.9.3 at 2021-02-02
 
