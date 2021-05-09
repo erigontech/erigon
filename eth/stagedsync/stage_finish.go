@@ -22,9 +22,6 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 		return nil
 	}
 
-	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
-
 	err = MigrateSnapshot(executionAt, tx, db, btClient, snBuilder)
 	if err != nil {
 		return err
