@@ -6,6 +6,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -539,6 +540,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
 	for len(hd.insertList) > 0 {
 		link := hd.insertList[len(hd.insertList)-1]
 		if link.blockHeight <= hd.preverifiedHeight && !link.preverified {
@@ -546,18 +548,26 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			break
 		}
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
-		if _, ok := hd.links[link.hash]; ok {
-			heap.Remove(hd.linkQueue, link.idx)
-		}
+		skip := false
 		if !link.preverified {
 			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
-				// skip this link and its children
-				continue
-			}
-			if hd.seenAnnounces.Pop(link.hash) {
+				if errors.Is(err, consensus.ErrFutureBlock) {
+					// This may become valid later
+					linksInFuture = append(linksInFuture, link)
+					continue // prevent removal of the link from the hd.linkQueue
+				} else {
+					skip = true
+				}
+			} else if hd.seenAnnounces.Pop(link.hash) {
 				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
 			}
+		}
+		if _, ok := hd.links[link.hash]; ok {
+			heap.Remove(hd.linkQueue, link.idx)
+		}
+		if skip {
+			continue
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
 			return err
@@ -574,6 +584,10 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
 		link := heap.Pop(hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
+	}
+	if len(linksInFuture) > 0 {
+		hd.insertList = append(hd.insertList, linksInFuture...)
+		linksInFuture = nil
 	}
 	return nil
 }
@@ -723,6 +737,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 	if blockHeight > hi.highest {
 		hi.highest = blockHeight
 		hi.highestHash = hash
+		hi.highestTimestamp = header.Time
 	}
 	return nil
 }
@@ -733,6 +748,10 @@ func (hi *HeaderInserter) GetHighest() uint64 {
 
 func (hi *HeaderInserter) GetHighestHash() common.Hash {
 	return hi.highestHash
+}
+
+func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
+	return hi.highestTimestamp
 }
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {

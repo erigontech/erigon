@@ -252,15 +252,16 @@ func (pp PeerPenalty) String() string {
 // HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
-	logPrefix      string
-	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
-	prevHeight     uint64
-	newCanonical   bool
-	unwindPoint    uint64
-	highest        uint64
-	highestHash    common.Hash
-	localTd        *big.Int
-	headerProgress uint64
+	logPrefix        string
+	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
+	prevHeight       uint64
+	newCanonical     bool
+	unwindPoint      uint64
+	highest          uint64
+	highestHash      common.Hash
+	highestTimestamp uint64
+	localTd          *big.Int
+	headerProgress   uint64
 }
 
 func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
