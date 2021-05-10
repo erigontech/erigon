@@ -188,7 +188,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	for {
 		op := contract.GetOp(pc)
 		
-		// none of the bare ops can resize memory or use dynamic gas, must us execute()
+		// none of the bare ops can resize memory or use dynamic gas
 		switch op {
 		case ADD:
 			x, y := locStack.Pop(), locStack.Peek()
@@ -372,7 +372,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 		default:
 
-			operation, err := op_gas_memory(in, op, contract, locStack, mem)
+			operation, err := runGasMemory(in, op, contract, locStack, mem)
 			if err != nil {
 				return nil, err
 			}
@@ -414,19 +414,19 @@ func enterBlock(ctx *callCtx, pc uint64) error {
 	if info == nil || err != nil {
 		return err
 	}
-	// check stack, gas, and memory usage
-	if sLen := ctx.stack.Len(); sLen < info.minStack {
+	// check gas & stack usage
+	if !ctx.contract.UseGas(info.constantGas) {
+		return ErrOutOfGas
+	} else if sLen := ctx.stack.Len(); sLen < info.minStack {
 		return &ErrStackUnderflow{stackLen: sLen, required: info.minStack}
 	} else if sLen > info.maxStack {
 		return &ErrStackOverflow{stackLen: sLen, limit: info.maxStack}
-	} else if !ctx.contract.UseGas(info.constantGas) {
-		return ErrOutOfGas
 	}
 	return nil
 }
 
 // resize memory and use dynamic portion of gas
-func op_gas_memory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *stack.Stack, mem *Memory)(*operation, error) {
+func runGasMemory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *stack.Stack, mem *Memory)(*operation, error) {
 	
 	var (
 		operation *operation = in.jt[op]
@@ -434,16 +434,16 @@ func op_gas_memory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *
 		err error
 	)
 	
-	err = op_Readonly(in, op, operation, locStack)
+    if operation == nil {
+        return nil, &ErrInvalidOpCode{opcode: op}
+    }
+
+	err = runReadOnly(operation, locStack)	
 	if err != nil {
 		return nil, err
 	}
-	
-	memorySize, err = op_memory(operation, locStack)
-	if err != nil {
-		return nil, err
-	}
-	err = op_dyn_gas(in.evm, operation, contract, locStack, mem, memorySize)
+
+	err = runGas(in.evm, operation, contract, locStack, mem, memorySize)
 	if err != nil {
 		return nil, err
 	}
@@ -453,8 +453,7 @@ func op_gas_memory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *
 	return operation, nil
 }
 
-func op_Readonly(in *EVMInterpreter, op OpCode, operation *operation, locStack *stack.Stack) (error) {
-
+func runReadOnly(in *EVMInterpreter, operation *operation, locStack *stack.Stack) error {
 	// If the operation is valid, enforce and write restrictions
 	if in.readOnly && in.evm.chainRules.IsByzantium {
 		// If the interpreter is operating in readonly mode, make sure no
@@ -469,7 +468,7 @@ func op_Readonly(in *EVMInterpreter, op OpCode, operation *operation, locStack *
 	return nil
 }
 
-func op_memory(operation *operation, locStack *stack.Stack)(uint64, error) {
+func runMemory(operation *operation, locStack *stack.Stack)(uint64, error) {
 
 	// calculate the new memory size to expand the memory to fit
 	// the operation
@@ -490,7 +489,7 @@ func op_memory(operation *operation, locStack *stack.Stack)(uint64, error) {
 	return 0, nil
 }
 
-func op_dyn_gas(evm *EVM, operation *operation, contract *Contract, locStack *stack.Stack, mem *Memory, memorySize uint64) (error) {
+func runGas(evm *EVM, operation *operation, contract *Contract, locStack *stack.Stack, mem *Memory, memorySize uint64) (error) {
 
 	// Dynamic portion of gas
 	// consume the gas and return an error if not enough gas is available.
