@@ -16,10 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -270,51 +266,54 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 
-	tracer := NewCallTracer()
-	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
-	for blockNum := from; blockNum > to; blockNum-- {
-		if err := common.Stopped(quitCh); err != nil {
-			return err
-		}
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
-		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
-		if err != nil {
-			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
-		}
-		block, _, err := rawdb.ReadBlockWithSenders(db, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
-		if block == nil {
-			return fmt.Errorf("no block %d", blockNum)
-		}
-
-		stateReader := state.NewPlainKvState(db, blockNum-1)
-		stateWriter := state.NewNoopWriter()
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
-		if _, err = core.ExecuteBlockEphemerally(cfg.chainConfig, vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter); err != nil {
-			return fmt.Errorf("exec block: %w", err)
-		}
-
-		coinbase := block.Coinbase()
-		tos[string(coinbase[:])] = struct{}{}
-		for _, uncle := range block.Uncles() {
-			tos[string(uncle.Coinbase[:])] = struct{}{}
-		}
-	}
-	for addr := range tracer.froms {
-		a := addr // To copy addr
-		froms[string(a[:])] = struct{}{}
-	}
-	for addr := range tracer.tos {
-		a := addr // To copy addr
-		tos[string(a[:])] = struct{}{}
+	traceCursor, err := db.CursorDupSort(dbutils.CallTraceSet)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
 
-	if err := truncateBitmaps(db, dbutils.CallFromIndex, froms, to); err != nil {
+	var k, v []byte
+	prev := to + 1
+	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= from {
+			break
+		}
+		if len(v) != common.AddressLength+1 {
+			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+		}
+		mapKey := string(common.CopyBytes(v[:common.AddressLength]))
+		if v[common.AddressLength]&1 > 0 {
+			froms[mapKey] = struct{}{}
+		}
+		if v[common.AddressLength]&2 > 0 {
+			tos[mapKey] = struct{}{}
+		}
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
+			prev = blockNum
+
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
+				"blk/second", speed,
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
+	}
+
+	if err := truncateBitmaps64(db, dbutils.CallFromIndex, froms, to); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(db, dbutils.CallToIndex, tos, to); err != nil {
+	if err := truncateBitmaps64(db, dbutils.CallToIndex, tos, to); err != nil {
 		return err
 	}
 	return nil

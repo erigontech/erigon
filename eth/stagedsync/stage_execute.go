@@ -438,6 +438,25 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}
 	}
 
+	if cfg.writeCallTraces {
+		// Truncate CallTraceSet
+		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+		c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			err = c.DeleteCurrentDuplicates()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
