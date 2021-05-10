@@ -82,65 +82,65 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		return err
 	})
 
-	s.events.AddPendingLogsSubscription(func(data types.Logs) error {
-		select {
-		case <-subscribeServer.Context().Done():
-			return subscribeServer.Context().Err()
-		default:
-		}
+	//s.events.AddPendingLogsSubscription(func(data types.Logs) error {
+	//	select {
+	//	case <-subscribeServer.Context().Done():
+	//		return subscribeServer.Context().Err()
+	//	default:
+	//	}
+	//
+	//	var buf bytes.Buffer
+	//	if err := rlp.Encode(&buf, data); err != nil {
+	//		log.Warn("error while marshaling a pending logs", "err", err)
+	//		return err
+	//	}
+	//	payload := buf.Bytes()
+	//
+	//	err := subscribeServer.Send(&remote.SubscribeReply{
+	//		Type: remote.Event_PENDING_LOGS,
+	//		Data: payload,
+	//	})
+	//
+	//	// we only close the wg on error because if we successfully sent an event,
+	//	// that means that the channel wasn't closed and is ready to
+	//	// receive more events.
+	//	// if rpcdaemon disconnects, we will receive an error here
+	//	// next time we try to send an event
+	//	if err != nil {
+	//		log.Info("event subscription channel was closed", "reason", err)
+	//	}
+	//	return err
+	//})
 
-		var buf bytes.Buffer
-		if err := rlp.Encode(&buf, data); err != nil {
-			log.Warn("error while marshaling a pending logs", "err", err)
-			return err
-		}
-		payload := buf.Bytes()
-
-		err := subscribeServer.Send(&remote.SubscribeReply{
-			Type: remote.Event_PENDING_LOGS,
-			Data: payload,
-		})
-
-		// we only close the wg on error because if we successfully sent an event,
-		// that means that the channel wasn't closed and is ready to
-		// receive more events.
-		// if rpcdaemon disconnects, we will receive an error here
-		// next time we try to send an event
-		if err != nil {
-			log.Info("event subscription channel was closed", "reason", err)
-		}
-		return err
-	})
-
-	s.events.AddPendingBlockSubscription(func(data *types.Block) error {
-		select {
-		case <-subscribeServer.Context().Done():
-			return subscribeServer.Context().Err()
-		default:
-		}
-
-		var buf bytes.Buffer
-		if err := rlp.Encode(&buf, data); err != nil {
-			log.Warn("error while marshaling a pending block", "err", err)
-			return err
-		}
-		payload := buf.Bytes()
-
-		err := subscribeServer.Send(&remote.SubscribeReply{
-			Type: remote.Event_PENDING_BLOCK,
-			Data: payload,
-		})
-
-		// we only close the wg on error because if we successfully sent an event,
-		// that means that the channel wasn't closed and is ready to
-		// receive more events.
-		// if rpcdaemon disconnects, we will receive an error here
-		// next time we try to send an event
-		if err != nil {
-			log.Info("event subscription channel was closed", "reason", err)
-		}
-		return err
-	})
+	//s.events.AddPendingBlockSubscription(func(data *types.Block) error {
+	//	select {
+	//	case <-subscribeServer.Context().Done():
+	//		return subscribeServer.Context().Err()
+	//	default:
+	//	}
+	//
+	//	var buf bytes.Buffer
+	//	if err := rlp.Encode(&buf, data); err != nil {
+	//		log.Warn("error while marshaling a pending block", "err", err)
+	//		return err
+	//	}
+	//	payload := buf.Bytes()
+	//
+	//	err := subscribeServer.Send(&remote.SubscribeReply{
+	//		Type: remote.Event_PENDING_BLOCK,
+	//		Data: payload,
+	//	})
+	//
+	//	// we only close the wg on error because if we successfully sent an event,
+	//	// that means that the channel wasn't closed and is ready to
+	//	// receive more events.
+	//	// if rpcdaemon disconnects, we will receive an error here
+	//	// next time we try to send an event
+	//	if err != nil {
+	//		log.Info("event subscription channel was closed", "reason", err)
+	//	}
+	//	return err
+	//})
 
 	log.Info("event subscription channel established with the RPC daemon")
 	<-subscribeServer.Context().Done()
