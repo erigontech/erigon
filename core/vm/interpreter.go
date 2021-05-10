@@ -323,6 +323,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 			n := uint(shift.Uint64())
 			value.SRsh(value, n)
+
 		case POP:
 			locStack.Pop()
 
@@ -427,33 +428,35 @@ func enterBlock(ctx *callCtx, pc uint64) error {
 
 // resize memory and use dynamic portion of gas
 func runGasMemory(in *EVMInterpreter, op OpCode, contract *Contract, locStack *stack.Stack, mem *Memory)(*operation, error) {
-	
+
 	var (
 		operation *operation = in.jt[op]
 		memorySize uint64
 		err error
 	)
 	
-    if operation == nil {
-        return nil, &ErrInvalidOpCode{opcode: op}
-    }
+	if operation == nil {
+		return nil, &ErrInvalidOpCode{opcode: op}
+	}
 
-	err = runReadOnly(operation, locStack)	
+	err = runReadOnly(in, op, operation, locStack)	
 	if err != nil {
 		return nil, err
 	}
 
-	err = runGas(in.evm, operation, contract, locStack, mem, memorySize)
+	memorySize, err = runMemory(operation, locStack)
 	if err != nil {
 		return nil, err
 	}
-	if memorySize > 0 {
-		mem.Resize(memorySize)
+
+	err = runGas(in, operation, contract, locStack, mem, memorySize)
+	if err != nil {
+		return nil, err
 	}
 	return operation, nil
 }
 
-func runReadOnly(in *EVMInterpreter, operation *operation, locStack *stack.Stack) error {
+func runReadOnly(in *EVMInterpreter, op OpCode, operation *operation, locStack *stack.Stack) error {
 	// If the operation is valid, enforce and write restrictions
 	if in.readOnly && in.evm.chainRules.IsByzantium {
 		// If the interpreter is operating in readonly mode, make sure no
@@ -489,13 +492,13 @@ func runMemory(operation *operation, locStack *stack.Stack)(uint64, error) {
 	return 0, nil
 }
 
-func runGas(evm *EVM, operation *operation, contract *Contract, locStack *stack.Stack, mem *Memory, memorySize uint64) (error) {
+func runGas(in *EVMInterpreter, operation *operation, contract *Contract, locStack *stack.Stack, mem *Memory, memorySize uint64) (error) {
 
 	// Dynamic portion of gas
 	// consume the gas and return an error if not enough gas is available.
 	// cost is explicitly set so that the capture state defer method can get the proper cost
 	if operation.dynamicGas != nil {
-		dynamicCost, err := operation.dynamicGas(evm, contract, locStack, mem, memorySize)
+		dynamicCost, err := operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 		if err != nil || !contract.UseGas(dynamicCost) {
 			return ErrOutOfGas
 		}
