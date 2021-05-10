@@ -776,7 +776,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 			s.ethDialCandidates,
 			&s.sentryServer.Peers,
 			&s.sentryServer.PeerHeightMap,
-			&s.sentryServer.PeerTimeMap,
+			&s.sentryServer.PeerPermitMap,
 			&s.sentryServer.PeerRwMap,
 			s.sentryServer.GetStatus,
 			s.sentryServer.ReceiveCh,

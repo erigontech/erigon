@@ -206,13 +206,13 @@ func BodiesForward(
 			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
+			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.bd.DeliveryNotify:
 			log.Debug("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
-		log.Info("Body progress", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := batch.Commit(); err != nil {

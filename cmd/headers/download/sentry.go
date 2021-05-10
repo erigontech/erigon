@@ -41,7 +41,8 @@ import (
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
-	handshakeTimeout = 5 * time.Second
+	handshakeTimeout  = 5 * time.Second
+	maxPermitsPerPeer = 8 // How many outstanding requests per peer we may have
 )
 
 func nodeKey() *ecdsa.PrivateKey {
@@ -68,7 +69,7 @@ func makeP2PServer(
 	port int,
 	peers *sync.Map,
 	peerHeightMap *sync.Map,
-	peerTimeMap *sync.Map,
+	peerPermitMap *sync.Map,
 	peerRwMap *sync.Map,
 	genesisHash common.Hash,
 	statusFn func() *proto_sentry.StatusData,
@@ -120,7 +121,7 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerTimeMap, peerRwMap, statusFn, receiveCh, receiveUploadCh, receiveTxCh)
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, peerHeightMap, peerPermitMap, peerRwMap, statusFn, receiveCh, receiveUploadCh, receiveTxCh)
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
@@ -129,7 +130,7 @@ func MakeProtocols(ctx context.Context,
 	dialCandidates enode.Iterator,
 	peers *sync.Map,
 	peerHeightMap *sync.Map,
-	peerTimeMap *sync.Map,
+	peerPermitMap *sync.Map,
 	peerRwMap *sync.Map,
 	statusFn func() *proto_sentry.StatusData,
 	receiveCh chan<- StreamMsg,
@@ -150,7 +151,7 @@ func MakeProtocols(ctx context.Context,
 				if err := runPeer(
 					ctx,
 					peerHeightMap,
-					peerTimeMap,
+					peerPermitMap,
 					peerRwMap,
 					peer,
 					eth.ProtocolVersions[0], // version == eth66
@@ -164,7 +165,7 @@ func MakeProtocols(ctx context.Context,
 				}
 				peers.Delete(peerID)
 				peerHeightMap.Delete(peerID)
-				peerTimeMap.Delete(peerID)
+				peerPermitMap.Delete(peerID)
 				peerRwMap.Delete(peerID)
 				return nil
 			},
@@ -272,7 +273,7 @@ func handShake(
 func runPeer(
 	ctx context.Context,
 	peerHeightMap *sync.Map,
-	peerTimeMap *sync.Map,
+	peerPermitMap *sync.Map,
 	peerRwMap *sync.Map,
 	peer *p2p.Peer,
 	version uint,
@@ -324,7 +325,12 @@ func runPeer(
 			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders})
 		case eth.BlockHeadersMsg:
 			// Peer responded or sent message - reset the "back off" timer
-			peerTimeMap.Store(peerID, time.Now().Unix())
+			permitsRaw, _ := peerPermitMap.Load(peerID)
+			permits, _ := permitsRaw.(int)
+			if permits < maxPermitsPerPeer {
+				permits++
+				peerPermitMap.Store(peerID, permits)
+			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
@@ -338,7 +344,12 @@ func runPeer(
 			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies})
 		case eth.BlockBodiesMsg:
 			// Peer responded or sent message - reset the "back off" timer
-			peerTimeMap.Store(peerID, time.Now().Unix())
+			permitsRaw, _ := peerPermitMap.Load(peerID)
+			permits, _ := permitsRaw.(int)
+			if permits < maxPermitsPerPeer {
+				permits++
+				peerPermitMap.Store(peerID, permits)
+			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
@@ -520,7 +531,7 @@ func p2pServer(ctx context.Context,
 		port,
 		&sentryServer.Peers,
 		&sentryServer.PeerHeightMap,
-		&sentryServer.PeerTimeMap,
+		&sentryServer.PeerPermitMap,
 		&sentryServer.PeerRwMap,
 		genesisHash,
 		sentryServer.GetStatus,
@@ -583,7 +594,7 @@ type SentryServerImpl struct {
 	Peers           sync.Map
 	PeerHeightMap   sync.Map
 	PeerRwMap       sync.Map
-	PeerTimeMap     sync.Map
+	PeerPermitMap   sync.Map // Keeps track of request permits for each peer - for request load balancing
 	statusData      *proto_sentry.StatusData
 	P2pServer       *p2p.Server
 	nodeName        string
@@ -600,7 +611,7 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	ss.PeerRwMap.Delete(strId)
-	ss.PeerTimeMap.Delete(strId)
+	ss.PeerPermitMap.Delete(strId)
 	ss.PeerHeightMap.Delete(strId)
 	return &empty.Empty{}, nil
 }
@@ -616,25 +627,23 @@ func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.Pe
 }
 
 func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, bool) {
-	// Choose a peer that we can send this request to
-	var peerID string
-	var found bool
-	timeNow := time.Now().Unix()
+	// Choose a peer that we can send this request to, with maximum number of permits
+	var foundPeerID string
+	var maxPermits int
 	ss.PeerHeightMap.Range(func(key, value interface{}) bool {
 		valUint, _ := value.(uint64)
 		if valUint >= minBlock {
-			peerID = key.(string)
-			timeRaw, _ := ss.PeerTimeMap.Load(peerID)
-			t, _ := timeRaw.(int64)
-			// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
-			if t <= timeNow {
-				found = true
-				return false
+			peerID := key.(string)
+			permitsRaw, _ := ss.PeerPermitMap.Load(peerID)
+			permits, _ := permitsRaw.(int)
+			if permits > maxPermits {
+				maxPermits = permits
+				foundPeerID = peerID
 			}
 		}
 		return true
 	})
-	return peerID, found
+	return foundPeerID, maxPermits > 0
 }
 
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
@@ -646,7 +655,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
 		ss.PeerHeightMap.Delete(peerID)
-		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerPermitMap.Delete(peerID)
 		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock find rw for peer %s", peerID)
 	}
@@ -661,11 +670,15 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	}
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		ss.PeerHeightMap.Delete(peerID)
-		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerPermitMap.Delete(peerID)
 		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+5)
+	permitsRaw, _ := ss.PeerPermitMap.Load(peerID)
+	permits, _ := permitsRaw.(int)
+	if permits > 0 {
+		ss.PeerPermitMap.Store(peerID, permits-1)
+	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
@@ -698,7 +711,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		ss.PeerHeightMap.Delete(peerID)
-		ss.PeerTimeMap.Delete(peerID)
+		ss.PeerPermitMap.Delete(peerID)
 		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
@@ -735,7 +748,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 		rw, _ := value.(p2p.MsgReadWriter)
 		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
 			ss.PeerHeightMap.Delete(peerID)
-			ss.PeerTimeMap.Delete(peerID)
+			ss.PeerPermitMap.Delete(peerID)
 			ss.PeerRwMap.Delete(peerID)
 			innerErr = err
 			return false
@@ -768,7 +781,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 		rw, _ := value.(p2p.MsgReadWriter)
 		if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			ss.PeerHeightMap.Delete(peerID)
-			ss.PeerTimeMap.Delete(peerID)
+			ss.PeerPermitMap.Delete(peerID)
 			ss.PeerRwMap.Delete(peerID)
 			innerErr = err
 			return false
