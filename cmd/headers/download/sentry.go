@@ -665,7 +665,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+1)
+	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+5)
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 

@@ -313,7 +313,7 @@ func NewStagedSync(
 			controlServer.sendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
 			controlServer.penalize,
-			controlServer.requestWakeUpBodies,
+			controlServer.requestWakeUpHeaders,
 			batchSize,
 			increment,
 		),
