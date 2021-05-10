@@ -64,23 +64,29 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 				ctx.contract.Code[startMin:endMin], pushByteSize))
 
 			// attach PushInfo with decoded push data to PUSHn
-			ctx.contract.opsInfo[pc] = NewPushInfo(ctx.contract, pc, *integer)
+			NewPushInfo(ctx.contract, pc, *integer)
 
 			continue
 		}
 		if op == JUMP || op == JUMPI {
-			prevOp := OpCode(code[pc-1])
+			prevPC := pc - 1
+			prevOp := OpCode(code[prevPC])
 			if prevOp >= PUSH1 && prevOp <= PUSH32 {
+
+				pos := ctx.contract.opsInfo[prevPC].(PushInfo).data
+				if valid, _ := ctx.contract.validJumpdest(&pos); !valid {
+					return nil, ErrInvalidJump
+				}
+				NewJumpInfo(ctx.contract, pc, pos.Uint64())
 
 				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
 				if op == JUMP {
-					code[pc-1] = byte(JMP)
+					code[prevPC] = byte(JMP)
 				}
 				if op == JUMPI {
-					code[pc-1] = byte(JMPI)
+					code[prevPC] = byte(JMPI)
 				}
 				code[pc] = byte(NOOP)
-				ctx.contract.opsInfo[pc-1] = NewJumpInfo(ctx.contract, pc)
 
 				// end block
 				break

@@ -20,8 +20,6 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// we are creating an 
-
 type OpInfo interface {
 	opInfo()
 }
@@ -46,9 +44,9 @@ type JumpInfo struct {
 	dest uint64 // pc to jump to
 }
 func (JumpInfo) opInfo() {}
-func NewJumpInfo(c *Contract, pc uint64) *JumpInfo {
+func NewJumpInfo(c *Contract, pc uint64, dest uint64) *JumpInfo {
 	p := new(JumpInfo)
-	p.dest = pc
+	p.dest = dest
 	c.opsInfo[pc] = p
 	return p
 }
