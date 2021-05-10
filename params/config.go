@@ -34,7 +34,7 @@ const (
 	GoerliChainName  = "goerli"
 	DevChainName     = "dev"
 	TurboMineName    = "turbomine"
-	BaikalChainName  = "bailkal"
+	BaikalChainName  = "baikal"
 )
 
 // Genesis hashes to enforce below configs on.
