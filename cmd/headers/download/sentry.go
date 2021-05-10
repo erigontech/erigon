@@ -665,7 +665,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		ss.PeerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+5)
+	ss.PeerTimeMap.Store(peerID, time.Now().Unix()+1)
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
@@ -844,7 +844,7 @@ func trySend(ch chan<- StreamMsg, msg *StreamMsg) {
 	select {
 	case ch <- *msg:
 	default:
-		// TODO make a warning about dropped messages
+		log.Warn("Dropped stream message", "type", msg.msgName)
 	}
 }
 
