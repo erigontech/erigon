@@ -174,8 +174,14 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 			if _, ok := callTracer.tos[addr]; ok {
 				v[common.AddressLength] |= 2
 			}
-			if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
-				return err
+			if j == 0 {
+				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
+					return err
+				}
+			} else {
+				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
+					return err
+				}
 			}
 			copy(prev[:], addr[:])
 		}
