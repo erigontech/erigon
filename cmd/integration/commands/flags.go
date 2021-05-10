@@ -11,6 +11,7 @@ import (
 var (
 	chaindata          string
 	database           string
+	databaseVerbosity  int
 	snapshotMode       string
 	snapshotDir        string
 	toChaindata        string
@@ -91,6 +92,7 @@ func withDatadir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", -1, "Enabling internal db logs. Very high verbosity levels may require recompile db.")
 }
 
 func withDatadir(cmd *cobra.Command) {
@@ -106,6 +108,7 @@ func withDatadir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", -1, "Enabling internal db logs. Very high verbosity levels may require recompile db.")
 }
 
 func withBatchSize(cmd *cobra.Command) {

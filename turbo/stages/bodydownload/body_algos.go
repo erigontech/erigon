@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-const BlockBufferSize = 1024
+const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -206,6 +206,10 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 		for _, blockNum := range req.BlockNums {
 			bd.requests[blockNum-bd.requestedLow] = nil
 		}
+	}
+	select {
+	case bd.DeliveryNotify <- struct{}{}:
+	default:
 	}
 	return delivered, undelivered
 }

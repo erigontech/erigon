@@ -24,7 +24,6 @@ type HeadersCfg struct {
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	wakeUpChan        chan struct{}
 	batchSize         datasize.ByteSize
 	increment         uint64
 }
@@ -36,7 +35,6 @@ func StageHeadersCfg(
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	wakeUpChan chan struct{},
 	batchSize datasize.ByteSize,
 	increment uint64,
 ) HeadersCfg {
@@ -47,7 +45,6 @@ func StageHeadersCfg(
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
-		wakeUpChan:        wakeUpChan,
 		batchSize:         batchSize,
 		increment:         increment,
 	}
@@ -209,7 +206,7 @@ func HeadersForward(
 			prevProgress = progress
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
-		case <-cfg.wakeUpChan:
+		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
 		if initialCycle && cfg.hd.InSync() {

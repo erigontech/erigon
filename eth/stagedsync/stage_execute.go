@@ -2,13 +2,14 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"time"
 	"unsafe"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -99,8 +100,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg,
-	froms, tos *map[string]*roaring.Bitmap, collectorFrom, collectorTo *etl.Collector, bitmapCounter *int) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg, traceCursor ethdb.RwCursorDupSort) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -147,38 +147,37 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 		for _, uncle := range block.Uncles() {
 			callTracer.tos[uncle.Coinbase] = struct{}{}
 		}
-
+		list := make(common.Addresses, len(callTracer.froms)+len(callTracer.tos))
+		i := 0
 		for addr := range callTracer.froms {
-			m, ok := (*froms)[string(addr[:])]
-			if !ok {
-				m = roaring.New()
-				a := addr // To copy addr
-				(*froms)[string(a[:])] = m
-			}
-			m.Add(uint32(blockNum))
-			*bitmapCounter++
+			copy(list[i][:], addr[:])
+			i++
 		}
 		for addr := range callTracer.tos {
-			m, ok := (*tos)[string(addr[:])]
-			if !ok {
-				m = roaring.New()
-				a := addr // To copy addr
-				(*tos)[string(a[:])] = m
-			}
-			m.Add(uint32(blockNum))
-			*bitmapCounter++
+			copy(list[i][:], addr[:])
+			i++
 		}
-
-		if *bitmapCounter > 1000000 {
-			if err := flushBitmaps(collectorFrom, *froms); err != nil {
+		sort.Sort(list)
+		// List may contain duplicates
+		var blockNumEnc [8]byte
+		binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
+		var prev common.Address
+		for j, addr := range list {
+			if j > 0 && prev == addr {
+				continue
+			}
+			var v [common.AddressLength + 1]byte
+			copy(v[:], addr[:])
+			if _, ok := callTracer.froms[addr]; ok {
+				v[common.AddressLength] |= 1
+			}
+			if _, ok := callTracer.tos[addr]; ok {
+				v[common.AddressLength] |= 2
+			}
+			if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
 				return err
 			}
-			if err := flushBitmaps(collectorTo, *tos); err != nil {
-				return err
-			}
-			*froms = map[string]*roaring.Bitmap{}
-			*tos = map[string]*roaring.Bitmap{}
-			*bitmapCounter = 0
+			copy(prev[:], addr[:])
 		}
 	}
 
@@ -211,14 +210,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 
-	var froms, tos map[string]*roaring.Bitmap
-	var collectorFrom, collectorTo *etl.Collector
-	var bitmapCounter int
+	var traceCursor ethdb.RwCursorDupSort
 	if cfg.writeCallTraces {
-		froms = map[string]*roaring.Bitmap{}
-		tos = map[string]*roaring.Bitmap{}
-		collectorFrom = etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		collectorTo = etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		var err error
+		if traceCursor, err = tx.RwCursorDupSort(dbutils.CallTraceSet); err != nil {
+			return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
+		}
+		defer traceCursor.Close()
 	}
 
 	useSilkworm := cfg.silkwormExecutionFunc != nil
@@ -258,7 +256,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg, &froms, &tos, collectorFrom, collectorTo, &bitmapCounter); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg, traceCursor); err != nil {
 				return err
 			}
 		}
@@ -310,12 +308,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
-		}
-	}
-
-	if cfg.writeCallTraces {
-		if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
 
@@ -447,8 +439,21 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	}
 
 	if cfg.writeCallTraces {
-		if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quit, CallTracesCfg{engine: cfg.engine, chainConfig: cfg.chainConfig}); err != nil {
-			return fmt.Errorf("%s: unwinding call traces: %v", logPrefix, err)
+		// Truncate CallTraceSet
+		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+		c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			err = c.DeleteCurrentDuplicates()
+			if err != nil {
+				return err
+			}
 		}
 	}
 

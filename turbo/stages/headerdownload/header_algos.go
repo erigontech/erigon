@@ -555,6 +555,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					linksInFuture = append(linksInFuture, link)
+					log.Warn("Added future link", "hash", link.header.Hash(), "height", link.blockHeight, "timestamp", link.header.Time)
 					continue // prevent removal of the link from the hd.linkQueue
 				} else {
 					skip = true
@@ -778,8 +779,10 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	if height > hd.topSeenHeight {
-		hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
+	if newBlock || hd.topSeenHeight > 0 {
+		if height > hd.topSeenHeight {
+			hd.topSeenHeight = height
+		}
 	}
 	startNum := segment.Headers[start].Number.Uint64()
 	endNum := segment.Headers[end-1].Number.Uint64()
@@ -851,6 +854,10 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 				}
 			}
 		}
+	}
+	select {
+	case hd.DeliveryNotify <- struct{}{}:
+	default:
 	}
 
 	return requestMore
