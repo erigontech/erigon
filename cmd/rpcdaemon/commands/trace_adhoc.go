@@ -641,7 +641,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	parentHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if parentHeader == nil {
 		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}

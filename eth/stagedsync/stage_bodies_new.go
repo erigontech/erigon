@@ -161,7 +161,7 @@ func BodiesForward(
 					return err
 				}
 				if !useExternalTx {
-					if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
+					if err := s.Update(tx, bodyProgress); err != nil {
 						return err
 					}
 					if err = tx.Commit(); err != nil {
@@ -190,9 +190,9 @@ func BodiesForward(
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 		case <-timer.C:
-		//log.Info("RequestQueueTime (bodies) ticked")
+			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.wakeUpChan:
-			//log.Info("bodyLoop woken up by the incoming request")
+			log.Debug("bodyLoop woken up by the incoming request")
 		}
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
@@ -216,7 +216,7 @@ func BodiesForward(
 			return err
 		}
 	}
-	log.Info("Processed", "highest", bodyProgress)
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 	return nil
 }
 

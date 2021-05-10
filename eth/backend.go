@@ -210,6 +210,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
+	if sm.Pruning && !eth.config.EnableDownloadV2 {
+		log.Info("Pruning is on, switching to new downloader")
+		eth.config.EnableDownloadV2 = true
+	}
+
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
 		return nil, err
 	}
