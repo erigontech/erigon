@@ -172,10 +172,10 @@ func resetExec(tx ethdb.RwTx) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CodeBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallTraceSet); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
 	return nil
