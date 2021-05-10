@@ -236,8 +236,8 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 			chainConfig.IstanbulBlock = bigNumber
 		case "berlin":
 			chainConfig.BerlinBlock = bigNumber
-		case "aleut":
-			chainConfig.AleutBlock = bigNumber
+		case "london":
+			chainConfig.LondonBlock = bigNumber
 		default:
 			return fmt.Errorf("unknown fork name [%s]", forkName)
 		}
