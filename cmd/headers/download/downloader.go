@@ -313,7 +313,6 @@ func NewStagedSync(
 			controlServer.sendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
 			controlServer.penalize,
-			controlServer.requestWakeUpHeaders,
 			batchSize,
 			increment,
 		),
@@ -324,7 +323,6 @@ func NewStagedSync(
 			controlServer.penalise,
 			controlServer.updateHead,
 			controlServer,
-			controlServer.requestWakeUpBodies,
 			bodyDownloadTimeout,
 			batchSize,
 		),
@@ -354,23 +352,21 @@ func NewStagedSync(
 }
 
 type ControlServerImpl struct {
-	lock                 sync.RWMutex
-	hd                   *headerdownload.HeaderDownload
-	bd                   *bodydownload.BodyDownload
-	nodeName             string
-	sentries             []proto_sentry.SentryClient
-	requestWakeUpHeaders chan struct{}
-	requestWakeUpBodies  chan struct{}
-	headHeight           uint64
-	headHash             common.Hash
-	headTd               *uint256.Int
-	chainConfig          *params.ChainConfig
-	forks                []uint64
-	genesisHash          common.Hash
-	protocolVersion      uint32
-	networkId            uint64
-	db                   ethdb.Database
-	engine               consensus.Engine
+	lock            sync.RWMutex
+	hd              *headerdownload.HeaderDownload
+	bd              *bodydownload.BodyDownload
+	nodeName        string
+	sentries        []proto_sentry.SentryClient
+	headHeight      uint64
+	headHash        common.Hash
+	headTd          *uint256.Int
+	chainConfig     *params.ChainConfig
+	forks           []uint64
+	genesisHash     common.Hash
+	protocolVersion uint32
+	networkId       uint64
+	db              ethdb.Database
+	engine          consensus.Engine
 }
 
 func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64) {
@@ -427,14 +423,12 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 
 	cs := &ControlServerImpl{
-		nodeName:             nodeName,
-		hd:                   hd,
-		bd:                   bd,
-		sentries:             sentries,
-		requestWakeUpHeaders: make(chan struct{}, 1),
-		requestWakeUpBodies:  make(chan struct{}, 1),
-		db:                   db,
-		engine:               engine,
+		nodeName: nodeName,
+		hd:       hd,
+		bd:       bd,
+		sentries: sentries,
+		db:       db,
+		engine:   engine,
 	}
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
@@ -757,16 +751,6 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 }
 
 func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	defer func() {
-		select {
-		case cs.requestWakeUpHeaders <- struct{}{}:
-		default:
-		}
-		select {
-		case cs.requestWakeUpBodies <- struct{}{}:
-		default:
-		}
-	}()
 	switch inreq.Id {
 	case proto_sentry.MessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq, sentry)

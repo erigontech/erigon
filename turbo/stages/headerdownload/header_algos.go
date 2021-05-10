@@ -855,6 +855,10 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 			}
 		}
 	}
+	select {
+	case hd.DeliveryNotify <- struct{}{}:
+	default:
+	}
 
 	return requestMore
 }

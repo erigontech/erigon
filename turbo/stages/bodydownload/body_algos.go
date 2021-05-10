@@ -207,6 +207,10 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 			bd.requests[blockNum-bd.requestedLow] = nil
 		}
 	}
+	select {
+	case bd.DeliveryNotify <- struct{}{}:
+	default:
+	}
 	return delivered, undelivered
 }
 

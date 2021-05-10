@@ -27,7 +27,6 @@ type BodiesCfg struct {
 	penalise        func(context.Context, []byte)
 	updateHead      func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	blockPropagator adapter.BlockPropagator
-	wakeUpChan      chan struct{}
 	timeout         int
 	batchSize       datasize.ByteSize
 }
@@ -39,11 +38,10 @@ func StageBodiesCfg(
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	blockPropagator adapter.BlockPropagator,
-	wakeUpChan chan struct{},
 	timeout int,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, wakeUpChan: wakeUpChan, timeout: timeout, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -52,6 +50,9 @@ func BodiesForward(
 	ctx context.Context,
 	tx ethdb.RwTx,
 	cfg BodiesCfg) error {
+
+	var d1, d2, d3, d4, d5, d6 time.Duration
+
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -106,41 +107,56 @@ func BodiesForward(
 			}
 		*/
 		if req == nil {
+			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
 			}
+			d1 += time.Since(start)
 		}
 		peer = nil
 		if req != nil {
+			start := time.Now()
 			peer = cfg.bodyReqSend(ctx, req)
+			d2 += time.Since(start)
 		}
 		if req != nil && peer != nil {
+			start := time.Now()
 			if !penalties {
 				log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
 			}
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
+			d3 += time.Since(start)
 		}
 		for req != nil && peer != nil {
+			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
 			}
+			d1 += time.Since(start)
 			peer = nil
 			if req != nil {
+				start = time.Now()
 				peer = cfg.bodyReqSend(ctx, req)
+				d2 += time.Since(start)
 			}
 			if req != nil && peer != nil {
+				start = time.Now()
 				if !penalties {
 					log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
 				}
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
+				d3 += time.Since(start)
 			}
 		}
+		start := time.Now()
 		d := cfg.bd.GetDeliveries()
+		d4 += time.Since(start)
+		start = time.Now()
 		for _, block := range d {
 			if err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
@@ -175,7 +191,8 @@ func BodiesForward(
 				batch = ethdb.NewBatch(tx)
 			}
 		}
-		//log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)
+		d5 += time.Since(start)
+		start = time.Now()
 		if bodyProgress == headerProgress {
 			break
 		}
@@ -191,9 +208,11 @@ func BodiesForward(
 			prevWastedCount = wastedCount
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
-		case <-cfg.wakeUpChan:
+		case <-cfg.bd.DeliveryNotify:
 			log.Debug("bodyLoop woken up by the incoming request")
 		}
+		d6 += time.Since(start)
+		log.Info("Body progress", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := batch.Commit(); err != nil {
