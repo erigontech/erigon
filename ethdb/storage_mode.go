@@ -48,6 +48,8 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 	mode.Initialised = true
 	for _, flag := range flags {
 		switch flag {
+		case 'p':
+			mode.Pruning = true
 		case 'h':
 			mode.History = true
 		case 'r':

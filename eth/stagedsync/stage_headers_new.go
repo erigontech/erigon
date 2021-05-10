@@ -208,7 +208,7 @@ func HeadersForward(
 			logProgressHeaders(logPrefix, prevProgress, progress, batch)
 			prevProgress = progress
 		case <-timer.C:
-			log.Debug("RequestQueueTime (header) ticked")
+			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.wakeUpChan:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
