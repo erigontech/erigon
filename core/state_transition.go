@@ -322,15 +322,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.refundGas(params.RefundQuotient)
 		}
 	}
-	price := st.gasPrice
+	effectiveTip := st.gasPrice
 	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
-		var feeDiff uint256.Int
-		if st.evm.Context.BaseFee.Lt(st.feeCap) {
-			feeDiff.Sub(st.feeCap, st.evm.Context.BaseFee)
-		}
-		price = cmath.Min256(st.tip, &feeDiff)
+		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
 	}
-	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), price))
+	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),

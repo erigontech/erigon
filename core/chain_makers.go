@@ -364,10 +364,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	}
 
 	if chain.Config().IsLondon(parent.Number().Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(parent.Header())
-		header.Eip1559 = true
-	} else if chain.Config().IsLondon(header.Number.Uint64()) {
-		header.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
 

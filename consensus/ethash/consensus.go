@@ -274,29 +274,30 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	if header.GasLimit > cap {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
 	}
+	// Verify that the gasUsed is <= gasLimit
+	if header.GasUsed > header.GasLimit {
+		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
+	}
 	// Verify the block's gas usage and (if applicable) verify the base fee.
-	if chain.Config().IsLondon(header.Number.Uint64()) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsLondon(parent.Number.Uint64())); err != nil {
-			return err
+	if !chain.Config().IsLondon(header.Number.Uint64()) {
+		// Verify BaseFee not present before EIP-1559 fork.
+		if header.BaseFee != nil {
+			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
 		}
-	} else {
-		// Verify that the gasUsed is <= gasLimit
-		if header.GasUsed > header.GasLimit {
-			return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
+		// Verify that the gas limit remains within allowed bounds
+		diff := int64(parent.GasLimit) - int64(header.GasLimit)
+		if diff < 0 {
+			diff *= -1
 		}
-
+		limit := parent.GasLimit / params.GasLimitBoundDivisor
+		if uint64(diff) >= limit || header.GasLimit < params.MinGasLimit {
+			return fmt.Errorf("invalid gas limit: have %d, want %d += %d", header.GasLimit, parent.GasLimit, limit)
+		}
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		// Verify the header's EIP-1559 attributes.
+		return err
 	}
 
-	// Verify that the gas limit remains within allowed bounds
-	diff := int64(parent.GasLimit) - int64(header.GasLimit)
-	if diff < 0 {
-		diff *= -1
-	}
-	limit := parent.GasLimit / params.GasLimitBoundDivisor
-
-	if uint64(diff) >= limit || header.GasLimit < params.MinGasLimit {
-		return fmt.Errorf("invalid gas limit: have %d, want %d += %d", header.GasLimit, parent.GasLimit, limit)
-	}
 	// Verify that the block number is parent's +1
 	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(big.NewInt(1)) != 0 {
 		return consensus.ErrInvalidNumber
@@ -617,7 +618,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 		header.Time,
 		header.Extra,
 	}
-	if header.BaseFee != nil {
+	if header.Eip1559 {
 		enc = append(enc, header.BaseFee)
 	}
 	rlp.Encode(hasher, enc)

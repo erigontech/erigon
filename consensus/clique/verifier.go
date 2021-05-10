@@ -2,6 +2,7 @@ package clique
 
 import (
 	"bytes"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -105,15 +106,28 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
 		return consensus.ErrUnknownAncestor
 	}
-	// Verify the header's EIP-1559 attributes.
-	if chain.Config().IsLondon(header.Number.Uint64()) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsLondon(parent.Number.Uint64())); err != nil {
-			return err
-		}
-	}
 
 	if parent.Time+c.config.Period > header.Time {
 		return errInvalidTimestamp
+	}
+	if !chain.Config().IsLondon(header.Number.Uint64()) {
+		// Verify BaseFee not present before EIP-1559 fork.
+		if header.BaseFee != nil {
+			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
+		}
+		// Verify that the gas limit remains within allowed bounds
+		diff := int64(parent.GasLimit) - int64(header.GasLimit)
+		if diff < 0 {
+			diff *= -1
+		}
+		limit := parent.GasLimit / params.GasLimitBoundDivisor
+
+		if uint64(diff) >= limit || header.GasLimit < params.MinGasLimit {
+			return fmt.Errorf("invalid gas limit: have %d, want %d += %d", header.GasLimit, parent.GasLimit, limit)
+		}
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		// Verify the header's EIP-1559 attributes.
+		return err
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it
