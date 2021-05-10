@@ -34,7 +34,7 @@ const (
 	GoerliChainName  = "goerli"
 	DevChainName     = "dev"
 	TurboMineName    = "turbomine"
-	AleutChainName   = "aleut"
+	BaikalChainName  = "bailkal"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -44,7 +44,7 @@ var (
 	RinkebyGenesisHash   = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash    = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	TurboMineGenesisHash = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
-	AleutGenesisHash     = common.HexToHash("0x10796525313298922a66fafbb2a7f4f426fcf97143ac32d30285b2fdfed105e6")
+	BaikalGenesisHash    = common.HexToHash("0xa0bc5d43c72a990cedeb59d305702602b34c3ee8585e77d03c7a4fa64d79636e")
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -248,9 +248,9 @@ var (
 		Ethash:              new(EthashConfig),
 	}
 
-	// AleutChainConfig contains the chain parameters to run a node on the Aleut test network.
-	AleutChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(7822),
+	// BaikalChainConfig contains the chain parameters to run a node on the Baikal test network.
+	BaikalChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(1642),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -263,9 +263,9 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
-		AleutBlock:          big.NewInt(10),
+		LondonBlock:         big.NewInt(0),
 		Clique: &CliqueConfig{
-			Period: 15,
+			Period: 30,
 			Epoch:  30000,
 		},
 	}
@@ -290,8 +290,7 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		AleutBlock:          nil,
-		BaikalBlock:         nil,
+		LondonBlock:         nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -316,8 +315,7 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		AleutBlock:          nil,
-		BaikalBlock:         nil,
+		LondonBlock:         nil,
 		Ethash:              nil,
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
@@ -339,8 +337,7 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		AleutBlock:          nil,
-		BaikalBlock:         nil,
+		LondonBlock:         nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -416,9 +413,7 @@ type ChainConfig struct {
 	IstanbulBlock       *big.Int `json:"istanbulBlock,omitempty"`       // Istanbul switch block (nil = no fork, 0 = already on istanbul)
 	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
-
-	AleutBlock  *big.Int `json:"aleutBlock,omitempty"`  // Aleut: a test network for EIP-1559.
-	BaikalBlock *big.Int `json:"baikalBlock,omitempty"` // Baikal a dev net for London HF
+	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -455,7 +450,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, Aleut: %v, Baikal: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -469,8 +464,7 @@ func (c *ChainConfig) String() string {
 		c.IstanbulBlock,
 		c.MuirGlacierBlock,
 		c.BerlinBlock,
-		c.AleutBlock,
-		c.BaikalBlock,
+		c.LondonBlock,
 		engine,
 	)
 }
@@ -558,14 +552,9 @@ func (c *ChainConfig) IsBerlin(num uint64) bool {
 	return isForked(c.BerlinBlock, num)
 }
 
-// IsLondon returns whether num represents a block number after the Aleut fork
-func (c *ChainConfig) IsAleut(num uint64) bool {
-	return isForked(c.AleutBlock, num)
-}
-
-// IsBaikal returns whether num represents a block number after the Baikal fork
-func (c *ChainConfig) IsBaikal(num uint64) bool {
-	return isForked(c.AleutBlock, num)
+// IsLondon returns whether num is either equal to the London fork block or greater.
+func (c *ChainConfig) IsLondon(num uint64) bool {
+	return isForked(c.LondonBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -607,8 +596,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "istanbulBlock", block: c.IstanbulBlock},
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
-		{name: "aleutBlock", block: c.AleutBlock},
-		{name: "baikalBlock", block: c.BaikalBlock},
+		{name: "londonBlock", block: c.LondonBlock},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -675,11 +663,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.BerlinBlock, newcfg.BerlinBlock, head) {
 		return newCompatError("Berlin fork block", c.BerlinBlock, newcfg.BerlinBlock)
 	}
-	if isForkIncompatible(c.AleutBlock, newcfg.AleutBlock, head) {
-		return newCompatError("Aleut fork block", c.AleutBlock, newcfg.AleutBlock)
-	}
-	if isForkIncompatible(c.BaikalBlock, newcfg.BaikalBlock, head) {
-		return newCompatError("Baikal fork block", c.BaikalBlock, newcfg.BaikalBlock)
+	if isForkIncompatible(c.LondonBlock, newcfg.LondonBlock, head) {
+		return newCompatError("London fork block", c.LondonBlock, newcfg.LondonBlock)
 	}
 	return nil
 }
@@ -748,7 +733,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsAleut, IsBaikal                             bool
+	IsBerlin, IsLondon                                      bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -768,7 +753,6 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsPetersburg:     c.IsPetersburg(num),
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
-		IsAleut:          c.IsAleut(num),
-		IsBaikal:         c.IsBaikal(num),
+		IsLondon:         c.IsLondon(num),
 	}
 }

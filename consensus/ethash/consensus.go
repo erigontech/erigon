@@ -270,8 +270,8 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
 	}
 	// Verify the block's gas usage and (if applicable) verify the base fee.
-	if chain.Config().IsAleut(header.Number.Uint64()) || chain.Config().IsBaikal(header.Number.Uint64()) {
-		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsAleut(parent.Number.Uint64()) || chain.Config().IsBaikal(parent.Number.Uint64())); err != nil {
+	if chain.Config().IsLondon(header.Number.Uint64()) {
+		if err := misc.VerifyEip1559Header(parent, header, chain.Config().IsLondon(parent.Number.Uint64())); err != nil {
 			return err
 		}
 	} else {
