@@ -336,6 +336,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			integer := info.data
 			callContext.stack.Push(&integer)
 
+        // TODO -- analysis needs to check destinations
 		case JMP:
 			info := callContext.contract.opsInfo[pc].(JumpInfo)
 			pc = info.dest
@@ -351,21 +352,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 					return nil, err
 				}
 			}
-		case JUMP:	
-			dest := locStack.Pop()
-			pc = dest.Uint64()
-		case JUMPI:
-			dest, cond := locStack.Pop(), locStack.Pop()
-			if !cond.IsZero() {
-				pc = dest.Uint64()
-			} else {
-				pc++
-				err = enterBlock(callContext, pc)
-				if err != nil {
-					return nil, err
-				}
-			}
-		case JUMPDEST:
+        case JUMPDEST:
 			err = enterBlock(callContext, pc)
 			if err != nil {
 				return nil, err

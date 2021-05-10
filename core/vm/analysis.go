@@ -80,7 +80,7 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 					code[pc-1] = byte(JMPI)
 				}
 				code[pc] = byte(NOOP)
-				ctx.contract.opsInfo[pc] = NewJumpInfo(ctx.contract, pc)
+				ctx.contract.opsInfo[pc-1] = NewJumpInfo(ctx.contract, pc)
 
 				// end block
 				break

@@ -578,11 +578,19 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 		*pc = pos.Uint64()
 	} else {
 		*pc++
+		err := enterBlock(callContext, *pc)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return nil, nil
 }
 
 func opJumpdest(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	err := enterBlock(callContext, *pc)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
