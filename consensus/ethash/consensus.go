@@ -49,6 +49,11 @@ var (
 	maxUncles                     = 2                                 // Maximum number of uncles allowed in a single block
 	allowedFutureBlockTimeSeconds = int64(15)                         // Max seconds from current time allowed for blocks, before they're considered future blocks
 
+	// calcDifficultyEip3554 is the difficulty adjustment algorithm as specified by EIP 3554.
+	// It offsets the bomb a total of 9.5M blocks.
+	// Specification EIP-3554: https://eips.ethereum.org/EIPS/eip-3554
+	calcDifficultyEip3554 = makeDifficultyCalculator(9500000)
+
 	// calcDifficultyEip2384 is the difficulty adjustment algorithm as specified by EIP 2384.
 	// It offsets the bomb 4M blocks from Constantinople, so in total 9M blocks.
 	// Specification EIP-2384: https://eips.ethereum.org/EIPS/eip-2384
@@ -325,6 +330,8 @@ func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time, pa
 func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
 	next := parentNumber + 1
 	switch {
+	case config.IsLondon(next):
+		return calcDifficultyEip3554(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsMuirGlacier(next):
 		return calcDifficultyEip2384(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsConstantinople(next):
