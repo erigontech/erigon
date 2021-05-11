@@ -43,7 +43,7 @@ const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
 	handshakeTimeout  = 5 * time.Second
-	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
+	maxPermitsPerPeer = 8 // How many outstanding requests per peer we may have
 )
 
 func nodeKey() *ecdsa.PrivateKey {
@@ -675,7 +675,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		ss.Peers.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	peerInfo.AddDeadline(time.Now().Add(5 * time.Second))
+	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 
