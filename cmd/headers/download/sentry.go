@@ -210,7 +210,7 @@ func MakeProtocols(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				return p.(*p2p.Peer).Info()
+				return p.(*PeerInfo).peer.Info()
 			},
 			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
 		},
@@ -634,15 +634,15 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 	var maxPermits int
 	now := time.Now()
 	ss.Peers.Range(func(key, value interface{}) bool {
-		valUint, _ := value.(uint64)
-		if valUint >= minBlock {
-			peerID := key.(string)
-			x, _ := ss.Peers.Load(peerID)
-			peerInfo, _ := x.(*PeerInfo)
-			if peerInfo == nil {
-				return true
-			}
+		peerID := key.(string)
+		x, _ := ss.Peers.Load(peerID)
+		peerInfo, _ := x.(*PeerInfo)
+		if peerInfo == nil {
+			return true
+		}
+		if peerInfo.height >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 			if deadlines < maxPermitsPerPeer {
 				permits := maxPermitsPerPeer - deadlines
 				if permits > maxPermits {
