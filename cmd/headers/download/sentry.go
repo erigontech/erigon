@@ -710,6 +710,10 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	x, ok := ss.Peers.Load(peerID)
 	if !ok {
+		ss.Peers.Range(func(key, value interface{}) bool {
+			fmt.Printf("peerID: %s\n", key.(string))
+			return true
+		})
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
 	peerInfo := x.(*PeerInfo)
@@ -778,12 +782,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 			return true
 		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
-			if x, ok := ss.Peers.Load(peerID); ok {
-				peerInfo := x.(*PeerInfo)
-				if peerInfo != nil {
-					peerInfo.Remove()
-				}
-			}
+			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
 			return false
@@ -818,12 +817,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 			return true
 		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
-			if x, ok := ss.Peers.Load(peerID); ok {
-				peerInfo := x.(*PeerInfo)
-				if peerInfo != nil {
-					peerInfo.Remove()
-				}
-			}
+			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
 			return false
