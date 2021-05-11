@@ -43,7 +43,7 @@ const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
 	handshakeTimeout  = 5 * time.Second
-	maxPermitsPerPeer = 8 // How many outstanding requests per peer we may have
+	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
 )
 
 func nodeKey() *ecdsa.PrivateKey {
