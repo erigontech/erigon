@@ -648,6 +648,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 				if permits > maxPermits {
 					maxPermits = permits
 					foundPeerID = peerID
+					foundPeerInfo = peerInfo
 				}
 			}
 		}
