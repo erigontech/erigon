@@ -686,7 +686,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -723,7 +723,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -756,7 +756,7 @@ if false { fmt.Fprintf(os.Stderr,"CALL: %v\n",*pc) }
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
 		retSize.Clear()
@@ -788,7 +788,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), res)
+		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
 		retSize.Clear()
