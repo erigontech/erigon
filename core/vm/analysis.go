@@ -78,6 +78,7 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 					return nil, ErrInvalidJump
 				}
 				NewJumpInfo(ctx.contract, pc, pos.Uint64())
+				ctx.contract.opsInfo[prevPC] = nil
 
 				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
 				if op == JUMP {

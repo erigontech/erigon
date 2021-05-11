@@ -677,7 +677,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 		gas += params.CallStipend
 	}
 
-	res, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, &value, false /* bailout */)
+	ret, returnGas, err := interpreter.evm.Call(callContext.contract, toAddr, args, gas, &value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -695,7 +695,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	callContext.contract.Gas += returnGas
 
-	return res, nil
+	return ret, nil
 }
 
 func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -715,7 +715,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 		gas += params.CallStipend
 	}
 
-	res, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, &value)
+	ret, returnGas, err := interpreter.evm.CallCode(callContext.contract, toAddr, args, gas, &value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -732,7 +732,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	callContext.contract.Gas += returnGas
 
-	return res, nil
+	return ret, nil
 }
 
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -748,7 +748,7 @@ if false { fmt.Fprintf(os.Stderr,"CALL: %v\n",*pc) }
 	// Get arguments from the memory.
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	res, returnGas, err := interpreter.evm.DelegateCall(callContext.contract, toAddr, args, gas)
+	ret, returnGas, err := interpreter.evm.DelegateCall(callContext.contract, toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -765,7 +765,7 @@ if false { fmt.Fprintf(os.Stderr,"CALL: %v\n",*pc) }
 	}
 	callContext.contract.Gas += returnGas
 
-	return res, nil
+	return ret, nil
 }
 
 func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -780,7 +780,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	// Get arguments from the memory.
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	res, returnGas, err := interpreter.evm.StaticCall(callContext.contract, toAddr, args, gas)
+	ret, returnGas, err := interpreter.evm.StaticCall(callContext.contract, toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -797,7 +797,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	callContext.contract.Gas += returnGas
 
-	return res, nil
+	return ret, nil
 }
 
 // operation.reverts
@@ -805,14 +805,14 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 
 func opRevert(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
-	res := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
-	return res, ErrExecutionReverted
+	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
+	return ret, ErrExecutionReverted
 }
 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	offset, size := callContext.stack.Pop(), callContext.stack.Pop()
-	res := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
-	return res, nil
+	ret := callContext.memory.GetPtr(offset.Uint64(), size.Uint64())
+	return ret, nil
 }
 
 // operation.halts
