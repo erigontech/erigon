@@ -8,12 +8,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
 const BlockBufferSize = 128
@@ -221,7 +224,34 @@ func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 	bd.wastedCount += wasted
 }
 
-func (bd *BodyDownload) GetDeliveries() []*types.Block {
+// ValidateBody validates the given block's uncles and verifies the block
+// header's transaction and uncle roots. The headers are assumed to be already
+// validated at this point.
+func (bd *BodyDownload) ValidateBody(block *types.Block, r consensus.ChainReader) (headerdownload.Penalty, error) {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+
+	// Check whether the block's known, and if not, that it's linkable
+	foundInDB := r.GetBlock(block.Hash(), block.NumberU64())
+	if foundInDB != nil {
+		return headerdownload.BadBlockPenalty, core.ErrKnownBlock
+	}
+
+	// Header validity is known at this point, check the uncles and transactions
+	header := block.Header()
+	if err := bd.Engine.VerifyUncles(r, block); err != nil {
+		return headerdownload.BadBlockPenalty, err
+	}
+	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
+		return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash)
+	}
+	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
+		return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
+	}
+	return headerdownload.NoPenalty, nil
+}
+
+func (bd *BodyDownload) GetDeliveries(validateBody func(block *types.Block) (headerdownload.Penalty, error)) ([]*types.Block, []headerdownload.PenaltyItem) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	var i uint64
@@ -231,10 +261,22 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 	// Move the deliveries back
 	// bd.requestedLow can only be moved forward if there are consecutive block numbers present in the bd.delivered map
 	var d []*types.Block
+	var penalties []headerdownload.PenaltyItem
 	if i > 0 {
 		d = make([]*types.Block, i)
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
+		for j := uint64(0); j < i; j++ {
+			penalty, err := validateBody(d[j])
+			if penalty == headerdownload.NoPenalty {
+				continue
+			}
+			if err != nil {
+				// Log them?
+			}
+			penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[j].peerID), Reason: headerdownload.BadBlockPenalty})
+		}
+
 		copy(bd.requests[:], bd.requests[i:])
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
@@ -242,7 +284,7 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		}
 		bd.requestedLow += i
 	}
-	return d
+	return d, penalties
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {

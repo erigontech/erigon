@@ -5,6 +5,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
@@ -30,6 +31,7 @@ type BodyDownload struct {
 	peerMap          map[string]int
 	prefetchedBlocks *PrefetchedBlocks
 	DeliveryNotify   chan struct{}
+	Engine           consensus.Engine
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -41,7 +43,7 @@ type BodyRequest struct {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(outstandingLimit int) *BodyDownload {
+func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[DoubleHash]uint64),
 		outstandingLimit: uint64(outstandingLimit),

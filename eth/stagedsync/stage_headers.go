@@ -31,13 +31,13 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 
 // Implements consensus.ChainReader
 type ChainReader struct {
-	Cfg *params.ChainConfig
+	Cfg params.ChainConfig
 	Db  ethdb.Getter
 }
 
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *params.ChainConfig {
-	return cr.Cfg
+	return &cr.Cfg
 }
 
 // CurrentHeader retrieves the current header from the local chain.
@@ -89,7 +89,7 @@ func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.Chai
 		seals[len(seals)-1] = true
 	}
 
-	return engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	return engine.VerifyHeaders(ChainReader{*config, db}, headers, seals)
 }
 
 func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, verifyDuration time.Duration) (bool, bool, uint64, error) {

@@ -10,12 +10,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
 var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
@@ -24,10 +27,11 @@ type BodiesCfg struct {
 	db              ethdb.RwKV
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
-	penalise        func(context.Context, []byte)
+	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	updateHead      func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
+	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
 }
 
@@ -35,13 +39,14 @@ func StageBodiesCfg(
 	db ethdb.RwKV,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
-	penalise func(context.Context, []byte),
+	penalise func(context.Context, []headerdownload.PenaltyItem),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
+	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -154,7 +159,11 @@ func BodiesForward(
 			}
 		}
 		start := time.Now()
-		d := cfg.bd.GetDeliveries()
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
+		d, penalties := cfg.bd.GetDeliveries(func(block *types.Block) (headerdownload.Penalty, error) {
+			return cfg.bd.ValidateBody(block, cr)
+		})
+		cfg.penalise(ctx, penalties)
 		d4 += time.Since(start)
 		start = time.Now()
 		for _, block := range d {

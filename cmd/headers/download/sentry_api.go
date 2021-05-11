@@ -126,11 +126,17 @@ func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
 	}
 }
 
-func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
-	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: gointerfaces.ConvertBytesToH512(peer), Penalty: proto_sentry.PenaltyKind_Kick}
-	for _, sentry := range cs.sentries {
-		if _, err := sentry.PenalizePeer(ctx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {
-			log.Error("Could not penalise", "peer", peer, "error", err)
+// sending list of penalties to all sentries
+func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
+	for i := range penalties {
+		outreq := proto_sentry.PenalizePeerRequest{
+			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
+			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+		}
+		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
+			}
 		}
 	}
 }

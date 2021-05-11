@@ -320,10 +320,11 @@ func NewStagedSync(
 			db,
 			controlServer.bd,
 			controlServer.sendBodyRequest,
-			controlServer.penalise,
+			controlServer.penalize,
 			controlServer.updateHead,
 			controlServer,
 			bodyDownloadTimeout,
+			*controlServer.chainConfig,
 			batchSize,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
@@ -420,7 +421,7 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chainConfig.ChainID)
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
-	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
+	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
 
 	cs := &ControlServerImpl{
 		nodeName: nodeName,
@@ -558,21 +559,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, in *proto_sentry.
 		log.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
-}
-
-// sending list of penalties to all sentries
-func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
-	for i := range penalties {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
-			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-		}
-		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-				log.Error("Could not send penalty", "err", err1)
-			}
-		}
-	}
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
