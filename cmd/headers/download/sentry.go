@@ -708,15 +708,11 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
-	x, ok := ss.Peers.Load(peerID)
-	if !ok {
-		ss.Peers.Range(func(key, value interface{}) bool {
-			fmt.Printf("peerID: %s\n", key.(string))
-			return true
-		})
+	x, _ := ss.Peers.Load(peerID)
+	peerInfo := x.(*PeerInfo)
+	if peerInfo == nil {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
-	peerInfo := x.(*PeerInfo)
 	var msgcode uint64
 	switch inreq.Data.Id {
 	case proto_sentry.MessageId_GetBlockHeaders:
