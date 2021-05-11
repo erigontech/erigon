@@ -24,7 +24,7 @@ func TestResolve1(t *testing.T) {
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
-	r := NewSubTrieLoader(0)
+	r := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
 	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaabbbbb")}, []int{40}, false)
@@ -47,7 +47,7 @@ func TestResolve2(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewSubTrieLoader(0)
+	r := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa"))
 	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
@@ -71,7 +71,7 @@ func TestResolve2Keep(t *testing.T) {
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewSubTrieLoader(0)
+	r := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
@@ -96,7 +96,7 @@ func TestResolve3Keep(t *testing.T) {
 	putStorage("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
 
-	r := NewSubTrieLoader(0)
+	r := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	subTries, err := r.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{common.Hex2Bytes("aaaaaaaaaa")}, []int{40}, false)
@@ -125,7 +125,7 @@ func TestTrieSubTrieLoader(t *testing.T) {
 	putStorage("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	putStorage("bccccccccccccccccccccccccccccccc", "")
 
-	resolver := NewSubTrieLoader(0)
+	resolver := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	rs.AddKey(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -162,7 +162,7 @@ func TestTwoStorageItems(t *testing.T) {
 	rootHash := common.HexToHash("85737b049107f866fedbd6d787077fc2c245f4748e28896a3e8ee82c377ecdcf")
 	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
-	resolver := NewSubTrieLoader(0)
+	resolver := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	subTries, err1 := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	require.NoError(err1, "resolve error")
@@ -179,7 +179,7 @@ func TestTwoStorageItems(t *testing.T) {
 	//	t.Errorf("failed ot hash hasState: %v", err)
 	//}
 
-	resolver2 := NewSubTrieLoader(0)
+	resolver2 := NewSubTrieLoader()
 	rs2 := NewRetainList(0)
 	rs2.AddHex([]byte{0xd})
 	subTries, err = resolver2.LoadSubTries(db, 0, rs2, nil /* HashCollector */, [][]byte{{0xd0}}, []int{4}, false)
@@ -214,7 +214,7 @@ func TestTwoAccounts(t *testing.T) {
 
 	expect := common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7")
 
-	resolver := NewSubTrieLoader(0)
+	resolver := NewSubTrieLoader()
 	rs := NewRetainList(0)
 	rs.AddKey(key1)
 	subTries, err1 := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
@@ -241,7 +241,7 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
 
 	rs := NewRetainList(0)
-	resolver := NewSubTrieLoader(0)
+	resolver := NewSubTrieLoader()
 	_, err := resolver.LoadSubTries(db, 0, rs, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
 	require.NotNil(t, err)
 }

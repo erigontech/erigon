@@ -36,7 +36,7 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	input := []byte{0x80}
 	var r Receipt
 	err := rlp.DecodeBytes(input, &r)
-	if !errors.Is(err, errEmptyTypedReceipt) {
+	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
 	}
 }
@@ -128,26 +128,34 @@ func TestDeriveFields(t *testing.T) {
 	to2 := common.HexToAddress("0x2")
 	to3 := common.HexToAddress("0x3")
 	txs := Transactions{
-		NewTx(&LegacyTx{
-			Nonce:    1,
-			Value:    uint256.NewInt().SetUint64(1),
-			Gas:      1,
-			GasPrice: uint256.NewInt().SetUint64(1),
-		}),
-		NewTx(&LegacyTx{
-			To:       &to2,
-			Nonce:    2,
-			Value:    uint256.NewInt().SetUint64(2),
-			Gas:      2,
-			GasPrice: uint256.NewInt().SetUint64(2),
-		}),
-		NewTx(&AccessListTx{
-			To:       &to3,
-			Nonce:    3,
-			Value:    uint256.NewInt().SetUint64(3),
-			Gas:      3,
-			GasPrice: uint256.NewInt().SetUint64(3),
-		}),
+		&LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 1,
+				Value: u256.Num1,
+				Gas:   1,
+			},
+			GasPrice: u256.Num1,
+		},
+		&LegacyTx{
+			CommonTx: CommonTx{
+				To:    &to2,
+				Nonce: 2,
+				Value: u256.Num2,
+				Gas:   2,
+			},
+			GasPrice: u256.Num2,
+		},
+		&AccessListTx{
+			LegacyTx: LegacyTx{
+				CommonTx: CommonTx{
+					To:    &to3,
+					Nonce: 3,
+					Value: uint256.NewInt().SetUint64(3),
+					Gas:   3,
+				},
+				GasPrice: uint256.NewInt().SetUint64(3),
+			},
+		},
 	}
 	// Create the corresponding receipts
 	receipts := Receipts{
@@ -195,7 +203,7 @@ func TestDeriveFields(t *testing.T) {
 		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct
-	signer := MakeSigner(params.TestChainConfig, number)
+	signer := MakeSigner(params.TestChainConfig, number.Uint64())
 
 	logIndex := uint(0)
 	for i := range receipts {
@@ -214,15 +222,15 @@ func TestDeriveFields(t *testing.T) {
 		if receipts[i].TransactionIndex != uint(i) {
 			t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, receipts[i].TransactionIndex, i)
 		}
-		if receipts[i].GasUsed != txs[i].Gas() {
-			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, receipts[i].GasUsed, txs[i].Gas())
+		if receipts[i].GasUsed != txs[i].GetGas() {
+			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, receipts[i].GasUsed, txs[i].GetGas())
 		}
-		if txs[i].To() != nil && receipts[i].ContractAddress != (common.Address{}) {
+		if txs[i].GetTo() != nil && receipts[i].ContractAddress != (common.Address{}) {
 			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), (common.Address{}).String())
 		}
-		from, _ := Sender(signer, txs[i])
-		contractAddress := crypto.CreateAddress(from, txs[i].Nonce())
-		if txs[i].To() == nil && receipts[i].ContractAddress != contractAddress {
+		from, _ := txs[i].Sender(*signer)
+		contractAddress := crypto.CreateAddress(from, txs[i].GetNonce())
+		if txs[i].GetTo() == nil && receipts[i].ContractAddress != contractAddress {
 			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), contractAddress.String())
 		}
 		for j := range receipts[i].Logs {

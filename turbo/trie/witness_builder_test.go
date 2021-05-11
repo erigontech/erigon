@@ -8,17 +8,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
-func TestBlockWitnessBinary(t *testing.T) {
+func TestBlockWitness(t *testing.T) {
 	tr := New(common.Hash{})
 	tr.Update([]byte("ABCD0001"), []byte("val1"))
 	tr.Update([]byte("ABCE0002"), []byte("val2"))
 
-	trBin := HexToBin(tr)
-
-	rl := NewBinaryRetainList(2)
+	rl := NewRetainList(2)
 	rl.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, false)
+	bwb := NewWitnessBuilder(tr.root, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -29,22 +27,22 @@ func TestBlockWitnessBinary(t *testing.T) {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
+	tr1, err := BuildTrieFromWitness(w, false)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
-	if trBin.Trie().Hash() != trBin1.Hash() {
+	if tr.Hash() != tr1.Hash() {
 		t.Errorf("Reconstructed block witness has different root hash than source trie")
 	}
 
 	expected := []byte("val1")
-	got, _ := trBin1.Get([]byte("ABCD0001"))
+	got, _ := tr1.Get([]byte("ABCD0001"))
 	if !bytes.Equal(got, expected) {
 		t.Errorf("unexpected value: %x (expected %x)", got, expected)
 	}
 }
 
-func TestBlockWitnessBinaryAccount(t *testing.T) {
+func TestBlockWitnessAccount(t *testing.T) {
 	tr := New(common.Hash{})
 
 	account := accounts.NewAccount()
@@ -52,12 +50,10 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 
 	tr.UpdateAccount([]byte("ABCD0001"), &account)
 
-	trBin := HexToBin(tr)
-
-	rl := NewBinaryRetainList(2)
+	rl := NewRetainList(2)
 	rl.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, false)
+	bwb := NewWitnessBuilder(tr.root, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -68,11 +64,11 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
+	trBin1, err := BuildTrieFromWitness(w, false)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
-	if trBin.Trie().Hash() != trBin1.Hash() {
+	if tr.Hash() != trBin1.Hash() {
 		t.Errorf("Reconstructed block witness has different root hash than source trie")
 	}
 

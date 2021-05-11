@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -46,21 +47,21 @@ type ttFork struct {
 
 func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, isHomestead bool, isIstanbul bool) (*common.Address, *common.Hash, error) {
-		tx := new(types.Transaction)
-		if err := rlp.DecodeBytes(rlpData, tx); err != nil {
+		tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpData), 0))
+		if err != nil {
 			return nil, nil, err
 		}
-		sender, err := types.Sender(signer, tx)
+		sender, err := tx.Sender(signer)
 		if err != nil {
 			return nil, nil, err
 		}
 		// Intrinsic gas
-		requiredGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, isHomestead, isIstanbul)
+		requiredGas, err := core.IntrinsicGas(tx.GetData(), tx.GetAccessList(), tx.GetTo() == nil, isHomestead, isIstanbul)
 		if err != nil {
 			return nil, nil, err
 		}
-		if requiredGas > tx.Gas() {
-			return nil, nil, fmt.Errorf("insufficient gas ( %d < %d )", tx.Gas(), requiredGas)
+		if requiredGas > tx.GetGas() {
+			return nil, nil, fmt.Errorf("insufficient gas ( %d < %d )", tx.GetGas(), requiredGas)
 		}
 		h := tx.Hash()
 		return &sender, &h, nil
@@ -68,20 +69,20 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 
 	for _, testcase := range []struct {
 		name        string
-		signer      types.Signer
+		signer      *types.Signer
 		fork        ttFork
 		isHomestead bool
 		isIstanbul  bool
 	}{
-		{"Frontier", types.FrontierSigner{}, tt.Frontier, false, false},
-		{"Homestead", types.HomesteadSigner{}, tt.Homestead, true, false},
-		{"EIP150", types.HomesteadSigner{}, tt.EIP150, true, false},
-		{"EIP158", types.NewEIP155Signer(config.ChainID), tt.EIP158, true, false},
-		{"Byzantium", types.NewEIP155Signer(config.ChainID), tt.Byzantium, true, false},
-		{"Constantinople", types.NewEIP155Signer(config.ChainID), tt.Constantinople, true, false},
-		{"Istanbul", types.NewEIP155Signer(config.ChainID), tt.Istanbul, true, true},
+		{"Frontier", types.MakeFrontierSigner(), tt.Frontier, false, false},
+		{"Homestead", types.LatestSignerForChainID(nil), tt.Homestead, true, false},
+		{"EIP150", types.LatestSignerForChainID(nil), tt.EIP150, true, false},
+		{"EIP158", types.LatestSignerForChainID(config.ChainID), tt.EIP158, true, false},
+		{"Byzantium", types.LatestSignerForChainID(config.ChainID), tt.Byzantium, true, false},
+		{"Constantinople", types.LatestSignerForChainID(config.ChainID), tt.Constantinople, true, false},
+		{"Istanbul", types.LatestSignerForChainID(config.ChainID), tt.Istanbul, true, true},
 	} {
-		sender, txhash, err := validateTx(tt.RLP, testcase.signer, testcase.isHomestead, testcase.isIstanbul)
+		sender, txhash, err := validateTx(tt.RLP, *testcase.signer, testcase.isHomestead, testcase.isIstanbul)
 
 		if testcase.fork.Sender == (common.UnprefixedAddress{}) {
 			if err == nil {

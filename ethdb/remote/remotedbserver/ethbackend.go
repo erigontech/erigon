@@ -1,10 +1,9 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -14,35 +13,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth    core.EthBackend
-	events *Events
-	ethash *ethash.API
+	eth       core.EthBackend
+	events    *Events
+	ethash    *ethash.API
+	gitCommit string
 }
 
-func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi}
-}
-
-func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
-	signedTx := new(types.Transaction)
-	out := &remote.AddReply{Hash: gointerfaces.ConvertHashToH256(common.Hash{})}
-
-	if err := rlp.DecodeBytes(in.Signedtx, signedTx); err != nil {
-		return out, err
-	}
-
-	if err := s.eth.TxPool().AddLocal(signedTx); err != nil {
-		return out, err
-	}
-
-	out.Hash = gointerfaces.ConvertHashToH256(signedTx.Hash())
-	return out, nil
+func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API, gitCommit string) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
@@ -67,23 +52,21 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	log.Debug("establishing event subscription channel with the RPC daemon")
-	wg := sync.WaitGroup{}
-	wg.Add(1)
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-subscribeServer.Context().Done():
-			wg.Done()
 			return subscribeServer.Context().Err()
 		default:
 		}
 
-		payload, err := json.Marshal(h)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, h); err != nil {
 			log.Warn("error while marshaling a header", "err", err)
 			return err
 		}
+		payload := buf.Bytes()
 
-		err = subscribeServer.Send(&remote.SubscribeReply{
+		err := subscribeServer.Send(&remote.SubscribeReply{
 			Type: remote.Event_HEADER,
 			Data: payload,
 		})
@@ -99,8 +82,68 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		return err
 	})
 
+	s.events.AddPendingLogsSubscription(func(data types.Logs) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			return subscribeServer.Context().Err()
+		default:
+		}
+
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
+			log.Warn("error while marshaling a pending logs", "err", err)
+			return err
+		}
+		payload := buf.Bytes()
+
+		err := subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_PENDING_LOGS,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
+	s.events.AddPendingBlockSubscription(func(data *types.Block) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			return subscribeServer.Context().Err()
+		default:
+		}
+
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, data); err != nil {
+			log.Warn("error while marshaling a pending block", "err", err)
+			return err
+		}
+		payload := buf.Bytes()
+
+		err := subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_PENDING_BLOCK,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
 	log.Info("event subscription channel established with the RPC daemon")
-	wg.Wait()
+	<-subscribeServer.Context().Done()
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
 }
@@ -146,4 +189,13 @@ func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) 
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	return &remote.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+}
+
+func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
+	// Hardcoding to avoid import cycle
+	return &remote.ProtocolVersionReply{Id: 66}, nil
+}
+
+func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
+	return &remote.ClientVersionReply{NodeName: common.MakeName("TurboGeth", params.VersionWithCommit(s.gitCommit, ""))}, nil
 }

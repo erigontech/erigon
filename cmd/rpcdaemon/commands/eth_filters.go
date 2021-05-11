@@ -11,7 +11,7 @@ import (
 )
 
 // NewPendingTransactionFilter new transaction filter
-func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (hexutil.Uint64, error) {
+func (api *APIImpl) NewPendingTransactionFilter(ctx context.Context) (hexutil.Uint64, error) {
 	return 0, fmt.Errorf(NotImplemented, "eth_newPendingTransactionFilter")
 }
 
@@ -46,8 +46,10 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		headers := make(chan *types.Header)
+		headers := make(chan *types.Header, 1)
+		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
+		defer api.filters.UnsubscribeHeads(id)
 
 		for {
 			select {
@@ -57,10 +59,39 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 					log.Warn("error while notifying subscription", "err", err)
 				}
 			case <-rpcSub.Err():
-				api.filters.Unsubscribe(id)
 				return
-			case <-notifier.Closed():
-				api.filters.Unsubscribe(id)
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
+// NewPendingTransactions send a notification each time a new (header) block is appended to the chain.
+func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		txsCh := make(chan []types.Transaction, 1)
+		defer close(txsCh)
+		id := api.filters.SubscribePendingTxs(txsCh)
+		defer api.filters.UnsubscribePendingTxs(id)
+
+		for {
+			select {
+			case txs := <-txsCh:
+				for _, t := range txs {
+					err := notifier.Notify(rpcSub.ID, t.Hash())
+					if err != nil {
+						log.Warn("error while notifying subscription", "err", err)
+					}
+				}
+			case <-rpcSub.Err():
 				return
 			}
 		}

@@ -649,9 +649,9 @@ func TestHTTPSnapshot(t *testing.T) {
 	}
 	<-eventsDone
 	// create a snapshot
-	snap, err := client.CreateSnapshot()
-	if err != nil {
-		t.Fatalf("error creating snapshot: %s", err)
+	snap, snapErr := client.CreateSnapshot()
+	if snapErr != nil {
+		t.Fatalf("error creating snapshot: %s", snapErr)
 	}
 	for i, state := range states {
 		gotState := snap.Nodes[i].Snapshots["test"]
@@ -682,9 +682,9 @@ func TestHTTPSnapshot(t *testing.T) {
 	// subscribe to events so we can check them later
 	events := make(chan *Event, 100)
 	var opts SubscribeOpts
-	sub, err := client.SubscribeNetwork(events, opts)
-	if err != nil {
-		t.Fatalf("error subscribing to network events: %s", err)
+	sub, subErr := client.SubscribeNetwork(events, opts)
+	if subErr != nil {
+		t.Fatalf("error subscribing to network events: %s", subErr)
 	}
 	defer sub.Unsubscribe()
 

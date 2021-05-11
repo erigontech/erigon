@@ -33,7 +33,7 @@ const ReviveABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\
 var ReviveBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea26469706673582212205d3337629b15c78b9915ebb927a3e974fe4df0d021b8c091ca1923cf2258ed2564736f6c63430007020033"
 
 // DeployRevive deploys a new Ethereum contract, binding an instance of Revive to it.
-func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Revive, error) {
+func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Revive, error) {
 	parsed, err := abi.JSON(strings.NewReader(ReviveABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Revive *ReviveRaw) Call(opts *bind.CallOpts, result *[]interface{}, metho
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Revive *ReviveRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Revive *ReviveRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Revive.Contract.ReviveTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Revive.Contract.ReviveTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,33 +179,33 @@ func (_Revive *ReviveCallerRaw) Call(opts *bind.CallOpts, result *[]interface{},
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Revive *ReviveTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Revive *ReviveTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Revive.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive *ReviveTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Revive *ReviveTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Revive.Contract.contract.Transact(opts, method, params...)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0xa5e38751.
 //
 // Solidity: function deploy(uint256 salt) returns()
-func (_Revive *ReviveTransactor) Deploy(opts *bind.TransactOpts, salt *big.Int) (*types.Transaction, error) {
+func (_Revive *ReviveTransactor) Deploy(opts *bind.TransactOpts, salt *big.Int) (types.Transaction, error) {
 	return _Revive.contract.Transact(opts, "deploy", salt)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0xa5e38751.
 //
 // Solidity: function deploy(uint256 salt) returns()
-func (_Revive *ReviveSession) Deploy(salt *big.Int) (*types.Transaction, error) {
+func (_Revive *ReviveSession) Deploy(salt *big.Int) (types.Transaction, error) {
 	return _Revive.Contract.Deploy(&_Revive.TransactOpts, salt)
 }
 
 // Deploy is a paid mutator transaction binding the contract method 0xa5e38751.
 //
 // Solidity: function deploy(uint256 salt) returns()
-func (_Revive *ReviveTransactorSession) Deploy(salt *big.Int) (*types.Transaction, error) {
+func (_Revive *ReviveTransactorSession) Deploy(salt *big.Int) (types.Transaction, error) {
 	return _Revive.Contract.Deploy(&_Revive.TransactOpts, salt)
 }
 

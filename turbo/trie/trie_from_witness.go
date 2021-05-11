@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
-func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
+func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 	hb := NewHashBuilder(false)
 	for _, operator := range witness.Operators {
 		switch op := operator.(type) {
@@ -66,7 +66,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 			}
 
 			// Incarnation is always needed for a hashbuilder.
-			// but it is just our implementation detail needed for contract self-descruction suport with our
+			// but it is just our implementation detail needed for contract self-descruction support with our
 			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
 			incarnation := uint64(0)
 
@@ -86,18 +86,10 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 		fmt.Printf("\n")
 	}
 	if !hb.hasRoot() {
-		if isBinary {
-			return NewBinary(EmptyRoot), nil
-		}
 		return New(EmptyRoot), nil
 	}
 	r := hb.root()
-	var tr *Trie
-	if isBinary {
-		tr = NewBinary(hb.rootHash())
-	} else {
-		tr = New(hb.rootHash())
-	}
+	tr := New(hb.rootHash())
 	tr.root = r
 	return tr, nil
 }

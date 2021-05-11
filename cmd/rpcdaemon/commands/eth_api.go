@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"sync"
@@ -8,14 +9,17 @@ import (
 	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -30,10 +34,14 @@ type EthAPI interface {
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
+	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutil.Bytes, error)
+	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error)
+	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+	GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
@@ -64,7 +72,7 @@ type EthAPI interface {
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
+	EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
@@ -92,27 +100,27 @@ type BaseAPI struct {
 	_genesisSetOnce sync.Once
 }
 
-func (api *BaseAPI) chainConfig(db ethdb.Database) (*params.ChainConfig, error) {
-	cfg, _, err := api.chainConfigWithGenesis(db)
+func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
+	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
 }
 
 //nolint:unused
-func (api *BaseAPI) genesis(db ethdb.Database) (*types.Block, error) {
-	_, genesis, err := api.chainConfigWithGenesis(db)
+func (api *BaseAPI) genesis(tx ethdb.Tx) (*types.Block, error) {
+	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConfig, *types.Block, error) {
+func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *types.Block, error) {
 	if api._chainConfig != nil {
 		return api._chainConfig, api._genesis, nil
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(db, 0)
+	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err := rawdb.ReadChainConfig(db, genesisBlock.Hash())
+	cc, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,69 +136,118 @@ func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConf
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend   core.ApiBackend
-	db           ethdb.Database
-	chainContext core.ChainContext
-	GasCap       uint64
-	filters      *rpcfilters.Filters
+	ethBackend core.ApiBackend
+	txPool     txpool.TxpoolClient
+	db         ethdb.RoKV
+	GasCap     uint64
+	filters    *rpcfilters.Filters
+	pending    *rpchelper.Pending
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.Database, eth core.ApiBackend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
+func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+	if gascap == 0 {
+		gascap = uint64(math.MaxUint64 / 2)
+	}
+
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,
 		ethBackend: eth,
+		txPool:     txPool,
 		GasCap:     gascap,
 		filters:    filters,
+		pending:    pending,
 	}
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash    `json:"blockHash"`
-	BlockNumber      *hexutil.Big    `json:"blockNumber"`
-	From             common.Address  `json:"from"`
-	Gas              hexutil.Uint64  `json:"gas"`
-	GasPrice         *hexutil.Big    `json:"gasPrice"`
-	Hash             common.Hash     `json:"hash"`
-	Input            hexutil.Bytes   `json:"input"`
-	Nonce            hexutil.Uint64  `json:"nonce"`
-	R                *hexutil.Big    `json:"r"`
-	S                *hexutil.Big    `json:"s"`
-	To               *common.Address `json:"to"`
-	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
-	V                *hexutil.Big    `json:"v"`
-	Value            *hexutil.Big    `json:"value"`
+	BlockHash        *common.Hash      `json:"blockHash"`
+	BlockNumber      *hexutil.Big      `json:"blockNumber"`
+	From             common.Address    `json:"from"`
+	Gas              hexutil.Uint64    `json:"gas"`
+	GasPrice         *hexutil.Big      `json:"gasPrice,omitempty"`
+	Tip              *hexutil.Big      `json:"tip,omitempty"`
+	FeeCap           *hexutil.Big      `json:"feeCap,omitempty"`
+	Hash             common.Hash       `json:"hash"`
+	Input            hexutil.Bytes     `json:"input"`
+	Nonce            hexutil.Uint64    `json:"nonce"`
+	To               *common.Address   `json:"to"`
+	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
+	Value            *hexutil.Big      `json:"value"`
+	Type             hexutil.Uint64    `json:"type"`
+	Accesses         *types.AccessList `json:"accessList,omitempty"`
+	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
+	V                *hexutil.Big      `json:"v"`
+	R                *hexutil.Big      `json:"r"`
+	S                *hexutil.Big      `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
-	var signer types.Signer = types.FrontierSigner{}
-	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainId().ToBig())
-	}
-	from, _ := types.Sender(signer, tx)
-	v, r, s := tx.RawSignatureValues()
-
+func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+	// Determine the signer. For replay-protected transactions, use the most permissive
+	// signer, because we assume that signers are backwards-compatible with old
+	// transactions. For non-protected transactions, the homestead signer signer is used
+	// because the return value of ChainId is zero for those transactions.
+	var chainId *big.Int
 	result := &RPCTransaction{
-		From:     from,
-		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
-		Hash:     tx.Hash(),
-		Input:    hexutil.Bytes(tx.Data()),
-		Nonce:    hexutil.Uint64(tx.Nonce()),
-		R:        (*hexutil.Big)(r.ToBig()),
-		S:        (*hexutil.Big)(s.ToBig()),
-		To:       tx.To(),
-		V:        (*hexutil.Big)(v.ToBig()),
-		Value:    (*hexutil.Big)(tx.Value().ToBig()),
+		Type:  hexutil.Uint64(tx.Type()),
+		Gas:   hexutil.Uint64(tx.GetGas()),
+		Hash:  tx.Hash(),
+		Input: hexutil.Bytes(tx.GetData()),
+		Nonce: hexutil.Uint64(tx.GetNonce()),
+		To:    tx.GetTo(),
+		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
+	switch t := tx.(type) {
+	case *types.LegacyTx:
+		chainId = types.DeriveChainId(&t.V).ToBig()
+		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+	case *types.AccessListTx:
+		chainId = t.ChainID.ToBig()
+		result.ChainID = (*hexutil.Big)(chainId)
+		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+	case *types.DynamicFeeTransaction:
+		chainId = t.ChainID.ToBig()
+		result.ChainID = (*hexutil.Big)(chainId)
+		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
+		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
+	}
+	signer := types.LatestSignerForChainID(chainId)
+	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
+}
+
+// newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
+func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
+	return newRPCTransaction(tx, common.Hash{}, 0, 0)
+}
+
+// newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
+func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.Bytes, error) {
+	txs := b.Transactions()
+	if index >= uint64(len(txs)) {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	err := txs[index].MarshalBinary(&buf)
+	return buf.Bytes(), err
 }

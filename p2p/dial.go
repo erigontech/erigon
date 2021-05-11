@@ -559,15 +559,3 @@ func cleanupDialErr(err error) error {
 	}
 	return err
 }
-
-func sleep(d time.Duration, quit chan struct{}) {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		//nothing to do
-	case <-quit:
-		return
-	}
-}

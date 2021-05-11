@@ -18,7 +18,6 @@ package eth
 
 import (
 	"math/big"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 )
@@ -34,8 +33,6 @@ type ethPeerInfo struct {
 // ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
 type ethPeer struct {
 	*eth.Peer
-
-	syncDrop *time.Timer // Connection dropper if `eth` sync progress isn't validated in time
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.

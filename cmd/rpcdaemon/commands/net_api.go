@@ -37,7 +37,7 @@ func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
 // Version implements net_version. Returns the current network id.
 func (api *NetAPIImpl) Version(ctx context.Context) (string, error) {
 	if api.ethBackend == nil {
-		// We're running in --chaindata mode or otherwise cannot get the backend
+		// We're running in --datadir mode or otherwise cannot get the backend
 		return "", fmt.Errorf(NotAvailableChainData, "net_version")
 	}
 

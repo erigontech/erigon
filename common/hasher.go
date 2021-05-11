@@ -2,8 +2,9 @@ package common
 
 import (
 	"fmt"
-	"golang.org/x/crypto/sha3"
 	"hash"
+
+	"golang.org/x/crypto/sha3"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports

@@ -72,6 +72,7 @@ func TestDatadirCreation(t *testing.T) {
 			t.Fatalf("failed to close node: %v", err)
 		}
 	}
+	_ = node
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different

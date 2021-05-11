@@ -16,9 +16,13 @@ import (
 )
 
 func TestReceiptCbor(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	kv := db.RwKV()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	require := require.New(t)
+
+	err := kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockReceiptsPrefix)
 	})
 	require.NoError(err)
@@ -27,13 +31,18 @@ func TestReceiptCbor(t *testing.T) {
 	migrator.Migrations = []Migration{receiptsCborEncode}
 	err = migrator.Apply(db, "")
 	require.NoError(err)
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 
-	err = receiptsCborEncode.Up(db, "tmp-test-dir", nil, func(db ethdb.Putter, key []byte, isDone bool) error {
+	err = receiptsCborEncode.Up(tx, "tmp-test-dir", nil, func(db ethdb.Putter, key []byte, isDone bool) error {
 		return nil
 	})
 	require.NoError(err)
 
-	err = receiptsCborEncode.Up(db, "tmp-test-dir", []byte("load"), func(db ethdb.Putter, key []byte, isDone bool) error {
+	err = receiptsCborEncode.Up(tx, "tmp-test-dir", []byte("load"), func(db ethdb.Putter, key []byte, isDone bool) error {
 		return nil
 	})
 	require.True(errors.Is(err, ErrMigrationETLFilesDeleted))
@@ -42,7 +51,7 @@ func TestReceiptCbor(t *testing.T) {
 func TestReceiptOnePerTx(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.BlockReceiptsPrefix)
 	})
 	require.NoError(err)

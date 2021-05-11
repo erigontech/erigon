@@ -17,81 +17,14 @@
 package ethash
 
 import (
-	"io/ioutil"
 	"math/big"
-	"math/rand"
-	"os"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
-
-// Tests that ethash works correctly in test mode.
-func TestTestMode(t *testing.T) {
-	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
-
-	ethash := NewTester(nil, false)
-	defer ethash.Close()
-
-	results := make(chan consensus.ResultWithContext)
-	err := ethash.Seal(consensus.NewCancel(), nil, types.NewBlockWithHeader(header), results, nil)
-	if err != nil {
-		t.Fatalf("failed to seal block: %v", err)
-	}
-	select {
-	case block := <-results:
-		header.Nonce = types.EncodeNonce(block.Nonce())
-		header.MixDigest = block.MixDigest()
-		if err := ethash.verifySeal(nil, header, false); err != nil {
-			t.Fatalf("unexpected verification error: %v", err)
-		}
-	case <-time.NewTimer(4 * time.Second).C:
-		t.Error("sealing result timeout")
-	}
-}
-
-// This test checks that cache lru logic doesn't crash under load.
-// It reproduces https://github.com/ledgerwatch/turbo-geth/issues/14943
-func TestCacheFileEvict(t *testing.T) {
-	// turbo-geth: all caches are in RAM, no files are actually used there
-	tmpdir, err := ioutil.TempDir("", "ethash-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpdir)
-	e := New(Config{CachesInMem: 3, PowMode: ModeTest}, nil, false)
-	defer e.Close()
-
-	workers := 8
-	epochs := 100
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go verifyTest(&wg, e, i, epochs)
-	}
-	wg.Wait()
-}
-
-func verifyTest(wg *sync.WaitGroup, e *Ethash, workerIndex, epochs int) {
-	defer wg.Done()
-
-	const wiggle = 4 * epochLength
-	r := rand.New(rand.NewSource(int64(workerIndex)))
-	for epoch := 0; epoch < epochs; epoch++ {
-		block := int64(epoch)*epochLength - wiggle/2 + r.Int63n(wiggle)
-		if block < 0 {
-			block = 0
-		}
-		header := &types.Header{Number: big.NewInt(block), Difficulty: big.NewInt(100)}
-		// we expect an error there sometimes
-		e.verifySeal(nil, header, false) //nolint:errcheck
-	}
-}
 
 func TestRemoteSealer(t *testing.T) {
 	ethash := NewTester(nil, false)
@@ -106,9 +39,10 @@ func TestRemoteSealer(t *testing.T) {
 	sealhash := ethash.SealHash(header)
 
 	// Push new work.
-	results := make(chan consensus.ResultWithContext)
-	_ = ethash.Seal(consensus.NewCancel(), nil, block, results, nil)
-
+	results := make(chan *types.Block)
+	if err := ethash.Seal(nil, block, results, nil); err != nil {
+		t.Fatal(err)
+	}
 	var (
 		work [4]string
 		err  error
@@ -124,8 +58,10 @@ func TestRemoteSealer(t *testing.T) {
 	header = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(1000)}
 	block = types.NewBlockWithHeader(header)
 	sealhash = ethash.SealHash(header)
-	_ = ethash.Seal(consensus.NewCancel(), nil, block, results, nil)
-
+	err = ethash.Seal(nil, block, results, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if work, err = api.GetWork(); err != nil || work[0] != sealhash.Hex() {
 		t.Error("expect to return the latest pushed work")
 	}
@@ -159,7 +95,7 @@ func TestHashRate(t *testing.T) {
 func TestClosedRemoteSealer(t *testing.T) {
 	ethash := NewTester(nil, false)
 	time.Sleep(1 * time.Second) // ensure exit channel is listening
-	ethash.Close()
+	_ = ethash.Close()
 
 	api := &API{ethash}
 	if _, err := api.GetWork(); err != errEthashStopped {

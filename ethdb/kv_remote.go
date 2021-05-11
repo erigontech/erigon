@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // generate the messages and services
@@ -30,15 +31,15 @@ import (
 //go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
 
 type remoteOpts struct {
-	DialAddress string
-	inMemConn   *bufconn.Listener // for tests
-	bucketsCfg  BucketConfigsFunc
+	DialAddress                              string
+	inMemConn                                *bufconn.Listener // for tests
+	bucketsCfg                               BucketConfigsFunc
+	versionMajor, versionMinor, versionPatch uint32 // KV interface version of the client - to perform compatibility check when opening
 }
 
 type RemoteKV struct {
 	opts     remoteOpts
 	remoteKV remote.KVClient
-	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
@@ -54,13 +55,12 @@ type remoteTx struct {
 }
 
 type remoteCursor struct {
-	initialized bool
-	id          uint32
-	ctx         context.Context
-	stream      remote.KV_TxClient
-	tx          *remoteTx
-	bucketName  string
-	bucketCfg   dbutils.BucketConfigItem
+	id         uint32
+	ctx        context.Context
+	stream     remote.KV_TxClient
+	tx         *remoteTx
+	bucketName string
+	bucketCfg  dbutils.BucketConfigItem
 }
 
 type remoteCursorDupSort struct {
@@ -86,7 +86,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (*RemoteKV, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -144,11 +144,36 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
 		return nil, err
 	}
 
+	kvClient := remote.NewKVClient(conn)
+	// Perform compatibility check
+	go func() {
+		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+		if err != nil {
+			log.Error("getting Version info from remove KV", "error", err)
+			cancelFn()
+			return
+		}
+		var compatible bool
+		if versionReply.Major != opts.versionMajor {
+			compatible = false
+		} else if versionReply.Minor != opts.versionMinor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+				"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+			cancelFn()
+			return
+		}
+		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	}()
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKVClient(conn),
-		remoteDB: remote.NewDBClient(conn),
+		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
 	}
@@ -160,16 +185,19 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, error) {
 	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() KV {
-	db, err := opts.Open("", "", "")
+func (opts remoteOpts) MustOpen() RwKV {
+	db, err := opts.Open("", "", "", func() {})
 	if err != nil {
 		panic(err)
 	}
 	return db
 }
 
-func NewRemote() remoteOpts {
-	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
+// NewRemote defines new remove KV connection (without actually opening it)
+// version parameters represent the version the KV client is expecting,
+// compatibility check will be performed when the KV connection opens
+func NewRemote(versionMajor, versionMinor, versionPatch uint32) remoteOpts {
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs, versionMajor: versionMajor, versionMinor: versionMinor, versionPatch: versionPatch}
 }
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
@@ -193,17 +221,9 @@ func (db *RemoteKV) Close() {
 	}
 }
 
-func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
-	sizeReply, err := db.remoteDB.Size(ctx, &remote.SizeRequest{})
-	if err != nil {
-		return 0, err
-	}
-	return sizeReply.Size, nil
-}
-
 func (db *RemoteKV) CollectMetrics() {}
 
-func (db *RemoteKV) Begin(ctx context.Context) (Tx, error) {
+func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -218,7 +238,7 @@ func (db *RemoteKV) BeginRw(ctx context.Context) (RwTx, error) {
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -232,6 +252,7 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx RwTx) error) (err erro
 }
 
 func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
+func (tx *remoteTx) CollectMetrics()                          {}
 func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
 
 func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
@@ -241,7 +262,7 @@ func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
 
-func (tx *remoteTx) Commit(ctx context.Context) error {
+func (tx *remoteTx) Commit() error {
 	panic("remote db is read-only")
 }
 
@@ -252,31 +273,15 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
-func (c *remoteCursor) Prefix(v []byte) Cursor {
-	return c
-}
-
-func (c *remoteCursor) Prefetch(v uint) Cursor {
-	return c
-}
-
-func (tx *remoteTx) BucketSize(name string) (uint64, error) {
-	sizeReply, err := tx.db.remoteDB.BucketSize(tx.ctx, &remote.BucketSizeRequest{BucketName: name})
-	if err != nil {
-		return 0, err
-	}
-	return sizeReply.Size, nil
-}
-
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
-	c := tx.Cursor(bucket)
+	c, _ := tx.Cursor(bucket)
 	defer c.Close()
 	_, val, err = c.SeekExact(key)
 	return val, err
 }
 
-func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
-	c := tx.Cursor(bucket)
+func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
+	c, _ := tx.Cursor(bucket)
 	defer c.Close()
 	k, _, err := c.Seek(key)
 	if err != nil {
@@ -286,40 +291,26 @@ func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (c *remoteCursor) SeekExact(key []byte) (k, val []byte, err error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.seekExact(key)
 }
 
 func (c *remoteCursor) Prev() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prev()
 }
 
-func (tx *remoteTx) Cursor(bucket string) Cursor {
+func (tx *remoteTx) Cursor(bucket string) (Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
-	return c
-}
-
-func (c *remoteCursor) initCursor() error {
-	if c.initialized {
-		return nil
-	}
 	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_OPEN, BucketName: c.bucketName}); err != nil {
-		return err
+		return nil, err
 	}
 	msg, err := c.stream.Recv()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.id = msg.CursorID
-	c.initialized = true
-	return nil
+	return c, nil
 }
 
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
@@ -482,40 +473,25 @@ func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
 }
 
 func (c *remoteCursor) Current() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.getCurrent()
 }
 
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.setRange(seek)
 }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.first()
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.next()
 }
 
 func (c *remoteCursor) Last() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.last()
 }
 
@@ -549,45 +525,29 @@ func (tx *remoteTx) closeGrpcStream() {
 }
 
 func (c *remoteCursor) Close() {
-	if c.initialized {
-		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
-			_, _ = c.stream.Recv()
-		}
-		c.initialized = false
+	if c.stream == nil {
+		return
+	}
+	st := c.stream
+	c.stream = nil
+	if err := st.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
+		_, _ = st.Recv()
 	}
 }
 
-func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
-	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
+func (tx *remoteTx) CursorDupSort(bucket string) (CursorDupSort, error) {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteCursorDupSort{remoteCursor: c.(*remoteCursor)}, nil
 }
-
-//func (c *remoteCursorDupSort) initCursor() error {
-//	if c.initialized {
-//		return nil
-//	}
-//
-//	if c.bucketCfg.AutoDupSortKeysConversion {
-//		return fmt.Errorf("class remoteCursorDupSort not compatible with AutoDupSortKeysConversion buckets")
-//	}
-//
-//	if c.bucketCfg.Flags&dbutils.DupSort == 0 {
-//		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag dbutils.DupSort")
-//	}
-//
-//	return c.remoteCursor.initCursor()
-//}
 
 func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.seekBothExact(key, value)
 }
 
 func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.getBothRange(key, value)
 }
 
@@ -598,38 +558,20 @@ func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error       { panic("not
 func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)     { panic("not supported") }
 
 func (c *remoteCursorDupSort) FirstDup() ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.firstDup()
 }
 func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.nextDup()
 }
 func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.nextNoDup()
 }
 func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prevDup()
 }
 func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
 	return c.prevNoDup()
 }
 func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
 	return c.lastDup()
 }

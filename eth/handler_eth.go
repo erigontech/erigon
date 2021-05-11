@@ -24,9 +24,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -35,8 +36,8 @@ import (
 // packets that are sent as replies or broadcasts.
 type ethHandler handler
 
-func (h *ethHandler) Chain() *core.BlockChain { return h.chain }
-func (h *ethHandler) TxPool() eth.TxPool      { return h.txpool }
+func (h *ethHandler) DB() ethdb.RwKV     { return h.database.(ethdb.HasRwKV).RwKV() }
+func (h *ethHandler) TxPool() eth.TxPool { return h.txpool }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
@@ -106,27 +107,9 @@ func (h *ethHandler) handleHeaders(peer *eth.Peer, headers []*types.Header) erro
 	if p == nil {
 		return errors.New("unregistered during callback")
 	}
-	// If no headers were received, but we're expencting a checkpoint header, consider it that
-	if len(headers) == 0 && p.syncDrop != nil {
-		// Stop the timer either way, decide later to drop or not
-		p.syncDrop.Stop()
-		p.syncDrop = nil
-	}
 	// Filter out any explicitly requested headers, deliver the rest to the downloader
 	filter := len(headers) == 1
 	if filter {
-		// If it's a potential sync progress check, validate the content and advertised chain weight
-		if p.syncDrop != nil && headers[0].Number.Uint64() == h.checkpointNumber {
-			// Disable the sync drop timer
-			p.syncDrop.Stop()
-			p.syncDrop = nil
-
-			// Validate the header and either drop the peer or continue
-			if headers[0].Hash() != h.checkpointHash {
-				return errors.New("checkpoint hash mismatch")
-			}
-			return nil
-		}
 		// Otherwise if it's a whitelisted block, validate against the set
 		if want, ok := h.whitelist[headers[0].Number.Uint64()]; ok {
 			if hash := headers[0].Hash(); want != hash {
@@ -149,7 +132,7 @@ func (h *ethHandler) handleHeaders(peer *eth.Peer, headers []*types.Header) erro
 
 // handleBodies is invoked from a peer's message handler when it transmits a batch
 // of block bodies for the local node to process.
-func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]*types.Transaction, uncles [][]*types.Header) error {
+func (h *ethHandler) handleBodies(peer *eth.Peer, txs [][]types.Transaction, uncles [][]*types.Header) error {
 	// Filter out any explicitly requested bodies, deliver the rest to the downloader
 	filter := len(txs) > 0 || len(uncles) > 0
 	if filter {
@@ -173,7 +156,7 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 		unknownNumbers = make([]uint64, 0, len(numbers))
 	)
 	for i := 0; i < len(hashes); i++ {
-		if !h.chain.HasBlock(hashes[i], numbers[i]) {
+		if !rawdb.HasBody(h.database, hashes[i], numbers[i]) {
 			unknownHashes = append(unknownHashes, hashes[i])
 			unknownNumbers = append(unknownNumbers, numbers[i])
 		}
@@ -183,6 +166,7 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 			log.Error("blockFetcher.Notify", "error", err)
 		}
 	}
+	h.chainSync.handlePeerEvent() // Make sure sync start a new iteration to get this
 	return nil
 }
 

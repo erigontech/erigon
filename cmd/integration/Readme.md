@@ -1,7 +1,7 @@
 Integration - tool to run TurboGeth stages in custom way: run/reset single stage, run all stages but reorg every X blocks, etc...
 
 ## Examples 
-All commands require parameter `--chaindata=<datadir>/tg/chaindata` - I will skip it for readability.
+All commands require parameter `--datadir=<datadir>` - I will skip it for readability.
 
 ```
 integration --help
@@ -36,7 +36,7 @@ Pre-requirements of `state_stages` command:
 
 ```
 make all
-./build/bin/integration state_stages --chaindata=<datadir>/tg/chaindata --unwind=10 --unwind.every=20 --pprof
+./build/bin/integration state_stages --datadir=<datadir> --unwind=10 --unwind.every=20 --pprof
 integration reset_state # drops all stages after Senders stage (including it's db tables DB tables)
 ```
 
@@ -54,7 +54,7 @@ For example:
 
 ```
 make all
-./build/bin/integration stage_hash_state --chaindata=<datadir>/tg/chaindata --reset
-./build/bin/integration stage_trie --chaindata=<datadir>/tg/chaindata --reset
+./build/bin/integration stage_hash_state --datadir=<datadir> --reset
+./build/bin/integration stage_trie --datadir=<datadir> --reset
 # Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```

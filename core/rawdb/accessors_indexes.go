@@ -36,7 +36,15 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db databaseReader, hash common.Hash) *uint64 {
+func ReadTxLookupEntry(db ethdb.Tx, hash common.Hash) *uint64 {
+	data, _ := db.GetOne(dbutils.TxLookupPrefix, hash.Bytes())
+	if len(data) == 0 {
+		return nil
+	}
+	number := new(big.Int).SetBytes(data).Uint64()
+	return &number
+}
+func ReadTxLookupEntryDeprecated(db ethdb.DatabaseReader, hash common.Hash) *uint64 {
 	data, _ := db.Get(dbutils.TxLookupPrefix, hash.Bytes())
 	if len(data) == 0 {
 		return nil
@@ -47,7 +55,7 @@ func ReadTxLookupEntry(db databaseReader, hash common.Hash) *uint64 {
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
-func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
+func WriteTxLookupEntries(db ethdb.Putter, block *types.Block) {
 	for _, tx := range block.Transactions() {
 		data := block.Number().Bytes()
 		if err := db.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
@@ -57,13 +65,13 @@ func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
-func DeleteTxLookupEntry(db DatabaseDeleter, hash common.Hash) error {
+func DeleteTxLookupEntry(db ethdb.Deleter, hash common.Hash) error {
 	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes(), nil)
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func ReadTransaction(db ethdb.Database, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
+func ReadTransaction(db ethdb.Tx, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64) {
 	blockNumber := ReadTxLookupEntry(db, hash)
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
@@ -81,6 +89,39 @@ func ReadTransaction(db ethdb.Database, hash common.Hash) (*types.Transaction, c
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0
 	}
+	senders, err1 := ReadSenders(db, blockHash, *blockNumber)
+	if err1 != nil {
+		log.Error("ReadSenders failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
+	body.SendersToTxs(senders)
+	for txIndex, tx := range body.Transactions {
+		if tx.Hash() == hash {
+			return tx, blockHash, *blockNumber, uint64(txIndex)
+		}
+	}
+	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	return nil, common.Hash{}, 0, 0
+}
+
+func ReadTransactionDeprecated(db ethdb.Getter, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64) {
+	blockNumber := ReadTxLookupEntryDeprecated(db, hash)
+	if blockNumber == nil {
+		return nil, common.Hash{}, 0, 0
+	}
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
+	if blockHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, 0
+	}
+	body := ReadBodyDeprecated(db, blockHash, *blockNumber)
+	if body == nil {
+		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
+		return nil, common.Hash{}, 0, 0
+	}
 	for txIndex, tx := range body.Transactions {
 		if tx.Hash() == hash {
 			return tx, blockHash, *blockNumber, uint64(txIndex)
@@ -92,9 +133,9 @@ func ReadTransaction(db ethdb.Database, hash common.Hash) (*types.Transaction, c
 
 // ReadReceipt retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
-func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+func ReadReceipt(db ethdb.Getter, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber := ReadTxLookupEntry(db, hash)
+	blockNumber := ReadTxLookupEntryDeprecated(db, hash)
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
 	}
@@ -107,7 +148,7 @@ func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Ha
 		return nil, common.Hash{}, 0, 0
 	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := ReadReceipts(db, blockHash, *blockNumber)
+	receipts := ReadReceiptsDeprecated(db, blockHash, *blockNumber)
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == hash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)
@@ -119,13 +160,13 @@ func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Ha
 
 // ReadBloomBits retrieves the compressed bloom bit vector belonging to the given
 // section and bit index from the.
-func ReadBloomBits(db databaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
+func ReadBloomBits(db ethdb.DatabaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
 	return db.Get(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head))
 }
 
 // WriteBloomBits stores the compressed bloom bits vector belonging to the given
 // section and bit index.
-func WriteBloomBits(db DatabaseWriter, bit uint, section uint64, head common.Hash, bits []byte) {
+func WriteBloomBits(db ethdb.Putter, bit uint, section uint64, head common.Hash, bits []byte) {
 	if err := db.Put(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head), bits); err != nil {
 		log.Crit("Failed to store bloom bits", "err", err)
 	}

@@ -30,163 +30,14 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	check "gopkg.in/check.v1"
+	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// Tests that updating a state trie does not leak any database writes prior to
-// actually committing the state.
-func TestUpdateLeaks(t *testing.T) {
-	// Create an empty state database
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
-
-	// Update it with some accounts
-	for i := byte(0); i < 255; i++ {
-		tds.StartNewBuffer()
-		addr := common.BytesToAddress([]byte{i})
-		state.AddBalance(addr, uint256.NewInt().SetUint64(uint64(11*i)))
-		state.SetNonce(addr, uint64(42*i))
-		if i%2 == 0 {
-			val := uint256.NewInt().SetBytes([]byte{i, i, i, i})
-			state.SetState(addr, &common.Hash{i, i, i}, *val)
-		}
-		if i%3 == 0 {
-			state.SetCode(addr, []byte{i, i, i, i, i})
-		}
-		_ = state.FinalizeTx(context.Background(), tds.TrieStateWriter())
-	}
-
-	_, err := tds.ComputeTrieRoots()
-	if err != nil {
-		t.Fatal("error while ComputeTrieRoots", err)
-	}
-
-	// Ensure that no data was leaked into the database
-	keys, err := db.Keys()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < len(keys); i += 2 {
-		if string(keys[i]) == dbutils.PreimagePrefix {
-			continue
-		}
-		value, _ := db.Get(string(keys[i]), keys[i+1])
-		t.Errorf("State leaked into database: %x:%x -> %x", keys[i], keys[i+1], value)
-	}
-}
-
-// Tests that no intermediate state of an object is stored into the database,
-// only the one right before the commit.
-func TestIntermediateLeaks(t *testing.T) {
-	// Create two state databases, one transitioning to the final state, the other final from the beginning
-	transDb := ethdb.NewMemDatabase()
-	defer transDb.Close()
-	finalDb := ethdb.NewMemDatabase()
-	defer finalDb.Close()
-	transTds := NewTrieDbState(common.Hash{}, transDb, 0)
-	transState := New(transTds)
-	transTds.StartNewBuffer()
-	finalTds := NewTrieDbState(common.Hash{}, finalDb, 0)
-	finalState := New(finalTds)
-	finalTds.StartNewBuffer()
-
-	modify := func(state *IntraBlockState, addr common.Address, i, tweak byte) {
-		state.SetBalance(addr, uint256.NewInt().SetUint64(uint64(11*i+tweak)))
-		state.SetNonce(addr, uint64(42*i+tweak))
-		if i%2 == 0 {
-			val := uint256.NewInt()
-			state.SetState(addr, &common.Hash{i, i, i, 0}, *val)
-			val.SetBytes([]byte{i, i, i, i, tweak})
-			state.SetState(addr, &common.Hash{i, i, i, tweak}, *val)
-		}
-		if i%3 == 0 {
-			state.SetCode(addr, []byte{i, i, i, i, i, tweak})
-		}
-	}
-
-	// Modify the transient state.
-	for i := byte(0); i < 255; i++ {
-		modify(transState, common.Address{i}, i, 0)
-	}
-
-	// Write modifications to trie.
-	if err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter()); err != nil {
-		t.Fatal("error while finalizing state", err)
-	}
-
-	transTds.StartNewBuffer()
-
-	// Overwrite all the data with new values in the transient database.
-	for i := byte(0); i < 255; i++ {
-		modify(transState, common.Address{i}, i, 99)
-		modify(finalState, common.Address{i}, i, 99)
-	}
-
-	// Commit and cross check the databases.
-
-	if err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter()); err != nil {
-		t.Fatal("error while finalizing state", err)
-	}
-
-	if _, err := transTds.ComputeTrieRoots(); err != nil {
-		t.Fatal("error while ComputeTrieRoots", err)
-	}
-
-	transTds.SetBlockNr(1)
-
-	if err := transState.CommitBlock(context.Background(), transTds.DbStateWriter()); err != nil {
-		t.Fatal("failed to commit transition state", err)
-	}
-
-	if err := finalState.FinalizeTx(context.Background(), finalTds.TrieStateWriter()); err != nil {
-		t.Fatal("error while finalizing state", err)
-	}
-
-	if _, err := finalTds.ComputeTrieRoots(); err != nil {
-		t.Fatal("error while ComputeTrieRoots", err)
-	}
-
-	finalTds.SetBlockNr(1)
-	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
-		t.Fatalf("failed to commit final state: %v", err)
-	}
-	finalKeys, err2 := finalDb.Keys()
-	if err2 != nil {
-		t.Fatal(err2)
-	}
-	for i := 0; i < len(finalKeys); i += 2 {
-		if string(finalKeys[i]) == dbutils.PreimagePrefix {
-			continue
-		}
-		if _, err := transDb.Get(string(finalKeys[i]), finalKeys[i+1]); err != nil {
-			val, _ := finalDb.Get(string(finalKeys[i]), finalKeys[i+1])
-			t.Errorf("entry missing from the transition database: %x:%x -> %x", finalKeys[i], finalKeys[i+1], val)
-		}
-	}
-	transKeys, err := transDb.Keys()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < len(transKeys); i += 2 {
-		if string(transKeys[i]) == dbutils.PreimagePrefix {
-			continue
-		}
-		if _, err := finalDb.Get(string(transKeys[i]), transKeys[i+1]); err != nil {
-			val, _ := transDb.Get(string(transKeys[i]), transKeys[i+1])
-			t.Errorf("entry missing in the transition database: %x:%x -> %x", transKeys[i], transKeys[i+1], val)
-		}
-	}
-}
-
 func TestSnapshotRandom(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth. tag: mining")
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
@@ -470,19 +321,12 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.FinalizeTx(context.Background(), s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(context.Background(), s.w)
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
 
-	_, err = s.tds.ComputeTrieRoots()
-	if err != nil {
-		c.Fatal("error while ComputeTrieRoots", err)
-	}
-
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
+	err = s.state.CommitBlock(context.Background(), s.w)
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
@@ -512,8 +356,7 @@ func TestAccessList(t *testing.T) {
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
+	state := New(NewPlainStateReader(db))
 	state.accessList = newAccessList()
 
 	verifyAddrs := func(astrings ...string) {

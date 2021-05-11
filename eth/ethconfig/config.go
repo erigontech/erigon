@@ -26,13 +26,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/consensus/db"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -57,7 +58,6 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: downloader.StagedSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -65,15 +65,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:               1,
-	TxLookupLimit:           2350000,
-	DatabaseCache:           512,
-	TrieCleanCache:          256,
-	TrieCleanCacheJournal:   "triecache",
-	TrieCleanCacheRejournal: 60 * time.Minute,
-	TrieDirtyCache:          256,
-	TrieTimeout:             60 * time.Minute,
-	StorageMode:             ethdb.DefaultStorageMode,
+	NetworkID:   1,
+	StorageMode: ethdb.DefaultStorageMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -112,7 +105,7 @@ func init() {
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
-// Config contains configuration options for of the ETH and LES protocols.
+// Config contains configuration options for ETH protocol.
 type Config struct {
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -120,57 +113,38 @@ type Config struct {
 
 	// Protocol options
 	NetworkID uint64 // Network ID to use for selecting peers to connect to
-	SyncMode  downloader.SyncMode
 
 	// This can be set to list of enrtree:// URLs which will be queried for
 	// for nodes to connect to.
-	EthDiscoveryURLs  []string
-	SnapDiscoveryURLs []string
+	EthDiscoveryURLs []string
 
-	Pruning       bool   // Whether to disable pruning and flush everything to disk
-	NoPrefetch    bool   // Whether to disable prefetching and only load state on demand
-	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
+	Pruning bool
+
+	EnableDownloadV2 bool
+	P2PEnabled       bool
 
 	StorageMode     ethdb.StorageMode
-	CacheSize       datasize.ByteSize // Cache size for execution stage
 	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool
+	SnapshotLayout  bool
 
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
 	ExternalSnapshotDownloaderAddr string
 
-	// DownloadOnly is set when the node does not need to process the blocks, but simply
-	// download them
-	DownloadOnly        bool
-	ArchiveSyncInterval int
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruningTimeout      time.Duration
-
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	// Database options
-	SkipBcVersionCheck bool `toml:"-"`
-	DatabaseHandles    int  `toml:"-"`
-	DatabaseCache      int
-	DatabaseFreezer    string
-
-	TrieCleanCache          int
-	TrieCleanCacheJournal   string        `toml:",omitempty"` // Disk journal directory for trie cache to survive node restarts
-	TrieCleanCacheRejournal time.Duration `toml:",omitempty"` // Time interval to regenerate the journal for clean cache
-	TrieDirtyCache          int
-	TrieTimeout             time.Duration
-	SnapshotCache           int
-	Preimages               bool
+	Preimages bool
 
 	// Mining options
 	Miner params.MiningConfig
 
 	// Ethash options
 	Ethash ethash.Config
+
+	Clique params.SnapshotConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -201,37 +175,44 @@ type Config struct {
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	// Berlin block override (TODO: remove after the fork)
-	StagedSync     *stagedsync.StagedSync `toml:"-"`
-	OverrideBerlin *big.Int               `toml:",omitempty"`
+	StagedSync *stagedsync.StagedSync `toml:"-"`
 }
 
-// CreateConsensusEngine creates a consensus engine for the given chain configuration.
-func CreateConsensusEngine(chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
-	// If proof-of-authority is requested, set it up
-	if chainConfig.Clique != nil {
-		return clique.New(chainConfig.Clique, db)
+func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {
+	var eng consensus.Engine
+
+	switch consensusCfg := config.(type) {
+	case *ethash.Config:
+		switch consensusCfg.PowMode {
+		case ethash.ModeFake:
+			log.Warn("Ethash used in fake mode")
+			eng = ethash.NewFaker()
+		case ethash.ModeTest:
+			log.Warn("Ethash used in test mode")
+			eng = ethash.NewTester(nil, noverify)
+		case ethash.ModeShared:
+			log.Warn("Ethash used in shared mode")
+			eng = ethash.NewShared()
+		default:
+			engine := ethash.New(ethash.Config{
+				CachesInMem:      consensusCfg.CachesInMem,
+				CachesLockMmap:   consensusCfg.CachesLockMmap,
+				DatasetDir:       consensusCfg.DatasetDir,
+				DatasetsInMem:    consensusCfg.DatasetsInMem,
+				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
+				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
+			}, notify, noverify)
+			eng = engine
+		}
+	case *params.SnapshotConfig:
+		if chainConfig.Clique != nil {
+			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, consensusCfg.MDBX))
+		}
 	}
-	// Otherwise assume proof-of-work
-	switch config.PowMode {
-	case ethash.ModeFake:
-		log.Warn("Ethash used in fake mode")
-		return ethash.NewFaker()
-	case ethash.ModeTest:
-		log.Warn("Ethash used in test mode")
-		return ethash.NewTester(nil, noverify)
-	case ethash.ModeShared:
-		log.Warn("Ethash used in shared mode")
-		return ethash.NewShared()
-	default:
-		engine := ethash.New(ethash.Config{
-			CachesInMem:      config.CachesInMem,
-			CachesLockMmap:   config.CachesLockMmap,
-			DatasetDir:       config.DatasetDir,
-			DatasetsInMem:    config.DatasetsInMem,
-			DatasetsOnDisk:   config.DatasetsOnDisk,
-			DatasetsLockMmap: config.DatasetsLockMmap,
-		}, notify, noverify)
-		engine.SetThreads(-1) // Disable CPU mining
-		return engine
+
+	if eng == nil {
+		panic("unknown config" + spew.Sdump(config))
 	}
+
+	return eng
 }

@@ -14,12 +14,12 @@ import (
 )
 
 type chainContext struct {
-	db ethdb.Database
+	tx ethdb.Tx
 }
 
-func NewChainContext(db ethdb.Database) *chainContext {
+func NewChainContext(tx ethdb.Tx) *chainContext {
 	return &chainContext{
-		db: db,
+		tx: tx,
 	}
 }
 
@@ -30,7 +30,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 
 	panic("must not be called")
 }
-func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
@@ -42,20 +42,21 @@ func (c *powEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.
 func (c *powEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
-func (c *powEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header) {
+func (c *powEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header) {
 	panic("must not be called")
 }
-func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction,
+func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	panic("must not be called")
 }
-func (c *powEngine) Seal(_ consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+
+func (c *powEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	panic("must not be called")
 }
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash) *big.Int {
 	panic("must not be called")
 }
 func (c *powEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {
@@ -71,7 +72,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(c.db, hash, number)
+	return rawdb.ReadHeader(ethdb.NewRoTxDb(c.tx), hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {

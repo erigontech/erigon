@@ -4,11 +4,12 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
@@ -35,6 +36,10 @@ type OptionalParameters struct {
 	Notifier ChainEventNotifier
 
 	SilkwormExecutionFunc unsafe.Pointer
+
+	SnapshotDir      string
+	TorrnetClient    *snapshotsync.Client
+	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -49,21 +54,19 @@ func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameter
 func (stagedSync *StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
-	chainContext *core.TinyChainContext,
+	engine consensus.Engine,
 	vmConfig *vm.Config,
 	db ethdb.Database,
 	tx ethdb.Database,
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
-	cache *shards.StateCache,
 	batchSize datasize.ByteSize,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
-	poolStart func() error,
 	initialCycle bool,
-	miningConfig *MiningStagesParameters,
+	miningConfig *MiningCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -83,7 +86,7 @@ func (stagedSync *StagedSync) Prepare(
 		StageParameters{
 			d:                     d,
 			ChainConfig:           chainConfig,
-			chainContext:          chainContext,
+			Engine:                engine,
 			vmConfig:              vmConfig,
 			DB:                    db,
 			TX:                    tx,
@@ -93,8 +96,6 @@ func (stagedSync *StagedSync) Prepare(
 			QuitCh:                quitCh,
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,
-			poolStart:             poolStart,
-			cache:                 cache,
 			BatchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
@@ -103,6 +104,9 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
+			snapshotsDir:          stagedSync.params.SnapshotDir,
+			btClient:              stagedSync.params.TorrnetClient,
+			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
 		},
 	)
 	state := NewState(stages)
@@ -120,4 +124,10 @@ func (stagedSync *StagedSync) Prepare(
 		return nil, err
 	}
 	return state, nil
+}
+
+func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
+	stagedSync.params.TorrnetClient = client
+	stagedSync.params.SnapshotDir = snapshotsDir
+	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }

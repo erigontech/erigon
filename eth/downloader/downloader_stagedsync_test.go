@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -42,12 +41,11 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	if err := rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty()); err != nil {
 		panic(err)
 	}
-	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
+	if err := rawdb.WriteBlockDeprecated(context.Background(), tester.db, testGenesis); err != nil {
 		panic(err)
 	}
-	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, nil, tester, tester.dropPeer, ethdb.DefaultStorageMode)
-	//tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
-	tester.downloader.SetBatchSize(0 /* cacheSize */, 16*1024 /* batchSize */)
+	tester.downloader = New(tester.db, params.TestChainConfig, ethash.NewFaker(), &vm.Config{}, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader.SetBatchSize(16 * 1024)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),
@@ -124,7 +122,7 @@ func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
 		log.Error("ReadCanonicalHash failed", "err", err)
 		return nil
 	}
-	return rawdb.ReadBlock(st.db, hash, number)
+	return rawdb.ReadBlockDeprecated(st.db, hash, number)
 }
 
 // GetHeaderByHash is part of the implementation of BlockChain interface defined in downloader.go
@@ -159,16 +157,11 @@ func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, db ethd
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	for _, block := range blocks {
-		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
 			panic(err)
 		}
 	}
 	return false, nil
-}
-
-// InsertChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertChain(_ context.Context, blocks types.Blocks) (i int, err error) {
-	panic("")
 }
 
 // InsertHeaderChain is part of the implementation of BlockChain interface defined in downloader.go
@@ -211,7 +204,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise(id, hash, number, StagedSync, nil, func() error { return nil })
+	err := st.downloader.synchronise(id, hash, number, nil)
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle

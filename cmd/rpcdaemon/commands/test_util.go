@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"encoding/binary"
+	"log"
 	"math/big"
+	"net"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -18,7 +20,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/mock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func createTestDb() (ethdb.Database, error) {
@@ -42,18 +49,20 @@ func createTestDb() (ethdb.Database, error) {
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
-		signer = types.HomesteadSigner{}
+		signer = types.LatestSignerForChainID(nil)
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, _, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
 	if err != nil {
 		return nil, err
 	}
-	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainId)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainId)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
@@ -63,20 +72,20 @@ func createTestDb() (ethdb.Database, error) {
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 10, func(i int, block *core.BlockGen) {
 		var (
-			tx  *types.Transaction
-			txs []*types.Transaction
+			tx  types.Transaction
+			txs []types.Transaction
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -94,7 +103,7 @@ func createTestDb() (ethdb.Database, error) {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -131,7 +140,7 @@ func createTestDb() (ethdb.Database, error) {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), signer, key)
+			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
@@ -181,4 +190,39 @@ func createTestDb() (ethdb.Database, error) {
 	}
 
 	return db, nil
+}
+
+func createTestKV() (ethdb.RwKV, error) {
+	db, err := createTestDb()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return db.(ethdb.HasRwKV).RwKV(), nil
+}
+
+func createTestGrpcConn() *grpc.ClientConn { //nolint
+	ctx := context.Background()
+
+	server := grpc.NewServer()
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
+	listener := bufconn.Listen(1024 * 1024)
+
+	dialer := func() func(context.Context, string) (net.Conn, error) {
+		go func() {
+			if err := server.Serve(listener); err != nil {
+				log.Fatal(err)
+			}
+		}()
+		return func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}
+	}
+
+	conn, err := grpc.DialContext(ctx, "", grpc.WithInsecure(), grpc.WithContextDialer(dialer()))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return conn
 }

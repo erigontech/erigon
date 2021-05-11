@@ -24,17 +24,22 @@ import (
 type miningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []*types.Transaction
+	Txs      []types.Transaction
 	Receipts types.Receipts
 
-	localTxs  *types.TransactionsByPriceAndNonce
-	remoteTxs *types.TransactionsByPriceAndNonce
+	LocalTxs  types.TransactionsStream
+	RemoteTxs types.TransactionsStream
 }
 
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPoolLocals []common.Address, pendingTxs map[common.Address]types.Transactions, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+	txPoolLocals := txPool.Locals()
+	pendingTxs, err := txPool.Pending()
+	if err != nil {
+		return err
+	}
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -54,15 +59,15 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if parent == nil { // todo: how to return error and don't stop TG?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-	signer := types.NewEIP155Signer(chainConfig.ChainID)
 
 	blockNum := executionAt + 1
+	signer := types.MakeSigner(chainConfig, blockNum)
 
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{chainConfig, tx}
+	chain := ChainReader{Cfg: chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
@@ -81,13 +86,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	}
 
 	type envT struct {
-		signer    types.Signer
+		signer    *types.Signer
 		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
 		family    mapset.Set // family set (used for checking uncle invalidity)
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.NewEIP155Signer(chainConfig.ChainID),
+		signer:    types.MakeSigner(chainConfig, blockNum),
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -212,20 +217,34 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	current.Uncles = makeUncles(env.uncles)
 
 	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pendingTxs
-	for _, account := range txPoolLocals {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
+	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+	for _, txs := range pendingTxs {
+		if len(txs) == 0 {
+			continue
+		}
+		from, _ := txs[0].Sender(*signer)
+		isLocal := false
+		for _, local := range txPoolLocals {
+			if local == from {
+				isLocal = true
+				break
+			}
+		}
+
+		if isLocal {
+			localTxs = append(localTxs, txs)
+		} else {
+			remoteTxs = append(remoteTxs, txs)
 		}
 	}
-	current.localTxs = types.NewTransactionsByPriceAndNonce(signer, localTxs)
-	current.remoteTxs = types.NewTransactionsByPriceAndNonce(signer, remoteTxs)
+
+	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
+	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
 	s.Done()
 	return nil
 }
 
-func readNonCanonicalHeaders(tx ethdb.Getter, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx ethdb.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {

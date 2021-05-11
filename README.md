@@ -1,12 +1,16 @@
+
 # Turbo-Geth
 
-Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance. [![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
+Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
+
+![Build status](https://github.com/ledgerwatch/turbo-geth/actions/workflows/ci.yml/badge.svg)
 
 <!--ts-->
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
     + [Getting Started](#getting-started)
     + [Testnets](#testnets)
+    + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
 - [Key features](#key-features)
@@ -39,9 +43,9 @@ System Requirements
 
 Recommend 2Tb storage space on a single partition: 1Tb state, 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). 
 
-RAM: 16GB, 64-bit architecture, (Golang version >= 1.15.6](https://golang.org/doc/install)
+RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
 
-<code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
+<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
 Usage
 =====
@@ -62,10 +66,28 @@ If you would like to give turbo-geth a try, but do not have spare 2Tb on your dr
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
 > cd turbo-geth
 > make tg
-> ./build/bin/tg --datadir goerli --goerli
+> ./build/bin/tg --datadir goerli --chain goerli
 ```
 
-Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory.
+Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
+
+### Mining
+
+Support only remote-miners.
+
+* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
+* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
+  , `--miner.gastarget`
+* RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+* RPCDaemon supports websocket methods: newPendingTransaction
+* TODO:
+    + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/turbo-geth/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+    + eth_newPendingTransactionFilter
+    + eth_newBlockFilter
+    + eth_newFilter
+    + websocket Logs
+
+<code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
 
 ### Windows
 
@@ -156,7 +178,7 @@ it can run from a snapshot of a database for read-only calls.
 This is only possible if RPC daemon runs on the same computer as turbo-geth. This mode of operation uses shared memory access to the database of turbo-geth, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
 > make rpcdaemon
-> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
+> ./build/bin/rpcdaemon --datadir ~/Library/TurboGeth/ --http.api=eth,debug,net
 ```
 
 In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
@@ -174,9 +196,11 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
 
+**gRPC ports**: `9090` TG, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
 **For dual mode**
 
-If both `--chaindata` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
+If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
@@ -266,3 +290,7 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
+### Blocks Execution is slow on cloud-network-drives
+
+Please read https://github.com/ledgerwatch/turbo-geth/issues/1516#issuecomment-811958891
+In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.

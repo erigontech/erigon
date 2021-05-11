@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -60,25 +61,21 @@ func ExampleGenerateChain() {
 	}
 	genesis := gspec.MustCommit(db)
 
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
-
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
 	// block index.
-	signer := types.HomesteadSigner{}
+	signer := types.LatestSignerForChainID(nil)
 	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
-			tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), signer, key1)
+			tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), *signer, key1)
 			gen.AddTx(tx)
 		case 1:
 			// In block 2, addr1 sends some more ether to addr2.
 			// addr2 passes it on to addr3.
-			tx1, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key1)
-			tx2, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, key2)
+			tx1, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key1)
+			tx2, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key2)
 			gen.AddTx(tx1)
 			gen.AddTx(tx2)
 		case 2:
@@ -106,7 +103,7 @@ func ExampleGenerateChain() {
 	}
 
 	st := state.New(state.NewDbStateReader(db))
-	fmt.Printf("last block: #%d\n", blockchain.CurrentBlock().Number())
+	fmt.Printf("last block: #%d\n", rawdb.ReadCurrentBlockDeprecated(db).Number())
 	fmt.Println("balance of addr1:", st.GetBalance(addr1))
 	fmt.Println("balance of addr2:", st.GetBalance(addr2))
 	fmt.Println("balance of addr3:", st.GetBalance(addr3))

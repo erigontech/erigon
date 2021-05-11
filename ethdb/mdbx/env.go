@@ -62,6 +62,8 @@ const (
 	AllowTxOverlap = C.MDBX_DBG_LEGACY_OVERLAP
 )
 
+type LogLvl = C.MDBX_log_level_t
+
 const (
 	LogLvlFatal       = C.MDBX_LOG_FATAL
 	LogLvlError       = C.MDBX_LOG_ERROR
@@ -97,6 +99,7 @@ const (
 	OptSpillMaxDenominator          = C.MDBX_opt_spill_max_denominator
 	OptSpillMinDenominator          = C.MDBX_opt_spill_min_denominator
 	OptSpillParent4ChildDenominator = C.MDBX_opt_spill_parent4child_denominator
+	OptMergeThreshold16dot16Percent = C.MDBX_opt_merge_threshold_16dot16_percent
 )
 
 var (
@@ -296,8 +299,7 @@ type Stat struct {
 // See mdbx_env_stat.
 func (env *Env) Stat() (*Stat, error) {
 	var _stat C.MDBX_stat
-	var ret C.int
-	ret = C.mdbx_env_stat_ex(env._env, nil, &_stat, C.size_t(unsafe.Sizeof(_stat)))
+	var ret C.int = C.mdbx_env_stat_ex(env._env, nil, &_stat, C.size_t(unsafe.Sizeof(_stat)))
 	if ret != success {
 		return nil, operrno("mdbx_env_stat_ex", ret)
 	}
@@ -311,19 +313,36 @@ func (env *Env) Stat() (*Stat, error) {
 	return &stat, nil
 }
 
+type EnvInfoGeo struct {
+	Lower   uint64
+	Upper   uint64
+	Current uint64
+	Shrink  uint64
+	Grow    uint64
+}
+type EnfInfoPageOps struct {
+	Newly   uint64 /**< Quantity of a new pages added */
+	Cow     uint64 /**< Quantity of pages copied for update */
+	Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
+	Split   uint64 /**< Page splits */
+	Merge   uint64 /**< Page merges */
+	Spill   uint64 /**< Quantity of spilled dirty pages */
+	Unspill uint64 /**< Quantity of unspilled/reloaded pages */
+	Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
+}
+
 // EnvInfo contains information an environment.
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
 	MapSize int64 // Size of the data memory map
 	LastPNO int64 // ID of the last used page
-	Geo     struct {
-		Lower   uint64
-		Upper   uint64
-		Current uint64
-		Shrink  uint64
-		Grow    uint64
-	}
+	Geo     EnvInfoGeo
+	/** Statistics of page operations.
+	 * \details Overall statistics of page operations of all (running, completed
+	 * and aborted) transactions in the current multi-process session (since the
+	 * first process opened the database). */
+	PageOps                        EnfInfoPageOps
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -353,18 +372,22 @@ func (env *Env) Info() (*EnvInfo, error) {
 	}
 	info := EnvInfo{
 		MapSize: int64(_info.mi_mapsize),
-		Geo: struct {
-			Lower   uint64
-			Upper   uint64
-			Current uint64
-			Shrink  uint64
-			Grow    uint64
-		}{
+		Geo: EnvInfoGeo{
 			Lower:   uint64(_info.mi_geo.lower),
 			Upper:   uint64(_info.mi_geo.upper),
 			Current: uint64(_info.mi_geo.current),
 			Shrink:  uint64(_info.mi_geo.shrink),
 			Grow:    uint64(_info.mi_geo.grow),
+		},
+		PageOps: EnfInfoPageOps{
+			Newly:   uint64(_info.mi_pgop_stat.newly),
+			Cow:     uint64(_info.mi_pgop_stat.cow),
+			Clone:   uint64(_info.mi_pgop_stat.clone),
+			Split:   uint64(_info.mi_pgop_stat.split),
+			Merge:   uint64(_info.mi_pgop_stat.merge),
+			Spill:   uint64(_info.mi_pgop_stat.spill),
+			Unspill: uint64(_info.mi_pgop_stat.unspill),
+			Wops:    uint64(_info.mi_pgop_stat.wops),
 		},
 		LastPNO:        int64(_info.mi_last_pgno),
 		LastTxnID:      int64(_info.mi_recent_txnid),
@@ -419,7 +442,7 @@ func (env *Env) Flags() (uint, error) {
 	return uint(_flags), nil
 }
 
-func (env *Env) SetDebug(logLvl int, dbg int, logger *C.MDBX_debug_func) error {
+func (env *Env) SetDebug(logLvl LogLvl, dbg int, logger *C.MDBX_debug_func) error {
 	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), logger)
 	return operrno("mdbx_setup_debug", ret)
 }
@@ -440,37 +463,15 @@ func (env *Env) Path() (string, error) {
 	return C.GoString(cpath), nil
 }
 
-// SetMaxFreelistReuse sets the size of the environment memory map.
-//
-// Find a big enough contiguous page range for large values in freelist is hard
-//        just allocate new pages and even don't try to search if value is bigger than this limit.
-//        measured in pages
-//func (env *Env) SetMaxFreelistReuse(pagesLimit uint) error {
-//	ret := C.mdbx_env_set_maxfree_reuse(env._env, C.uint(pagesLimit))
-//	return operrno("mdbx_env_set_maxfree_reuse", ret)
-//}
-
-// MaxFreelistReuse
-//func (env *Env) MaxFreelistReuse() (uint, error) {
-//	var pages C.uint
-//	ret := C.mdbx_env_get_maxfree_reuse(env._env, &pages)
-//	return uint(pages), operrno("mdbx_env_get_maxreaders", ret)
-//}
-
-// SetMapSize sets the size of the environment memory map.
-//
-// See mdbx_env_set_mapsize.
-//func (env *Env) SetMapSize(size int64) error {
-//	if size < 0 {
-//		return errNegSize
-//	}
-//	ret := C.mdbx_env_set_mapsize(env._env, C.size_t(size))
-//	return operrno("mdbx_env_set_mapsize", ret)
-//}
-
 func (env *Env) SetOption(option uint, value uint64) error {
 	ret := C.mdbx_env_set_option(env._env, C.MDBX_option_t(option), C.uint64_t(value))
 	return operrno("mdbx_env_set_option", ret)
+}
+
+func (env *Env) GetOption(option uint) (uint64, error) {
+	var res C.uint64_t
+	ret := C.mdbx_env_get_option(env._env, C.MDBX_option_t(option), &res)
+	return uint64(res), operrno("mdbx_env_get_option", ret)
 }
 
 func (env *Env) SetGeometry(sizeLower int, sizeNow int, sizeUpper int, growthStep int, shrinkThreshold int, pageSize int) error {

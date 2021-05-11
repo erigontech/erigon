@@ -1,37 +1,37 @@
 package bodydownload
 
 import (
-	//"context"
-	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
+	"context"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-const BlockBufferSize = 1024
+const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
-	bd.maxProgress = headerProgress + 1
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
+	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.lowWaitUntil = 0
@@ -46,11 +46,14 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	}
 	bd.peerMap = make(map[string]int)
 	headHeight = bodyProgress
-	headHash = rawdb.ReadHeaderByNumber(db, headHeight).Hash()
+	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
+		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)
@@ -60,7 +63,8 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	return headHeight, headHash, headTd256, nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime uint64) (*BodyRequest, uint64) {
+// RequestMoreBodies - returns nil if nothing to request
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
@@ -94,36 +98,48 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		if bd.deliveries[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveries[blockNum-bd.requestedLow].Header()
+			if header == nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+			}
 			hash = header.Hash()
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
-			if err == nil {
-				header = rawdb.ReadHeader(db, hash, blockNum)
-			} else {
-				log.Error("Could not find canonical header", "block number", blockNum)
+			if err != nil {
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
-			if header != nil {
-				if block := bd.prefetchedBlocks.Pop(hash); block != nil {
-					// Block is prefetched, no need to request
-					bd.deliveries[blockNum-bd.requestedLow] = block
-					request = false
+			header = rawdb.ReadHeader(db, hash, blockNum)
+			if header == nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+			}
+
+			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
+				// Block is prefetched, no need to request
+				bd.deliveries[blockNum-bd.requestedLow] = block
+
+				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
+				var td *big.Int
+				if parent, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1); err != nil {
+					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
+				} else if parent != nil {
+					td = new(big.Int).Add(block.Difficulty(), parent)
+					go blockPropagator.BroadcastNewBlock(context.Background(), block, td)
 				} else {
-					bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
-					if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-						var doubleHash DoubleHash
-						copy(doubleHash[:], header.UncleHash.Bytes())
-						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = blockNum
-					} else {
-						request = false
-					}
+					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
+				}
+				request = false
+			} else {
+				bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
+				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+					var doubleHash DoubleHash
+					copy(doubleHash[:], header.UncleHash.Bytes())
+					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+					bd.requestedMap[doubleHash] = blockNum
+				} else {
+					request = false
 				}
 			}
 		}
-		if header == nil {
-			log.Error("Header not found", "block number", blockNum)
-			panic("")
-		} else if request {
+		if request {
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
@@ -137,7 +153,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 			bd.requests[blockNum-bd.requestedLow] = bodyReq
 		}
 	}
-	return bodyReq, blockNum
+	return bodyReq, blockNum, nil
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {
@@ -155,15 +171,15 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	}
 }
 
-// DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
+// DeliverBodies takes the block body received from a peer and adds it to the various data structures
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)
 	var delivered, undelivered int
-	for _, body := range bodies {
-		uncleHash := types.CalcUncleHash(body.Uncles)
-		txHash := types.DeriveSha(types.Transactions(body.Transactions))
+	for i := range txs {
+		uncleHash := types.CalcUncleHash(uncles[i])
+		txHash := types.DeriveSha(types.Transactions(txs[i]))
 		var doubleHash DoubleHash
 		copy(doubleHash[:], uncleHash.Bytes())
 		copy(doubleHash[common.HashLength:], txHash.Bytes())
@@ -171,7 +187,8 @@ func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 		// Also, block numbers can be added to bd.delivered for empty blocks, above
 		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
 			bd.delivered.Add(blockNum)
-			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
+			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			bd.deliveries[blockNum-bd.requestedLow] = block
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
@@ -189,6 +206,10 @@ func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 		for _, blockNum := range req.BlockNums {
 			bd.requests[blockNum-bd.requestedLow] = nil
 		}
+	}
+	select {
+	case bd.DeliveryNotify <- struct{}{}:
+	default:
 	}
 	return delivered, undelivered
 }
@@ -208,7 +229,7 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	// Move the deliveries back
-	// bd.requestedLow can only be moved forward if there are consequitive block numbers present in the bd.delivered map
+	// bd.requestedLow can only be moved forward if there are consecutive block numbers present in the bd.delivered map
 	var d []*types.Block
 	if i > 0 {
 		d = make([]*types.Block, i)

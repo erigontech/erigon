@@ -5,8 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 )
+
+// DBSchemaVersion
+var DBSchemaVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 // Buckets
 
@@ -38,24 +41,24 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-var PlainStateBucket = "PLAIN-CST2"
-var PlainStateBucketOld1 = "PLAIN-CST"
+const PlainStateBucket = "PLAIN-CST2"
+const PlainStateBucketOld1 = "PLAIN-CST"
 
-var (
+const (
 	//PlainContractCodeBucket -
 	//key - address+incarnation
 	//value - code hash
 	PlainContractCodeBucket = "PLAIN-contractCode"
 
-	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
+	// AccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	PlainAccountChangeSetBucket = "PLAIN-ACS"
+	AccountChangeSetBucket = "PLAIN-ACS"
 
-	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
+	// StorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	PlainStorageChangeSetBucket = "PLAIN-SCS"
+	StorageChangeSetBucket = "PLAIN-SCS"
 
 	//HashedAccountsBucket
 	// key - address hash
@@ -130,21 +133,19 @@ Invariants:
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
-var TrieOfAccountsBucket = "trie_account"
-var TrieOfStorageBucket = "trie_storage"
-var IntermediateTrieHashBucketOld1 = "iTh"
-var IntermediateTrieHashBucketOld2 = "iTh2"
+const TrieOfAccountsBucket = "trie_account"
+const TrieOfStorageBucket = "trie_storage"
+const IntermediateTrieHashBucketOld1 = "iTh"
+const IntermediateTrieHashBucketOld2 = "iTh2"
 
-var (
+const (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket        = "DBINFO"
 	SnapshotInfoBucket        = "SNINFO"
+	BittorrentInfoBucket      = "BTINFO"
 	HeadersSnapshotInfoBucket = "hSNINFO"
 	BodiesSnapshotInfoBucket  = "bSNINFO"
 	StateSnapshotInfoBucket   = "sSNINFO"
-
-	// databaseVerisionKey tracks the current database version.
-	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
@@ -170,6 +171,10 @@ var (
 	LogTopicIndex   = "log_topic_index"
 	LogAddressIndex = "log_address_index"
 
+	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
+	// touched by call traces. It is DupSort-ed table
+	// 8-byte BE block nunber -> account address -> two bits (one for "from", another for "to")
+	CallTraceSet = "call_trace_set"
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
 	CallFromIndex = "call_from_index"
@@ -191,7 +196,10 @@ var (
 	SyncStageUnwind     = "SSU2"
 	SyncStageUnwindOld1 = "SSU"
 
-	CliqueBucket = "clique-"
+	CliqueBucket             = "clique-"
+	CliqueSeparateBucket     = "clique-snapshots-"
+	CliqueSnapshotBucket     = "snap"
+	CliqueLastSnapshotBucket = "lastSnap"
 
 	// this bucket stored in separated database
 	InodesBucket = "inodes"
@@ -199,12 +207,8 @@ var (
 	// Transaction senders - stored separately from the block bodies
 	Senders = "txSenders"
 
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	FastTrieProgressKey = "TrieSync"
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	HeadFastBlockKey = "LastFast"
 
 	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
 	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
@@ -220,9 +224,8 @@ var (
 
 // Keys
 var (
-	// last  block that was pruned
-	// it's saved one in 5 minutes
-	LastPrunedBlockKey = []byte("LastPrunedBlock")
+	//StorageModePruning - does node prune.
+	StorageModePruning = []byte("smPruning")
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
@@ -232,18 +235,18 @@ var (
 	//StorageModeCallTraces - does not build index of call traces
 	StorageModeCallTraces = []byte("smCallTraces")
 
+	DBSchemaVersionKey = []byte("dbVersion")
+
 	HeadHeaderKey = "LastHeader"
 
 	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
-)
 
-// Metrics
-var (
-	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
-	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+	BittorrentPeerID            = "peerID"
+	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
+	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -255,7 +258,6 @@ var Buckets = []string{
 	StorageHistoryBucket,
 	CodeBucket,
 	ContractCodeBucket,
-	DatabaseVerisionKey,
 	HeaderNumberBucket,
 	BlockBodyPrefix,
 	BlockReceiptsPrefix,
@@ -266,17 +268,17 @@ var Buckets = []string{
 	BloomBitsIndexPrefix,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
-	CliqueBucket,
+	CliqueSeparateBucket,
+	CliqueLastSnapshotBucket,
+	CliqueSnapshotBucket,
 	SyncStageProgress,
 	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
-	PlainAccountChangeSetBucket,
-	PlainStorageChangeSetBucket,
+	AccountChangeSetBucket,
+	StorageChangeSetBucket,
 	Senders,
-	FastTrieProgressKey,
 	HeadBlockKey,
-	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
 	LogTopicIndex,
@@ -285,6 +287,7 @@ var Buckets = []string{
 	HeadersSnapshotInfoBucket,
 	BodiesSnapshotInfoBucket,
 	StateSnapshotInfoBucket,
+	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
 	Log,
@@ -295,7 +298,7 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
-
+	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,
@@ -309,6 +312,7 @@ var DeprecatedBuckets = []string{
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
 	HeaderPrefixOld,
+	CliqueBucket,
 }
 
 type CustomComparator string
@@ -376,10 +380,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	PlainAccountChangeSetBucket: {
+	AccountChangeSetBucket: {
 		Flags: DupSort,
 	},
-	PlainStorageChangeSetBucket: {
+	StorageChangeSetBucket: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {
@@ -391,6 +395,9 @@ var BucketsConfigs = BucketsCfg{
 	IntermediateTrieHashBucketOld2: {
 		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
+	},
+	CallTraceSet: {
+		Flags: DupSort,
 	},
 	InvalidBlock: {},
 }

@@ -3,8 +3,8 @@ import common
 
 PlainStateBucket = "PLAIN-CST2".encode()
 PlainContractCodeBucket = "PLAIN-contractCode".encode()
-PlainAccountChangeSetBucket = "PLAIN-ACS".encode()
-PlainStorageChangeSetBucket = "PLAIN-SCS".encode()
+AccountChangeSetBucket = "PLAIN-ACS".encode()
+StorageChangeSetBucket = "PLAIN-SCS".encode()
 CurrentStateBucket = "CST2".encode()
 AccountsHistoryBucket = "hAT".encode()
 StorageHistoryBucket = "hST".encode()

@@ -310,7 +310,7 @@ func (s *Suite) TestMaliciousStatus_66(t *utesting.T) {
 }
 
 func (s *Suite) TestTransaction_66(t *utesting.T) {
-	tests := []*types.Transaction{
+	tests := []types.Transaction{
 		getNextTxFromChain(t, s),
 		unknownTx(t, s),
 	}
@@ -321,7 +321,7 @@ func (s *Suite) TestTransaction_66(t *utesting.T) {
 }
 
 func (s *Suite) TestMaliciousTx_66(t *utesting.T) {
-	tests := []*types.Transaction{
+	tests := []types.Transaction{
 		getOldTxFromChain(t, s),
 		invalidNonceTx(t, s),
 		hugeAmount(t, s),

@@ -24,12 +24,13 @@ import (
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	kv := db.RwKV()
+	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
-			db := ethdb.NewMemDatabase()
-			defer db.Close()
-			tx, err := db.Begin(context.Background(), ethdb.RW)
+			tx, err := kv.BeginRw(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -40,11 +41,14 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 				t.Fatal("incorrect cs bucket")
 			}
 			addrs, expecedIndexes := generateTestData(t, tx, csBucket, blocksNum)
-			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), 10, time.Millisecond, getTmpDir(), nil)
+			cfgCopy := cfg
+			cfgCopy.bufLimit = 10
+			cfgCopy.flushEvery = time.Millisecond
+			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), 10, time.Millisecond, getTmpDir(), nil)
+			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,19 +59,22 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account plain state", test(2100, dbutils.PlainAccountChangeSetBucket))
-	t.Run("storage plain state", test(2100, dbutils.PlainStorageChangeSetBucket))
+	t.Run("account plain state", test(2100, dbutils.AccountChangeSetBucket))
+	t.Run("storage plain state", test(2100, dbutils.StorageChangeSetBucket))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	buckets := []string{dbutils.PlainAccountChangeSetBucket, dbutils.PlainStorageChangeSetBucket}
+	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	kv := db.RwKV()
+	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
 	for i := range buckets {
 		csbucket := buckets[i]
-		db := ethdb.NewMemDatabase()
-		defer db.Close()
-		tx, err := db.Begin(context.Background(), ethdb.RW)
+
+		tx, err := kv.BeginRw(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +83,10 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		hashes, expected := generateTestData(t, tx, csbucket, 2100)
 		mp := changeset.Mapper[csbucket]
 		indexBucket := mp.IndexBucket
-		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), 10, time.Millisecond, getTmpDir(), nil)
+		cfgCopy := cfg
+		cfgCopy.bufLimit = 10
+		cfgCopy.flushEvery = time.Millisecond
+		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +103,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2050)
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
 
-		err = unwindHistory("logPrefix", tx, csbucket, 2050, nil)
+		err = unwindHistory("logPrefix", tx, csbucket, 2050, cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +118,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2000)
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
 
-		err = unwindHistory("logPrefix", tx, csbucket, 2000, nil)
+		err = unwindHistory("logPrefix", tx, csbucket, 2000, cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +129,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		//})
 
 		//t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
-		err = unwindHistory("logPrefix", tx, csbucket, 1999, nil)
+		err = unwindHistory("logPrefix", tx, csbucket, 1999, cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +161,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 999)
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 999)
 
-		err = unwindHistory("logPrefix", tx, csbucket, 999, nil)
+		err = unwindHistory("logPrefix", tx, csbucket, 999, cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,24 +185,23 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 		//})
 		tx.Rollback()
-		db.Close()
 	}
 }
 
-func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
+func generateTestData(t *testing.T, db ethdb.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
 	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if dbutils.PlainStorageChangeSetBucket == csBucket || dbutils.PlainAccountChangeSetBucket == csBucket {
+	if dbutils.StorageChangeSetBucket == csBucket || dbutils.AccountChangeSetBucket == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dbutils.PlainStorageChangeSetBucket == csBucket {
+	if dbutils.StorageChangeSetBucket == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -248,7 +257,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 	}
 }
 
-func checkIndex(t *testing.T, db ethdb.Getter, bucket string, k []byte, expected []uint64) {
+func checkIndex(t *testing.T, db ethdb.Tx, bucket string, k []byte, expected []uint64) {
 	t.Helper()
 	k = dbutils.CompositeKeyWithoutIncarnation(k)
 	m, err := bitmapdb.Get64(db, bucket, k, 0, math.MaxUint32)

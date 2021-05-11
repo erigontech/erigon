@@ -748,10 +748,15 @@ func (s *Stream) List() (size uint64, err error) {
 	if kind != List {
 		return 0, ErrExpectedList
 	}
+	s.NewList(size)
+	return size, nil
+}
+
+// NewList starts decoding an RLP list, but without reading its prefix
+func (s *Stream) NewList(size uint64) {
 	s.stack = append(s.stack, listpos{0, size})
 	s.kind = -1
 	s.size = 0
-	return size, nil
 }
 
 // ListEnd returns to the enclosing list.
@@ -788,12 +793,12 @@ func (s *Stream) Decode(val interface{}) error {
 	if rval.IsNil() {
 		return errDecodeIntoNil
 	}
-	decoder, err := cachedDecoder(rtyp.Elem())
+	dcd, err := cachedDecoder(rtyp.Elem())
 	if err != nil {
 		return err
 	}
 
-	err = decoder(s, rval.Elem())
+	err = dcd(s, rval.Elem())
 	if decErr, ok := err.(*decodeError); ok && len(decErr.ctx) > 0 {
 		// add decode target type to error so context has more meaning
 		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
@@ -975,8 +980,8 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 }
 
 func (s *Stream) readFull(buf []byte) (err error) {
-	if err := s.willRead(uint64(len(buf))); err != nil {
-		return err
+	if e := s.willRead(uint64(len(buf))); e != nil {
+		return e
 	}
 	var nn, n int
 	for n < len(buf) && err == nil {

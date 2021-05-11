@@ -237,12 +237,12 @@ func (c *Conn) waitForBlock66(block *types.Block) error {
 	}
 }
 
-func sendSuccessfulTx66(t *utesting.T, s *Suite, tx *types.Transaction) {
+func sendSuccessfulTx66(t *utesting.T, s *Suite, tx types.Transaction) {
 	sendConn := s.setupConnection66(t)
 	sendSuccessfulTxWithConn(t, s, tx, sendConn)
 }
 
-func sendFailingTx66(t *utesting.T, s *Suite, tx *types.Transaction) {
+func sendFailingTx66(t *utesting.T, s *Suite, tx types.Transaction) {
 	sendConn, recvConn := s.setupConnection66(t), s.setupConnection66(t)
 	sendFailingTxWithConns(t, s, tx, sendConn, recvConn)
 }

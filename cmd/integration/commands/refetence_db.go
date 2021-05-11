@@ -24,8 +24,8 @@ var stateBuckets = []string{
 	dbutils.HashedStorageBucket,
 	dbutils.ContractCodeBucket,
 	dbutils.PlainStateBucket,
-	dbutils.PlainAccountChangeSetBucket,
-	dbutils.PlainStorageChangeSetBucket,
+	dbutils.AccountChangeSetBucket,
+	dbutils.StorageChangeSetBucket,
 	dbutils.PlainContractCodeBucket,
 	dbutils.IncarnationMapBucket,
 	dbutils.CodeBucket,
@@ -40,7 +40,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -57,7 +57,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -74,7 +74,7 @@ var cmdLmdbToMdbx = &cobra.Command{
 	Use:   "lmdb_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := lmdbToMdbx(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -88,7 +88,7 @@ var cmdLmdbToLmdb = &cobra.Command{
 	Use:   "lmdb_to_lmdb",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := lmdbToLmdb(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -102,7 +102,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := mdbxToMdbx(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -116,7 +116,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
+		ctx, _ := utils.RootContext()
 		err := fToMdbx(ctx, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
@@ -127,31 +127,31 @@ var cmdFToMdbx = &cobra.Command{
 }
 
 func init() {
-	withChaindata(cmdCompareBucket)
+	withDatadir(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
 	withBucket(cmdCompareBucket)
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
-	withChaindata(cmdCompareStates)
+	withDatadir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
 
-	withChaindata(cmdLmdbToMdbx)
+	withDatadir(cmdLmdbToMdbx)
 	withToChaindata(cmdLmdbToMdbx)
 	withBucket(cmdLmdbToMdbx)
 
 	rootCmd.AddCommand(cmdLmdbToMdbx)
 
-	withChaindata(cmdLmdbToLmdb)
+	withDatadir(cmdLmdbToLmdb)
 	withToChaindata(cmdLmdbToLmdb)
 	withBucket(cmdLmdbToLmdb)
 
 	rootCmd.AddCommand(cmdLmdbToLmdb)
 
-	withChaindata(cmdMdbxToMdbx)
+	withDatadir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
 
@@ -171,8 +171,8 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 	refDB := ethdb.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		if err := refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		if err := refDB.RwKV().View(context.Background(), func(refTX ethdb.Tx) error {
 			for _, bucket := range stateBuckets {
 				fmt.Printf("\nBucket: %s\n", bucket)
 				if err := compareBuckets(ctx, tx, bucket, refTX, bucket); err != nil {
@@ -197,8 +197,8 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	refDB := ethdb.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		return refDB.KV().View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		return refDB.RwKV().View(context.Background(), func(refTX ethdb.Tx) error {
 			return compareBuckets(ctx, tx, bucket, refTX, bucket)
 		})
 	}); err != nil {
@@ -210,12 +210,18 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, refB string) error {
 	count := 0
-	c := tx.Cursor(b)
+	c, err := tx.Cursor(b)
+	if err != nil {
+		return err
+	}
 	k, v, e := c.First()
 	if e != nil {
 		return e
 	}
-	refC := refTx.Cursor(refB)
+	refC, err := refTx.Cursor(refB)
+	if err != nil {
+		return err
+	}
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr
@@ -328,7 +334,10 @@ MainLoop:
 			panic("bucket not parse")
 		}
 
-		c := dstTx.RwCursor(bucket)
+		c, err := dstTx.RwCursor(bucket)
+		if err != nil {
+			return err
+		}
 
 		var prevK []byte
 		for {
@@ -376,7 +385,7 @@ MainLoop:
 			panic(err)
 		}
 	}
-	err = dstTx.Commit(context.Background())
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -384,7 +393,7 @@ MainLoop:
 	if err != nil {
 		return err
 	}
-	err = dstTx.Commit(ctx)
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -413,8 +422,8 @@ func mdbxToMdbx(ctx context.Context, from, to string) error {
 	return kv2kv(ctx, src, dst)
 }
 
-func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
-	srcTx, err1 := src.Begin(ctx)
+func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
+	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
 	}
@@ -435,8 +444,14 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 			continue
 		}
 
-		c := dstTx.RwCursor(name)
-		srcC := srcTx.Cursor(name)
+		c, err := dstTx.RwCursor(name)
+		if err != nil {
+			return err
+		}
+		srcC, err := srcTx.Cursor(name)
+		if err != nil {
+			return err
+		}
 		var prevK []byte
 		casted, isDupsort := c.(ethdb.RwCursorDupSort)
 
@@ -467,14 +482,17 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 				return ctx.Err()
 			case <-commitEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
-				if err2 := dstTx.Commit(ctx); err2 != nil {
+				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
 				dstTx, err = dst.BeginRw(ctx)
 				if err != nil {
 					return err
 				}
-				c = dstTx.RwCursor(name)
+				c, err = dstTx.RwCursor(name)
+				if err != nil {
+					return err
+				}
 				casted, isDupsort = c.(ethdb.RwCursorDupSort)
 			default:
 			}
@@ -491,7 +509,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 		//	return err
 		//}
 	}
-	err := dstTx.Commit(context.Background())
+	err := dstTx.Commit()
 	if err != nil {
 		return err
 	}
@@ -499,7 +517,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.KV) error {
 	if err != nil {
 		return err
 	}
-	err = dstTx.Commit(ctx)
+	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}

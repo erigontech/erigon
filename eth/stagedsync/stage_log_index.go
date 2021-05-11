@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -27,15 +26,27 @@ const (
 	bitmapsFlushEvery = 10 * time.Second
 )
 
-func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
+type LogIndexCfg struct {
+	db         ethdb.RwKV
+	bufLimit   datasize.ByteSize
+	flushEvery time.Duration
+	tmpdir     string
+}
+
+func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
+	return LogIndexCfg{
+		db:         db,
+		bufLimit:   bitmapsBufLimit,
+		flushEvery: bitmapsFlushEvery,
+		tmpdir:     tmpDir,
+	}
+}
+
+func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -57,7 +68,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, bitmapsBufLimit, bitmapsFlushEvery, tmpdir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, cfg, quit); err != nil {
 		return err
 	}
 
@@ -73,20 +84,22 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan 
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, tmpdir string, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	logs := tx.Cursor(dbutils.Log)
+	logs, err := tx.Cursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
 	defer logs.Close()
-	checkFlushEvery := time.NewTicker(flushEvery)
+	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorTopics := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	collectorAddrs := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTopics := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorAddrs := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	reader := bytes.NewReader(nil)
 
@@ -107,14 +120,14 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
-			if needFlush(topics, bufLimit) {
+			if needFlush(topics, cfg.bufLimit) {
 				if err := flushBitmaps(collectorTopics, topics); err != nil {
 					return err
 				}
 				topics = map[string]*roaring.Bitmap{}
 			}
 
-			if needFlush(addresses, bufLimit) {
+			if needFlush(addresses, cfg.bufLimit) {
 				if err := flushBitmaps(collectorAddrs, addresses); err != nil {
 					return err
 				}
@@ -165,7 +178,7 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit
 		copy(lastChunkKey, k)
 		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		if err != nil {
 			return fmt.Errorf("%s: find last chunk failed: %w", logPrefix, err)
 		}
 
@@ -190,26 +203,22 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit
 		})
 	}
 
-	if err := collectorTopics.Load(logPrefix, db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorTopics.Load(logPrefix, tx, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 
-	if err := collectorAddrs.Load(logPrefix, db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorAddrs.Load(logPrefix, tx, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
+func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quitCh <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -217,7 +226,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, quitCh); err != nil {
+	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -234,18 +243,26 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func unwindLogIndex(logPrefix string, db ethdb.Database, to uint64, quitCh <-chan struct{}) error {
+func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg, quitCh <-chan struct{}) error {
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
-	start := dbutils.EncodeBlockNumber(to + 1)
-	if err := db.Walk(dbutils.Log, start, 0, func(k, v []byte) (bool, error) {
+	c, err := db.Cursor(dbutils.Log)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
 		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+			return err
 		}
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return false, fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+			return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 		}
 
 		for _, l := range logs {
@@ -254,9 +271,6 @@ func unwindLogIndex(logPrefix string, db ethdb.Database, to uint64, quitCh <-cha
 			}
 			addrs[string(l.Address.Bytes())] = struct{}{}
 		}
-		return true, nil
-	}); err != nil {
-		return err
 	}
 
 	if err := truncateBitmaps(db, dbutils.LogTopicIndex, topics, to); err != nil {
@@ -294,7 +308,7 @@ func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
 	return nil
 }
 
-func truncateBitmaps(tx ethdb.Database, bucket string, inMem map[string]struct{}, to uint64) error {
+func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)

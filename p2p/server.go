@@ -140,6 +140,7 @@ type Config struct {
 	// ListenAddr field will be updated with the actual address when
 	// the server is started.
 	ListenAddr string
+	SentryAddr []string
 
 	// If set to a non-nil value, the given NAT port mapper
 	// is used to make the listening port available to the

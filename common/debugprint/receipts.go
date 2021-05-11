@@ -18,11 +18,11 @@ func Transactions(ts1, ts2 types.Transactions) {
 		fmt.Printf(" ==== Transaction ====\n")
 		if t2 == nil {
 			fmt.Printf(" TxHash:        %x\n", t1.Hash())
-			fmt.Printf(" To:            %x\n", t1.To())
+			fmt.Printf(" To:            %x\n", t1.GetTo())
 			continue
 		}
 		fmt.Printf(" TxHash:        %x, %x\n", t1.Hash(), t2.Hash())
-		fmt.Printf(" To:            %x, %x\n", t1.To(), t2.To())
+		fmt.Printf(" To:            %x, %x\n", t1.GetTo(), t2.GetTo())
 	}
 }
 
@@ -71,7 +71,7 @@ func Receipts(rs1, rs2 types.Receipts) {
 			fmt.Printf("  Logs[%d].Topic:   %x, %x\n", j, l1.Topics, l2.Topics)
 			fmt.Printf("  Logs[%d].Data:    %x, %x\n", j, l1.Data, l2.Data)
 		}
-		fmt.Printf(" Bloom: %x, %x\n", r1.Bloom, r1.Bloom)
+		//fmt.Printf(" Bloom: %x, %x\n", r1.Bloom, r1.Bloom)
 	}
 }
 

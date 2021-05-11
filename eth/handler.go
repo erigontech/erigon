@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -27,10 +28,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
@@ -49,10 +52,6 @@ const (
 	txChanSize = 4096
 )
 
-var (
-	syncChallengeTimeout = 15 * time.Second // Time allowance for a node to reply to the sync progress challenge
-)
-
 // txPool defines the methods needed from a transaction pool implementation to
 // support all the operations needed by the Ethereum chain protocols.
 type txPool interface {
@@ -62,14 +61,14 @@ type txPool interface {
 
 	// Get retrieves the transaction from local txpool with given
 	// tx hash.
-	Get(hash common.Hash) *types.Transaction
+	Get(hash common.Hash) types.Transaction
 
 	// AddRemotes should add the given transactions to the pool.
-	AddRemotes([]*types.Transaction) []error
+	AddRemotes([]types.Transaction) []error
 
 	// Pending should return pending transactions.
 	// The slice should be modifiable by the caller.
-	Pending() (map[common.Address]types.Transactions, error)
+	Pending() (types.TransactionsGroupedBySender, error)
 
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
@@ -79,16 +78,16 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database   ethdb.Database            // Database for direct sync insertions
-	Chain      *core.BlockChain          // Blockchain to serve data from
-	TxPool     txPool                    // Transaction pool to propagate from
-	Network    uint64                    // Network identifier to adfvertise
-	Sync       downloader.SyncMode       // Whether to fast or full sync
-	BloomCache uint64                    // Megabytes to alloc for fast sync bloom
-	EventMux   *event.TypeMux            // Legacy event mux, deprecate for `feed`
-	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
-	Whitelist  map[uint64]common.Hash    // Hard coded whitelist for sync challenged
-	Mining     *params.MiningConfig
+	Database    ethdb.Database // Database for direct sync insertions
+	ChainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	genesis     *types.Block
+	engine      consensus.Engine
+	TxPool      txPool                    // Transaction pool to propagate from
+	Network     uint64                    // Network identifier to adfvertise
+	BloomCache  uint64                    // Megabytes to alloc for fast sync bloom
+	Checkpoint  *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
+	Whitelist   map[uint64]common.Hash    // Hard coded whitelist for sync challenged
 }
 
 type handler struct {
@@ -97,23 +96,21 @@ type handler struct {
 
 	acceptTxs uint32 // Flag whether we're considered synchronised (enables transaction processing)
 
-	checkpointNumber uint64      // Block number for the sync progress validator to cross reference
-	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
-
-	database ethdb.Database
-	txpool   txPool
-	chain    *core.BlockChain
-	maxPeers int
+	database    ethdb.Database
+	txpool      txPool
+	chainConfig *params.ChainConfig
+	vmConfig    *vm.Config
+	genesis     *types.Block
+	engine      consensus.Engine
+	maxPeers    int
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
 	txFetcher    *fetcher.TxFetcher
 	peers        *peerSet
 
-	eventMux      *event.TypeMux
-	txsCh         chan core.NewTxsEvent
-	txsSub        event.Subscription
-	minedBlockSub *event.TypeMuxSubscription
+	txsCh  chan core.NewTxsEvent
+	txsSub event.Subscription
 
 	whitelist map[uint64]common.Hash
 
@@ -126,29 +123,25 @@ type handler struct {
 	peerWG    sync.WaitGroup
 
 	tmpdir        string
-	cacheSize     datasize.ByteSize
 	batchSize     datasize.ByteSize
 	stagedSync    *stagedsync.StagedSync
-	mining        *stagedsync.StagedSync
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
 // newHandler returns a handler for all Ethereum chain management protocol.
 func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
-	// Create the protocol manager with the base fields
-	if config.EventMux == nil {
-		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
-	}
 	h := &handler{
-		networkID: config.Network,
-		eventMux:  config.EventMux,
-		database:  config.Database,
-		txpool:    config.TxPool,
-		chain:     config.Chain,
-		peers:     newPeerSet(),
-		whitelist: config.Whitelist,
-		txsyncCh:  make(chan *txsync),
-		quitSync:  make(chan struct{}),
+		networkID:   config.Network,
+		database:    config.Database,
+		txpool:      config.TxPool,
+		chainConfig: config.ChainConfig,
+		vmConfig:    config.vmConfig,
+		genesis:     config.genesis,
+		engine:      config.engine,
+		peers:       newPeerSet(),
+		whitelist:   config.Whitelist,
+		txsyncCh:    make(chan *txsync),
+		quitSync:    make(chan struct{}),
 	}
 	if headHeight, err := stages.GetStageProgress(config.Database, stages.Finish); err == nil {
 		h.currentHeight = headHeight
@@ -158,7 +151,7 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	heighter := func() uint64 {
 		return atomic.LoadUint64(&h.currentHeight)
 	}
-	h.forkFilter = forkid.NewFilter(config.Chain.Config(), config.Chain.Genesis().Hash(), heighter)
+	h.forkFilter = forkid.NewFilter(config.ChainConfig, config.genesis.Hash(), heighter)
 	// Construct the downloader (long sync) and its backing state bloom if fast
 	// sync is requested. The downloader is responsible for deallocating the state
 	// bloom when it's done.
@@ -166,13 +159,13 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
 	}
-	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, config.Chain.Config(), config.Mining, config.Chain, h.removePeer, sm)
+	h.downloader = downloader.New(config.Database, config.ChainConfig, config.engine, config.vmConfig, h.removePeer, sm)
 	h.downloader.SetTmpDir(h.tmpdir)
-	h.downloader.SetBatchSize(h.cacheSize, h.batchSize)
+	h.downloader.SetBatchSize(h.batchSize)
 
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
-		return h.chain.Engine().VerifyHeader(h.chain, header, true)
+		return h.engine.VerifyHeader(stagedsync.ChainReader{Cfg: h.chainConfig, Db: h.database}, header, true)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		if err == nil {
@@ -180,7 +173,15 @@ func newHandler(config *handlerConfig) (*handler, error) { //nolint:unparam
 		}
 		return 0, err
 	}
-	h.blockFetcher = fetcher.NewBlockFetcher(nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+
+	getBlockByHash := func(hash common.Hash) (b *types.Block) {
+		_ = h.database.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+			b, err = rawdb.ReadBlockByHash(tx, hash)
+			return err
+		})
+		return b
+	}
+	h.blockFetcher = fetcher.NewBlockFetcher(nil, getBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
 
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)
@@ -201,11 +202,10 @@ func (h *handler) SetTmpDir(tmpdir string) {
 	}
 }
 
-func (h *handler) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
-	h.cacheSize = cacheSize
+func (h *handler) SetBatchSize(batchSize datasize.ByteSize) {
 	h.batchSize = batchSize
 	if h.downloader != nil {
-		h.downloader.SetBatchSize(cacheSize, batchSize)
+		h.downloader.SetBatchSize(batchSize)
 	}
 }
 
@@ -216,26 +216,15 @@ func (h *handler) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 	}
 }
 
-func (h *handler) SetMining(mining *stagedsync.StagedSync) {
-	h.mining = mining
-	if h.downloader != nil {
-		h.downloader.SetMining(mining)
-	}
-}
-
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
 // various subsistems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
-	// TODO(karalabe): Not sure why this is needed
-	if !h.chainSync.handlePeerEvent() {
-		return p2p.DiscQuitting
-	}
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
 	// Execute the Ethereum handshake
 	var (
-		genesis = h.chain.Genesis()
+		genesis = h.genesis
 		number  = atomic.LoadUint64(&h.currentHeight)
 	)
 	hash, err := rawdb.ReadCanonicalHash(h.database, number)
@@ -246,7 +235,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	if err1 != nil {
 		return fmt.Errorf("reading td for %d %x: %v", number, hash, err1)
 	}
-	forkID := forkid.NewID(h.chain.Config(), genesis.Hash(), number)
+	forkID := forkid.NewID(h.chainConfig, genesis.Hash(), number)
 	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
@@ -282,25 +271,6 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// after this will be sent via broadcasts.
 	h.syncTransactions(peer)
 
-	// If we have a trusted CHT, reject all peers below that (avoid fast sync eclipse)
-	if h.checkpointHash != (common.Hash{}) {
-		// Request the peer's checkpoint header for chain height/weight validation
-		if err := peer.RequestHeadersByNumber(h.checkpointNumber, 1, 0, false); err != nil {
-			return err
-		}
-		// Start a timer to disconnect if the peer doesn't reply in time
-		p.syncDrop = time.AfterFunc(syncChallengeTimeout, func() {
-			peer.Log().Warn("Checkpoint challenge timed out, dropping", "addr", peer.RemoteAddr(), "type", peer.Name())
-			h.removePeer(peer.ID())
-		})
-		// Make sure it's cleaned up if the peer dies off
-		defer func() {
-			if p.syncDrop != nil {
-				p.syncDrop.Stop()
-				p.syncDrop = nil
-			}
-		}()
-	}
 	// If we have any explicit whitelist block hashes, request them
 	for number := range h.whitelist {
 		if err := peer.RequestHeadersByNumber(number, 1, 0, false); err != nil {
@@ -352,20 +322,13 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
-	// broadcast mined blocks
-	h.wg.Add(1)
-	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go h.minedBroadcastLoop()
-
 	// start sync handlers
 	h.wg.Add(2)
 	go h.chainSync.loop()
 	go h.txsyncLoop64() // TODO(karalabe): Legacy initial tx echange, drop with eth/64.
 }
-
 func (h *handler) Stop() {
-	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
-	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
@@ -392,9 +355,12 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 	if propagate {
 		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 		var td *big.Int
-		if parent := h.chain.GetBlock(block.ParentHash(), block.NumberU64()-1); parent != nil {
-			td = new(big.Int).Add(block.Difficulty(), h.chain.GetTd(block.ParentHash(), block.NumberU64()-1))
+
+		if rawdb.HasBody(h.database, block.ParentHash(), block.NumberU64()-1) {
+			parentTd, _ := rawdb.ReadTd(h.database, block.ParentHash(), block.NumberU64()-1)
+			td = new(big.Int).Add(block.Difficulty(), parentTd)
 		} else {
+			// If the parent's unknown, abort insertion
 			log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 			return
 		}
@@ -407,7 +373,7 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 		return
 	}
 	// Otherwise if the block is indeed in out own chain, announce it
-	if h.chain.HasBlock(hash, block.NumberU64()) {
+	if rawdb.HasBody(h.database, hash, block.NumberU64()) {
 		for _, peer := range peers {
 			peer.AsyncSendNewBlockHash(block)
 		}
@@ -451,27 +417,11 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 	for peer, hashes := range annos {
 		annoPeers++
 		annoCount += len(hashes)
-		if peer.Version() >= eth.ETH65 {
-			peer.AsyncSendPooledTransactionHashes(hashes)
-		} else {
-			peer.AsyncSendTransactions(hashes)
-		}
+		peer.AsyncSendPooledTransactionHashes(hashes)
 	}
 	log.Debug("Transaction broadcast", "txs", len(txs),
 		"announce packs", annoPeers, "announced hashes", annoCount,
 		"tx packs", directPeers, "broadcast txs", directCount)
-}
-
-// minedBroadcastLoop sends mined blocks to connected peers.
-func (h *handler) minedBroadcastLoop() {
-	defer h.wg.Done()
-
-	for obj := range h.minedBlockSub.Chan() {
-		if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
-			h.BroadcastBlock(ev.Block, true)  // First propagate block to peers
-			h.BroadcastBlock(ev.Block, false) // Only then announce to the rest
-		}
-	}
 }
 
 // txBroadcastLoop announces new transactions to connected peers.

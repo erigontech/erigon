@@ -313,7 +313,7 @@ func (p *Peer) handle(msg Msg) error {
 		var reason [1]DiscReason
 		// This is the last message. We don't need to discard or
 		// check errors because, the connection will be closed after it.
-		rlp.Decode(msg.Payload, &reason)
+		_ = rlp.Decode(msg.Payload, &reason)
 		return reason[0]
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages

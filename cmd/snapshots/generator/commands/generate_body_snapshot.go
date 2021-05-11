@@ -14,13 +14,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func init() {
-	withChaindata(generateBodiesSnapshotCmd)
+	withDatadir(generateBodiesSnapshotCmd)
 	withSnapshotFile(generateBodiesSnapshotCmd)
-	withSnapshotData(generateBodiesSnapshotCmd)
 	withBlock(generateBodiesSnapshotCmd)
 	rootCmd.AddCommand(generateBodiesSnapshotCmd)
 
@@ -29,7 +27,7 @@ func init() {
 var generateBodiesSnapshotCmd = &cobra.Command{
 	Use:     "bodies",
 	Short:   "Generate bodies snapshot",
-	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
+	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --datadir /media/b00ris/nvme/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
@@ -38,18 +36,6 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
 	var err error
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
 
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
@@ -58,8 +44,12 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	db := ethdb.NewObjectDatabase(kv)
 	snDB := ethdb.NewObjectDatabase(snKV)
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	t := time.Now()
 	chunkFile := 30000
@@ -71,11 +61,11 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 			return common.ErrStopped
 		}
 
-		hash, err = rawdb.ReadCanonicalHash(db, i)
+		hash, err = rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 		}
-		body := rawdb.ReadBodyRLP(db, hash, i)
+		body := rawdb.ReadBodyRLP(tx, hash, i)
 		tuples = append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)

@@ -108,7 +108,7 @@ func TestEth66EmptyMessages(t *testing.T) {
 		ReceiptsPacket66{1111, ReceiptsPacket([][]*types.Receipt{})},
 		// Transactions
 		GetPooledTransactionsPacket66{1111, GetPooledTransactionsPacket([]common.Hash{})},
-		PooledTransactionsPacket66{1111, PooledTransactionsPacket([]*types.Transaction{})},
+		PooledTransactionsPacket66{1111, PooledTransactionsPacket([]types.Transaction{})},
 		PooledTransactionsRLPPacket66{1111, PooledTransactionsRLPPacket([]rlp.RawValue{})},
 	} {
 		if have, _ := rlp.EncodeToBytes(msg); !bytes.Equal(have, want) {
@@ -126,7 +126,7 @@ func TestEth66Messages(t *testing.T) {
 		header       *types.Header
 		blockBody    *BlockBody
 		blockBodyRlp rlp.RawValue
-		txs          []*types.Transaction
+		txs          []types.Transaction
 		txRlps       []rlp.RawValue
 		hashes       []common.Hash
 		receipts     []*types.Receipt
@@ -148,9 +148,10 @@ func TestEth66Messages(t *testing.T) {
 			"f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10",
 			"f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb",
 		} {
-			var tx *types.Transaction
+			var tx types.Transaction
 			rlpdata := common.FromHex(hexrlp)
-			if err1 := rlp.DecodeBytes(rlpdata, &tx); err1 != nil {
+			tx, err1 := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpdata), 0))
+			if err1 != nil {
 				t.Fatal(err1)
 			}
 			txs = append(txs, tx)

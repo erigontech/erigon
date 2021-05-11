@@ -1,7 +1,11 @@
 package commands
 
 import (
+	"path"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/turbo/node"
 	"github.com/spf13/cobra"
 )
 
@@ -12,8 +16,14 @@ var (
 	chain    string // Name of the network to connect to
 )
 
+var (
+	// gitCommit is injected through the build flags (see Makefile)
+	gitCommit string
+	gitBranch string
+)
+
 func init() {
-	downloadCmd.Flags().StringVar(&sentryAddr, "sentryAddr", "localhost:9091", "sentry address <host>:<port>")
+	downloadCmd.Flags().StringSliceVar(&sentryAddrs, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	downloadCmd.Flags().BoolVar(&combined, "combined", false, "run downloader and sentry in the same process")
 	downloadCmd.Flags().IntVar(&timeout, "timeout", 30, "timeout for devp2p delivery requests, in seconds")
 	downloadCmd.Flags().IntVar(&window, "window", 65536, "size of sliding window for downloading block bodies, block")
@@ -22,12 +32,11 @@ func init() {
 	// Options below are only used in the combined mode
 	downloadCmd.Flags().StringVar(&natSetting, "nat", "any", "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
 	downloadCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
-	downloadCmd.Flags().StringArrayVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
+	downloadCmd.Flags().StringSliceVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
 	downloadCmd.Flags().BoolVar(&discovery, "discovery", true, "discovery mode")
 	downloadCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
 
-	withChaindata(downloadCmd)
-	withLmdbFlags(downloadCmd)
+	withDatadir(downloadCmd)
 	rootCmd.AddCommand(downloadCmd)
 }
 
@@ -37,9 +46,14 @@ var downloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db := openDatabase(chaindata)
 		defer db.Close()
+		nodeConfig := node.NewNodeConfig(node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+		nodeName := nodeConfig.NodeName()
+		tmpdir := path.Join(nodeConfig.DataDir, etl.TmpDirName)
+
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain)
+			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName, tmpdir)
 		}
-		return download.Download(sentryAddr, coreAddr, db, timeout, window, chain)
+
+		return download.Download(sentryAddrs, db, timeout, window, chain, nodeName, tmpdir)
 	},
 }

@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -10,26 +11,34 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const MaxTxTTL = 30 * time.Second
 
+// KvServiceAPIVersion - use it to track changes in API
+// 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
+var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
+
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.KV
+	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -37,18 +46,20 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 	}
 
 	kv2Srv := NewKvServer(kv)
-	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi)
+	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
+	txPoolServer := NewTxPoolServer(context.Background(), txPool)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	if metrics.Enabled {
 		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
 		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
@@ -71,8 +82,8 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 		opts = append(opts, grpc.Creds(*creds))
 	}
 	grpcServer = grpc.NewServer(opts...)
-	remote.RegisterDBServer(grpcServer, dbSrv)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
 	remote.RegisterKVServer(grpcServer, kv2Srv)
 
 	if metrics.Enabled {
@@ -88,12 +99,32 @@ func StartGrpc(kv ethdb.KV, eth core.EthBackend, ethashApi *ethash.API, addr str
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.KV) *KvServer {
+func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
+// GetInterfaceVersion returns the service-side interface version number
+func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
+	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
+		return &KvServiceAPIVersion, nil
+	}
+	if dbutils.DBSchemaVersion.Major > KvServiceAPIVersion.Major {
+		return &dbutils.DBSchemaVersion, nil
+	}
+	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
+		return &KvServiceAPIVersion, nil
+	}
+	if dbutils.DBSchemaVersion.Minor > KvServiceAPIVersion.Minor {
+		return &dbutils.DBSchemaVersion, nil
+	}
+	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
+		return &KvServiceAPIVersion, nil
+	}
+	return &dbutils.DBSchemaVersion, nil
+}
+
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
-	tx, errBegin := s.kv.Begin(stream.Context())
+	tx, errBegin := s.kv.BeginRo(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
@@ -137,13 +168,17 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 
 			tx.Rollback()
-			tx, errBegin = s.kv.Begin(stream.Context())
+			tx, errBegin = s.kv.BeginRo(stream.Context())
 			if errBegin != nil {
-				return fmt.Errorf("server-side error: %w", errBegin)
+				return fmt.Errorf("server-side error, BeginRo: %w", errBegin)
 			}
 
 			for _, c := range cursors { // restore all cursors position
-				c.c = tx.Cursor(c.bucket)
+				var err error
+				c.c, err = tx.Cursor(c.bucket)
+				if err != nil {
+					return err
+				}
 				switch casted := c.c.(type) {
 				case ethdb.CursorDupSort:
 					v, err := casted.SeekBothRange(c.k, c.v)
@@ -176,9 +211,14 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		switch in.Op {
 		case remote.Op_OPEN:
 			CursorID++
+			var err error
+			c, err = tx.Cursor(in.BucketName)
+			if err != nil {
+				return err
+			}
 			cursors[CursorID] = &CursorInfo{
 				bucket: in.BucketName,
-				c:      tx.Cursor(in.BucketName),
+				c:      c,
 			}
 			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)

@@ -7,13 +7,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
 
@@ -21,9 +19,10 @@ import (
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
 // this is reason why all methods are accepting context and returning error
 type ApiBackend interface {
-	AddLocal(context.Context, []byte) ([]byte, error)
 	Etherbase(ctx context.Context) (common.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
+	ProtocolVersion(ctx context.Context) (uint64, error)
+	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 
 	Mining(ctx context.Context) (bool, error)
@@ -34,55 +33,9 @@ type ApiBackend interface {
 }
 
 type EthBackend interface {
-	TxPool() *TxPool
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	IsMining() bool
-}
-
-type EthBackendImpl struct {
-	eth    EthBackend
-	ethash *ethash.API
-}
-
-func NewEthBackend(eth EthBackend, ethashApi *ethash.API) *EthBackendImpl {
-	return &EthBackendImpl{eth: eth, ethash: ethashApi}
-}
-
-func (back *EthBackendImpl) AddLocal(_ context.Context, signedtx []byte) ([]byte, error) {
-	tx := new(types.Transaction)
-	if err := rlp.DecodeBytes(signedtx, tx); err != nil {
-		return common.Hash{}.Bytes(), err
-	}
-
-	return tx.Hash().Bytes(), back.eth.TxPool().AddLocal(tx)
-}
-
-func (back *EthBackendImpl) Etherbase(_ context.Context) (common.Address, error) {
-	return back.eth.Etherbase()
-}
-func (back *EthBackendImpl) NetVersion(_ context.Context) (uint64, error) {
-	return back.eth.NetVersion()
-}
-func (back *EthBackendImpl) Subscribe(_ context.Context, cb func(*remote.SubscribeReply)) error {
-	// do nothing
-	return nil
-}
-
-func (back *EthBackendImpl) GetWork(ctx context.Context) ([4]string, error) {
-	return back.ethash.GetWork()
-}
-func (back *EthBackendImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, hash, digest common.Hash) (bool, error) {
-	return back.ethash.SubmitWork(nonce, hash, digest), nil
-}
-func (back *EthBackendImpl) SubmitHashRate(ctx context.Context, rate hexutil.Uint64, id common.Hash) (bool, error) {
-	return back.ethash.SubmitHashRate(rate, id), nil
-}
-func (back *EthBackendImpl) GetHashRate(ctx context.Context) (uint64, error) {
-	return back.ethash.GetHashrate(), nil
-}
-func (back *EthBackendImpl) Mining(ctx context.Context) (bool, error) {
-	return back.eth.IsMining(), nil
 }
 
 type RemoteBackend struct {
@@ -90,22 +43,11 @@ type RemoteBackend struct {
 	log              log.Logger
 }
 
-func NewRemoteBackend(kv ethdb.KV) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
-		remoteEthBackend: remote.NewETHBACKENDClient(kv.(*ethdb.RemoteKV).GrpcConn()),
+		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		log:              log.New("remote_db"),
 	}
-}
-
-func (back *RemoteBackend) AddLocal(ctx context.Context, signedTx []byte) ([]byte, error) {
-	res, err := back.remoteEthBackend.Add(ctx, &remote.TxRequest{Signedtx: signedTx})
-	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return common.Hash{}.Bytes(), errors.New(s.Message())
-		}
-		return common.Hash{}.Bytes(), err
-	}
-	return gointerfaces.ConvertH256ToHash(res.Hash).Bytes(), nil
 }
 
 func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {
@@ -132,8 +74,32 @@ func (back *RemoteBackend) NetVersion(ctx context.Context) (uint64, error) {
 	return res.Id, nil
 }
 
+func (back *RemoteBackend) ProtocolVersion(ctx context.Context) (uint64, error) {
+	res, err := back.remoteEthBackend.ProtocolVersion(ctx, &remote.ProtocolVersionRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return 0, errors.New(s.Message())
+		}
+		return 0, err
+	}
+
+	return res.Id, nil
+}
+
+func (back *RemoteBackend) ClientVersion(ctx context.Context) (string, error) {
+	res, err := back.remoteEthBackend.ClientVersion(ctx, &remote.ClientVersionRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return "", errors.New(s.Message())
+		}
+		return "", err
+	}
+
+	return res.NodeName, nil
+}
+
 func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remote.SubscribeReply)) error {
-	subscription, err := back.remoteEthBackend.Subscribe(ctx, &remote.SubscribeRequest{})
+	subscription, err := back.remoteEthBackend.Subscribe(ctx, &remote.SubscribeRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return errors.New(s.Message())

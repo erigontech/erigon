@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // TraceAPI RPC interface into tracing API
@@ -24,25 +26,27 @@ type TraceAPI interface {
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
-	Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
+	Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
 	*BaseAPI
-	dbReader  ethdb.Database
+	kv        ethdb.RoKV
 	maxTraces uint64
 	traceType string
 	gasCap    uint64
+	pending   *rpchelper.Pending
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(kv ethdb.RoKV, pending *rpchelper.Pending, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:   &BaseAPI{},
-		dbReader:  dbReader,
+		kv:        kv,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,
 		gasCap:    cfg.Gascap,
+		pending:   pending,
 	}
 }

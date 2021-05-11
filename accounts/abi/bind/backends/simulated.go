@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"sync"
 	"time"
 
@@ -66,9 +65,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database   *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine     consensus.Engine
-	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
+	database  *ethdb.ObjectDatabase // In memory database to store our testing data
+	engine    consensus.Engine
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -82,7 +81,6 @@ type SimulatedBackend struct {
 	events *filters.EventSystem // Event system for filtering log events live
 
 	config     *params.ChainConfig
-	txCacher   *core.TxSenderCacher
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
@@ -95,20 +93,15 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		panic(fmt.Sprintf("%v", err))
-	}
-	blockchain.EnableReceipts(true)
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		blockchain:   blockchain,
-		config:       genesis.Config,
-		txCacher:     txCacher,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
+		config: genesis.Config,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -123,19 +116,14 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		panic(err)
-	}
-	blockchain.EnableReceipts(true)
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       engine,
-		blockchain:   blockchain,
 		config:       genesis.Config,
-		txCacher:     txCacher,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(database, hash, number)
+		},
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -153,7 +141,6 @@ func (b *SimulatedBackend) DB() ethdb.Database {
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
-	b.blockchain.Stop()
 	b.database.Close()
 	return nil
 }
@@ -161,10 +148,9 @@ func (b *SimulatedBackend) Close() error {
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
-	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.blockchain.Engine(), b.pendingBlock, false /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -173,7 +159,6 @@ func (b *SimulatedBackend) Commit() {
 		allLogs = append(allLogs, r.Logs...)
 	}
 	b.logsFeed.Send(allLogs)
-	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
 }
@@ -275,7 +260,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 // blockchain. The isPending return value indicates whether the transaction has been
 // mined yet. Note that the transaction may not be part of the canonical chain even if
 // it's not pending.
-func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (*types.Transaction, bool, error) {
+func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (types.Transaction, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -283,7 +268,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if tx != nil {
 		return tx, true, nil
 	}
-	tx, _, _, _ = rawdb.ReadTransaction(b.database, txHash)
+	tx, _, _, _ = rawdb.ReadTransactionDeprecated(b.database, txHash)
 	if tx != nil {
 		return tx, false, nil
 	}
@@ -299,7 +284,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 		return b.pendingBlock, nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, hash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +315,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlock(b.database, hash, number.Uint64())
+	block := rawdb.ReadBlockDeprecated(b.database, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -385,7 +370,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
 	if err != nil {
 		return 0, err
 	}
@@ -397,7 +382,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 }
 
 // TransactionInBlock returns the transaction for a specific block at a specific index.
-func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error) {
+func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (types.Transaction, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -410,7 +395,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 		return transactions[index], nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +615,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.blockchain, nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -641,26 +626,25 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 // SendTransaction updates the pending block to include the given transaction.
 // It panics if the transaction is invalid.
-func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	block := b.blockchain.CurrentBlock()
-	signer := types.MakeSigner(b.blockchain.Config(), block.Number())
-	sender, err := types.Sender(signer, tx)
-	if err != nil {
-		return fmt.Errorf("invalid transaction: %v", err)
+	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
+	sender, senderErr := tx.Sender(*signer)
+	if senderErr != nil {
+		return fmt.Errorf("invalid transaction: %v", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
-	if tx.Nonce() != nonce {
-		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.Nonce(), nonce)
+	if tx.GetNonce() != nonce {
+		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.blockchain,
+		b.config, b.getHeader, b.engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -670,9 +654,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.blockchain, tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
-		block.AddTxWithChain(b.blockchain, tx)
+		block.AddTxWithChain(b.getHeader, b.engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -791,7 +775,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.blockchain, tx)
+			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)
@@ -804,11 +788,6 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	return nil
 }
 
-// Blockchain returns the underlying blockchain.
-func (b *SimulatedBackend) Blockchain() *core.BlockChain {
-	return b.blockchain
-}
-
 // callMsg implements core.Message to allow passing it as a transaction simulator.
 type callMsg struct {
 	ethereum.CallMsg
@@ -819,6 +798,8 @@ func (m callMsg) Nonce() uint64                { return 0 }
 func (m callMsg) CheckNonce() bool             { return false }
 func (m callMsg) To() *common.Address          { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int         { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int            { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
@@ -831,8 +812,7 @@ type filterBackend struct {
 	b  *SimulatedBackend
 }
 
-func (fb *filterBackend) ChainDb() ethdb.Database  { return fb.db }
-func (fb *filterBackend) EventMux() *event.TypeMux { panic("not supported") }
+func (fb *filterBackend) ChainDb() ethdb.Database { return fb.db }
 
 func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
 	if block == rpc.LatestBlockNumber {
@@ -850,7 +830,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number), nil
+	return rawdb.ReadReceiptsDeprecated(fb.db, hash, *number), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -858,7 +838,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
+	receipts := rawdb.ReadReceiptsDeprecated(fb.db, hash, *number)
 	if receipts == nil {
 		return nil, nil
 	}

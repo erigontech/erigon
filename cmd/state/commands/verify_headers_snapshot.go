@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withChaindata(verifyHeadersSnapshotCmd)
+	withDatadir(verifyHeadersSnapshotCmd)
 	rootCmd.AddCommand(verifyHeadersSnapshotCmd)
 }
 

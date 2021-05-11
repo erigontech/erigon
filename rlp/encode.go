@@ -260,16 +260,16 @@ func (w *encbuf) toWriter(out io.Writer) (err error) {
 	for _, head := range w.lheads {
 		// write string data before header
 		if head.offset-strpos > 0 {
-			n, err := out.Write(w.str[strpos:head.offset])
+			n, nErr := out.Write(w.str[strpos:head.offset])
 			strpos += n
-			if err != nil {
-				return err
+			if nErr != nil {
+				return nErr
 			}
 		}
 		// write the header
 		enc := head.encode(w.sizebuf[:])
-		if _, err = out.Write(enc); err != nil {
-			return err
+		if _, wErr := out.Write(enc); wErr != nil {
+			return wErr
 		}
 	}
 	if strpos < len(w.str) {
@@ -564,11 +564,11 @@ func writeInterface(val reflect.Value, w *encbuf) error {
 		return nil
 	}
 	eval := val.Elem()
-	writer, err := cachedWriter(eval.Type())
-	if err != nil {
-		return err
+	wtr, wErr := cachedWriter(eval.Type())
+	if wErr != nil {
+		return wErr
 	}
-	return writer(eval, w)
+	return wtr(eval, w)
 }
 
 func makeSliceWriter(typ reflect.Type, ts tags) (writer, error) {

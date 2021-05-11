@@ -1,24 +1,91 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
-	if api.ethBackend == nil {
-		// We're running in --chaindata mode or otherwise cannot get the backend
-		return common.Hash{}, fmt.Errorf(NotAvailableChainData, "eth_sendRawTransaction")
+	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
+	if err != nil {
+		return common.Hash{}, err
 	}
-	res, err := api.ethBackend.AddLocal(ctx, encodedTx)
-	return common.BytesToHash(res), err
+
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
+		return common.Hash{}, err
+	}
+	if !txn.Protected() {
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
+	hash := txn.Hash()
+	res, err := api.txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if res.Imported[0] != txpool.ImportResult_SUCCESS {
+		return hash, fmt.Errorf("%s: %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+	}
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+	// Print a log with full txn details for manual investigations and interventions
+	blockNum := rawdb.ReadCurrentBlockNumber(tx)
+	if blockNum == nil {
+		return common.Hash{}, err
+	}
+	signer := types.MakeSigner(api.ChainConfig(), *blockNum)
+	from, err := txn.Sender(*signer)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if txn.GetTo() == nil {
+		addr := crypto.CreateAddress(from, txn.GetNonce())
+		log.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "contract", addr.Hex(), "value", txn.GetValue())
+	} else {
+		log.Info("Submitted transaction", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
+	}
+
+	return txn.Hash(), nil
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
 func (api *APIImpl) SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error) {
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
+}
+
+// checkTxFee is an internal function used to check whether the fee of
+// the given transaction is _reasonable_(under the cap).
+func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
+	// Short circuit if there is no cap for transaction fee at all.
+	if cap == 0 {
+		return nil
+	}
+	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
+	feeFloat, _ := feeEth.Float64()
+	if feeFloat > cap {
+		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, cap)
+	}
+	return nil
 }

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -122,23 +121,25 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
 		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
 
-		memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
-		memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
-		memHVM    = GetOrRegisterGauge("mem/hvm", DefaultRegistry)
-		memData   = GetOrRegisterGauge("mem/data", DefaultRegistry)
-		memStack  = GetOrRegisterGauge("mem/stack", DefaultRegistry)
-		memLocked = GetOrRegisterGauge("mem/locked", DefaultRegistry)
-		memSwap   = GetOrRegisterGauge("mem/swap", DefaultRegistry)
+		/*
+			memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
+			memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
+			memHVM    = GetOrRegisterGauge("mem/hvm", DefaultRegistry)
+			memData   = GetOrRegisterGauge("mem/data", DefaultRegistry)
+			memStack  = GetOrRegisterGauge("mem/stack", DefaultRegistry)
+			memLocked = GetOrRegisterGauge("mem/locked", DefaultRegistry)
+			memSwap   = GetOrRegisterGauge("mem/swap", DefaultRegistry)
 
-		vmemTotal     = GetOrRegisterGauge("vmem/total", DefaultRegistry)
-		vmemAvailable = GetOrRegisterGauge("vmem/available", DefaultRegistry)
-		vmemUsed      = GetOrRegisterGauge("vmem/used", DefaultRegistry)
-		vmemBuffers   = GetOrRegisterGauge("vmem/buffers", DefaultRegistry)
-		vmemCached    = GetOrRegisterGauge("vmem/cached", DefaultRegistry)
-		vmemWriteBack = GetOrRegisterGauge("vmem/writeback", DefaultRegistry)
-		vmemDirty     = GetOrRegisterGauge("vmem/dirty", DefaultRegistry)
-		vmemShared    = GetOrRegisterGauge("vmem/shared", DefaultRegistry)
-		vmemMapped    = GetOrRegisterGauge("vmem/mapped", DefaultRegistry)
+			vmemTotal     = GetOrRegisterGauge("vmem/total", DefaultRegistry)
+			vmemAvailable = GetOrRegisterGauge("vmem/available", DefaultRegistry)
+			vmemUsed      = GetOrRegisterGauge("vmem/used", DefaultRegistry)
+			vmemBuffers   = GetOrRegisterGauge("vmem/buffers", DefaultRegistry)
+			vmemCached    = GetOrRegisterGauge("vmem/cached", DefaultRegistry)
+			vmemWriteBack = GetOrRegisterGauge("vmem/writeback", DefaultRegistry)
+			vmemDirty     = GetOrRegisterGauge("vmem/dirty", DefaultRegistry)
+			vmemShared    = GetOrRegisterGauge("vmem/shared", DefaultRegistry)
+			vmemMapped    = GetOrRegisterGauge("vmem/mapped", DefaultRegistry)
+		*/
 	)
 
 	p, _ := process.NewProcess(int32(os.Getpid()))
@@ -166,43 +167,48 @@ func CollectProcessMetrics(refresh time.Duration) {
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
 
-		if m, _ := mem.VirtualMemory(); m != nil {
-			vmemTotal.Update(int64(m.Total))
-			vmemAvailable.Update(int64(m.Available))
-			vmemUsed.Update(int64(m.Used))
-			vmemBuffers.Update(int64(m.Buffers))
-			vmemCached.Update(int64(m.Cached))
-			vmemWriteBack.Update(int64(m.WriteBack))
-			vmemDirty.Update(int64(m.Dirty))
-			vmemShared.Update(int64(m.Shared))
-			vmemMapped.Update(int64(m.Mapped))
-			//Slab           uint64 `json:"slab"`
-			//Sreclaimable   uint64 `json:"sreclaimable"`
-			//Sunreclaim     uint64 `json:"sunreclaim"`
-			//PageTables     uint64 `json:"pageTables"`
-			//SwapCached     uint64 `json:"swapCached"`
-			//CommitLimit    uint64 `json:"commitLimit"`
-			//CommittedAS    uint64 `json:"committedAS"`
-			//HighTotal      uint64 `json:"highTotal"`
-			//HighFree       uint64 `json:"highFree"`
-			//LowTotal       uint64 `json:"lowTotal"`
-			//LowFree        uint64 `json:"lowFree"`
-			//SwapTotal      uint64 `json:"swapTotal"`
-			//SwapFree       uint64 `json:"swapFree"`
-			//VmallocTotal   uint64 `json:"vmallocTotal"`
-			//VmallocUsed    uint64 `json:"vmallocUsed"`
-			//VmallocChunk   uint64 `json:"vmallocChunk"`
-		}
+		/*
+			if m, _ := mem.VirtualMemory(); m != nil {
+				vmemTotal.Update(int64(m.Total))
+				vmemAvailable.Update(int64(m.Available))
+				vmemUsed.Update(int64(m.Used))
+				vmemBuffers.Update(int64(m.Buffers))
+				vmemCached.Update(int64(m.Cached))
+				vmemWriteBack.Update(int64(m.WriteBack))
+				vmemDirty.Update(int64(m.Dirty))
+				vmemShared.Update(int64(m.Shared))
+				vmemMapped.Update(int64(m.Mapped))
 
-		if m, _ := p.MemoryInfo(); m != nil {
-			memRSS.Update(int64(m.RSS))
-			memVMS.Update(int64(m.VMS))
-			memHVM.Update(int64(m.HWM))
-			memData.Update(int64(m.Data))
-			memStack.Update(int64(m.Stack))
-			memLocked.Update(int64(m.Locked))
-			memSwap.Update(int64(m.Swap))
-		}
+				//Slab           uint64 `json:"slab"`
+				//Sreclaimable   uint64 `json:"sreclaimable"`
+				//Sunreclaim     uint64 `json:"sunreclaim"`
+				//PageTables     uint64 `json:"pageTables"`
+				//SwapCached     uint64 `json:"swapCached"`
+				//CommitLimit    uint64 `json:"commitLimit"`
+				//CommittedAS    uint64 `json:"committedAS"`
+				//HighTotal      uint64 `json:"highTotal"`
+				//HighFree       uint64 `json:"highFree"`
+				//LowTotal       uint64 `json:"lowTotal"`
+				//LowFree        uint64 `json:"lowFree"`
+				//SwapTotal      uint64 `json:"swapTotal"`
+				//SwapFree       uint64 `json:"swapFree"`
+				//VmallocTotal   uint64 `json:"vmallocTotal"`
+				//VmallocUsed    uint64 `json:"vmallocUsed"`
+				//VmallocChunk   uint64 `json:"vmallocChunk"`
+			}
+		*/
+		/*
+			if m, _ := p.MemoryInfo(); m != nil {
+				memRSS.Update(int64(m.RSS))
+				memVMS.Update(int64(m.VMS))
+				memHVM.Update(int64(m.HWM))
+				memData.Update(int64(m.Data))
+				memStack.Update(int64(m.Stack))
+				memLocked.Update(int64(m.Locked))
+				memSwap.Update(int64(m.Swap))
+			}
+		*/
+
 		if pf, _ := p.PageFaults(); pf != nil {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))

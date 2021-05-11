@@ -8,11 +8,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-func getBlockNumber(number rpc.BlockNumber, dbReader ethdb.Getter) (uint64, error) {
+func getBlockNumber(number rpc.BlockNumber, tx ethdb.Tx) (uint64, error) {
 	var blockNum uint64
 	var err error
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
-		blockNum, err = getLatestBlockNumber(dbReader)
+		blockNum, err = getLatestBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
@@ -25,8 +25,8 @@ func getBlockNumber(number rpc.BlockNumber, dbReader ethdb.Getter) (uint64, erro
 	return blockNum, nil
 }
 
-func getLatestBlockNumber(dbReader ethdb.Getter) (uint64, error) {
-	blockNum, err := stages.GetStageProgress(dbReader, stages.Execution)
+func getLatestBlockNumber(tx ethdb.Tx) (uint64, error) {
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %v", err)
 	}

@@ -17,6 +17,14 @@ func ConvertH256ToHash(h256 *types.H256) common.Hash {
 	return hash
 }
 
+func ConvertHashesToH256(hashes common.Hashes) []*types.H256 {
+	res := make([]*types.H256, len(hashes))
+	for i := range hashes {
+		res[i] = ConvertHashToH256(hashes[i])
+	}
+	return res
+}
+
 func ConvertHashToH256(hash common.Hash) *types.H256 {
 	return &types.H256{
 		Lo: &types.H128{Lo: binary.BigEndian.Uint64(hash[24:]), Hi: binary.BigEndian.Uint64(hash[16:])},
@@ -40,18 +48,20 @@ func ConvertAddressToH160(addr common.Address) *types.H160 {
 }
 
 func ConvertH256ToUint256Int(h256 *types.H256) *uint256.Int {
+	// Note: uint256.Int is an array of 4 uint64 in little-endian order, i.e. most significant word is [3]
 	var i uint256.Int
-	i[0] = h256.Hi.Hi
-	i[1] = h256.Hi.Lo
-	i[2] = h256.Lo.Hi
-	i[3] = h256.Lo.Lo
+	i[3] = h256.Hi.Hi
+	i[2] = h256.Hi.Lo
+	i[1] = h256.Lo.Hi
+	i[0] = h256.Lo.Lo
 	return &i
 }
 
 func ConvertUint256IntToH256(i *uint256.Int) *types.H256 {
+	// Note: uint256.Int is an array of 4 uint64 in little-endian order, i.e. most significant word is [3]
 	return &types.H256{
-		Lo: &types.H128{Lo: i[3], Hi: i[2]},
-		Hi: &types.H128{Lo: i[1], Hi: i[0]},
+		Lo: &types.H128{Lo: i[0], Hi: i[1]},
+		Hi: &types.H128{Lo: i[2], Hi: i[3]},
 	}
 }
 

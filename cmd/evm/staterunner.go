@@ -24,11 +24,13 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 
 	"github.com/urfave/cli"
 )
@@ -46,7 +48,7 @@ type StatetestResult struct {
 	Name  string      `json:"name"`
 	Pass  bool        `json:"pass"`
 	Fork  string      `json:"fork"`
-	Error *string     `json:"error,omitempty"`
+	Error string      `json:"error,omitempty"`
 	State *state.Dump `json:"state,omitempty"`
 }
 
@@ -96,27 +98,45 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
 	results := make([]StatetestResult, 0, len(tests))
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, tds, err := test.Run(context.Background(), st, cfg)
-			// print state root for evmlab tracing
-			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", tds.Trie().Root())
-			}
+			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
+
+			var root common.Hash
+
+			statedb, err := test.Run(context.Background(), db, st, cfg)
+
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, *result.Error = false, err.Error()
-				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background())
-					if err1 != nil {
-						return fmt.Errorf("transition cannot open tx: %v", err1)
-					}
-					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
-					tx.Rollback()
-					result.State = &dump
+				result.Pass, result.Error = false, err.Error()
+			} else {
+				root, err = trie.CalcRoot("", db)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
 				}
+			}
+
+			/*
+				if result.Error != "" {
+					if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
+						tx, err1 := tds.Database().Begin(context.Background(), ethdb.RO)
+						if err1 != nil {
+							return fmt.Errorf("transition cannot open tx: %v", err1)
+						}
+						dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+						tx.Rollback()
+						result.State = &dump
+					}
+				}
+			*/
+
+			// print state root for evmlab tracing
+			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root.Bytes())
 			}
 
 			results = append(results, *result)
@@ -128,7 +148,6 @@ func stateTestCmd(ctx *cli.Context) error {
 					vm.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
-			tds.Database().Close()
 		}
 	}
 	out, _ := json.MarshalIndent(results, "", "  ")

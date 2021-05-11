@@ -57,13 +57,14 @@ func TestIHCursor(t *testing.T) {
 	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 
-	tx, err := db.KV().BeginRw(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
 	integrity.Trie(tx, false, nil)
 
-	cursor := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	cursor, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+	require.NoError(err)
 	rl := trie.NewRetainList(0)
 	rl.AddHex(common.FromHex("01"))
 	rl.AddHex(common.FromHex("0101"))

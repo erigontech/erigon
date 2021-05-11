@@ -14,7 +14,7 @@ import (
 func TestDupSortHashState(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HashedStorageBucket)
 	})
 	require.NoError(err)
@@ -48,10 +48,10 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
-	// test low-level data layout
+	c, err := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
 	require.NoError(err)
 
+	// test low-level data layout
 	keyLen := common.HashLength + common.IncarnationLength
 	v, err = c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])
 	require.NoError(err)
@@ -62,7 +62,7 @@ func TestDupSortHashState(t *testing.T) {
 func TestDupSortPlainState(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := db.KV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.PlainStateBucketOld1)
 	})
 	require.NoError(err)
@@ -102,7 +102,8 @@ func TestDupSortPlainState(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+	c, err := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+	require.NoError(err)
 	_, v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
 	require.Equal([]byte{1}, v)

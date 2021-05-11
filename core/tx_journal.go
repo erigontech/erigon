@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"os"
@@ -56,7 +57,7 @@ func newTxJournal(path string) *txJournal {
 
 // load parses a transaction journal dump from disk, loading its contents into
 // the specified pool.
-func (journal *txJournal) load(add func([]*types.Transaction) []error) error {
+func (journal *txJournal) load(add func([]types.Transaction) []error) error {
 	// Skip the parsing if the journal file doesn't exist at all
 	if _, err := os.Stat(journal.path); os.IsNotExist(err) {
 		return nil
@@ -73,7 +74,7 @@ func (journal *txJournal) load(add func([]*types.Transaction) []error) error {
 	defer func() { journal.writer = nil }()
 
 	// Inject all transactions from the journal into the pool
-	stream := rlp.NewStream(input, 0)
+	stream := rlp.NewStream(bufio.NewReader(input), 0)
 	total, dropped := 0, 0
 
 	// Create a method to load a limited batch of transactions and bump the
@@ -93,10 +94,10 @@ func (journal *txJournal) load(add func([]*types.Transaction) []error) error {
 	)
 	for {
 		// Parse the next transaction and terminate on error
-		tx := new(types.Transaction)
-		if err = stream.Decode(tx); err != nil {
-			if err != io.EOF {
-				failure = err
+		tx, decodeErr := types.DecodeTransaction(stream)
+		if decodeErr != nil {
+			if !errors.Is(decodeErr, io.EOF) {
+				failure = decodeErr
 			}
 			if batch.Len() > 0 {
 				loadBatch(batch)
@@ -117,7 +118,7 @@ func (journal *txJournal) load(add func([]*types.Transaction) []error) error {
 }
 
 // insert adds the specified transaction to the local disk journal.
-func (journal *txJournal) insert(tx *types.Transaction) error {
+func (journal *txJournal) insert(tx types.Transaction) error {
 	if journal.writer == nil {
 		return errNoActiveJournal
 	}

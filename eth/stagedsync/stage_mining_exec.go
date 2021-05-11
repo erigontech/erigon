@@ -4,8 +4,10 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -18,13 +20,12 @@ import (
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, localTxs, remoteTxs *types.TransactionsByPriceAndNonce, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
-	engine := cc.Engine()
 	ibs := state.New(state.NewPlainStateReader(tx))
-	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+	stateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -37,12 +38,14 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 		return nil
 	}
 
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, cc, localTxs, coinbase, ibs, stateWriter, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, coinbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -54,7 +57,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, cc, remoteTxs, coinbase, ibs, stateWriter, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, coinbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -107,22 +110,23 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, cc *core.TinyChainContext, txs *types.TransactionsByPriceAndNonce, coinbase common.Address, ibs *state.IntraBlockState, stateWriter state.StateWriter, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
-	signer := types.NewEIP155Signer(chainConfig.ChainID)
+	signer := types.MakeSigner(chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn *types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, cc *core.TinyChainContext, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, err := core.ApplyTransaction(chainConfig, cc, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err
 		}
+
 		//if !chainConfig.IsByzantium(header.Number) {
 		//	batch.Rollback()
 		//}
@@ -172,11 +176,11 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 		// during transaction acceptance is the transaction pool.
 		//
 		// We use the eip155 signer regardless of the env hf.
-		from, _ := types.Sender(signer, txn)
+		from, _ := txn.Sender(*signer)
 		// Check whether the txn is replay protected. If we're not in the EIP155 hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsEIP155(header.Number) {
-			log.Trace("Ignoring reply protected transaction", "hash", txn.Hash(), "eip155", chainConfig.EIP155Block)
+		if txn.Protected() && !chainConfig.IsEIP155(header.Number.Uint64()) {
+			log.Trace("Ignoring replay protected transaction", "hash", txn.Hash(), "eip155", chainConfig.EIP155Block)
 
 			txs.Pop()
 			continue
@@ -184,7 +188,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 		// Start executing the transaction
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
-		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, cc, ibs, current)
+		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 
 		switch err {
 		case core.ErrGasLimitReached:
@@ -194,12 +198,12 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.Chai
 
 		case core.ErrNonceTooLow:
 			// New head notification data race between the transaction pool and miner, shift
-			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", txn.Nonce())
+			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", txn.GetNonce())
 			txs.Shift()
 
 		case core.ErrNonceTooHigh:
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Trace("Skipping account with hight nonce", "sender", from, "nonce", txn.Nonce())
+			log.Trace("Skipping account with hight nonce", "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 
 		case nil:
@@ -232,18 +236,21 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 
-	// make a copy, the state caches the logs and these logs get "upgraded" from pending to mined
-	// logs by filling in the block hash when the block was mined by the local miner. This can
-	// cause a race condition if a log was "upgraded" before the PendingLogsEvent is processed.
-	cpy := make(types.Logs, len(logs))
-	for i, l := range logs {
-		cpy[i] = new(types.Log)
-		*cpy[i] = *l
+	if notifier == nil {
+		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
+		return
+	}
+	notifier.OnNewPendingLogs(logs)
+}
+
+func NotifyPendingBlock(logPrefix string, notifier ChainEventNotifier, block *types.Block) {
+	if block == nil {
+		return
 	}
 
 	if notifier == nil {
 		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
 		return
 	}
-	notifier.OnNewPendingLogs(logs)
+	notifier.OnNewPendingBlock(block)
 }

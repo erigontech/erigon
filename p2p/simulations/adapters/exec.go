@@ -164,13 +164,14 @@ func (n *ExecNode) Client() (*rpc.Client, error) {
 
 // Start exec's the node passing the ID and service as command line arguments
 // and the node config encoded as JSON in an environment variable.
-func (n *ExecNode) Start(snapshots map[string][]byte) (err error) {
+func (n *ExecNode) Start(snapshots map[string][]byte) error {
 	if n.Cmd != nil {
 		return errors.New("already started")
 	}
+	var started bool
 	defer func() {
-		if err != nil {
-			n.Stop()
+		if !started {
+			_ = n.Stop()
 		}
 	}()
 
@@ -181,9 +182,9 @@ func (n *ExecNode) Start(snapshots map[string][]byte) (err error) {
 	for id, node := range n.adapter.nodes {
 		confCopy.PeerAddrs[id.String()] = node.wsAddr
 	}
-	confData, err := json.Marshal(confCopy)
-	if err != nil {
-		return fmt.Errorf("error generating node config: %s", err)
+	confData, confDataErr := json.Marshal(confCopy)
+	if confDataErr != nil {
+		return fmt.Errorf("error generating node config: %s", confDataErr)
 	}
 	// expose the admin namespace via websocket if it's not enabled
 	exposed := confCopy.Stack.WSExposeAll
@@ -230,6 +231,8 @@ func (n *ExecNode) Start(snapshots map[string][]byte) (err error) {
 	n.client = client
 	n.wsAddr = status.WSEndpoint
 	n.Info = status.NodeInfo
+
+	started = true
 	return nil
 }
 
@@ -260,7 +263,9 @@ func (n *ExecNode) waitForStartupJSON(ctx context.Context) (string, chan nodeSta
 	})
 	// Run the HTTP server, but don't wait forever and shut it down
 	// if the context is canceled.
-	go srv.Serve(l)
+	go func() {
+		_ = srv.Serve(l)
+	}()
 	go func() {
 		<-ctx.Done()
 		quit(nodeStartupJSON{Err: "didn't get startup report"})
@@ -318,7 +323,7 @@ func (n *ExecNode) NodeInfo() *p2p.NodeInfo {
 		ID: n.ID.String(),
 	}
 	if n.client != nil {
-		n.client.Call(&info, "admin_nodeInfo")
+		_ = n.client.Call(&info, "admin_nodeInfo")
 	}
 	return info
 }
@@ -468,7 +473,7 @@ func startExecNodeStack() (*node.Node, error) {
 	if nodeTcpConn.IP == nil {
 		nodeTcpConn.IP = net.IPv4(127, 0, 0, 1)
 	}
-	conf.Node.initEnode(nodeTcpConn.IP, nodeTcpConn.Port, nodeTcpConn.Port)
+	_ = conf.Node.initEnode(nodeTcpConn.IP, nodeTcpConn.Port, nodeTcpConn.Port)
 	conf.Stack.P2P.PrivateKey = conf.Node.PrivateKey
 	conf.Stack.Logger = log.New("node.id", conf.Node.ID.String())
 

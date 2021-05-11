@@ -29,9 +29,8 @@ func (t *Tuples) Append(values ...[]byte) error {
 
 	t.Length++
 
-	for _, value := range values {
-		t.Values = append(t.Values, value)
-	}
+	t.Values = append(t.Values, values...)
+
 	return nil
 }
 

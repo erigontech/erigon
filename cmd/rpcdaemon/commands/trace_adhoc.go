@@ -34,6 +34,7 @@ const (
 	STATICCALL         = "staticcall"
 	CREATE             = "create"
 	SUICIDE            = "suicide"
+	REWARD             = "reward"
 	TraceTypeTrace     = "trace"
 	TraceTypeStateDiff = "stateDiff"
 	TraceTypeVmTrace   = "vmTrace"
@@ -41,12 +42,16 @@ const (
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
-	From     *common.Address `json:"from"`
-	To       *common.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     hexutil.Bytes   `json:"data"`
+	From       *common.Address   `json:"from"`
+	To         *common.Address   `json:"to"`
+	Gas        *hexutil.Uint64   `json:"gas"`
+	GasPrice   *hexutil.Big      `json:"gasPrice"`
+	Tip        *hexutil.Big      `json:"tip"`
+	FeeCap     *hexutil.Big      `json:"feeCap"`
+	Value      *hexutil.Big      `json:"value"`
+	Data       hexutil.Bytes     `json:"data"`
+	AccessList *types.AccessList `json:"accessList"`
+	traceTypes []string
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -113,18 +118,28 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 	if args.GasPrice != nil {
 		gasPrice.SetFromBig(args.GasPrice.ToInt())
 	}
-
+	var tip *uint256.Int
+	if args.Tip != nil {
+		tip.SetFromBig(args.Tip.ToInt())
+	}
+	var feeCap *uint256.Int
+	if args.FeeCap != nil {
+		feeCap.SetFromBig(args.FeeCap.ToInt())
+	}
 	value := new(uint256.Int)
 	if args.Value != nil {
 		value.SetFromBig(args.Value.ToInt())
 	}
-
-	var input []byte
+	var data []byte
 	if args.Data != nil {
-		input = args.Data
+		data = args.Data
+	}
+	var accessList types.AccessList
+	if args.AccessList != nil {
+		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0 /* nonce */, value, gas, gasPrice, input, types.AccessList{}, false /* checkNonce */)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, feeCap, tip, data, accessList, false /* checkNonce */)
 	return msg
 }
 
@@ -133,6 +148,7 @@ type OeTracer struct {
 	r          *TraceCallResult
 	traceAddr  []int
 	traceStack []*ParityTrace
+	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 }
 
@@ -216,14 +232,17 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.r.Output = common.CopyBytes(output)
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	ot.lastTop = topTrace
 	if err != nil {
 		switch err {
 		case vm.ErrInvalidJump:
 			topTrace.Error = "Bad jump destination"
-		case vm.ErrOutOfGas:
+		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
+		case vm.ErrWriteProtection:
+			topTrace.Error = "Mutable Call In Static Context"
 		default:
 			switch err.(type) {
 			case *vm.ErrStackUnderflow:
@@ -265,7 +284,6 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
-	//fmt.Printf("CaptureFault depth %d\n", opDepth)
 	return nil
 }
 
@@ -350,7 +368,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 		exist := ibs.Exist(addr)
 		if initialExist {
 			if exist {
-				var allEqual bool = len(accountDiff.Storage) == 0
+				var allEqual = len(accountDiff.Storage) == 0
 				fromBalance := initialIbs.GetBalance(addr).ToBig()
 				toBalance := ibs.GetBalance(addr).ToBig()
 				if fromBalance.Cmp(toBalance) == 0 {
@@ -436,7 +454,7 @@ const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +469,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
 	if err != nil {
 		return nil, err
 	}
@@ -459,11 +477,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -505,6 +523,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	msg := args.ToMessage(api.gasCap)
 
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	//blockCtx.BlockNumber++
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
@@ -517,11 +536,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	var execResult *core.ExecutionResult
+	ibs.Prepare(common.Hash{}, common.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
-	traceResult.Output = execResult.ReturnData
+	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -547,39 +567,83 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 // CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
+	var callParams []TraceCallParam
+	dec := json.NewDecoder(bytes.NewReader(calls))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim('[') {
+		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
+	}
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim('[') {
+			return nil, fmt.Errorf("expected [callparam, tracetypes]")
+		}
+		callParams = append(callParams, TraceCallParam{})
+		args := &callParams[len(callParams)-1]
+		if err = dec.Decode(args); err != nil {
+			return nil, err
+		}
+		if err = dec.Decode(&args.traceTypes); err != nil {
+			return nil, err
+		}
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim(']') {
+			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
+		}
+	}
+	tok, err = dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim(']') {
+		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
+	}
+	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil)
+}
+
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}
 
-	if blockNrOrHash == nil {
+	if parentNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
-		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.pending)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
-	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+	if num, ok := parentNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
-	if header == nil {
-		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -596,41 +660,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	defer cancel()
 	results := []*TraceCallResult{}
 
-	dec := json.NewDecoder(bytes.NewReader(calls))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, err
-	}
-	if tok != json.Delim('[') {
-		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
-	}
-	txIndex := 0
-	for dec.More() {
-		tok, err = dec.Token()
-		if err != nil {
-			return nil, err
-		}
-		if tok != json.Delim('[') {
-			return nil, fmt.Errorf("expected [callparam, tracetypes]")
-		}
-		var args TraceCallParam
-		if err = dec.Decode(&args); err != nil {
-			return nil, err
-		}
-		var traceTypes []string
-		if err = dec.Decode(&traceTypes); err != nil {
-			return nil, err
-		}
-		tok, err = dec.Token()
-		if err != nil {
-			return nil, err
-		}
-		if tok != json.Delim(']') {
-			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
-		}
+	for txIndex, args := range callParams {
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-		for _, traceType := range traceTypes {
+		for _, traceType := range args.traceTypes {
 			switch traceType {
 			case TraceTypeTrace:
 				traceTypeTrace = true
@@ -651,7 +684,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+		if header == nil {
+			header = parentHeader
+		}
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
@@ -665,11 +701,12 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
+		ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
-		traceResult.Output = execResult.ReturnData
+		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
 			sdMap := make(map[common.Address]*StateDiffAccount)
@@ -695,14 +732,6 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
-		txIndex++
-	}
-	tok, err = dec.Token()
-	if err != nil {
-		return nil, err
-	}
-	if tok != json.Delim(']') {
-		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
 	return results, nil
 }

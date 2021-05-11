@@ -758,9 +758,6 @@ func TestCursor_Del(t *testing.T) {
 			return fmt.Errorf("post-delete: %v", err)
 		}
 		item = items[2]
-		if err != nil {
-			return err
-		}
 		if !bytes.Equal(k, []byte(item.k)) {
 			return fmt.Errorf("found key %q (!= %q)", k, item.k)
 		}

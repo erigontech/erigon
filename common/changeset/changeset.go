@@ -112,34 +112,23 @@ func Len(b []byte) int {
 	return int(binary.BigEndian.Uint32(b[0:4]))
 }
 
-func FromDBFormat(addrSize int) func(dbKey, dbValue []byte) (blockN uint64, k, v []byte) {
-	stSz := addrSize + common.IncarnationLength + common.HashLength
-	const BlockNSize = 8
-	return func(dbKey, dbValue []byte) (blockN uint64, k, v []byte) {
-		blockN = binary.BigEndian.Uint64(dbKey)
-		if len(dbKey) == 8 {
-			k = dbValue[:addrSize]
-			v = dbValue[addrSize:]
-		} else {
-			k = make([]byte, stSz)
-			dbKey = dbKey[BlockNSize:] // remove BlockN bytes
-			copy(k, dbKey)
-			copy(k[len(dbKey):], dbValue[:common.HashLength])
-			v = dbValue[common.HashLength:]
-			if len(v) == 0 {
-				v = nil
-			}
-		}
-
-		return blockN, k, v
+func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+	if len(dbKey) == 8 {
+		return DecodeAccounts(dbKey, dbValue)
+	} else {
+		return DecodeStorage(dbKey, dbValue)
 	}
 }
 
-func Walk(db ethdb.Database, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
-	fromDBFormat := FromDBFormat(Mapper[bucket].KeySize)
+func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
 	var blockN uint64
-	return db.Walk(bucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
-		blockN, k, v = fromDBFormat(k, v)
+	c, err := db.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		blockN, k, v = FromDBFormat(k, v)
 		return walker(blockN, k, v)
 	})
 }
@@ -148,7 +137,10 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 	keyStart := dbutils.EncodeBlockNumber(from)
 
 	{
-		c := tx.RwCursorDupSort(dbutils.PlainAccountChangeSetBucket)
+		c, err := tx.RwCursorDupSort(dbutils.AccountChangeSetBucket)
+		if err != nil {
+			return err
+		}
 		defer c.Close()
 		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
 			if err != nil {
@@ -161,7 +153,10 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 		}
 	}
 	{
-		c := tx.RwCursorDupSort(dbutils.PlainStorageChangeSetBucket)
+		c, err := tx.RwCursorDupSort(dbutils.StorageChangeSetBucket)
+		if err != nil {
+			return err
+		}
 		defer c.Close()
 		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
 			if err != nil {
@@ -179,32 +174,29 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 var Mapper = map[string]struct {
 	IndexBucket   string
 	WalkerAdapter func(cursor ethdb.CursorDupSort) Walker
-	KeySize       int
 	Template      string
 	New           func() *ChangeSet
 	Encode        Encoder
 	Decode        Decoder
 }{
-	dbutils.PlainAccountChangeSetBucket: {
+	dbutils.AccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return AccountChangeSetPlain{c: c}
+			return AccountChangeSet{c: c}
 		},
-		KeySize:  common.AddressLength,
 		Template: "acc-ind-",
-		New:      NewAccountChangeSetPlain,
-		Encode:   EncodeAccountsPlain,
-		Decode:   FromDBFormat(common.AddressLength),
+		New:      NewAccountChangeSet,
+		Encode:   EncodeAccounts,
+		Decode:   DecodeAccounts,
 	},
-	dbutils.PlainStorageChangeSetBucket: {
+	dbutils.StorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return StorageChangeSetPlain{c: c}
+			return StorageChangeSet{c: c}
 		},
-		KeySize:  common.AddressLength,
 		Template: "st-ind-",
-		New:      NewStorageChangeSetPlain,
-		Encode:   EncodeStoragePlain,
-		Decode:   FromDBFormat(common.AddressLength),
+		New:      NewStorageChangeSet,
+		Encode:   EncodeStorage,
+		Decode:   DecodeStorage,
 	},
 }

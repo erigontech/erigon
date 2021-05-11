@@ -135,14 +135,10 @@ func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
-func (r *Receipt) EncodeRLP(w io.Writer) error {
+func (r Receipt) EncodeRLP(w io.Writer) error {
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
-	}
-	// It's an EIP-2718 typed TX receipt.
-	if r.Type != AccessListTxType {
-		return ErrTxTypeNotSupported
 	}
 	buf := new(bytes.Buffer)
 	buf.WriteByte(r.Type)
@@ -152,47 +148,120 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, buf.Bytes())
 }
 
+func (r *Receipt) decodePayload(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read PostStateOrStatus: %w", err)
+	}
+	r.setStatus(b)
+	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
+		return fmt.Errorf("read CumulativeGasUsed: %w", err)
+	}
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Bloom: %w", err)
+	}
+	if len(b) != 256 {
+		return fmt.Errorf("wrong size for Bloom: %d", len(b))
+	}
+	copy(r.Bloom[:], b)
+	// decode logs
+	if _, err = s.List(); err != nil {
+		return fmt.Errorf("open Logs: %w", err)
+	}
+	if r.Logs != nil && len(r.Logs) > 0 {
+		r.Logs = r.Logs[:0]
+	}
+	for _, err = s.List(); err == nil; _, err = s.List() {
+		r.Logs = append(r.Logs, &Log{})
+		log := r.Logs[len(r.Logs)-1]
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
+		}
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for Log address: %d", len(b))
+		}
+		copy(log.Address[:], b)
+		if _, err = s.List(); err != nil {
+			return fmt.Errorf("open Topics: %w", err)
+		}
+		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+			log.Topics = append(log.Topics, common.Hash{})
+			if len(b) != 32 {
+				return fmt.Errorf("wrong size for Topic: %d", len(b))
+			}
+			copy(log.Topics[len(log.Topics)-1][:], b)
+		}
+		if !errors.Is(err, rlp.EOL) {
+			return fmt.Errorf("read Topic: %w", err)
+		}
+		// end of Topics list
+		if err = s.ListEnd(); err != nil {
+			return fmt.Errorf("close Topics: %w", err)
+		}
+		if log.Data, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read Data: %w", err)
+		}
+		// end of Log
+		if err = s.ListEnd(); err != nil {
+			return fmt.Errorf("close Log: %w", err)
+		}
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return fmt.Errorf("open Log: %w", err)
+	}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close Logs: %w", err)
+	}
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close receipt payload: %w", err)
+	}
+	return nil
+}
+
 // DecodeRLP implements rlp.Decoder, and loads the consensus fields of a receipt
 // from an RLP stream.
 func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
-	kind, _, err := s.Kind()
-	switch {
-	case err != nil:
+	kind, size, err := s.Kind()
+	if err != nil {
 		return err
-	case kind == rlp.List:
+	}
+	switch kind {
+	case rlp.List:
 		// It's a legacy receipt.
-		var dec receiptRLP
-		if err := s.Decode(&dec); err != nil {
+		if err := r.decodePayload(s); err != nil {
 			return err
 		}
 		r.Type = LegacyTxType
-		return r.setFromRLP(dec)
-	case kind == rlp.String:
+	case rlp.String:
 		// It's an EIP-2718 typed tx receipt.
-		b, err := s.Bytes()
-		if err != nil {
-			return err
+		s.NewList(size) // Hack - convert String (envelope) into List
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read TxType: %w", err)
 		}
-		if len(b) == 0 {
-			return errEmptyTypedReceipt
+		if len(b) != 1 {
+			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes: %w", len(b), errEmptyTypedReceipt)
 		}
 		r.Type = b[0]
-		if r.Type == AccessListTxType {
-			var dec receiptRLP
-			if err := rlp.DecodeBytes(b[1:], &dec); err != nil {
+		switch r.Type {
+		case AccessListTxType, DynamicFeeTxType:
+			if err := r.decodePayload(s); err != nil {
 				return err
 			}
-			return r.setFromRLP(dec)
+		default:
+			return ErrTxTypeNotSupported
 		}
-		return ErrTxTypeNotSupported
+		if err = s.ListEnd(); err != nil {
+			return err
+		}
 	default:
 		return rlp.ErrExpectedList
 	}
-}
-
-func (r *Receipt) setFromRLP(data receiptRLP) error {
-	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
-	return r.setStatus(data.PostStateOrStatus)
+	return nil
 }
 
 func (r *Receipt) setStatus(postStateOrStatus []byte) error {
@@ -348,6 +417,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
+	case DynamicFeeTxType:
+		w.WriteByte(DynamicFeeTxType)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
 	default:
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
@@ -376,11 +450,11 @@ func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions
 		r[i].TransactionIndex = uint(i)
 
 		// The contract address can be derived from the transaction itself
-		if txs[i].To() == nil {
+		if txs[i].GetTo() == nil {
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].Nonce())
+			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {

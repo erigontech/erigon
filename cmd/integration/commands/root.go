@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"path"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -18,6 +20,12 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			panic(err)
+		}
+		if chaindata == "" {
+			chaindata = path.Join(datadir, "tg", "chaindata")
+		}
+		if snapshotDir == "" {
+			snapshotDir = path.Join(datadir, "tg", "snapshot")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -48,10 +56,7 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 			db = ethdb.NewObjectDatabase(openKV(path, false))
 		}
 	}
-	metrics.AddCallback(db.KV().CollectMetrics)
-	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
-		panic(err)
-	}
+	metrics.AddCallback(db.RwKV().CollectMetrics)
 	return db
 }
 
@@ -63,7 +68,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 	return openDatabase2(path, applyMigrations, snapshotDir, mode)
 }
 
-func openKV(path string, exclusive bool) ethdb.KV {
+func openKV(path string, exclusive bool) ethdb.RwKV {
 	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
 		if exclusive {
@@ -74,8 +79,8 @@ func openKV(path string, exclusive bool) ethdb.KV {
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 			opts = opts.MapSize(mapSize)
 		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
+		if databaseVerbosity != -1 {
+			opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
 		}
 		return opts.MustOpen()
 	}
@@ -89,8 +94,8 @@ func openKV(path string, exclusive bool) ethdb.KV {
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		opts = opts.MapSize(mapSize)
 	}
-	if freelistReuse > 0 {
-		opts = opts.MaxFreelistReuse(uint(freelistReuse))
+	if databaseVerbosity != -1 {
+		opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
 	}
 	kv := opts.MustOpen()
 	metrics.AddCallback(kv.CollectMetrics)

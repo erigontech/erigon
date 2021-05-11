@@ -205,14 +205,14 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 
 	// Decode the RLP container.
 	s = rlp.NewStream(bytes.NewReader(raw), 0)
-	if _, err := s.List(); err != nil {
-		return dec, raw, err
+	if _, e := s.List(); e != nil {
+		return dec, raw, e
 	}
-	if err = s.Decode(&dec.signature); err != nil {
-		return dec, raw, err
+	if e := s.Decode(&dec.signature); e != nil {
+		return dec, raw, e
 	}
-	if err = s.Decode(&dec.seq); err != nil {
-		return dec, raw, err
+	if e := s.Decode(&dec.seq); e != nil {
+		return dec, raw, e
 	}
 	// The rest of the record contains sorted k/v pairs.
 	var prevkey string

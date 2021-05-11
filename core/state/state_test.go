@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -34,9 +35,10 @@ var toAddr = common.BytesToAddress
 
 type StateSuite struct {
 	db    ethdb.Database
-	kv    ethdb.KV // Same as db, but with a different interface
+	kv    ethdb.RwKV // Same as db, but with a different interface
 	state *IntraBlockState
-	tds   *TrieDbState
+	r     StateReader
+	w     StateWriter
 }
 
 var _ = checker.Suite(&StateSuite{})
@@ -52,24 +54,19 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := s.w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-
-	err = s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	err = s.w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	_, err = s.tds.ComputeTrieRoots()
+	err = s.state.FinalizeTx(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := s.kv.Begin(context.Background())
+	tx, err1 := s.kv.BeginRo(context.Background())
 	if err1 != nil {
 		c.Fatalf("create tx: %v", err1)
 	}
@@ -107,10 +104,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := ethdb.NewMemDatabase()
 	s.db = db
-	s.kv = db.KV()
-	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
-	s.state = New(s.tds)
-	s.tds.StartNewBuffer()
+	s.kv = db.RwKV()
+	s.r = NewDbStateReader(s.db)
+	s.w = NewDbStateWriter(s.db, 0)
+	s.state = New(s.r)
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
@@ -122,12 +119,10 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	s.state.SetState(address, &common.Hash{}, value)
 
 	ctx := context.TODO()
-	err := s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(1)
-
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.w)
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)
@@ -174,11 +169,11 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
+
 	db := ethdb.NewMemDatabase()
 	ctx := context.TODO()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
-	tds.StartNewBuffer()
+	w := NewDbStateWriter(db, 0)
+	state := New(NewDbStateReader(db))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -199,19 +194,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.FinalizeTx(ctx, tds.TrieStateWriter())
+	err := state.FinalizeTx(ctx, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
+	w = NewDbStateWriter(db, 1)
 
-	_, err = tds.ComputeTrieRoots()
-	if err != nil {
-		t.Fatal("error while computing trie roots", err)
-	}
-
-	tds.SetBlockNr(1)
-
-	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	err = state.CommitBlock(ctx, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -297,10 +286,13 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	tds := NewTrieDbState(common.Hash{}, db, 0)
-	state := New(tds)
-	tds.StartNewBuffer()
+	db := ethdb.NewMemKV()
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	w := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
+	state := New(NewPlainStateReader(ethdb.NewRoTxDb(tx)))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -313,30 +305,21 @@ func TestDump(t *testing.T) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := tds.PlainStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err = w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = tds.PlainStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = state.FinalizeTx(ctx, tds.PlainStateWriter())
+	err = w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Log("last root", tds.LastRoot().String())
-	_, err = tds.ComputeTrieRoots()
-	t.Log("last root", tds.LastRoot().String())
+	err = state.FinalizeTx(ctx, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	tds.SetBlockNr(1)
-
-	blockWriter := tds.PlainStateWriter()
+	blockWriter := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1)
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)
@@ -351,11 +334,6 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := db.KV().Begin(context.Background())
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
 	got := string(NewDumper(tx, 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",

@@ -56,8 +56,8 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 
 		// If the block number is multiple of 3, send a bonus transaction to the miner
 		if parent == genesis && i%3 == 0 {
-			signer := types.MakeSigner(params.TestChainConfig, block.Number())
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
+			signer := types.MakeSigner(params.TestChainConfig, block.Number().Uint64())
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{seed}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, testKey)
 			if err != nil {
 				panic(err)
 			}
@@ -221,7 +221,7 @@ func (f *fetcherTester) makeBodyFetcher(peer string, blocks map[common.Hash]*typ
 	// Create a function that returns blocks from the closure
 	return func(hashes []common.Hash) error {
 		// Gather the block bodies to return
-		transactions := make([][]*types.Transaction, 0, len(hashes))
+		transactions := make([][]types.Transaction, 0, len(hashes))
 		uncles := make([][]*types.Header, 0, len(hashes))
 
 		for _, hash := range hashes {

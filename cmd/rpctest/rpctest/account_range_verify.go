@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNum uint64, notRegenerateGethData bool) {
+func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Fatal(err)
@@ -67,7 +67,7 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 		for {
 			reqGen.reqID++
 			ar := DebugAccountRange{}
-			req := reqGen.accountRange(int(blockNum), next, 256)
+			req := reqGen.accountRange(blockFrom, next, 256)
 			fmt.Println(req)
 			err = post(client, url, req, &ar)
 			if err != nil {
@@ -109,16 +109,24 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 		}
 	}
 
-	tgTx, err := resultsKV.Begin(context.Background())
+	tgTx, err := resultsKV.BeginRo(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	gethTx, err := gethKV.Begin(context.Background())
+	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	tgCursor := tgTx.Cursor(dbutils.AccountsHistoryBucket)
-	gethCursor := gethTx.Cursor(dbutils.AccountsHistoryBucket)
+	tgCursor, err := tgTx.Cursor(dbutils.AccountsHistoryBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer tgCursor.Close()
+	gethCursor, err := gethTx.Cursor(dbutils.AccountsHistoryBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer gethCursor.Close()
 
 	tgKey, tgVal, err1 := tgCursor.Next()
 	if err1 != nil {

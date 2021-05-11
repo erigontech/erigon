@@ -57,12 +57,11 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
 	}, nil, false)
-	engine.SetThreads(-1)
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	config, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
+	config, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
@@ -83,9 +82,12 @@ func TestVerifyHeadersClique(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	engine := clique.New(params.RinkebyChainConfig.Clique, db)
+	cliqueDB := ethdb.NewMemDatabase()
+	defer cliqueDB.Close()
 
-	config, _, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
+	engine := clique.New(params.RinkebyChainConfig, params.CliqueSnapshot, cliqueDB)
+
+	config, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}

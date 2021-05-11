@@ -42,7 +42,7 @@ var stagesToUseNamedKeys = Migration{
 			}
 			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
-			if err := next(k, newKey, v); err != nil {
+			if err := next(k, []byte(newKey), v); err != nil {
 				return err
 			}
 			return nil
@@ -50,17 +50,19 @@ var stagesToUseNamedKeys = Migration{
 
 		if err := etl.Transform(
 			"stages_to_use_named_keys",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.SyncStageProgressOld1,
 			dbutils.SyncStageProgress,
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
 			return err
 		}
-
+		if err := OnLoadCommit(db, nil, true); err != nil {
+			return err
+		}
 		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {
 			return err
 		}
@@ -87,7 +89,7 @@ var unwindStagesToUseNamedKeys = Migration{
 			}
 			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
-			if err := next(k, newKey, v); err != nil {
+			if err := next(k, []byte(newKey), v); err != nil {
 				return err
 			}
 			return nil
@@ -95,14 +97,17 @@ var unwindStagesToUseNamedKeys = Migration{
 
 		if err := etl.Transform(
 			"unwind_stages_to_use_named_keys",
-			db,
+			db.(ethdb.HasTx).Tx().(ethdb.RwTx),
 			dbutils.SyncStageUnwindOld1,
 			dbutils.SyncStageUnwind,
 			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+			etl.TransformArgs{},
 		); err != nil {
+			return err
+		}
+		if err := OnLoadCommit(db, nil, true); err != nil {
 			return err
 		}
 

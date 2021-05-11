@@ -24,8 +24,8 @@ var accChangeSetDupSort = Migration{
 
 		const loadStep = "load"
 
-		changeSetBucket := dbutils.PlainAccountChangeSetBucket
-		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket)
+		changeSetBucket := dbutils.AccountChangeSetBucket
+		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.StorageChangeSetBucket)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 		buf.SetComparator(cmp)
 
@@ -96,7 +96,7 @@ var accChangeSetDupSort = Migration{
 			return err
 		}
 
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket); err != nil {
+		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.AccountChangeSetBucket); err != nil {
 			return fmt.Errorf("clearing the receipt bucket: %w", err)
 		}
 
@@ -111,12 +111,10 @@ var accChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-		}); err != nil {
+		if err = collectorR.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.AccountChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 
@@ -128,8 +126,8 @@ var storageChangeSetDupSort = Migration{
 		logPrefix := "data migration: storage_change_set_dup_sort"
 
 		const loadStep = "load"
-		changeSetBucket := dbutils.PlainStorageChangeSetBucket
-		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket)
+		changeSetBucket := dbutils.StorageChangeSetBucket
+		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.StorageChangeSetBucket)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 		buf.SetComparator(cmp)
 
@@ -201,7 +199,7 @@ var storageChangeSetDupSort = Migration{
 			return err
 		}
 
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainStorageChangeSetBucket); err != nil {
+		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.StorageChangeSetBucket); err != nil {
 			return fmt.Errorf("clearing the receipt bucket: %w", err)
 		}
 
@@ -216,13 +214,12 @@ var storageChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-			OnLoadCommit: CommitProgress,
-			Comparator:   cmp,
+		if err = collectorR.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.StorageChangeSetBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+			Comparator: cmp,
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
 

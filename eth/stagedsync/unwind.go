@@ -8,7 +8,7 @@ import (
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(uint64, ethdb.Database) error
+	UnwindTo(uint64, ethdb.KVGetter, ethdb.Putter) error
 }
 
 // UnwindState contains the information about unwind.
@@ -41,7 +41,7 @@ func NewPersistentUnwindStack() *PersistentUnwindStack {
 	return &PersistentUnwindStack{make([]UnwindState, 0)}
 }
 
-func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncStage) error {
+func (s *PersistentUnwindStack) AddFromDB(db ethdb.KVGetter, stageID stages.SyncStage) error {
 	u, err := s.LoadFromDB(db, stageID)
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncSt
 	return nil
 }
 
-func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) (*UnwindState, error) {
+func (s *PersistentUnwindStack) LoadFromDB(db ethdb.KVGetter, stageID stages.SyncStage) (*UnwindState, error) {
 	unwindPoint, err := stages.GetStageUnwind(db, stageID)
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ func (s *PersistentUnwindStack) Empty() bool {
 	return len(s.unwindStack) == 0
 }
 
-func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error {
+func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.KVGetter, w ethdb.Putter) error {
 	currentPoint, err := stages.GetStageUnwind(db, u.Stage)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error 
 		return nil
 	}
 	s.unwindStack = append(s.unwindStack, u)
-	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint)
+	return stages.SaveStageUnwind(w, u.Stage, u.UnwindPoint)
 }
 
 func (s *PersistentUnwindStack) Pop() *UnwindState {

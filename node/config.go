@@ -26,8 +26,10 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/paths"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -142,10 +144,10 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use LMDB.
-	LMDB                 bool
-	LMDBMapSize          datasize.ByteSize
-	LMDBMaxFreelistReuse uint
-	MDBX                 bool
+	DatabaseVerbosity ethdb.DBVerbosityLvl
+	LMDB              bool
+	LMDBMapSize       datasize.ByteSize
+	MDBX              bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
@@ -189,7 +191,7 @@ func (c *Config) IPCEndpoint() string {
 }
 
 // NodeDB returns the path to the discovery node database.
-func (c *Config) NodeDB() (string, error) {
+func (c *Config) NodeDB() string {
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
@@ -201,7 +203,7 @@ func DefaultIPCEndpoint(clientIdentifier string) string {
 			panic("empty executable name")
 		}
 	}
-	config := &Config{DataDir: DefaultDataDir(), IPCPath: clientIdentifier + ".ipc"}
+	config := &Config{DataDir: paths.DefaultDataDir(), IPCPath: clientIdentifier + ".ipc"}
 	return config.IPCEndpoint()
 }
 
@@ -267,14 +269,14 @@ func (c *Config) name() string {
 }
 
 // ResolvePath resolves path in the instance directory.
-func (c *Config) ResolvePath(path string) (string, error) {
+func (c *Config) ResolvePath(path string) string {
 	if filepath.IsAbs(path) {
-		return path, nil
+		return path
 	}
 	if c.DataDir == "" {
-		return "", nil
+		return ""
 	}
-	return filepath.Join(c.instanceDir(), path), nil
+	return filepath.Join(c.instanceDir(), path)
 }
 
 func (c *Config) instanceDir() string {
@@ -305,10 +307,7 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 		return key, nil
 	}
 
-	keyfile, err := c.ResolvePath(datadirPrivateKey)
-	if err != nil {
-		return nil, err
-	}
+	keyfile := c.ResolvePath(datadirPrivateKey)
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key, nil
 	}
@@ -331,19 +330,13 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
 func (c *Config) StaticNodes() ([]*enode.Node, error) {
-	dbPath, err := c.ResolvePath(datadirStaticNodes)
-	if err != nil {
-		return nil, err
-	}
+	dbPath := c.ResolvePath(datadirStaticNodes)
 	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
 func (c *Config) TrustedNodes() ([]*enode.Node, error) {
-	dbPath, err := c.ResolvePath(datadirTrustedNodes)
-	if err != nil {
-		return nil, err
-	}
+	dbPath := c.ResolvePath(datadirTrustedNodes)
 	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath), nil
 }
 

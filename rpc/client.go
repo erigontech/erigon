@@ -566,9 +566,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 		// Read path:
 		case op := <-c.readOp:
 			if op.batch {
-				conn.handler.handleBatch(op.msgs)
+				conn.handler.handleBatch(op.msgs, nil)
 			} else {
-				conn.handler.handleMsg(op.msgs[0])
+				conn.handler.handleMsg(op.msgs[0], nil)
 			}
 
 		case err := <-c.readErr:

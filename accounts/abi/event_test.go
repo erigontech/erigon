@@ -170,7 +170,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		// this is valid because `value` is not exportable,
 		// so value is only unmarshalled into `Value1`.
 		// U1000 unused field is part of test
-		value  *big.Int //nolint:structcheck,unused
+		value  *big.Int
 		Value1 *big.Int `abi:"value"`
 	}
 
@@ -234,8 +234,8 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can unpack ERC20 Transfer event into slice",
 	}, {
 		transferData1,
-		&EventTransferWithTag{},
-		&EventTransferWithTag{Value1: bigintExpected},
+		&EventTransferWithTag{value: nil},
+		&EventTransferWithTag{value: nil, Value1: bigintExpected},
 		jsonEventTransfer,
 		"",
 		"Can unpack ERC20 Transfer event into structure with abi: tag",
@@ -355,35 +355,6 @@ func unpackTestEventData(dest interface{}, hexData string, jsonEvent []byte, ass
 Taken from
 https://github.com/ledgerwatch/turbo-geth/pull/15568
 */
-
-type testResult struct {
-	Values [2]*big.Int
-	Value1 *big.Int
-	Value2 *big.Int
-}
-
-type testCase struct {
-	definition string
-	want       testResult
-}
-
-func (tc testCase) encoded(intType, arrayType Type) []byte {
-	var b bytes.Buffer
-	if tc.want.Value1 != nil {
-		val, _ := intType.pack(reflect.ValueOf(tc.want.Value1))
-		b.Write(val)
-	}
-
-	if !reflect.DeepEqual(tc.want.Values, [2]*big.Int{nil, nil}) {
-		val, _ := arrayType.pack(reflect.ValueOf(tc.want.Values))
-		b.Write(val)
-	}
-	if tc.want.Value2 != nil {
-		val, _ := intType.pack(reflect.ValueOf(tc.want.Value2))
-		b.Write(val)
-	}
-	return b.Bytes()
-}
 
 // TestEventUnpackIndexed verifies that indexed field will be skipped by event decoder.
 func TestEventUnpackIndexed(t *testing.T) {

@@ -33,7 +33,7 @@ const SelfdestructABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"ty
 var SelfdestructBin = "0x6080604052348015600f57600080fd5b50640100000000600055600260018190556003905560b0806100326000396000f3fe60806040526004361060295760003560e01c80632b68b9c61460345780632ee79ded14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605d565b30ff5b60008054600190810190915580548101815560028054909101905556fea2646970667358221220caae26a119b18c374d0a657f2582ca8ab59c89f78ec97da1efbc9d426f23a5c764736f6c63430007020033"
 
 // DeploySelfdestruct deploys a new Ethereum contract, binding an instance of Selfdestruct to it.
-func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Selfdestruct, error) {
+func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Selfdestruct, error) {
 	parsed, err := abi.JSON(strings.NewReader(SelfdestructABI))
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -160,12 +160,12 @@ func (_Selfdestruct *SelfdestructRaw) Call(opts *bind.CallOpts, result *[]interf
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Selfdestruct *SelfdestructRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Selfdestruct.Contract.SelfdestructTransactor.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Selfdestruct.Contract.SelfdestructTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -179,74 +179,74 @@ func (_Selfdestruct *SelfdestructCallerRaw) Call(opts *bind.CallOpts, result *[]
 
 // Transfer initiates a plain transaction to move funds to the contract, calling
 // its default method if one is available.
-func (_Selfdestruct *SelfdestructTransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Selfdestruct.Contract.contract.Transfer(opts)
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Selfdestruct *SelfdestructTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
 	return _Selfdestruct.Contract.contract.Transact(opts, method, params...)
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Selfdestruct *SelfdestructTransactor) Change(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactor) Change(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Selfdestruct.contract.Transact(opts, "change")
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Selfdestruct *SelfdestructSession) Change() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructSession) Change() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Change(&_Selfdestruct.TransactOpts)
 }
 
 // Change is a paid mutator transaction binding the contract method 0x2ee79ded.
 //
 // Solidity: function change() returns()
-func (_Selfdestruct *SelfdestructTransactorSession) Change() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorSession) Change() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Change(&_Selfdestruct.TransactOpts)
 }
 
 // Destruct is a paid mutator transaction binding the contract method 0x2b68b9c6.
 //
 // Solidity: function destruct() returns()
-func (_Selfdestruct *SelfdestructTransactor) Destruct(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactor) Destruct(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Selfdestruct.contract.Transact(opts, "destruct")
 }
 
 // Destruct is a paid mutator transaction binding the contract method 0x2b68b9c6.
 //
 // Solidity: function destruct() returns()
-func (_Selfdestruct *SelfdestructSession) Destruct() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructSession) Destruct() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Destruct(&_Selfdestruct.TransactOpts)
 }
 
 // Destruct is a paid mutator transaction binding the contract method 0x2b68b9c6.
 //
 // Solidity: function destruct() returns()
-func (_Selfdestruct *SelfdestructTransactorSession) Destruct() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorSession) Destruct() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Destruct(&_Selfdestruct.TransactOpts)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Selfdestruct *SelfdestructTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactor) Receive(opts *bind.TransactOpts) (types.Transaction, error) {
 	return _Selfdestruct.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Selfdestruct *SelfdestructSession) Receive() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructSession) Receive() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Receive(&_Selfdestruct.TransactOpts)
 }
 
 // Receive is a paid mutator transaction binding the contract receive function.
 //
 // Solidity: receive() payable returns()
-func (_Selfdestruct *SelfdestructTransactorSession) Receive() (*types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorSession) Receive() (types.Transaction, error) {
 	return _Selfdestruct.Contract.Receive(&_Selfdestruct.TransactOpts)
 }

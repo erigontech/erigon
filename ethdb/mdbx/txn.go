@@ -421,6 +421,9 @@ type TxInfo struct {
 	  For WRITE transaction: The summarized size of the dirty database
 	  pages that generated during this transaction. */
 	SpaceDirty uint64
+
+	Spill   uint64
+	Unspill uint64
 }
 
 // scan_rlt   The boolean flag controls the scan of the read lock
@@ -610,10 +613,7 @@ func (txn *Txn) Del(dbi DBI, key, val []byte) error {
 //
 // See mdbx_cursor_open.
 func (txn *Txn) OpenCursor(dbi DBI) (*Cursor, error) {
-	cur, err := openCursor(txn, dbi)
-	if cur != nil && txn.readonly {
-	}
-	return cur, err
+	return openCursor(txn, dbi)
 }
 
 func (txn *Txn) errf(format string, v ...interface{}) {
@@ -622,16 +622,6 @@ func (txn *Txn) errf(format string, v ...interface{}) {
 		return
 	}
 	log.Printf(format, v...)
-}
-
-func (txn *Txn) finalize() {
-	if txn._txn != nil {
-		if !txn.Pooled {
-			txn.errf("lmdb: aborting unreachable transaction %#x", uintptr(unsafe.Pointer(txn)))
-		}
-
-		txn.abort()
-	}
 }
 
 // TxnOp is an operation applied to a managed transaction.  The Txn passed to a

@@ -74,6 +74,15 @@ var YoloV3Bootnodes = []string{
 	"enode://9e1096aa59862a6f164994cb5cb16f5124d6c992cdbf4535ff7dea43ea1512afe5448dca9df1b7ab0726129603f1a3336b631e4d7a1a44c94daddd03241587f9@3.9.20.133:30303",
 }
 
+// TurboMineBootnodes are the enode URLs of the P2P bootstrap nodes running on the TurboNodes devnet
+var TurboMineBootnodes = []string{}
+
+var AleutBootnodes = []string{
+	"enode://0c72e2b7873e4342d725b5990c17adb2b159aad2ff5853de7e4910b25522a1f9e78f9cd802a8a3225b8fae4e994e522b50d6bd5a163eb3a7b49a0a73ca9a1c7e@3.12.166.199:30303",
+	"enode://aec88fd902744bf67705c098bf532b01017ccc3a156395508e2d9c4e7c22699ecccae1e7316614f8a2d4c5698a9be3fe6151ee25b9ed4aa052f88e112c65387a@164.90.171.157:31559",
+	"enode://d4937b184f79b21845c290902e3667b9e8e96af3cf7b4917e85c7d3aa12d6ed22720d3c3f6ef7d6f93311f5c4ddc0c1e2a166ea4a765220212e49dfd54eec456@quilt.link:30308",
+}
+
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QOtcP9X1FbIMOe17QNMKqDxCpm14jcX5tiOE4_TyMrFqbmhPZHK_ZPG2Gxb1GE2xdtodOfx9-cgvNtxnRyHEmC0ghGV0aDKQ9aX9QgAAAAD__________4JpZIJ2NIJpcIQDE8KdiXNlY3AyNTZrMaEDhpehBDbZjM_L9ek699Y7vhUJ-eAdMyQW_Fil522Y0fODdGNwgiMog3VkcIIjKA",

@@ -2,10 +2,7 @@
 package node
 
 import (
-	"math"
 	"net"
-	"runtime/debug"
-	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -20,8 +17,6 @@ import (
 	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
 
 	"github.com/urfave/cli"
-
-	gopsutil "github.com/shirou/gopsutil/v3/mem"
 )
 
 // TurboGethNode represents a single node, that runs sync and p2p network.
@@ -75,17 +70,30 @@ func New(
 ) *TurboGethNode {
 	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
-	nodeConfig := makeNodeConfig(ctx, optionalParams)
+
+	nodeConfig := NewNodeConfig(optionalParams)
+	utils.SetNodeConfig(ctx, nodeConfig)
+	turbocli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
+
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
 
 	ethConfig.StagedSync = sync
 
-	ethereum := utils.RegisterEthService(node, ethConfig)
+	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
 	return &TurboGethNode{stack: node, backend: ethereum}
+}
+
+// RegisterEthService adds an Ethereum client to the stack.
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, gitCommit string) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg, gitCommit)
+	if err != nil {
+		panic(err)
+	}
+	return backend
 }
 
 func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
@@ -95,7 +103,7 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	return ethConfig
 }
 
-func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
+func NewNodeConfig(p Params) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := p.GitCommit; commit != "" {
@@ -105,10 +113,6 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
-
-	utils.SetNodeConfig(ctx, &nodeConfig)
-	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
-
 	return &nodeConfig
 }
 
@@ -125,57 +129,27 @@ func makeConfigNode(config *node.Config) *node.Node {
 // This function should be called before launching devp2p stack.
 func prepare(ctx *cli.Context) {
 	// If we're running a known preset, log it for convenience.
-	switch {
-	case ctx.GlobalIsSet(utils.RopstenFlag.Name):
+	chain := ctx.GlobalString(utils.ChainFlag.Name)
+	switch chain {
+	case params.RopstenChainName:
 		log.Info("Starting Turbo-Geth on Ropsten testnet...")
 
-	case ctx.GlobalIsSet(utils.RinkebyFlag.Name):
+	case params.RinkebyChainName:
 		log.Info("Starting Turbo-Geth on Rinkeby testnet...")
 
-	case ctx.GlobalIsSet(utils.GoerliFlag.Name):
+	case params.GoerliChainName:
 		log.Info("Starting Turbo-Geth on Görli testnet...")
 
-	case ctx.GlobalIsSet(utils.DeveloperFlag.Name):
+	case params.DevChainName:
 		log.Info("Starting Turbo-Geth in ephemeral dev mode...")
 
-	case !ctx.GlobalIsSet(utils.NetworkIdFlag.Name):
-		log.Info("Starting Turbo-Geth on Ethereum mainnet...")
-	}
-	// If we're a full node on mainnet without --cache specified, bump default cache allowance
-	if !ctx.GlobalIsSet(utils.CacheFlag.Name) && !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
-		// Make sure we're not on any supported preconfigured testnet either
-		if !ctx.GlobalIsSet(utils.RopstenFlag.Name) && !ctx.GlobalIsSet(utils.RinkebyFlag.Name) && !ctx.GlobalIsSet(utils.GoerliFlag.Name) && !ctx.GlobalIsSet(utils.DeveloperFlag.Name) {
-			// Nope, we're really on mainnet. Bump that cache up!
-			log.Info("Bumping default cache on mainnet", "provided", ctx.GlobalInt(utils.CacheFlag.Name), "updated", 4096)
-			ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(4096)) //nolint:errcheck
+	case "", params.MainnetChainName:
+		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
+			log.Info("Starting Turbo-Geth on Ethereum mainnet...")
 		}
+	default:
+		log.Info("Starting Turbo-Geth on", "devnet", chain)
 	}
-	// If we're running a light client on any network, drop the cache to some meaningfully low amount
-	if !ctx.GlobalIsSet(utils.CacheFlag.Name) {
-		log.Info("Dropping default light client cache", "provided", ctx.GlobalInt(utils.CacheFlag.Name), "updated", 128)
-		ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(128)) //nolint:errcheck
-	}
-	// Cap the cache allowance and tune the garbage collector
-	mem, err := gopsutil.VirtualMemory()
-	if err == nil {
-		if 32<<(^uintptr(0)>>63) == 32 && mem.Total > 2*1024*1024*1024 {
-			log.Warn("Lowering memory allowance on 32bit arch", "available", mem.Total/1024/1024, "addressable", 2*1024)
-			mem.Total = 2 * 1024 * 1024 * 1024
-		}
-		allowance := int(mem.Total / 1024 / 1024 / 3)
-		if cache := ctx.GlobalInt(utils.CacheFlag.Name); cache > allowance {
-			log.Warn("Sanitizing cache to Go's GC limits", "provided", cache, "updated", allowance)
-			if err = ctx.GlobalSet(utils.CacheFlag.Name, strconv.Itoa(allowance)); err != nil {
-				log.Error("Error while sanitizing cache to Go's GC limits", "err", err)
-			}
-		}
-	}
-	// Ensure Go's GC ignores the database cache for trigger percentage
-	cache := ctx.GlobalInt(utils.CacheFlag.Name)
-	gogc := math.Max(20, math.Min(100, 100/(float64(cache)/1024)))
-
-	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
-	debug.SetGCPercent(int(gogc))
 
 	// Start system runtime metrics collection
 	go metrics.CollectProcessMetrics(10 * time.Second)

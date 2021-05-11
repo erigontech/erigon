@@ -21,7 +21,10 @@ func HeadersSnapshot(snapshotPath string) error {
 	}).MustOpen()
 	var prevHeader *types.Header
 	err := snKV.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeadersBucket)
+		c, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
 		k, v, innerErr := c.First()
 		for {
 			if len(k) == 0 && len(v) == 0 {

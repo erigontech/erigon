@@ -21,15 +21,11 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 }
 
-func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
+func SpawnBlockHashStage(s *StageState, db ethdb.RwKV, tx ethdb.RwTx, tmpdir string, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+		tx, err = db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}

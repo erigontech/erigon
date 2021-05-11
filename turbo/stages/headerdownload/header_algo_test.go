@@ -9,23 +9,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInserter1(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 	// Set up parent difficulty
-	if err := rawdb.WriteTd(db, common.Hash{}, 4, big.NewInt(0)); err != nil {
+	if err := rawdb.WriteTd(tx, common.Hash{}, 4, big.NewInt(0)); err != nil {
 		t.Fatalf("write parent diff: %v", err)
 	}
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatalf("begin transaction: %v", err)
-	}
-	defer tx.Rollback()
-	batch := tx.NewBatch()
-	hi := NewHeaderInserter("headers", batch, big.NewInt(0), 0)
-	if err := hi.FeedHeader(&types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
+	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
+	if err := hi.FeedHeader(tx, &types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
 		t.Errorf("feed empty header: %v", err)
 	}
 }

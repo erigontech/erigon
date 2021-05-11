@@ -1,6 +1,7 @@
 package rpctest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,19 +17,28 @@ import (
 
 func Proofs(chaindata string, url string, block uint64) {
 	fileName := "trie.txt"
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		panic(err1)
+	}
+	defer tx.Rollback()
+
 	var t *trie.Trie
-	if _, err := os.Stat(fileName); err != nil {
-		if os.IsNotExist(err) {
+	if _, errf := os.Stat(fileName); errf != nil {
+		if os.IsNotExist(errf) {
 			// Resolve 6 top levels of the accounts trie
-			l := trie.NewSubTrieLoader(block)
 			rl := trie.NewRetainList(6)
-			subTries, err1 := l.LoadSubTries(ethDb, block, rl, nil /* HashCollector */, [][]byte{nil}, []int{0}, false)
-			if err1 != nil {
-				panic(err1)
+			loader := trie.NewFlatDBTrieLoader("checkRoots")
+			if err := loader.Reset(rl, nil, nil, false); err != nil {
+				panic(err)
 			}
-			fmt.Printf("Resolved with hash: %x\n", subTries.Hashes[0])
+			root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), []byte{}, nil)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("Resolved with hash: %x\n", root)
 			f, err1 := os.Create(fileName)
 			if err1 == nil {
 				defer f.Close()
@@ -38,7 +48,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			}
 			fmt.Printf("Saved trie to file\n")
 		} else {
-			panic(err)
+			panic(errf)
 		}
 	} else {
 		f, err1 := os.Open(fileName)
@@ -80,7 +90,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			}
 			var account common.Address
 			var found bool
-			err := ethDb.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
+			err := tx.Walk(dbutils.PreimagePrefix, startKey[:], 4*len(diffKey), func(k, v []byte) (bool, error) {
 				if len(v) == common.AddressLength {
 					copy(account[:], v)
 					found = true

@@ -41,14 +41,23 @@ func runTurboGeth(cliCtx *cli.Context) {
 		}
 	}
 
-	// creating staged sync with all default parameters
-	sync := stagedsync.New(
-		stagedsync.DefaultStages(),
-		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
-	)
+	var sync *stagedsync.StagedSync
+	if cliCtx.Bool(turbocli.SnapshotDatabaseLayoutFlag.Name) {
+		sync = stagedsync.New(
+			stagedsync.WithSnapshotsStages(),
+			stagedsync.UnwindOrderWithSnapshots(),
+			stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
+		)
+	} else {
+		// creating staged sync with all default parameters
+		sync = stagedsync.New(
+			stagedsync.DefaultStages(),
+			stagedsync.DefaultUnwindOrder(),
+			stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
+		)
+	}
 
-	ctx := utils.RootContext()
+	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", gitBranch, "git_commit", gitCommit)

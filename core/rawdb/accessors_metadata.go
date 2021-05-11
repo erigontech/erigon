@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -31,37 +30,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-// ReadDatabaseVersion retrieves the version number of the database.
-func ReadDatabaseVersion(db databaseReader) *uint64 {
-	var version uint64
-
-	enc, _ := db.Get(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey))
-	if len(enc) == 0 {
-		return nil
-	}
-	if err := rlp.DecodeBytes(enc, &version); err != nil {
-		return nil
-	}
-
-	return &version
-}
-
-// WriteDatabaseVersion stores the version number of the database
-func WriteDatabaseVersion(db DatabaseWriter, version uint64) error {
-	enc, err := rlp.EncodeToBytes(version)
-	if err != nil {
-		return fmt.Errorf("failed to encode database version: %w", err)
-	}
-	if err = db.Put(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey), enc); err != nil {
-		return fmt.Errorf("failed to store the database version: %w", err)
-	}
-	return nil
-}
-
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db databaseReader, hash common.Hash) (*params.ChainConfig, error) {
-	data, err := db.Get(dbutils.ConfigPrefix, hash[:])
-	if err != nil && errors.Is(err, ethdb.ErrKeyNotFound) {
+func ReadChainConfig(db ethdb.KVGetter, hash common.Hash) (*params.ChainConfig, error) {
+	data, err := db.GetOne(dbutils.ConfigPrefix, hash[:])
+	if err != nil {
 		return nil, err
 	}
 	if len(data) == 0 {
@@ -75,7 +47,7 @@ func ReadChainConfig(db databaseReader, hash common.Hash) (*params.ChainConfig, 
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConfig) error {
+func WriteChainConfig(db ethdb.Putter, hash common.Hash, cfg *params.ChainConfig) error {
 	if cfg == nil {
 		return nil
 	}

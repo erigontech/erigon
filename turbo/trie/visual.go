@@ -35,7 +35,7 @@ type VisualOpts struct {
 	FontColors     []string // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
 	CutTerminals   int      // Specifies how many digits to cut from the terminal short node keys for a more convinient display
 	Values         bool     // Whether to display value nodes (as box with rounded corners)
-	CodeCompressed bool     // Whether to turn the code from a large rectange to a small square for a more convinient display
+	CodeCompressed bool     // Whether to turn the code from a large rectangle to a small square for a more convinient display
 	ValCompressed  bool     // Whether long values (over 10 characters) are shortened using ... in the middle
 	ValHex         bool     // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
 	SameLevel      bool     // Whether the leaves (and hashes) need to be on the same horizontal level

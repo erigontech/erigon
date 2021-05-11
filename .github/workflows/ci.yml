@@ -1,0 +1,63 @@
+name: Continuous integration
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15, windows-2019 ] # list of os: https://github.com/actions/virtual-environments
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16.x
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt update && sudo apt install build-essential
+          fi
+        shell: bash
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Build (non-windows)
+        if: matrix.os != 'windows-2019'
+        run: make all
+      - name: Build (windows)
+        if: matrix.os == 'windows-2019'
+        run: |
+          go build -trimpath -o bin/tg.exe ./cmd/tg
+          go build -trimpath -o bin/rpcdaemon.exe ./cmd/rpcdaemon
+          go build -trimpath -o bin/rpctest.exe ./cmd/rpctest
+          go build -trimpath -o bin/integration.exe ./cmd/integration
+          go build -trimpath -o bin/headers.ext ./cmd/headers
+      - name: Lint
+        if: matrix.os == 'ubuntu-latest'
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: v1.38
+          args: "--build-tags=mdbx"
+          skip-go-installation: true
+          skip-pkg-cache: true
+          skip-build-cache: true
+      - name: Test (non-windows)
+        if: matrix.os != 'windows-2019'
+        run: make test
+  docker:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Docker
+        run: docker build .

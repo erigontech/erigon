@@ -89,10 +89,11 @@ func (l *JSONLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time
 	if depth != 0 {
 		return nil
 	}
+	var errMsg string
 	if err != nil {
-		return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, err.Error()})
+		errMsg = err.Error()
 	}
-	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, ""})
+	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, errMsg})
 }
 
 func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {

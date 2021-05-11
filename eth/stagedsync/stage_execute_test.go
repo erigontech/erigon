@@ -11,15 +11,15 @@ import (
 )
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
-	db1 := ethdb.NewMemDatabase()
+	db1 := ethdb.NewMemKV()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	tx1, err := db1.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
-	db2 := ethdb.NewMemDatabase()
+	db2 := ethdb.NewMemKV()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	tx2, err := db2.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -32,33 +32,24 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	err = tx1.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-	err = tx2.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-
-	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
-	db1 := ethdb.NewMemDatabase()
+	db1 := ethdb.NewMemKV()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	tx1, err := db1.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
-	db2 := ethdb.NewMemDatabase()
+	db2 := ethdb.NewMemKV()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	tx2, err := db2.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -71,34 +62,25 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	err = tx1.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-	err = tx2.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-
-	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
-	db1 := ethdb.NewMemDatabase()
+	db1 := ethdb.NewMemKV()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	tx1, err := db1.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
-	db2 := ethdb.NewMemDatabase()
+	db2 := ethdb.NewMemKV()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	tx2, err := db2.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -111,19 +93,10 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	err = tx1.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-	err = tx2.Commit()
-	if err != nil {
-		t.Errorf("error while committing state: %v", err)
-	}
-
-	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }

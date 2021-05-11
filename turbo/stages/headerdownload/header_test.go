@@ -8,9 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
-const TestBufferLimit = 32 * 1024
-const TestTipLimit = 10
-
 func TestSplitIntoSegments(t *testing.T) {
 	engine := ethash.NewFaker()
 	hd := NewHeaderDownload(100, 100, engine)

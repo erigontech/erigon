@@ -1,13 +1,10 @@
 package stagedsync
 
 import (
-	"bytes"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -41,11 +38,11 @@ func (s *State) IsBefore(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, stage1) {
+		if stage.ID == stage1 {
 			idx1 = i
 		}
 
-		if bytes.Equal(stage.ID, stage2) {
+		if stage.ID == stage2 {
 			idx2 = i
 		}
 	}
@@ -58,11 +55,11 @@ func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, stage1) {
+		if stage.ID == stage1 {
 			idx1 = i
 		}
 
-		if bytes.Equal(stage.ID, stage2) {
+		if stage.ID == stage2 {
 			idx2 = i
 		}
 	}
@@ -70,18 +67,18 @@ func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
+func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 	state, err := s.StageState(stages.Headers, db)
 	return state.BlockNumber, err
 }
 
-func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
+func (s *State) UnwindTo(blockNumber uint64, r ethdb.KVGetter, w ethdb.Putter) error {
 	log.Info("UnwindTo", "block", blockNumber)
 	for _, stage := range s.unwindOrder {
 		if stage.Disabled {
 			continue
 		}
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, db); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, r, w); err != nil {
 			return err
 		}
 	}
@@ -105,7 +102,7 @@ func (s *State) LogPrefix() string {
 
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
-		if bytes.Equal(stage.ID, id) {
+		if stage.ID == id {
 			s.currentStage = uint(i)
 			return nil
 		}
@@ -115,7 +112,7 @@ func (s *State) SetCurrentStage(id stages.SyncStage) error {
 
 func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 	for _, stage := range s.stages {
-		if bytes.Equal(stage.ID, id) {
+		if stage.ID == id {
 			return stage, nil
 		}
 	}
@@ -132,7 +129,7 @@ func NewState(stagesList []*Stage) *State {
 	}
 }
 
-func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
+func (s *State) LoadUnwindInfo(db ethdb.KVGetter) error {
 	for _, stage := range s.unwindOrder {
 		if err := s.unwindStack.AddFromDB(db, stage.ID); err != nil {
 			return err
@@ -141,7 +138,7 @@ func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
 	return nil
 }
 
-func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState, error) {
+func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageState, error) {
 	blockNum, err := stages.GetStageProgress(db, stage)
 	if err != nil {
 		return nil, err
@@ -177,6 +174,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				return err
 			}
 		}
+
 		_, stage := s.CurrentStage()
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
@@ -212,51 +210,10 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
-	if err := printBucketsSize(tx); err != nil {
-		return err
-	}
 	return nil
 }
 
-//nolint
-func printBucketsSize(dbTx ethdb.Getter) error {
-	hasTx, ok := dbTx.(ethdb.HasTx)
-	if !ok {
-		return nil
-	}
-	tx := hasTx.Tx()
-	if tx == nil {
-		return nil
-	}
-	buckets, err := tx.(ethdb.BucketMigrator).ExistingBuckets()
-	if err != nil {
-		return err
-	}
-	sort.Strings(buckets)
-	bucketSizes := make([]interface{}, 0, 2*len(buckets))
-	for _, bucket := range buckets {
-		sz, err1 := tx.BucketSize(bucket)
-		if err1 != nil {
-			return err1
-		}
-		if sz < uint64(10*datasize.GB) {
-			continue
-		}
-		bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
-	}
-	if len(bucketSizes) == 0 {
-		return nil
-	}
-	sz, err1 := tx.BucketSize("freelist")
-	if err1 != nil {
-		return err1
-	}
-	bucketSizes = append(bucketSizes, "freelist", common.StorageSize(sz))
-	log.Info("Tables", bucketSizes...)
-	return nil
-}
-
-func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
+func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.KVGetter) error {
 	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		db = tx
 	}
@@ -323,7 +280,7 @@ func (s *State) DisableAllStages() {
 func (s *State) DisableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
-			if !bytes.Equal(s.stages[i].ID, id) {
+			if s.stages[i].ID != id {
 				continue
 			}
 			s.stages[i].Disabled = true
@@ -334,7 +291,7 @@ func (s *State) DisableStages(ids ...stages.SyncStage) {
 func (s *State) EnableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
-			if !bytes.Equal(s.stages[i].ID, id) {
+			if s.stages[i].ID != id {
 				continue
 			}
 			s.stages[i].Disabled = false
@@ -344,7 +301,7 @@ func (s *State) EnableStages(ids ...stages.SyncStage) {
 
 func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
-		if bytes.Equal(s.stages[i].ID, id) {
+		if s.stages[i].ID == id {
 			s.stages[i].ExecFunc = f
 		}
 	}

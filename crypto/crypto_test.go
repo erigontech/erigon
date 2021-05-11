@@ -214,8 +214,8 @@ func TestSaveECDSA(t *testing.T) {
 	defer os.Remove(file)
 
 	key, _ := HexToECDSA(testPrivHex)
-	if err := SaveECDSA(file, key); err != nil {
-		t.Fatal(err)
+	if e := SaveECDSA(file, key); e != nil {
+		t.Fatal(e)
 	}
 	loaded, err := LoadECDSA(file)
 	if err != nil {
