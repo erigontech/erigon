@@ -67,20 +67,13 @@ var GoerliBootnodes = []string{
 	"enode://a59e33ccd2b3e52d578f1fbd70c6f9babda2650f0760d6ff3b37742fdcdfdb3defba5d56d315b40c46b70198c7621e63ffa3f987389c7118634b0fefbbdfa7fd@51.15.119.157:40303",
 }
 
-// YoloV3Bootnodes are the enode URLs of the P2P bootstrap nodes running on the
-// YOLOv3 ephemeral test network.
-// TODO: Set Yolov3 bootnodes
-var YoloV3Bootnodes = []string{
-	"enode://9e1096aa59862a6f164994cb5cb16f5124d6c992cdbf4535ff7dea43ea1512afe5448dca9df1b7ab0726129603f1a3336b631e4d7a1a44c94daddd03241587f9@3.9.20.133:30303",
-}
-
 // TurboMineBootnodes are the enode URLs of the P2P bootstrap nodes running on the TurboNodes devnet
 var TurboMineBootnodes = []string{}
 
-var AleutBootnodes = []string{
-	"enode://0c72e2b7873e4342d725b5990c17adb2b159aad2ff5853de7e4910b25522a1f9e78f9cd802a8a3225b8fae4e994e522b50d6bd5a163eb3a7b49a0a73ca9a1c7e@3.12.166.199:30303",
-	"enode://aec88fd902744bf67705c098bf532b01017ccc3a156395508e2d9c4e7c22699ecccae1e7316614f8a2d4c5698a9be3fe6151ee25b9ed4aa052f88e112c65387a@164.90.171.157:31559",
-	"enode://d4937b184f79b21845c290902e3667b9e8e96af3cf7b4917e85c7d3aa12d6ed22720d3c3f6ef7d6f93311f5c4ddc0c1e2a166ea4a765220212e49dfd54eec456@quilt.link:30308",
+var BaikalBootnodes = []string{
+	"enode://9e1096aa59862a6f164994cb5cb16f5124d6c992cdbf4535ff7dea43ea1512afe5448dca9df1b7ab0726129603f1a3336b631e4d7a1a44c94daddd03241587f9@3.9.20.133:30303",
+	"enode://8e6788508278e514268307f27528ffabd6c86e755b0abd5ef170502b6444b35231dd0c7183e902c6a566c650104fdcfa58c6de28b54533f3dc243af444a60f51@quilt.link:30308",
+	"enode://14bed0619ef778342cb1ed18702004cb29f4324b7d411fc3d20adc8fe2d15c7bb30c663bd8767eaa32eaadcebc227a24e21c006028e12b9c38b25ea5e3147316@217.182.200.86:30303",
 }
 
 var V5Bootnodes = []string{

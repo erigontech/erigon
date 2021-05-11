@@ -158,6 +158,10 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
+	return SetupGenesisBlockWithOverride(db, genesis, nil, history, overwrite)
+}
+
+func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideLondon *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, ErrGenesisNoConfig
 	}
@@ -195,6 +199,9 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	}
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
+	if overrideLondon != nil {
+		newcfg.LondonBlock = overrideLondon
+	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, err
 	}
@@ -247,6 +254,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.GoerliChainConfig
 	case ghash == params.TurboMineGenesisHash:
 		return params.TurboMineChainConfig
+	case ghash == params.BaikalGenesisHash:
+		return params.BaikalChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -305,7 +314,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && (g.Config.IsAleut(0) || g.Config.IsBaikal(0)) {
+	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
 		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 	}
@@ -491,15 +500,15 @@ func DefaultTurboMineGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultAleutGenesisBlock() *Genesis {
+func DefaultBaikalGenesisBlock() *Genesis {
 	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
 	return &Genesis{
-		Config:     params.AleutChainConfig,
-		Timestamp:  0,
-		ExtraData:  hexutil.MustDecode("0x000000000000000000000000000000000000000000000000000000000000000036267c845cc42b57ccb869d655e5d5fb620cc69a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x1312D00,
-		Difficulty: big.NewInt(0x400),
-		Alloc:      readPrealloc("allocs/aleut.json"),
+		Config:     params.BaikalChainConfig,
+		Timestamp:  0x6092ca7f,
+		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000005211cea3870c7ba7c6c44b185e62eecdb864cd8c560228ce57d31efbf64c200b2c200aacec78cf17a7148e784fe95a7a750335f8b9572ee28d72e7650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x47b760,
+		Difficulty: big.NewInt(1),
+		Alloc:      readPrealloc("allocs/baikal.json"),
 	}
 }
 

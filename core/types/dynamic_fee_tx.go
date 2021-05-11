@@ -431,7 +431,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx DynamicFeeTransaction) AsMessage(header *Header, s Signer) (Message, error) {
+func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -443,7 +443,7 @@ func (tx DynamicFeeTransaction) AsMessage(header *Header, s Signer) (Message, er
 		accessList: tx.AccessList,
 		checkNonce: true,
 	}
-	msg.gasPrice.SetFromBig(header.BaseFee)
+	msg.gasPrice.SetFromBig(baseFee)
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
 	if msg.gasPrice.Gt(tx.FeeCap) {
 		msg.gasPrice.Set(tx.FeeCap)

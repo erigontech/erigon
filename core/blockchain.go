@@ -509,11 +509,7 @@ func ExecuteBlockEphemerally(
 	var receipts types.Receipts
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	if chainConfig.IsAleut(block.NumberU64()) || chainConfig.IsBaikal(block.NumberU64()) {
-		gp.AddGas(block.GasLimit() * params.ElasticityMultiplier)
-	} else {
-		gp.AddGas(block.GasLimit())
-	}
+	gp.AddGas(block.GasLimit())
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)

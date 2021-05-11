@@ -52,6 +52,7 @@ type remoteTx struct {
 	stream             remote.KV_TxClient
 	streamCancelFn     context.CancelFunc
 	streamingRequested bool
+	statelessCursors   map[string]Cursor
 }
 
 type remoteCursor struct {
@@ -273,16 +274,36 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
+func (tx *remoteTx) statelessCursor(bucket string) (Cursor, error) {
+	if tx.statelessCursors == nil {
+		tx.statelessCursors = make(map[string]Cursor)
+	}
+	c, ok := tx.statelessCursors[bucket]
+	if !ok {
+		var err error
+		c, err = tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		tx.statelessCursors[bucket] = c
+	}
+	return c, nil
+}
+
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
-	c, _ := tx.Cursor(bucket)
-	defer c.Close()
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
 	_, val, err = c.SeekExact(key)
 	return val, err
 }
 
 func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
-	c, _ := tx.Cursor(bucket)
-	defer c.Close()
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return false, err
+	}
 	k, _, err := c.Seek(key)
 	if err != nil {
 		return false, err
