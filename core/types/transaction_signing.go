@@ -41,7 +41,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsAleut(blockNumber) || config.IsBaikal(blockNumber):
+	case config.IsLondon(blockNumber):
 		// All transaction types are still supported
 		signer.protected = true
 		signer.accesslist = true
@@ -86,7 +86,7 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
-		if config.AleutBlock != nil {
+		if config.LondonBlock != nil {
 			signer.dynamicfee = true
 		}
 		if config.BerlinBlock != nil {

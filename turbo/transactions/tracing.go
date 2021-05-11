@@ -68,7 +68,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
-		msg, _ := tx.AsMessage(block.Header(), *signer)
+		msg, _ := tx.AsMessage(*signer, block.Header().BaseFee)
 		BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil)
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
