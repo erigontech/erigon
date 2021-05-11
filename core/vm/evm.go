@@ -246,6 +246,12 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		// leak the 'contract' to the outer scope, and make allocation for 'contract'
 		// even if the actual execution ends on RunPrecompiled above.
 		addrCopy := addr
+
+		var header EOF1Header
+		if evm.chainRules.IsShanghai && hasEOFMagic(code) {
+			header = readValidEOF1Header(code)
+		}
+
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
@@ -257,7 +263,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code)
+		contract.SetCallCode(&addrCopy, codeHash, code, &header)
 		readOnly := false
 		if callType == STATICCALLT {
 			readOnly = true
@@ -368,6 +374,15 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
+	// Try to read code header if it claims to be EOF-formatted.
+	var header EOF1Header
+	if evm.chainRules.IsShanghai && hasEOFMagic(codeAndHash.code) {
+		var err error
+		header, err = readEOF1Header(codeAndHash.code)
+		if err != nil {
+			return nil, common.Address{}, gas, ErrInvalidCodeFormat
+		}
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -379,7 +394,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
-	contract.SetCodeOptionalHash(&address, codeAndHash)
+	contract.SetCodeOptionalHash(&address, codeAndHash, &header)
 
 	if evm.config.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil
@@ -390,12 +405,23 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// check whether the max code size has been exceeded
 	maxCodeSizeExceeded := evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize && !evm.chainRules.IsAura
 
-	// Reject code starting with 0xEF if EIP-3541 is enabled.
-	if err == nil && !maxCodeSizeExceeded {
-		if evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
+	if err == nil && hasEOFByte(ret) {
+		if evm.chainRules.IsShanghai {
+			// Allow only valid EOF1 if EIP-3540 is enabled.
+			if hasEOFMagic(ret) {
+				if !validateEOF(ret) {
+					err = ErrInvalidCodeFormat
+				}
+			} else {
+				// Reject non-EOF code starting with 0xEF.
+				err = ErrInvalidCode
+			}
+		} else if evm.chainRules.IsLondon {
+			// Reject code starting with 0xEF in London.
 			err = ErrInvalidCode
 		}
 	}
+
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
 	// be stored due to not enough gas set an error and let it be handled

@@ -34,6 +34,7 @@ var activators = map[int]func(*JumpTable){
 	2200: enable2200,
 	1884: enable1884,
 	1344: enable1344,
+	3540: enable3540,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -196,4 +197,8 @@ func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 func enable3860(jt *JumpTable) {
 	jt[CREATE].dynamicGas = gasCreateEip3860
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
+}
+
+func enable3540(jt *JumpTable) {
+	// Do nothing.
 }

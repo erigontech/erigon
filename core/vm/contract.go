@@ -48,9 +48,12 @@ type Contract struct {
 	CallerAddress common.Address
 	caller        ContractRef
 	self          ContractRef
-	jumpdests     map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                 // Locally cached result of JUMPDEST analysis
-	skipAnalysis  bool
+
+	header EOF1Header
+
+	jumpdests    map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
+	analysis     []uint64                 // Locally cached result of JUMPDEST analysis
+	skipAnalysis bool
 
 	Code     []byte
 	CodeHash common.Hash
@@ -89,11 +92,11 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
-	if overflow || udest >= uint64(len(c.Code)) {
+	if overflow || udest >= c.CodeSize() {
 		return false, false
 	}
 	// Only JUMPDESTs allowed for destinations
-	if OpCode(c.Code[udest]) != JUMPDEST {
+	if OpCode(c.Code[c.CodeBeginOffset()+udest]) != JUMPDEST {
 		return false, false
 	}
 	if c.skipAnalysis {
@@ -118,7 +121,8 @@ func (c *Contract) isCode(udest uint64) bool {
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
+			code := c.Code[c.CodeBeginOffset():c.CodeEndOffset()]
+			analysis = codeBitmap(code)
 			c.jumpdests[c.CodeHash] = analysis
 		}
 		// Also stash it in current contract for faster access
@@ -131,7 +135,8 @@ func (c *Contract) isCode(udest uint64) bool {
 	// we don't have to recalculate it for every JUMP instruction in the execution
 	// However, we don't save it within the parent context
 	if c.analysis == nil {
-		c.analysis = codeBitmap(c.Code)
+		code := c.Code[c.CodeBeginOffset():c.CodeEndOffset()]
+		c.analysis = codeBitmap(code)
 	}
 
 	return isCodeFromAnalysis(c.analysis, udest)
@@ -156,7 +161,7 @@ func (c *Contract) GetOp(n uint64) OpCode {
 
 // GetByte returns the n'th byte in the contract's byte array
 func (c *Contract) GetByte(n uint64) byte {
-	if n < uint64(len(c.Code)) {
+	if n < c.CodeEndOffset() {
 		return c.Code[n]
 	}
 
@@ -190,18 +195,54 @@ func (c *Contract) Value() *uint256.Int {
 	return c.value
 }
 
+// IsLegacy returns true if contract is not EOF
+func (c *Contract) IsLegacy() bool {
+	// EOF1 doesn't allow contracts without code section
+	return c.header.codeSize == 0
+}
+
+// CodeBeginOffset returns starting offset of the code section
+func (c *Contract) CodeBeginOffset() uint64 {
+	if c.IsLegacy() {
+		return 0
+	}
+	return c.header.CodeBeginOffset()
+}
+
+// CodeEndOffset returns offset of the code section end
+func (c *Contract) CodeEndOffset() uint64 {
+	if c.IsLegacy() {
+		return uint64(len(c.Code))
+	}
+	return c.header.CodeEndOffset()
+}
+
+// CodeSize returns the size of the code (if legacy) or code section (if EOF)
+func (c *Contract) CodeSize() uint64 {
+	if c.IsLegacy() {
+		return uint64(len(c.Code))
+	}
+	return uint64(c.header.codeSize)
+}
+
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte) {
+func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte, header *EOF1Header) {
 	c.Code = code
 	c.CodeHash = hash
 	c.CodeAddr = addr
+
+	c.header.codeSize = header.codeSize
+	c.header.dataSize = header.dataSize
 }
 
 // SetCodeOptionalHash can be used to provide code, but it's optional to provide hash.
 // In case hash is not provided, the jumpdest analysis will not be saved to the parent context
-func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAndHash) {
+func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAndHash, header *EOF1Header) {
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr
+
+	c.header.codeSize = header.codeSize
+	c.header.dataSize = header.dataSize
 }

@@ -901,12 +901,13 @@ func makeLog(size int) executionFunc {
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		codeLen = uint64(len(scope.Contract.Code))
+		codeEnd = scope.Contract.CodeEndOffset()
 		integer = new(uint256.Int)
 	)
-	*pc++
-	if *pc < codeLen {
-		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[*pc])))
+	*pc += 1
+	dataPos := scope.Contract.CodeBeginOffset() + *pc
+	if dataPos < codeEnd {
+		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[dataPos])))
 	} else {
 		scope.Stack.Push(integer.Clear())
 	}
@@ -916,15 +917,16 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-		codeLen := len(scope.Contract.Code)
+		codeEnd := int(scope.Contract.CodeEndOffset())
 
-		startMin := int(*pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
+		pcAbsolute := scope.Contract.CodeBeginOffset() + *pc
+		startMin := int(pcAbsolute + 1)
+		if startMin >= codeEnd {
+			startMin = codeEnd
 		}
 		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
+		if endMin >= codeEnd {
+			endMin = codeEnd
 		}
 
 		integer := new(uint256.Int)
