@@ -196,6 +196,10 @@ func HeadersForward(
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
 		}
+		if initialCycle && cfg.hd.InSync() {
+			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
+			break
+		}
 		timer = time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -208,10 +212,6 @@ func HeadersForward(
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
-		}
-		if initialCycle && cfg.hd.InSync() {
-			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
-			break
 		}
 	}
 	if headerInserter.AnythingDone() {
