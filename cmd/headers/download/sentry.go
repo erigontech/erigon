@@ -616,6 +616,9 @@ func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.Pe
 	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	x, _ := ss.Peers.Load(peerID)
 	peerInfo, _ := x.(*PeerInfo)
+	if peerInfo == nil {
+		return &empty.Empty{}, nil
+	}
 	peerInfo.lock.Lock()
 	defer peerInfo.lock.Unlock()
 	if req.MinBlock > peerInfo.height {
@@ -636,6 +639,9 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 			peerID := key.(string)
 			x, _ := ss.Peers.Load(peerID)
 			peerInfo, _ := x.(*PeerInfo)
+			if peerInfo == nil {
+				return true
+			}
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			if deadlines < maxPermitsPerPeer {
 				permits := maxPermitsPerPeer - deadlines
@@ -734,6 +740,9 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	ss.Peers.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		peerInfo, _ := value.(*PeerInfo)
+		if peerInfo == nil {
+			return true
+		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
 			ss.Peers.Delete(peerID)
 			innerErr = err
@@ -765,6 +774,9 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	ss.Peers.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		peerInfo, _ := value.(*PeerInfo)
+		if peerInfo == nil {
+			return true
+		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			ss.Peers.Delete(peerID)
 			innerErr = err
