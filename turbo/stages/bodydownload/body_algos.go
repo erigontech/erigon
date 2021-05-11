@@ -21,6 +21,13 @@ import (
 
 const BlockBufferSize = 128
 
+// ValidateBodyFunc validates the given block's uncles and verifies the block
+// header's transaction and uncle roots. The headers are assumed to be already
+// validated at this point.
+// It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
+// bodies), second is internal runtime error (like network error or db error)
+type ValidateBodyFunc func(block *types.Block) (headerdownload.Penalty, error, error)
+
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
@@ -227,31 +234,33 @@ func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 // ValidateBody validates the given block's uncles and verifies the block
 // header's transaction and uncle roots. The headers are assumed to be already
 // validated at this point.
-func (bd *BodyDownload) ValidateBody(block *types.Block, r consensus.ChainReader) (headerdownload.Penalty, error) {
+// It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
+// bodies), second is internal runtime error (like network error or db error)
+func (bd *BodyDownload) ValidateBody(block *types.Block, r consensus.ChainReader) (headerdownload.Penalty, error, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 
 	// Check whether the block's known, and if not, that it's linkable
 	foundInDB := r.GetBlock(block.Hash(), block.NumberU64())
 	if foundInDB != nil {
-		return headerdownload.BadBlockPenalty, core.ErrKnownBlock
+		return headerdownload.BadBlockPenalty, core.ErrKnownBlock, nil
 	}
 
 	// Header validity is known at this point, check the uncles and transactions
 	header := block.Header()
 	if err := bd.Engine.VerifyUncles(r, block); err != nil {
-		return headerdownload.BadBlockPenalty, err
+		return headerdownload.BadBlockPenalty, err, nil
 	}
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
-		return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash)
+		return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash), nil
 	}
 	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
-		return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
+		return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash), nil
 	}
-	return headerdownload.NoPenalty, nil
+	return headerdownload.NoPenalty, nil, nil
 }
 
-func (bd *BodyDownload) GetDeliveries(validateBody func(block *types.Block) (headerdownload.Penalty, error)) ([]*types.Block, []headerdownload.PenaltyItem) {
+func (bd *BodyDownload) GetDeliveries(validateBody ValidateBodyFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	var i uint64
@@ -267,12 +276,15 @@ func (bd *BodyDownload) GetDeliveries(validateBody func(block *types.Block) (hea
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
 		for j := uint64(0); j < i; j++ {
-			penalty, err := validateBody(d[j])
+			penalty, reason, err := validateBody(d[j])
+			if err != nil {
+				return nil, nil, err
+			}
 			if penalty == headerdownload.NoPenalty {
 				continue
 			}
-			if err != nil {
-				// Log them?
+			if reason != nil {
+				log.Trace("penalize", "peer", bd.requests[j].peerID, "reason", reason)
 			}
 			penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[j].peerID), Reason: headerdownload.BadBlockPenalty})
 		}
@@ -284,7 +296,7 @@ func (bd *BodyDownload) GetDeliveries(validateBody func(block *types.Block) (hea
 		}
 		bd.requestedLow += i
 	}
-	return d, penalties
+	return d, penalties, nil
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {

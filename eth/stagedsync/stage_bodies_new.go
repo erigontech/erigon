@@ -160,9 +160,12 @@ func BodiesForward(
 		}
 		start := time.Now()
 		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-		d, penalties := cfg.bd.GetDeliveries(func(block *types.Block) (headerdownload.Penalty, error) {
+		d, penalties, err := cfg.bd.GetDeliveries(func(block *types.Block) (headerdownload.Penalty, error, error) {
 			return cfg.bd.ValidateBody(block, cr)
 		})
+		if err != nil {
+			return err
+		}
 		cfg.penalise(ctx, penalties)
 		d4 += time.Since(start)
 		start = time.Now()
