@@ -24,8 +24,8 @@ var (
 	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
-		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db.",
-		Value: -1,
+		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
+		Value: 2,
 	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
