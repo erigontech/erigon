@@ -256,29 +256,25 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
 	go RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
 
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
+	)
 	return nil
 }
 
+//Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl) {
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
-
+	)
 }
 
 func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
