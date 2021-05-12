@@ -69,6 +69,7 @@ func StageLoop(
 		}
 
 		initialCycle = false
+		hd.EnableRequestChaining()
 	}
 }
 
