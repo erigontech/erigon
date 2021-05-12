@@ -34,7 +34,7 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
 	txPoolLocals := txPool.Locals()
 	pendingTxs, err := txPool.Pending()
 	if err != nil {
@@ -61,7 +61,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 	}
 
 	blockNum := executionAt + 1
-	signer := types.MakeSigner(chainConfig, blockNum)
+	signer := types.MakeSigner(&chainConfig, blockNum)
 
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -74,7 +74,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlockWithoutTransactions(tx, hash, *number)
+			block := rawdb.ReadBlock(tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -92,7 +92,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.MakeSigner(chainConfig, blockNum),
+		signer:    types.MakeSigner(&chainConfig, blockNum),
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),

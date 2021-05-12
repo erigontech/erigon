@@ -499,7 +499,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 			} else {
 				// Ancestors of this anchor seem to be unavailable, invalidate and move on
 				hd.invalidateAnchor(anchor)
-				penalties = append(penalties, PenaltyItem{Reason: AbandonedAnchorPenalty, PeerID: anchor.peerID})
+				penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on
@@ -597,7 +597,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	}
 	if len(linksInFuture) > 0 {
 		hd.insertList = append(hd.insertList, linksInFuture...)
-		linksInFuture = nil
+		linksInFuture = nil //nolint
 	}
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
