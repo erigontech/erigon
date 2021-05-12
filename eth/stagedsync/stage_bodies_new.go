@@ -166,7 +166,7 @@ func BodiesForward(
 			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
 			if err != nil {
 				if penalty != headerdownload.NoPenalty {
-					log.Trace("penalize", "peer", peerID, "reason", err)
+					log.Debug("penalize", "peer", peerID, "reason", err)
 					cfg.penalise(ctx, []headerdownload.PenaltyItem{{PeerID: peerID, Penalty: penalty}})
 				}
 				return err
