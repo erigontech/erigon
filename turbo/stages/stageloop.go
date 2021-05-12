@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -84,9 +85,9 @@ func StageLoopStep(
 		if r := recover(); r != nil {
 			switch x := r.(type) {
 			case string:
-				err = errors.New(x)
+				err = errors.New(x + " " + string(debug.Stack()))
 			case error:
-				err = x
+				err = fmt.Errorf("err: %w, trace: %s", x, debug.Stack())
 			default:
 				panic(r)
 			}
