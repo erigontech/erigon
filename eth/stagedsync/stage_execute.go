@@ -175,12 +175,10 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 				v[common.AddressLength] |= 2
 			}
 			if j == 0 {
-				fmt.Printf("Append %d %x %x\n", j, blockNumEnc, v)
 				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			} else {
-				fmt.Printf("AppendDup %d %x %x\n", j, blockNumEnc, v)
 				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
@@ -282,13 +280,20 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				if err = s.Update(tx, stageProgress); err != nil {
 					return err
 				}
+				if traceCursor != nil {
+					traceCursor.Close()
+				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}
-
 				tx, err = cfg.db.BeginRw(context.Background())
 				if err != nil {
 					return err
+				}
+				if cfg.writeCallTraces {
+					if traceCursor, err = tx.RwCursorDupSort(dbutils.CallTraceSet); err != nil {
+						return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
+					}
 				}
 			}
 			batch = ethdb.NewBatch(tx)
@@ -314,6 +319,9 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		}
 	}
 	if !useExternalTx {
+		if traceCursor != nil {
+			traceCursor.Close()
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
