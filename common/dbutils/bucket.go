@@ -50,15 +50,15 @@ const (
 	//value - code hash
 	PlainContractCodeBucket = "PLAIN-contractCode"
 
-	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
+	// AccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	PlainAccountChangeSetBucket = "PLAIN-ACS"
+	AccountChangeSetBucket = "PLAIN-ACS"
 
-	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
+	// StorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	PlainStorageChangeSetBucket = "PLAIN-SCS"
+	StorageChangeSetBucket = "PLAIN-SCS"
 
 	//HashedAccountsBucket
 	// key - address hash
@@ -157,6 +157,7 @@ const (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket        = "DBINFO"
 	SnapshotInfoBucket        = "SNINFO"
+	BittorrentInfoBucket      = "BTINFO"
 	HeadersSnapshotInfoBucket = "hSNINFO"
 	BodiesSnapshotInfoBucket  = "bSNINFO"
 	StateSnapshotInfoBucket   = "sSNINFO"
@@ -185,6 +186,10 @@ const (
 	LogTopicIndex   = "log_topic_index"
 	LogAddressIndex = "log_address_index"
 
+	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
+	// touched by call traces. It is DupSort-ed table
+	// 8-byte BE block nunber -> account address -> two bits (one for "from", another for "to")
+	CallTraceSet = "call_trace_set"
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
 	CallFromIndex = "call_from_index"
@@ -234,9 +239,8 @@ const (
 
 // Keys
 var (
-	// last  block that was pruned
-	// it's saved one in 5 minutes
-	LastPrunedBlockKey = []byte("LastPrunedBlock")
+	//StorageModePruning - does node prune.
+	StorageModePruning = []byte("smPruning")
 	//StorageModeHistory - does node save history.
 	StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
@@ -254,6 +258,10 @@ var (
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
 	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
+
+	BittorrentPeerID            = "peerID"
+	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
+	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -283,8 +291,8 @@ var Buckets = []string{
 	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
-	PlainAccountChangeSetBucket,
-	PlainStorageChangeSetBucket,
+	AccountChangeSetBucket,
+	StorageChangeSetBucket,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
@@ -295,6 +303,7 @@ var Buckets = []string{
 	HeadersSnapshotInfoBucket,
 	BodiesSnapshotInfoBucket,
 	StateSnapshotInfoBucket,
+	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
 	Log,
@@ -305,7 +314,7 @@ var Buckets = []string{
 	HashedAccountsBucket,
 	HashedStorageBucket,
 	IntermediateTrieHashBucketOld2,
-
+	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,
@@ -387,10 +396,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	PlainAccountChangeSetBucket: {
+	AccountChangeSetBucket: {
 		Flags: DupSort,
 	},
-	PlainStorageChangeSetBucket: {
+	StorageChangeSetBucket: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {
@@ -402,6 +411,9 @@ var BucketsConfigs = BucketsCfg{
 	IntermediateTrieHashBucketOld2: {
 		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
+	},
+	CallTraceSet: {
+		Flags: DupSort,
 	},
 	InvalidBlock: {},
 }

@@ -8,8 +8,8 @@ type TEVMInterpreter struct {
 type VmType int8
 
 const (
-	EVMType     VmType = 0
-	TEVMType    VmType = 1
+	EVMType  VmType = 0
+	TEVMType VmType = 1
 )
 
 // NewTEVMInterpreter returns a new instance of the Interpreter.

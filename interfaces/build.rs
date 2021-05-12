@@ -36,9 +36,5 @@ fn main() {
         protos.push("txpool/txpool_control.proto");
     }
 
-    if cfg!(feature = "consensus") {
-        protos.push("consensus_engine/consensus.proto");
-    }
-
     make_protos(&protos);
 }

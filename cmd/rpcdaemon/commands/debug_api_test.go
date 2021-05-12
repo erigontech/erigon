@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -39,11 +42,19 @@ func TestTraceTransaction(t *testing.T) {
 	defer db.Close()
 	api := NewPrivateDebugAPI(db, 0, nil)
 	for _, tt := range debugTraceTransactionTests {
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{})
-		if err1 != nil {
-			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		err = api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		er := result.(*ethapi.ExecutionResult)
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
 		}
@@ -64,12 +75,20 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	defer db.Close()
 	api := NewPrivateDebugAPI(db, 0, nil)
 	for _, tt := range debugTraceTransactionNoRefundTests {
-		var norefunds bool = true
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds})
-		if err1 != nil {
-			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		var norefunds = true
+		err = api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		if err != nil {
+			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		er := result.(*ethapi.ExecutionResult)
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
 		}

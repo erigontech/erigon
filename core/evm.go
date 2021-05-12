@@ -36,7 +36,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 		beneficiary = *author
 	}
 	var baseFee uint256.Int
-	if header.BaseFee != nil {
+	if header.Eip1559 {
 		baseFee.SetFromBig(header.BaseFee)
 	}
 	return vm.BlockContext{

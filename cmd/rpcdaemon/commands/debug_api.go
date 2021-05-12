@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -25,11 +26,11 @@ import (
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig) (interface{}, error)
+	TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig) (interface{}, error)
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 }
 
@@ -99,7 +100,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block, err1 := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), hash)
+		block, err1 := rawdb.ReadBlockByHash(tx, hash)
 		if err1 != nil {
 			return state.IteratorDump{}, err1
 		}
@@ -119,7 +120,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(ethdb.NewRoTxDb(tx), blockNumber)
+	hash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -178,7 +179,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	startBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), startHash)
+	startBlock, err := rawdb.ReadBlockByHash(tx, startHash)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +190,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	endNum := startNum // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock, err := rawdb.ReadBlockByHash(ethdb.NewRoTxDb(tx), *endHash)
+		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
 		if err != nil {
 			return nil, err
 		}

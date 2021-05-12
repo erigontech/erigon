@@ -206,7 +206,7 @@ func AnswerGetBlockBodiesQuery(db ethdb.Tx, query GetBlockBodiesPacket) []rlp.Ra
 		if number == nil {
 			continue
 		}
-		data := rawdb.ReadBodyRLP(ethdb.NewRoTxDb(db), hash, *number)
+		data := rawdb.ReadBodyRLP(db, hash, *number)
 		if len(data) == 0 {
 			continue
 		}

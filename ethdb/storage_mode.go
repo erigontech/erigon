@@ -7,16 +7,24 @@ import (
 )
 
 type StorageMode struct {
-	History    bool
-	Receipts   bool
-	TxIndex    bool
-	CallTraces bool
+	Initialised bool // Set when the values are initialised (not default)
+	Pruning     bool
+	History     bool
+	Receipts    bool
+	TxIndex     bool
+	CallTraces  bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: true, TxIndex: true, CallTraces: false}
+var DefaultStorageMode = StorageMode{Initialised: true, Pruning: false, History: true, Receipts: true, TxIndex: true, CallTraces: false}
 
 func (m StorageMode) ToString() string {
+	if !m.Initialised {
+		return "default"
+	}
 	modeString := ""
+	if m.Pruning {
+		modeString += "p"
+	}
 	if m.History {
 		modeString += "h"
 	}
@@ -34,8 +42,14 @@ func (m StorageMode) ToString() string {
 
 func StorageModeFromString(flags string) (StorageMode, error) {
 	mode := StorageMode{}
+	if flags == "default" {
+		return mode, nil
+	}
+	mode.Initialised = true
 	for _, flag := range flags {
 		switch flag {
+		case 'p':
+			mode.Pruning = true
 		case 'h':
 			mode.History = true
 		case 'r':
@@ -58,6 +72,13 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 		v   []byte
 		err error
 	)
+	sm.Initialised = true
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModePruning)
+	if err != nil {
+		return StorageMode{}, err
+	}
+	sm.Pruning = len(v) == 1 && v[0] == 1
+
 	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
 	if err != nil {
 		return StorageMode{}, err
@@ -81,14 +102,53 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 		return StorageMode{}, err
 	}
 	sm.CallTraces = len(v) == 1 && v[0] == 1
-
 	return sm, nil
+}
+
+func OverrideStorageMode(db Database, sm StorageMode) error {
+	var (
+		err error
+	)
+	err = setMode(db, dbutils.StorageModePruning, sm.Pruning)
+	if err != nil {
+		return err
+	}
+
+	err = setMode(db, dbutils.StorageModeHistory, sm.History)
+	if err != nil {
+		return err
+	}
+
+	err = setMode(db, dbutils.StorageModeReceipts, sm.Receipts)
+	if err != nil {
+		return err
+	}
+
+	err = setMode(db, dbutils.StorageModeTxIndex, sm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	err = setMode(db, dbutils.StorageModeCallTraces, sm.CallTraces)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 	var (
 		err error
 	)
+	if !sm.Initialised {
+		sm = DefaultStorageMode
+	}
+	err = setModeOnEmpty(db, dbutils.StorageModePruning, sm.Pruning)
+	if err != nil {
+		return err
+	}
+
 	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
 	if err != nil {
 		return err
@@ -109,6 +169,17 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 		return err
 	}
 
+	return nil
+}
+
+func setMode(db Database, key []byte, currentValue bool) error {
+	val := []byte{2}
+	if currentValue {
+		val = []byte{1}
+	}
+	if err := db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
+		return err
+	}
 	return nil
 }
 

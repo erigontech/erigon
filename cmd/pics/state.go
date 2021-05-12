@@ -88,8 +88,8 @@ var bucketLabels = map[string]string{
 	dbutils.TrieOfAccountsBucket:         "Intermediate Hashes Of Accounts",
 	dbutils.TrieOfStorageBucket:          "Intermediate Hashes Of Storage",
 	dbutils.SyncStageUnwind:              "Unwind",
-	dbutils.PlainAccountChangeSetBucket:  "Account Changes",
-	dbutils.PlainStorageChangeSetBucket:  "Storage Changes",
+	dbutils.AccountChangeSetBucket:       "Account Changes",
+	dbutils.StorageChangeSetBucket:       "Storage Changes",
 	dbutils.IncarnationMapBucket:         "Incarnations",
 	dbutils.Senders:                      "Transaction Senders",
 	dbutils.ContractTEVMCodeBucket:       "Contract TEVM code",
@@ -295,7 +295,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 	if err != nil {
 		return err
 	}

@@ -73,18 +73,18 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		engine:  engine,
 	}
 
-	hc.genesisHeader = hc.GetHeaderByNumber(0)
+	hc.genesisHeader = rawdb.ReadHeaderByNumber(chainDb, 0)
 	if hc.genesisHeader == nil {
 		return nil, ErrNoGenesis
 	}
 
 	hc.currentHeader.Store(hc.genesisHeader)
 	if head := rawdb.ReadHeadBlockHash(chainDb); head != (common.Hash{}) {
-		if chead := hc.GetHeaderByHash(head); chead != nil {
+		if chead, _ := rawdb.ReadHeaderByHash(chainDb, head); chead != nil {
 			hc.currentHeader.Store(chead)
 		}
 	}
-	hc.currentHeaderHash = hc.CurrentHeader().Hash()
+	hc.currentHeaderHash = rawdb.ReadCurrentHeader(chainDb).Hash()
 	//headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
 
 	return hc, nil
@@ -120,23 +120,6 @@ func (hc *HeaderChain) GetBlockHashesFromHash(hash common.Hash, max uint64) []co
 	return chain
 }
 
-// GetTd retrieves a block's total difficulty in the canonical chain from the
-// database by hash and number, caching it if found.
-func (hc *HeaderChain) GetTd(dbr ethdb.Getter, hash common.Hash, number uint64) *big.Int {
-	td, _ := rawdb.ReadTd(dbr, hash, number)
-	return td
-}
-
-// GetTdByHash retrieves a block's total difficulty in the canonical chain from the
-// database by hash, caching it if found.
-func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
-	number := hc.GetBlockNumber(hc.chainDb, hash)
-	if number == nil {
-		return nil
-	}
-	return hc.GetTd(hc.chainDb, hash, *number)
-}
-
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -155,13 +138,6 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 		return nil
 	}
 	return hc.GetHeader(hash, *number)
-}
-
-// HasHeader checks if a block header is present in the database or not.
-// In theory, if header is present in the database, all relative components
-// like td and hash->number should be present too.
-func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
-	return rawdb.HasHeader(hc.chainDb, hash, number)
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number,

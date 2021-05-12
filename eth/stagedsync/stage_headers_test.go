@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
@@ -83,14 +82,14 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
 		panic(err)
 	}
-	rawdb.WriteHeader(context.TODO(), db, origin)
+	rawdb.WriteHeader(db, origin)
 	if err := rawdb.WriteHeadHeaderHash(db, origin.Hash()); err != nil {
 		panic(err)
 	}
 	err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 	assert.NoError(t, err)
 
-	_, reorg, _, err := InsertHeaderChain("logPrefix", db, headers1)
+	_, reorg, _, err := InsertHeaderChain("logPrefix", db, headers1, 0)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
@@ -98,7 +97,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock3, td)
 
-	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
@@ -107,7 +106,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 

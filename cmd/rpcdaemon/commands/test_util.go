@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"encoding/binary"
+	"log"
 	"math/big"
+	"net"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -18,7 +20,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/mock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func createTestDb() (ethdb.Database, error) {
@@ -49,7 +56,7 @@ func createTestDb() (ethdb.Database, error) {
 	if err != nil {
 		return nil, err
 	}
-	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 
 	engine := ethash.NewFaker()
 
@@ -193,4 +200,29 @@ func createTestKV() (ethdb.RwKV, error) {
 	}
 
 	return db.(ethdb.HasRwKV).RwKV(), nil
+}
+
+func createTestGrpcConn() *grpc.ClientConn { //nolint
+	ctx := context.Background()
+
+	server := grpc.NewServer()
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
+	listener := bufconn.Listen(1024 * 1024)
+
+	dialer := func() func(context.Context, string) (net.Conn, error) {
+		go func() {
+			if err := server.Serve(listener); err != nil {
+				log.Fatal(err)
+			}
+		}()
+		return func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}
+	}
+
+	conn, err := grpc.DialContext(ctx, "", grpc.WithInsecure(), grpc.WithContextDialer(dialer()))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return conn
 }

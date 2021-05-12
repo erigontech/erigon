@@ -11,6 +11,7 @@ import (
 var (
 	chaindata          string
 	database           string
+	databaseVerbosity  int
 	snapshotMode       string
 	snapshotDir        string
 	toChaindata        string
@@ -29,6 +30,7 @@ var (
 	silkwormPath       string
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
+	storageMode        string
 )
 
 func must(err error) {
@@ -90,6 +92,7 @@ func withDatadir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 }
 
 func withDatadir(cmd *cobra.Command) {
@@ -105,6 +108,7 @@ func withDatadir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 }
 
 func withBatchSize(cmd *cobra.Command) {

@@ -286,7 +286,7 @@ func (h *handler) doSync(op *chainSyncOp) error {
 	headHash := rawdb.ReadHeadHeaderHash(h.database)
 	headNumber := rawdb.ReadHeaderNumber(h.database, headHash)
 	atomic.StoreUint64(&h.currentHeight, *headNumber) // this will be read by the block fetcher when required
-	head := rawdb.ReadBlock(h.database, headHash, *headNumber)
+	head := rawdb.ReadBlockDeprecated(h.database, headHash, *headNumber)
 	if head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
 		// for non-checkpointed (number = 0) private networks.

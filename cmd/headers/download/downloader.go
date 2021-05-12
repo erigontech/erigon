@@ -38,15 +38,13 @@ import (
 
 // Methods of Core called by sentry
 
-func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
 	dialOpts = append(dialOpts, grpc.WithInsecure())
@@ -64,7 +62,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
 	sentries := make([]proto_sentry.SentryClient, len(sentryAddrs))
 	for i, addr := range sentryAddrs {
-		sentry, err := grpcSentryClient(ctx, addr)
+		sentry, err := GrpcSentryClient(ctx, addr)
 		if err != nil {
 			return err
 		}
@@ -115,10 +113,16 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		}(sentry)
 	}
 
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
+	}
+
 	batchSize := 512 * datasize.MB
 	sync, err := NewStagedSync(
 		ctx,
-		db,
+		db.(ethdb.HasRwKV).RwKV(),
+		sm,
 		batchSize,
 		timeout,
 		controlServer,
@@ -206,7 +210,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, []proto_sentry.SentryClient{sentry}, window)
+	sentries := []proto_sentry.SentryClient{sentry}
+	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
 	if err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
@@ -225,14 +230,19 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return err
 	}
 
-	if err = SetSentryStatus(ctx, sentry, controlServer); err != nil {
+	if err = SetSentryStatus(ctx, sentries, controlServer); err != nil {
 		log.Error("failed to set sentry status", "error", err)
 		return nil
+	}
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		return err
 	}
 	batchSize := 512 * datasize.MB
 	sync, err := NewStagedSync(
 		ctx,
-		db,
+		db.(ethdb.HasRwKV).RwKV(),
+		sm,
 		batchSize,
 		timeout,
 		controlServer,
@@ -271,48 +281,56 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 
 }
 
-func SetSentryStatus(ctx context.Context, sentry proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
-	if _, err := sentry.SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
-		return err
+func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
+	for i := range sentries {
+		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func NewStagedSync(
 	ctx context.Context,
-	db ethdb.Database,
+	db ethdb.RwKV,
+	sm ethdb.StorageMode,
 	batchSize datasize.ByteSize,
 	bodyDownloadTimeout int,
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
 ) (*stagedsync.StagedSync, error) {
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		return nil, err
+	var increment uint64
+	if sm.Pruning {
+		increment = params.FullImmutabilityThreshold
 	}
 
 	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
+			db,
 			controlServer.hd,
 			*controlServer.chainConfig,
 			controlServer.sendHeaderRequest,
-			controlServer.requestWakeUpBodies,
+			controlServer.PropagateNewBlockHashes,
+			controlServer.penalize,
 			batchSize,
+			increment,
 		),
 		stagedsync.StageBodiesCfg(
+			db,
 			controlServer.bd,
 			controlServer.sendBodyRequest,
 			controlServer.penalise,
 			controlServer.updateHead,
 			controlServer,
-			controlServer.requestWakeUpBodies,
 			bodyDownloadTimeout,
 			batchSize,
 		),
-		stagedsync.StageSendersCfg(controlServer.chainConfig),
+		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
 		stagedsync.StageExecuteBlocksCfg(
+			db,
 			sm.Receipts,
+			sm.CallTraces,
 			batchSize,
 			nil,
 			nil,
@@ -323,34 +341,32 @@ func NewStagedSync(
 			&vm.Config{NoReceipts: !sm.Receipts},
 			tmpdir,
 		),
-		stagedsync.StageHashStateCfg(tmpdir),
-		stagedsync.StageTrieCfg(true, true, tmpdir),
-		stagedsync.StageHistoryCfg(tmpdir),
-		stagedsync.StageLogIndexCfg(tmpdir),
-		stagedsync.StageCallTracesCfg(0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
-		stagedsync.StageTxLookupCfg(tmpdir),
-		stagedsync.StageTxPoolCfg(txPool),
+		stagedsync.StageHashStateCfg(db, tmpdir),
+		stagedsync.StageTrieCfg(db, true, true, tmpdir),
+		stagedsync.StageHistoryCfg(db, tmpdir),
+		stagedsync.StageLogIndexCfg(db, tmpdir),
+		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
+		stagedsync.StageTxLookupCfg(db, tmpdir),
+		stagedsync.StageTxPoolCfg(db, txPool),
 	), nil
 }
 
 type ControlServerImpl struct {
-	lock                 sync.RWMutex
-	hd                   *headerdownload.HeaderDownload
-	bd                   *bodydownload.BodyDownload
-	nodeName             string
-	sentries             []proto_sentry.SentryClient
-	requestWakeUpHeaders chan struct{}
-	requestWakeUpBodies  chan struct{}
-	headHeight           uint64
-	headHash             common.Hash
-	headTd               *uint256.Int
-	chainConfig          *params.ChainConfig
-	forks                []uint64
-	genesisHash          common.Hash
-	protocolVersion      uint32
-	networkId            uint64
-	db                   ethdb.Database
-	engine               consensus.Engine
+	lock            sync.RWMutex
+	hd              *headerdownload.HeaderDownload
+	bd              *bodydownload.BodyDownload
+	nodeName        string
+	sentries        []proto_sentry.SentryClient
+	headHeight      uint64
+	headHash        common.Hash
+	headTd          *uint256.Int
+	chainConfig     *params.ChainConfig
+	forks           []uint64
+	genesisHash     common.Hash
+	protocolVersion uint32
+	networkId       uint64
+	db              ethdb.Database
+	engine          consensus.Engine
 }
 
 func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64) {
@@ -407,14 +423,12 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 
 	cs := &ControlServerImpl{
-		nodeName:             nodeName,
-		hd:                   hd,
-		bd:                   bd,
-		sentries:             sentries,
-		requestWakeUpHeaders: make(chan struct{}, 1),
-		requestWakeUpBodies:  make(chan struct{}, 1),
-		db:                   db,
-		engine:               engine,
+		nodeName: nodeName,
+		hd:       hd,
+		bd:       bd,
+		sentries: sentries,
+		db:       db,
+		engine:   engine,
 	}
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
@@ -422,16 +436,21 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = networkID
 	var err error
-	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
+	err = db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
+		return err
+	})
 	return cs, err
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
+		cs.hd.SaveExternalAnnounce(announce.Hash)
 		if cs.hd.HasLink(announce.Hash) {
 			continue
 		}
@@ -463,9 +482,9 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 	return nil
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, in *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
+	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
@@ -489,7 +508,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket66
-	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
 		return fmt.Errorf("decode 5 BlockHeadersPacket66: %v", err)
 	}
 	headers := request.BlockHeadersPacket
@@ -502,12 +521,26 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			var canRequestMore bool
 			for _, segment := range segments {
-				cs.hd.ProcessSegment(segment, false /* newBlock */)
+				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				canRequestMore = canRequestMore || requestMore
+			}
+
+			if canRequestMore {
+				currentTime := uint64(time.Now().Unix())
+				req, penalties := cs.hd.RequestMoreHeaders(currentTime)
+				if req != nil {
+					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
+						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
+						log.Debug("Sent request", "height", req.Number)
+					}
+				}
+				cs.penalize(ctx, penalties)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  req.PeerId,
+				PeerId:  in.PeerId,
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
@@ -518,13 +551,28 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, req *proto_sentry
 		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   req.PeerId,
+		PeerId:   in.PeerId,
 		MinBlock: heighestBlock,
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
+}
+
+// sending list of penalties to all sentries
+func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
+	for i := range penalties {
+		outreq := proto_sentry.PenalizePeerRequest{
+			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
+			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+		}
+		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
+			}
+		}
+	}
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -549,7 +597,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.hd.ProcessSegment(segments[0], true /* newBlock */) // There is only one segment in this case
+			cs.hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -704,16 +752,6 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 }
 
 func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	defer func() {
-		select {
-		case cs.requestWakeUpHeaders <- struct{}{}:
-		default:
-		}
-		select {
-		case cs.requestWakeUpBodies <- struct{}{}:
-		default:
-		}
-	}()
 	switch inreq.Id {
 	case proto_sentry.MessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq, sentry)

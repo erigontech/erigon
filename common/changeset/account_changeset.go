@@ -1,6 +1,10 @@
 package changeset
 
 import (
+	"bytes"
+	"encoding/binary"
+	"sort"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -9,29 +13,54 @@ import (
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 
-/* Plain changesets (key is a common.Address) */
-
-func NewAccountChangeSetPlain() *ChangeSet {
+func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
 		keyLen:  common.AddressLength,
 	}
 }
 
-func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
-	return encodeAccounts2(blockN, s, f)
+func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	sort.Sort(s)
+	newK := dbutils.EncodeBlockNumber(blockN)
+	for _, cs := range s.Changes {
+		newV := make([]byte, len(cs.Key)+len(cs.Value))
+		copy(newV, cs.Key)
+		copy(newV[len(cs.Key):], cs.Value)
+		if err := f(newK, newV); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
+func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+	blockN := binary.BigEndian.Uint64(dbKey)
+	k := dbValue[:common.AddressLength]
+	v := dbValue[common.AddressLength:]
 
-func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
-	return findInAccountChangeSet(b.c, blockNumber, k, common.AddressLength)
+	return blockN, k, v
+}
+
+type AccountChangeSet struct{ c ethdb.CursorDupSort }
+
+func (b AccountChangeSet) Find(blockNumber uint64, key []byte) ([]byte, error) {
+	k := dbutils.EncodeBlockNumber(blockNumber)
+	v, err := b.c.SeekBothRange(k, key)
+	if err != nil {
+		return nil, err
+	}
+	_, k, v = DecodeAccounts(k, v)
+	if !bytes.HasPrefix(k, key) {
+		return nil, nil
+	}
+	return v, nil
 }
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
 func GetModifiedAccounts(db ethdb.Tx, startNum, endNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
-	if err := Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := Walk(db, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > endNum {
 			return false, nil
 		}

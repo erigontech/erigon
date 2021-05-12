@@ -20,26 +20,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem             bool
-	exclusive         bool
-	flags             uint
-	path              string
-	bucketsCfg        BucketConfigsFunc
-	mapSize           datasize.ByteSize
-	dirtyListMaxPages uint64
-	verbosity         DBVerbosityLvl
+	inMem      bool
+	exclusive  bool
+	flags      uint
+	path       string
+	bucketsCfg BucketConfigsFunc
+	mapSize    datasize.ByteSize
+	verbosity  DBVerbosityLvl
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg:        DefaultBucketConfigs,
-		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
-		dirtyListMaxPages: 128 * 1024,
+		bucketsCfg: DefaultBucketConfigs,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
 	}
 }
 
@@ -124,14 +123,14 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
-
+	const pageSize = 4 * 1024
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
 			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.MB), 0, 4*1024); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
 				return nil, err
 			}
 		}
@@ -152,40 +151,53 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		//	return nil, err
+		//}
+		if err = env.SetOption(mdbx.OptTxnDpInitial, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptDpReverseLimit, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+		// must be in the range from 12.5% (almost empty) to 50% (half empty)
+		// which corresponds to the range from 8192 and to 32768 in units respectively
+		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, 32768); err != nil {
 			return nil, err
 		}
 	}
 
+	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	db := &MdbxKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		wg:      &sync.WaitGroup{},
-		buckets: dbutils.BucketsCfg{},
+		opts:     opts,
+		env:      env,
+		log:      logger,
+		wg:       &sync.WaitGroup{},
+		buckets:  dbutils.BucketsCfg{},
+		pageSize: pageSize,
+		txSize:   dirtyPagesLimit * pageSize,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
 
+	buckets := bucketSlice(db.buckets)
 	// Open or create buckets
 	if opts.flags&mdbx.Readonly != 0 {
 		tx, innerErr := db.BeginRo(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
-		for name, cfg := range db.buckets {
-			if cfg.IsDeprecated {
+		for _, name := range buckets {
+			if db.buckets[name].IsDeprecated {
 				continue
 			}
 			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -198,8 +210,8 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		}
 	} else {
 		if err := db.Update(context.Background(), func(tx RwTx) error {
-			for name, cfg := range db.buckets {
-				if cfg.IsDeprecated {
+			for _, name := range buckets {
+				if db.buckets[name].IsDeprecated {
 					continue
 				}
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -214,9 +226,9 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 
 	// Configure buckets and open deprecated buckets
 	if err := env.View(func(tx *mdbx.Txn) error {
-		for name, cfg := range db.buckets {
+		for _, name := range buckets {
 			// Open deprecated buckets if they exist, don't create
-			if !cfg.IsDeprecated {
+			if !db.buckets[name].IsDeprecated {
 				continue
 			}
 			cnfCopy := db.buckets[name]
@@ -263,11 +275,13 @@ func (opts MdbxOpts) MustOpen() RwKV {
 }
 
 type MdbxKV struct {
-	opts    MdbxOpts
-	env     *mdbx.Env
-	log     log.Logger
-	buckets dbutils.BucketsCfg
-	wg      *sync.WaitGroup
+	opts     MdbxOpts
+	txSize   uint64
+	pageSize uint64
+	env      *mdbx.Env
+	log      log.Logger
+	buckets  dbutils.BucketsCfg
+	wg       *sync.WaitGroup
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -309,8 +323,22 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) CollectMetrics() {
-	info, _ := db.env.Info()
+	if !metrics.Enabled {
+		return
+	}
+	info, err := db.env.Info()
+	if err != nil {
+		return // ignore error for metrics collection
+	}
 	dbSize.Update(int64(info.Geo.Current))
+	dbPgopsNewly.Update(int64(info.PageOps.Newly))
+	dbPgopsCow.Update(int64(info.PageOps.Cow))
+	dbPgopsClone.Update(int64(info.PageOps.Clone))
+	dbPgopsSplit.Update(int64(info.PageOps.Split))
+	dbPgopsMerge.Update(int64(info.PageOps.Merge))
+	dbPgopsSpill.Update(int64(info.PageOps.Spill))
+	dbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	dbPgopsWops.Update(int64(info.PageOps.Wops))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
@@ -325,7 +353,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -346,10 +374,10 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, mdbx.TxNoMetaSync|mdbx.TxNoSync)
+	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, err
+		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -359,10 +387,11 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 }
 
 type MdbxTx struct {
-	readOnly bool
-	tx       *mdbx.Txn
-	db       *MdbxKV
-	cursors  []*mdbx.Cursor
+	readOnly         bool
+	tx               *mdbx.Txn
+	db               *MdbxKV
+	cursors          []*mdbx.Cursor
+	statelessCursors map[string]Cursor
 }
 
 type MdbxCursor struct {
@@ -370,7 +399,6 @@ type MdbxCursor struct {
 	bucketName string
 	dbi        mdbx.DBI
 	bucketCfg  dbutils.BucketConfigItem
-	prefix     []byte
 
 	c *mdbx.Cursor
 }
@@ -392,14 +420,26 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 }
 
 func (tx *MdbxTx) CollectMetrics() {
+	if !metrics.Enabled {
+		return
+	}
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
-		panic(err)
+		return
 	}
 
 	txDirty.Update(int64(txInfo.SpaceDirty))
+	txLimit.Update(int64(tx.db.txSize))
 	txSpill.Update(int64(txInfo.Spill))
 	txUnspill.Update(int64(txInfo.Unspill))
+
+	gc, err := tx.BucketStat("gc")
+	if err != nil {
+		return
+	}
+	gcLeafMetric.Update(int64(gc.LeafPages))
+	gcOverflowMetric.Update(int64(gc.OverflowPages))
+	gcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
@@ -614,15 +654,24 @@ func (tx *MdbxTx) Commit() error {
 		slowTx = debug.SlowCommit()
 	}
 
-	commitTimer := time.Now()
-	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+	//commitTimer := time.Now()
+	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
-	//tx.printDebugInfo()
+	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+		tx.PrintDebugInfo()
+	}
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
+
+	dbCommitPreparation.Update(latency.Preparation)
+	dbCommitGc.Update(latency.GC)
+	dbCommitAudit.Update(latency.Audit)
+	dbCommitWrite.Update(latency.Write)
+	dbCommitSync.Update(latency.Sync)
+	dbCommitEnding.Update(latency.Ending)
 
 	if latency.Whole > slowTx {
 		log.Info("Commit",
@@ -659,31 +708,36 @@ func (tx *MdbxTx) Rollback() {
 }
 
 //nolint
-func (tx *MdbxTx) printDebugInfo() {
-	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-		txInfo, err := tx.tx.Info(true)
-		if err != nil {
-			panic(err)
-		}
-
-		txSize := uint(txInfo.SpaceDirty / 1024)
-		doPrint := tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb()
-		doPrint = doPrint || (!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
-		if doPrint {
-			log.Info("Tx info",
-				"id", txInfo.Id,
-				"read_lag", txInfo.ReadLag,
-				"ro", tx.readOnly,
-				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
-				"space_dirty_kb", txInfo.SpaceDirty/1024,
-				"callers", debug.Callers(7),
-			)
-		}
+func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		return 0, 0, err
 	}
+
+	return txInfo.SpaceDirty, tx.db.txSize, nil
 }
 
-func (tx *MdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) {
-	return tx.tx.Get(dbi, key)
+//nolint
+func (tx *MdbxTx) PrintDebugInfo() {
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		panic(err)
+	}
+
+	txSize := uint(txInfo.SpaceDirty / 1024)
+	doPrint := debug.BigRoTxKb() == 0 && debug.BigRwTxKb() == 0 ||
+		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
+		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
+	if doPrint {
+		log.Info("Tx info",
+			"id", txInfo.Id,
+			"read_lag", txInfo.ReadLag,
+			"ro", tx.readOnly,
+			//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
+			"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
+			//"callers", debug.Callers(7),
+		)
+	}
 }
 
 func (tx *MdbxTx) closeCursors() {
@@ -695,118 +749,66 @@ func (tx *MdbxTx) closeCursors() {
 	tx.cursors = []*mdbx.Cursor{}
 }
 
-func (c *MdbxCursor) Prefix(v []byte) Cursor {
-	c.prefix = v
-	return c
-}
-
-func (c *MdbxCursor) Prefetch(v uint) Cursor {
-	//c.cursorOpts.PrefetchSize = int(v)
-	return c
+func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
+	if tx.statelessCursors == nil {
+		tx.statelessCursors = make(map[string]Cursor)
+	}
+	c, ok := tx.statelessCursors[bucket]
+	if !ok {
+		var err error
+		c, err = tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		tx.statelessCursors[bucket] = c
+	}
+	return c.(RwCursor), nil
 }
 
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		c, err := tx.RwCursor(bucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return c.Put(k, v)
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
 	}
-
-	return tx.tx.Put(mdbx.DBI(b.DBI), k, v, mdbx.Upsert)
+	return c.Put(k, v)
 }
 
 func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		c, err := tx.RwCursor(bucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return c.Delete(k, v)
-	}
-
-	err := tx.tx.Del(mdbx.DBI(b.DBI), k, v)
+	c, err := tx.statelessCursor(bucket)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil
-		}
 		return err
 	}
-	return nil
+	return c.Delete(k, v)
 }
 
-func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		c1, err := tx.Cursor(bucket)
-		if err != nil {
-			return nil, err
-		}
-		defer c1.Close()
-		c := c1.(*MdbxCursor)
-		v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if !bytes.Equal(key[to:], v[:from-to]) {
-			return nil, nil
-		}
-		return v[from-to:], nil
-	}
-
-	val, err := tx.get(mdbx.DBI(b.DBI), key)
+func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
+	c, err := tx.statelessCursor(bucket)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return val, nil
+	_, v, err := c.SeekExact(k)
+	return v, err
 }
 
 func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
-	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		c1, err := tx.Cursor(bucket)
-		if err != nil {
-			return false, err
-		}
-		defer c1.Close()
-		c := c1.(*MdbxCursor)
-		v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		return bytes.Equal(key[to:], v[:from-to]), nil
-	}
-
-	if _, err := tx.get(mdbx.DBI(b.DBI), key); err == nil {
-		return true, nil
-	} else if mdbx.IsNotFound(err) {
-		return false, nil
-	} else {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
 		return false, err
 	}
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(key, k), nil
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c, _ := tx.RwCursor(dbutils.Sequence)
-	defer c.Close()
+	c, err := tx.statelessCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil && !mdbx.IsNotFound(err) {
+	if err != nil {
 		return 0, err
 	}
 
@@ -825,8 +827,10 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, _ := tx.Cursor(dbutils.Sequence)
-	defer c.Close()
+	c, err := tx.statelessCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !mdbx.IsNotFound(err) {
 		return 0, err
@@ -962,14 +966,10 @@ func (c *MdbxCursor) Count() (uint64, error) {
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
-	return c.Seek(c.prefix)
+	return c.Seek(nil)
 }
 
 func (c *MdbxCursor) Last() ([]byte, []byte, error) {
-	if c.prefix != nil {
-		return []byte{}, nil, fmt.Errorf(".Last doesn't support c.prefix yet")
-	}
-
 	k, v, err := c.last()
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1006,9 +1006,6 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		err = fmt.Errorf("failed MdbxKV cursor.Seek(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
 		return []byte{}, nil, err
 	}
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 
 	return k, v, nil
 }
@@ -1023,9 +1020,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 				return nil, nil, nil
 			}
 			return []byte{}, nil, err
-		}
-		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-			k, v = nil, nil
 		}
 
 		if len(k) == to {
@@ -1073,9 +1067,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		k = k2
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
 	return k, v, nil
 }
 
@@ -1093,10 +1084,6 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil
@@ -1118,10 +1105,6 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 		v = v[keyPart:]
 	}
 
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
-	}
-
 	return k, v, nil
 }
 
@@ -1140,10 +1123,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 		keyPart := b.DupFromLen - b.DupToLen
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
-		k, v = nil, nil
 	}
 
 	return k, v, nil

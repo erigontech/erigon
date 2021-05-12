@@ -34,7 +34,7 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
 	txPoolLocals := txPool.Locals()
 	pendingTxs, err := txPool.Pending()
 	if err != nil {
@@ -67,7 +67,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: chainConfig, Db: tx}
+	chain := ChainReader{Cfg: chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
@@ -244,7 +244,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	return nil
 }
 
-func readNonCanonicalHeaders(tx ethdb.Getter, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx ethdb.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {

@@ -531,9 +531,9 @@ typedef mode_t mdbx_mode_t;
 extern "C" {
 #endif
 
-/* MDBX version 0.9.x */
+/* MDBX version 0.10.x */
 #define MDBX_VERSION_MAJOR 0
-#define MDBX_VERSION_MINOR 9
+#define MDBX_VERSION_MINOR 10
 
 #ifndef LIBMDBX_API
 #if defined(LIBMDBX_EXPORTS)
@@ -587,9 +587,7 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
   const char *flags;    /**< CFLAGS and CXXFLAGS */
 } /** \brief libmdbx build information */ mdbx_build;
 
-#if defined(_WIN32) || defined(_WIN64)
-#if !MDBX_BUILD_SHARED_LIBRARY
-
+#if (defined(_WIN32) || defined(_WIN64)) && !MDBX_BUILD_SHARED_LIBRARY
 /* MDBX internally uses global and thread local storage destructors to
  * automatically (de)initialization, releasing reader lock table slots
  * and so on.
@@ -600,39 +598,41 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
  *
  * Otherwise, if MDBX was builded not as a DLL, some black magic
  * may be required depending of Windows version:
+ *
  *  - Modern Windows versions, including Windows Vista and later, provides
  *    support for "TLS Directory" (e.g .CRT$XL[A-Z] sections in executable
  *    or dll file). In this case, MDBX capable of doing all automatically,
- *    and you do not need to call mdbx_dll_handler().
+ *    therefore you DON'T NEED to call mdbx_module_handler()
+ *    so the MDBX_MANUAL_MODULE_HANDLER defined as 0.
+ *
  *  - Obsolete versions of Windows, prior to Windows Vista, REQUIRES calling
- *    mdbx_dll_handler() manually from corresponding DllMain() or WinMain()
- *    of your DLL or application.
- *  - This behavior is under control of the MODX_CONFIG_MANUAL_TLS_CALLBACK
- *    option, which is determined by default according to the target version
- *    of Windows at build time.
- *    But you may override MODX_CONFIG_MANUAL_TLS_CALLBACK in special cases.
+ *    mdbx_module_handler() manually from corresponding DllMain() or WinMain()
+ *    of your DLL or application,
+ *    so the MDBX_MANUAL_MODULE_HANDLER defined as 1.
  *
  * Therefore, building MDBX as a DLL is recommended for all version of Windows.
- * So, if you doubt, just build MDBX as the separate DLL and don't worry. */
+ * So, if you doubt, just build MDBX as the separate DLL and don't care about
+ * the MDBX_MANUAL_MODULE_HANDLER. */
 
-#ifndef MDBX_CONFIG_MANUAL_TLS_CALLBACK
-#if defined(_WIN32_WINNT_VISTA) && WINVER >= _WIN32_WINNT_VISTA
-/* As described above mdbx_dll_handler() is NOT needed forWindows Vista
+#ifndef _WIN32_WINNT
+#error Non-dll build libmdbx requires target Windows version \
+  to be explicitly defined via _WIN32_WINNT for properly \
+  handling thread local storage destructors.
+#endif /* _WIN32_WINNT */
+
+#if _WIN32_WINNT >= 0x0600 /* Windows Vista */
+/* As described above mdbx_module_handler() is NOT needed for Windows Vista
  * and later. */
-#define MDBX_CONFIG_MANUAL_TLS_CALLBACK 0
+#define MDBX_MANUAL_MODULE_HANDLER 0
 #else
-/* As described above mdbx_dll_handler() IS REQUIRED for Windows versions
+/* As described above mdbx_module_handler() IS REQUIRED for Windows versions
  * prior to Windows Vista. */
-#define MDBX_CONFIG_MANUAL_TLS_CALLBACK 1
+#define MDBX_MANUAL_MODULE_HANDLER 1
+void LIBMDBX_API NTAPI mdbx_module_handler(PVOID module, DWORD reason,
+                                           PVOID reserved);
 #endif
-#endif /* MDBX_CONFIG_MANUAL_TLS_CALLBACK */
 
-#if MDBX_CONFIG_MANUAL_TLS_CALLBACK
-void LIBMDBX_API NTAPI mdbx_dll_handler(PVOID module, DWORD reason,
-                                        PVOID reserved);
-#endif /* MDBX_CONFIG_MANUAL_TLS_CALLBACK */
-#endif /* !MDBX_BUILD_SHARED_LIBRARY */
-#endif /* Windows */
+#endif /* Windows && !DLL && MDBX_MANUAL_MODULE_HANDLER */
 
 /* OPACITY STRUCTURES *********************************************************/
 
@@ -1951,17 +1951,49 @@ enum MDBX_option_t {
    * Default is 0, i.e. by default no spilling performed during starting nested
    * transactions, that correspond historically behaviour. */
   MDBX_opt_spill_parent4child_denominator,
+
+  /** \brief Controls the in-process threshold of semi-empty pages merge.
+   * \warning This is experimental option and subject for change or removal.
+   * \details This option controls the in-process threshold of minimum page
+   * fill, as used space of percentage of a page. Neighbour pages emptier than
+   * this value are candidates for merging. The threshold value is specified
+   * in 1/65536 of percent, which is equivalent to the 16-dot-16 fixed point
+   * format. The specified value must be in the range from 12.5% (almost empty)
+   * to 50% (half empty) which corresponds to the range from 8192 and to 32768
+   * in units respectively. */
+  MDBX_opt_merge_threshold_16dot16_percent,
 };
 #ifndef __cplusplus
 /** \ingroup c_settings */
 typedef enum MDBX_option_t MDBX_option_t;
 #endif
 
+/** \brief Sets the value of a runtime options for an environment.
+ * \ingroup c_settings
+ *
+ * \param [in] env     An environment handle returned by \ref mdbx_env_create().
+ * \param [in] option  The option from \ref MDBX_option_t to set value of it.
+ * \param [in] value   The value of option to be set.
+ *
+ * \see MDBX_option_t
+ * \see mdbx_env_get_option()
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
                                     const uint64_t value);
+
+/** \brief Gets the value of runtime options from an environment.
+ * \ingroup c_settings
+ *
+ * \param [in] env     An environment handle returned by \ref mdbx_env_create().
+ * \param [in] option  The option from \ref MDBX_option_t to get value of it.
+ * \param [out] pvalue The address where the option's value will be stored.
+ *
+ * \see MDBX_option_t
+ * \see mdbx_env_get_option()
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_get_option(const MDBX_env *env,
                                     const MDBX_option_t option,
-                                    uint64_t *value);
+                                    uint64_t *pvalue);
 
 /** \brief Open an environment instance.
  * \ingroup c_opening
@@ -2239,6 +2271,23 @@ struct MDBX_envinfo {
   /** Current environment mode.
    * The same as \ref mdbx_env_get_flags() returns. */
   uint32_t mi_mode;
+
+  /** Statistics of page operations.
+   * \details Overall statistics of page operations of all (running, completed
+   * and aborted) transactions in the current multi-process session (since the
+   * first process opened the database). */
+  struct {
+    uint64_t newly;   /**< Quantity of a new pages added */
+    uint64_t cow;     /**< Quantity of pages copied for update */
+    uint64_t clone;   /**< Quantity of parent's dirty pages clones
+                           for nested transactions */
+    uint64_t split;   /**< Page splits */
+    uint64_t merge;   /**< Page merges */
+    uint64_t spill;   /**< Quantity of spilled dirty pages */
+    uint64_t unspill; /**< Quantity of unspilled/reloaded pages */
+    uint64_t wops;    /**< Number of explicit write operations (not a pages)
+                           to a disk */
+  } mi_pgop_stat;
 };
 #ifndef __cplusplus
 /** \ingroup c_statinfo */
@@ -2859,12 +2908,23 @@ LIBMDBX_INLINE_API(int, mdbx_env_get_maxdbs,
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API size_t mdbx_default_pagesize(void);
 
 /** \brief Returns basic information about system RAM.
+ * This function provides a portable way to get information about available RAM
+ * and can be useful in that it returns the same information that libmdbx uses
+ * internally to adjust various options and control readahead.
  * \ingroup c_statinfo
- */
+ *
+ * \param [out] page_size     Optional address where the system page size
+ *                            will be stored.
+ * \param [out] total_pages   Optional address where the number of total RAM
+ *                            pages will be stored.
+ * \param [out] avail_pages   Optional address where the number of
+ *                            available/free RAM pages will be stored.
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
                                     intptr_t *avail_pages);
 
-/** \brief Get the maximum size of keys can write.
+/** \brief Returns the maximum size of keys can put.
  * \ingroup c_statinfo
  *
  * \param [in] env    An environment handle returned by \ref mdbx_env_create().
@@ -2876,7 +2936,7 @@ LIBMDBX_API int mdbx_get_sysraminfo(intptr_t *page_size, intptr_t *total_pages,
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int
 mdbx_env_get_maxkeysize_ex(const MDBX_env *env, MDBX_db_flags_t flags);
 
-/** \brief Get the maximum size of data we can write.
+/** \brief Returns the maximum size of data we can put.
  * \ingroup c_statinfo
  *
  * \param [in] env    An environment handle returned by \ref mdbx_env_create().
@@ -2894,9 +2954,10 @@ mdbx_env_get_maxvalsize_ex(const MDBX_env *env, MDBX_db_flags_t flags);
 MDBX_NOTHROW_PURE_FUNCTION MDBX_DEPRECATED LIBMDBX_API int
 mdbx_env_get_maxkeysize(const MDBX_env *env);
 
-/** \brief Set application information associated with the \ref MDBX_env.
- * \ingroup c_settings
+/** \brief Sets application information (a context pointer) associated with
+ * the environment.
  * \see mdbx_env_get_userctx()
+ * \ingroup c_settings
  *
  * \param [in] env  An environment handle returned by \ref mdbx_env_create().
  * \param [in] ctx  An arbitrary pointer for whatever the application needs.
@@ -2904,9 +2965,10 @@ mdbx_env_get_maxkeysize(const MDBX_env *env);
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_set_userctx(MDBX_env *env, void *ctx);
 
-/** \brief Get the application information associated with the MDBX_env.
- * \ingroup c_statinfo
+/** \brief Returns an application information (a context pointer) associated
+ * with the environment.
  * \see mdbx_env_set_userctx()
+ * \ingroup c_statinfo
  *
  * \param [in] env An environment handle returned by \ref mdbx_env_create()
  * \returns The pointer set by \ref mdbx_env_set_userctx()
@@ -2952,7 +3014,8 @@ mdbx_env_get_userctx(const MDBX_env *env);
  *                        to \ref MDBX_NOMETASYNC or \ref MDBX_SAFE_NOSYNC
  *                        description. \see sync_modes
  *
- * \param [out] txn    Address where the new MDBX_txn handle will be stored.
+ * \param [out] txn    Address where the new \ref MDBX_txn handle
+ *                     will be stored.
  *
  * \param [in] context A pointer to application context to be associated with
  *                     created transaction and could be retrieved by
@@ -3013,7 +3076,8 @@ LIBMDBX_API int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent,
  *                        to \ref MDBX_NOMETASYNC or \ref MDBX_SAFE_NOSYNC
  *                        description. \see sync_modes
  *
- * \param [out] txn    Address where the new MDBX_txn handle will be stored.
+ * \param [out] txn    Address where the new \ref MDBX_txn handle
+ *                     will be stored.
  *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
@@ -3035,7 +3099,8 @@ LIBMDBX_INLINE_API(int, mdbx_txn_begin,
   return mdbx_txn_begin_ex(env, parent, flags, txn, NULL);
 }
 
-/** \brief Set application information associated with the \ref MDBX_txn.
+/** \brief Sets application information associated (a context pointer) with the
+ * transaction.
  * \ingroup c_transactions
  * \see mdbx_txn_get_userctx()
  *
@@ -3046,7 +3111,8 @@ LIBMDBX_INLINE_API(int, mdbx_txn_begin,
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_txn_set_userctx(MDBX_txn *txn, void *ctx);
 
-/** \brief Get the application information associated with the MDBX_txn.
+/** \brief Returns an application information (a context pointer) associated
+ * with the transaction.
  * \ingroup c_transactions
  * \see mdbx_txn_set_userctx()
  *
@@ -3269,8 +3335,8 @@ LIBMDBX_API int mdbx_txn_abort(MDBX_txn *txn);
 /** \brief Marks transaction as broken.
  * \ingroup c_transactions
  *
- * Function keeps the transaction handle and corresponding locks, but it
- * is not possible to perform any operations in a broken transaction.
+ * Function keeps the transaction handle and corresponding locks, but makes
+ * impossible to perform any operations within a broken transaction.
  * Broken transaction must then be aborted explicitly later.
  *
  * \param [in] txn  A transaction handle returned by \ref mdbx_txn_begin().
@@ -4114,7 +4180,7 @@ LIBMDBX_API MDBX_dbi mdbx_cursor_dbi(const MDBX_cursor *cursor);
 LIBMDBX_API int mdbx_cursor_copy(const MDBX_cursor *src, MDBX_cursor *dest);
 
 /** \brief Retrieve by cursor.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function retrieves key/data pairs from the database. The address and
  * length of the key are returned in the object to which key refers (except
@@ -4138,7 +4204,7 @@ LIBMDBX_API int mdbx_cursor_get(MDBX_cursor *cursor, MDBX_val *key,
                                 MDBX_val *data, MDBX_cursor_op op);
 
 /** \brief Store by cursor.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function stores key/data pairs into the database. The cursor is
  * positioned at the new item, or on failure usually near it.
@@ -4221,7 +4287,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
                                 MDBX_val *data, MDBX_put_flags_t flags);
 
 /** \brief Delete current key/data pair.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This function deletes the key/data pair to which the cursor refers. This
  * does not invalidate the cursor, so operations such as \ref MDBX_NEXT can
@@ -4253,7 +4319,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
 LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
 
 /** \brief Return count of duplicates for current key.
- * \ingroup c_cursors c_crud
+ * \ingroup c_crud
  *
  * This call is valid for all databases, but reasonable only for that support
  * sorted duplicate data items \ref MDBX_DUPSORT.
@@ -4792,8 +4858,8 @@ LIBMDBX_API int mdbx_env_turn_for_recovery(MDBX_env *env, unsigned target_meta);
 
 /** @} B-tree Traversal */
 
-/**** Attribute support functions for Nexenta
- * *******************************************/
+/**** Attribute support functions for Nexenta (scheduled for removal)
+ * *****************************************************************/
 #if defined(MDBX_NEXENTA_ATTRS) || defined(DOXYGEN)
 /** \defgroup nexenta Attribute support functions for Nexenta
  * \ingroup c_crud

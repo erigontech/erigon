@@ -20,12 +20,12 @@ import (
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
 	ibs := state.New(state.NewPlainStateReader(tx))
-	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+	stateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, current.Header.Number.Uint64())
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}

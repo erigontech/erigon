@@ -15,13 +15,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func init() {
 	withDatadir(generateHeadersSnapshotCmd)
 	withSnapshotFile(generateHeadersSnapshotCmd)
-	withSnapshotData(generateHeadersSnapshotCmd)
 	withBlock(generateHeadersSnapshotCmd)
 
 	rootCmd.AddCommand(generateHeadersSnapshotCmd)
@@ -46,18 +44,6 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	}
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
 
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},

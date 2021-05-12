@@ -22,28 +22,26 @@ import (
 )
 
 type TrieCfg struct {
+	db                ethdb.RwKV
 	checkRoot         bool
 	saveNewHashesToDB bool
 	tmpDir            string
 }
 
-func StageTrieCfg(checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
+func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
+		db:                db,
 		checkRoot:         checkRoot,
 		saveNewHashesToDB: saveNewHashesToDB,
 		tmpDir:            tmpDir,
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -78,15 +76,24 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg,
 	var root common.Hash
 	if s.BlockNumber == 0 {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
-			return trie.EmptyRoot, err
+			log.Error("Regeneration failed", "error", err)
 		}
 	} else {
 		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, quit); err != nil {
-			return trie.EmptyRoot, err
+			log.Error("Increment  failed", "error", err)
 		}
 	}
 
-	if err = s.DoneAndUpdate(tx, to); err != nil {
+	if err == nil {
+		if err1 := s.DoneAndUpdate(tx, to); err1 != nil {
+			return trie.EmptyRoot, err1
+		}
+	} else if to > s.BlockNumber {
+		log.Warn("Unwinding due to error", "to", s.BlockNumber, "err", err)
+		if err1 := u.UnwindTo(s.BlockNumber, tx, tx); err1 != nil {
+			return trie.EmptyRoot, err1
+		}
+	} else {
 		return trie.EmptyRoot, err
 	}
 
@@ -96,7 +103,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, cfg TrieCfg,
 		}
 	}
 
-	return root, nil
+	return root, err
 }
 
 func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
@@ -150,9 +157,9 @@ func NewHashPromoter(db ethdb.RwTx, quitCh <-chan struct{}) *HashPromoter {
 func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.StorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.AccountChangeSetBucket
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
@@ -244,9 +251,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	var changeSetBucket string
 
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.StorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.AccountChangeSetBucket
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
@@ -376,15 +383,11 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, cfg TrieCfg, quit <-chan struct{}) error {
-	var tx ethdb.RwTx
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-		useExternalTx = true
-	} else {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
 		var err error
-		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}

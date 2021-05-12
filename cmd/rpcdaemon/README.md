@@ -121,8 +121,11 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getUncleCountByBlockNumber          | Yes     |                                            |
 |                                         |         |                                            |
 | eth_getTransactionByHash                | Yes     |                                            |
+| eth_getRawTransactionByHash             | Yes     |                                            |
 | eth_getTransactionByBlockHashAndIndex   | Yes     |                                            |
+| eth_retRawTransactionByBlockHashAndIndex| Yes     |                                            |
 | eth_getTransactionByBlockNumberAndIndex | Yes     |                                            |
+| eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
 | eth_getTransactionReceipt               | Yes     |                                            |
 | eth_getBlockReceipts                    | Yes     |                                            |
 |                                         |         |                                            |

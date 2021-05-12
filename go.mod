@@ -4,12 +4,12 @@ go 1.16
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
-	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
+	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
-	github.com/blend/go-sdk v1.1.1 // indirect
+	github.com/blend/go-sdk v0.0.0-20190205012150-4a150f307fcb // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/cloudflare/cloudflare-go v0.13.2
@@ -31,13 +31,14 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
-	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
+	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.1.1
 	github.com/huin/goupnp v1.0.1-0.20200620063722-49508fba0031
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
+	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/lmdb-go v1.17.4
@@ -62,11 +63,12 @@ require (
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
-	golang.org/x/tools v0.0.0-20201022035929-9cf592e881e9
+	golang.org/x/tools v0.0.0-20210106214847-113979e3529a
 	google.golang.org/grpc v1.36.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.26.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	pgregory.net/rapid v0.4.6
 )

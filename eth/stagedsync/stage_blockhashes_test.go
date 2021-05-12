@@ -19,13 +19,17 @@ func TestBlockHashStage(t *testing.T) {
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	var dbtx ethdb.RwTx
+	if hasTx, ok := tx.(ethdb.HasTx); ok {
+		dbtx = hasTx.Tx().(ethdb.RwTx)
+	}
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(tx, origin.Hash(), 0)
 	if err := rawdb.WriteTd(tx, origin.Hash(), 0, origin.Difficulty); err != nil {
 		panic(err)
 	}
-	rawdb.WriteHeader(context.TODO(), tx, origin)
+	rawdb.WriteHeader(tx, origin)
 	if err := rawdb.WriteHeadHeaderHash(tx, origin.Hash()); err != nil {
 		t.Fatalf("failed to write head header hash: %v", err)
 	}
@@ -36,13 +40,13 @@ func TestBlockHashStage(t *testing.T) {
 		t.Fatalf("writing canonical hash: %v", err)
 	}
 
-	if _, _, _, err := InsertHeaderChain("logPrefix", tx, headers); err != nil {
+	if _, _, _, err := InsertHeaderChain("logPrefix", tx, headers, 0); err != nil {
 		t.Errorf("inserting header chain: %v", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.Headers, headers[len(headers)-1].Number.Uint64()); err != nil {
 		t.Fatalf("setting headers progress: %v", err)
 	}
-	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, tx, "", nil)
+	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db.RwKV(), dbtx, "", nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(tx, h.Hash())

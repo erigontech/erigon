@@ -18,26 +18,35 @@ import (
 )
 
 type HeadersCfg struct {
-	hd            *headerdownload.HeaderDownload
-	chainConfig   params.ChainConfig
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte
-	wakeUpChan    chan struct{}
-	batchSize     datasize.ByteSize
+	db                ethdb.RwKV
+	hd                *headerdownload.HeaderDownload
+	chainConfig       params.ChainConfig
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
+	announceNewHashes func(context.Context, []headerdownload.Announce)
+	penalize          func(context.Context, []headerdownload.PenaltyItem)
+	batchSize         datasize.ByteSize
+	increment         uint64
 }
 
 func StageHeadersCfg(
+	db ethdb.RwKV,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
-	wakeUpChan chan struct{},
+	announceNewHashes func(context.Context, []headerdownload.Announce),
+	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
+	increment uint64,
 ) HeadersCfg {
 	return HeadersCfg{
-		hd:            headerDownload,
-		chainConfig:   chainConfig,
-		headerReqSend: headerReqSend,
-		wakeUpChan:    wakeUpChan,
-		batchSize:     batchSize,
+		db:                db,
+		hd:                headerDownload,
+		chainConfig:       chainConfig,
+		headerReqSend:     headerReqSend,
+		announceNewHashes: announceNewHashes,
+		penalize:          penalize,
+		batchSize:         batchSize,
+		increment:         increment,
 	}
 }
 
@@ -46,19 +55,15 @@ func HeadersForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	db ethdb.Database,
+	tx ethdb.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
 ) error {
 	var headerProgress uint64
 	var err error
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -70,12 +75,12 @@ func HeadersForward(
 	}
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err1 := rawdb.ReadCanonicalHash(tx, headerProgress)
-	if err1 != nil {
-		return err1
+	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
+	if err != nil {
+		return err
 	}
-	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if hash == (common.Hash{}) {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
 		}
@@ -88,27 +93,46 @@ func HeadersForward(
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
-	batch := tx.NewBatch()
+	incrementalTarget := headerProgress + cfg.increment
+	if cfg.increment > 0 {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "target", incrementalTarget)
+	} else {
+		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
+	}
+	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	localTd, err1 := rawdb.ReadTd(tx, hash, headerProgress)
-	if err1 != nil {
-		return err1
+	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
+	if err != nil {
+		return err
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 
-	var req *headerdownload.HeaderRequest
 	var peer []byte
 	stopped := false
-	timer := time.NewTimer(1 * time.Second) // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
+
+	// FIXME: remove this hack
+	if cfg.increment > 0 {
+		if cfg.hd.TopSeenHeight() > incrementalTarget {
+			initialCycle = true
+		}
+	}
+
 	for !stopped {
+		if cfg.increment > 0 {
+			progress := cfg.hd.Progress()
+			if progress > incrementalTarget {
+				log.Info(fmt.Sprintf("[%s] Target reached, exiting cycle", logPrefix), "progress", progress, "target", incrementalTarget)
+				break
+			}
+		}
+
 		currentTime := uint64(time.Now().Unix())
-		req = cfg.hd.RequestMoreHeaders(currentTime)
+		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
@@ -116,9 +140,10 @@ func HeadersForward(
 				log.Debug("Sent request", "height", req.Number)
 			}
 		}
+		cfg.penalize(ctx, penalties)
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
 		for req != nil && peer != nil && maxRequests > 0 {
-			req = cfg.hd.RequestMoreHeaders(currentTime)
+			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				peer = cfg.headerReqSend(ctx, req)
 				if peer != nil {
@@ -126,8 +151,10 @@ func HeadersForward(
 					log.Debug("Sent request", "height", req.Number)
 				}
 			}
+			cfg.penalize(ctx, penalties)
 			maxRequests--
 		}
+
 		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
 		if req != nil {
@@ -137,25 +164,41 @@ func HeadersForward(
 			}
 		}
 		// Load headers into the database
-		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
+		var inSync bool
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch), logPrefix, logEvery.C); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(cfg.batchSize) {
-			if err = batch.CommitAndBegin(context.Background()); err != nil {
+			if err = batch.Commit(); err != nil {
 				return err
 			}
 			if !useExternalTx {
-				if err = tx.CommitAndBegin(context.Background()); err != nil {
+				if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+					return err
+				}
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+				tx, err = cfg.db.BeginRw(ctx)
+				if err != nil {
 					return err
 				}
 			}
+			batch = ethdb.NewBatch(tx)
+			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
-		timer.Stop()
+		announces := cfg.hd.GrabAnnounces()
+		if len(announces) > 0 {
+			cfg.announceNewHashes(ctx, announces)
+		}
 		if !initialCycle && headerInserter.AnythingDone() {
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
 		}
-		timer = time.NewTimer(1 * time.Second)
+		if initialCycle && inSync {
+			break
+		}
+		timer := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			stopped = true
@@ -164,14 +207,11 @@ func HeadersForward(
 			logProgressHeaders(logPrefix, prevProgress, progress, batch)
 			prevProgress = progress
 		case <-timer.C:
-			log.Debug("RequestQueueTime (header) ticked")
-		case <-cfg.wakeUpChan:
+			log.Trace("RequestQueueTime (header) ticked")
+		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
-		if initialCycle && cfg.hd.InSync() {
-			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
-			break
-		}
+		timer.Stop()
 	}
 	if headerInserter.AnythingDone() {
 		if err := s.Update(batch, headerInserter.GetHighest()); err != nil {
@@ -179,7 +219,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch, batch); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
@@ -198,7 +238,7 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info("Processed", "highest", headerInserter.GetHighest())
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
 		return fmt.Errorf("interrupted")
 	}
@@ -206,7 +246,7 @@ func HeadersForward(
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
 	if height == 0 {
 		return nil
 	}
@@ -231,15 +271,11 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
+func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) error {
 	var err error
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		tx, err = db.Begin(context.Background(), ethdb.RW)
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -247,7 +283,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
 	}
 	// Delete canonical hashes that are being unwound
 	var headerProgress uint64
-	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
+	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}

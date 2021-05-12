@@ -402,6 +402,19 @@ func (ma *MixedcaseAddress) Original() string {
 	return ma.original
 }
 
+// Addresses is a slice of common.Address, implementing sort.Interface
+type Addresses []Address
+
+func (addrs Addresses) Len() int {
+	return len(addrs)
+}
+func (addrs Addresses) Less(i, j int) bool {
+	return bytes.Compare(addrs[i][:], addrs[j][:]) == -1
+}
+func (addrs Addresses) Swap(i, j int) {
+	addrs[i], addrs[j] = addrs[j], addrs[i]
+}
+
 // Hashes is a slice of common.Hash, implementing sort.Interface
 type Hashes []Hash
 

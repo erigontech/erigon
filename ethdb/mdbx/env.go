@@ -99,6 +99,7 @@ const (
 	OptSpillMaxDenominator          = C.MDBX_opt_spill_max_denominator
 	OptSpillMinDenominator          = C.MDBX_opt_spill_min_denominator
 	OptSpillParent4ChildDenominator = C.MDBX_opt_spill_parent4child_denominator
+	OptMergeThreshold16dot16Percent = C.MDBX_opt_merge_threshold_16dot16_percent
 )
 
 var (
@@ -312,19 +313,36 @@ func (env *Env) Stat() (*Stat, error) {
 	return &stat, nil
 }
 
+type EnvInfoGeo struct {
+	Lower   uint64
+	Upper   uint64
+	Current uint64
+	Shrink  uint64
+	Grow    uint64
+}
+type EnfInfoPageOps struct {
+	Newly   uint64 /**< Quantity of a new pages added */
+	Cow     uint64 /**< Quantity of pages copied for update */
+	Clone   uint64 /**< Quantity of parent's dirty pages clones for nested transactions */
+	Split   uint64 /**< Page splits */
+	Merge   uint64 /**< Page merges */
+	Spill   uint64 /**< Quantity of spilled dirty pages */
+	Unspill uint64 /**< Quantity of unspilled/reloaded pages */
+	Wops    uint64 /**< Number of explicit write operations (not a pages) to a disk */
+}
+
 // EnvInfo contains information an environment.
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
 	MapSize int64 // Size of the data memory map
 	LastPNO int64 // ID of the last used page
-	Geo     struct {
-		Lower   uint64
-		Upper   uint64
-		Current uint64
-		Shrink  uint64
-		Grow    uint64
-	}
+	Geo     EnvInfoGeo
+	/** Statistics of page operations.
+	 * \details Overall statistics of page operations of all (running, completed
+	 * and aborted) transactions in the current multi-process session (since the
+	 * first process opened the database). */
+	PageOps                        EnfInfoPageOps
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -354,18 +372,22 @@ func (env *Env) Info() (*EnvInfo, error) {
 	}
 	info := EnvInfo{
 		MapSize: int64(_info.mi_mapsize),
-		Geo: struct {
-			Lower   uint64
-			Upper   uint64
-			Current uint64
-			Shrink  uint64
-			Grow    uint64
-		}{
+		Geo: EnvInfoGeo{
 			Lower:   uint64(_info.mi_geo.lower),
 			Upper:   uint64(_info.mi_geo.upper),
 			Current: uint64(_info.mi_geo.current),
 			Shrink:  uint64(_info.mi_geo.shrink),
 			Grow:    uint64(_info.mi_geo.grow),
+		},
+		PageOps: EnfInfoPageOps{
+			Newly:   uint64(_info.mi_pgop_stat.newly),
+			Cow:     uint64(_info.mi_pgop_stat.cow),
+			Clone:   uint64(_info.mi_pgop_stat.clone),
+			Split:   uint64(_info.mi_pgop_stat.split),
+			Merge:   uint64(_info.mi_pgop_stat.merge),
+			Spill:   uint64(_info.mi_pgop_stat.spill),
+			Unspill: uint64(_info.mi_pgop_stat.unspill),
+			Wops:    uint64(_info.mi_pgop_stat.wops),
 		},
 		LastPNO:        int64(_info.mi_last_pgno),
 		LastTxnID:      int64(_info.mi_recent_txnid),
@@ -444,6 +466,12 @@ func (env *Env) Path() (string, error) {
 func (env *Env) SetOption(option uint, value uint64) error {
 	ret := C.mdbx_env_set_option(env._env, C.MDBX_option_t(option), C.uint64_t(value))
 	return operrno("mdbx_env_set_option", ret)
+}
+
+func (env *Env) GetOption(option uint) (uint64, error) {
+	var res C.uint64_t
+	ret := C.mdbx_env_get_option(env._env, C.MDBX_option_t(option), &res)
+	return uint64(res), operrno("mdbx_env_get_option", ret)
 }
 
 func (env *Env) SetGeometry(sizeLower int, sizeNow int, sizeUpper int, growthStep int, shrinkThreshold int, pageSize int) error {

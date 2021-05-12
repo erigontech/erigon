@@ -1,4 +1,4 @@
-package bittorrent
+package snapshotsync
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anacrolix/torrent/bencode"
+
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -16,29 +18,32 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 )
 
 type Client struct {
 	Cli          *torrent.Client
 	snapshotsDir string
+	trackers     [][]string
 }
 
-func New(snapshotsDir string, seeding bool) (*Client, error) {
+func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+	torrentConfig.PeerID = peerID
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
+		return nil, fmt.Errorf("fail to start: %w", err)
 	}
 
 	return &Client{
 		Cli:          torrentClient,
 		snapshotsDir: snapshotsDir,
+		trackers:     Trackers,
 	}, nil
 }
 
@@ -53,6 +58,14 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
+func (cli *Client) Torrents() []metainfo.Hash {
+	t := cli.Cli.Torrents()
+	hashes := make([]metainfo.Hash, 0, len(t))
+	for _, v := range t {
+		hashes = append(hashes, v.InfoHash())
+	}
+	return hashes
+}
 func (cli *Client) Load(db ethdb.Database) error {
 	log.Info("Load added torrents")
 	return db.Walk(dbutils.SnapshotInfoBucket, []byte{}, 0, func(k, infoHashBytes []byte) (bool, error) {
@@ -77,6 +90,18 @@ func (cli *Client) Load(db ethdb.Database) error {
 	})
 }
 
+func (cli *Client) SavePeerID(db ethdb.Putter) error {
+	return db.Put(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID), cli.PeerID())
+}
+
+func (cli *Client) Close() {
+	cli.Cli.Close()
+}
+
+func (cli *Client) PeerID() []byte {
+	peerID := cli.Cli.PeerID()
+	return peerID[:]
+}
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) (*torrent.Torrent, error) {
 	t, ok := cli.Cli.Torrent(snapshotHash)
 	if ok {
@@ -91,7 +116,7 @@ func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Has
 	return t, err
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
+func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType SnapshotType, networkID uint64) error { //nolint: interfacer
 	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
 	if err != nil {
 		return err
@@ -122,7 +147,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()
-	log.Info("Got infobytes", "snapshot", snapshotType.String())
+	log.Info("Got infobytes", "snapshot", snapshotType.String(), "file", t.Files()[0].Path())
 
 	if newTorrent {
 		log.Info("Save spec", "snapshot", snapshotType.String())
@@ -152,32 +177,32 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	}
 }
 
-func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {
+func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode SnapshotMode) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
 	eg := errgroup.Group{}
 
 	if mode.Headers {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_headers, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_headers, networkId)
 		})
 	}
 
 	if mode.Bodies {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_bodies, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_bodies, networkId)
 		})
 	}
 
 	if mode.State {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_state, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_state, networkId)
 		})
 	}
 
 	if mode.Receipts {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_receipts, networkId)
+			return cli.AddTorrent(ctx, db, SnapshotType_receipts, networkId)
 		})
 	}
 	err := eg.Wait()
@@ -198,6 +223,7 @@ func (cli *Client) Download() {
 			t.DownloadAll()
 
 			tt := time.Now()
+			prev := t.BytesCompleted()
 		dwn:
 			for {
 				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
@@ -205,8 +231,17 @@ func (cli *Client) Download() {
 					break dwn
 				} else {
 					stats := t.Stats()
-					log.Info("Downloading snapshot", "snapshot", t.Name(), "%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))), "seeders", stats.ConnectedSeeders)
-					time.Sleep(time.Minute)
+					log.Info("Downloading snapshot",
+						"snapshot", t.Name(),
+						"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
+						"mb", t.BytesCompleted()/1024/1024,
+						"diff(kb)", (t.BytesCompleted()-prev)/1024,
+						"seeders", stats.ConnectedSeeders,
+						"active", stats.ActivePeers,
+						"total", stats.TotalPeers)
+					prev = t.BytesCompleted()
+					time.Sleep(time.Second * 10)
+
 				}
 
 			}
@@ -219,8 +254,8 @@ func (cli *Client) Download() {
 	}
 }
 
-func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
-	mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[SnapshotType]*SnapshotsInfo, error) {
+	mp := make(map[SnapshotType]*SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
 	err := db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, func(k, v []byte) (bool, error) {
@@ -244,19 +279,19 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 		}
 
 		_, tpStr := ParseInfoHashKey(k)
-		tp, ok := snapshotsync.SnapshotType_value[tpStr]
+		tp, ok := SnapshotType_value[tpStr]
 		if !ok {
 			return false, fmt.Errorf("incorrect type: %v", tpStr)
 		}
 
-		val := &snapshotsync.SnapshotsInfo{
-			Type:          snapshotsync.SnapshotType(tp),
+		val := &SnapshotsInfo{
+			Type:          SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
 			SnapshotBlock: SnapshotBlock,
 			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
 		}
-		mp[snapshotsync.SnapshotType(tp)] = val
+		mp[SnapshotType(tp)] = val
 		return true, nil
 	})
 	if err != nil {
@@ -264,6 +299,34 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 	}
 
 	return mp, nil
+}
+
+func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error) {
+	info, err := BuildInfoBytesForSnapshot(path, LmdbFilename)
+	if err != nil {
+		return [20]byte{}, err
+	}
+
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		return [20]byte{}, err
+	}
+
+	t, err := cli.AddTorrentSpec(name, metainfo.HashBytes(infoBytes), infoBytes)
+	if err != nil {
+		return [20]byte{}, err
+	}
+	return t.InfoHash(), nil
+}
+func (cli *Client) StopSeeding(hash metainfo.Hash) error {
+	t, ok := cli.Cli.Torrent(hash)
+	if !ok {
+		return nil
+	}
+	ch := t.Closed()
+	t.Drop()
+	<-ch
+	return nil
 }
 
 func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {
@@ -307,4 +370,22 @@ func MakeInfoBytesKey(snapshotName string, networkID uint64) []byte {
 // ParseInfoHashKey returns networkID and snapshot name
 func ParseInfoHashKey(k []byte) (uint64, string) {
 	return binary.BigEndian.Uint64(k), string(bytes.TrimPrefix(k[8:], []byte(SnapshotInfoHashPrefix)))
+}
+
+func SnapshotSeeding(chainDB ethdb.Database, cli *Client, name string, snapshotsDir string) error {
+	snapshotBlock, err := chainDB.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return err
+	}
+
+	if len(snapshotBlock) == 8 {
+		hash, err := cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, binary.BigEndian.Uint64(snapshotBlock)))
+		if err != nil {
+			return err
+		}
+		log.Info("Start seeding", "snapshot", name, "hash", hash.String())
+	} else {
+		log.Warn("Snapshot block unknown", "snapshot", name, "v", common.Bytes2Hex(snapshotBlock))
+	}
+	return nil
 }

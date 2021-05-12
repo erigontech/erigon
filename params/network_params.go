@@ -58,10 +58,4 @@ const (
 	// hard limit against deep ancestors, by the blockchain against deep reorgs, by
 	// the freezer as the cutoff threshold and by clique as the snapshot trust limit.
 	FullImmutabilityThreshold = 90000
-
-	// LightImmutabilityThreshold is the number of blocks after which a header chain
-	// segment is considered immutable for light client(i.e. soft finality). It is used by
-	// the downloader as a hard limit against deep ancestors, by the blockchain against deep
-	// reorgs, by the light pruner as the pruning validity guarantee.
-	LightImmutabilityThreshold = 30000
 )

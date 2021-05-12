@@ -15,9 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 )
 
-//MaxChangesetsSearch -
-const MaxChangesetsSearch = 256
-
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	v, err := FindByHistory(tx, storage, key, timestamp)
@@ -88,7 +85,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		}
 		defer c.Close()
 		if storage {
-			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSetPlain).FindWithIncarnation(changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSet).FindWithIncarnation(changeSetBlock, key)
 		} else {
 			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).Find(changeSetBlock, key)
 		}
@@ -167,7 +164,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		common.AddressLength,                   /* part2start */
 		common.AddressLength+common.HashLength, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(dbutils.PlainStorageChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(dbutils.StorageChangeSetBucket)
 	if err != nil {
 		return err
 	}
@@ -274,7 +271,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 		common.AddressLength,   /* part2start */
 		common.AddressLength+8, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(dbutils.PlainAccountChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(dbutils.AccountChangeSetBucket)
 	if err != nil {
 		return err
 	}

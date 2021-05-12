@@ -29,6 +29,7 @@ type BodyDownload struct {
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	peerMap          map[string]int
 	prefetchedBlocks *PrefetchedBlocks
+	DeliveryNotify   chan struct{}
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -49,6 +50,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
+		DeliveryNotify:   make(chan struct{}, 1),
 	}
 	return bd
 }

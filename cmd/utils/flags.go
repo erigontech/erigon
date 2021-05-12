@@ -28,7 +28,6 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -147,50 +146,13 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	GCModePruningFlag = cli.BoolFlag{
-		Name:  "pruning",
-		Usage: `Enable storage pruning`,
-	}
-	GCModeLimitFlag = cli.Uint64Flag{
-		Name:  "pruning.stop_limit",
-		Usage: `Blockchain pruning limit`,
-		Value: 1024,
-	}
-	GCModeBlockToPruneFlag = cli.Uint64Flag{
-		Name:  "pruning.processing_limit",
-		Usage: `Block to prune per tick`,
-		Value: 20,
-	}
-	GCModeTickTimeout = cli.DurationFlag{
-		Name:  "pruning.tick",
-		Usage: `Time of tick`,
-		Value: time.Second * 2,
-	}
-	LightServFlag = cli.IntFlag{
-		Name:  "lightserv",
-		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",
-		Value: 0,
-	}
-	LightKDFFlag = cli.BoolFlag{
-		Name:  "lightkdf",
-		Usage: "Reduce key-derivation RAM & CPU usage at some expense of KDF strength",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	BloomFilterSizeFlag = cli.Uint64Flag{
-		Name:  "bloomfilter.size",
-		Usage: "Megabytes of memory allocated to bloom-filter for pruning",
-		Value: 2048,
-	}
-	OverrideBerlinFlag = cli.Uint64Flag{
-		Name:  "override.berlin",
-		Usage: "Manually specify Berlin fork-block, overriding the bundled setting",
-	}
-	DownloadOnlyFlag = cli.BoolFlag{
-		Name:  "download-only",
-		Usage: "Run in download only mode - only fetch blocks but not process them",
+	OverrideLondonFlag = cli.Uint64Flag{
+		Name:  "override.london",
+		Usage: "Manually specify London fork-block, overriding the bundled setting",
 	}
 	DebugProtocolFlag = cli.BoolFlag{
 		Name:  "debug-protocol",
@@ -343,10 +305,6 @@ var (
 		Name:  "fakepow",
 		Usage: "Disables proof-of-work verification",
 	}
-	NoCompactionFlag = cli.BoolFlag{
-		Name:  "nocompaction",
-		Usage: "Disables db compaction after import",
-	}
 	// RPC settings
 	IPCDisabledFlag = cli.BoolFlag{
 		Name:  "ipcdisable",
@@ -466,6 +424,10 @@ var (
 		Name:  "port",
 		Usage: "Network listening port",
 		Value: 30303,
+	}
+	SentryAddrFlag = cli.StringSliceFlag{
+		Name:  "sentry.api.addr",
+		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "bootnodes",
@@ -633,12 +595,10 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
-		case params.AleutChainName:
-			urls = params.AleutBootnodes
+		case params.BaikalChainName:
+			urls = params.BaikalBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -675,12 +635,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.YoloV3ChainName:
-			urls = params.YoloV3Bootnodes
 		case params.TurboMineName:
 			urls = params.TurboMineBootnodes
-		case params.AleutChainName:
-			urls = params.AleutBootnodes
+		case params.BaikalChainName:
+			urls = params.BaikalBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -723,6 +681,9 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
+		cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
 	}
 }
 
@@ -815,6 +776,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 }
+
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
 	flags := cmd.Flags()
 	//SetP2PConfig(ctx, &cfg.P2P)
@@ -834,10 +796,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.YoloV3ChainName:
-		return filepath.Join(datadir, "yolo-v3")
-	case params.AleutChainName:
-		return filepath.Join(datadir, "aleut")
+	case params.BaikalChainName:
+		return filepath.Join(datadir, "bailkal")
 	default:
 		return datadir
 	}
@@ -1124,19 +1084,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
+	cfg.P2PEnabled = len(stack.Config().P2P.SentryAddr) == 0
+
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-
-	// todo uncomment after fix pruning
-	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
-	cfg.Pruning = false
-	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
-	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
-	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
-
-	// Read the value from the flag no matter if it's set or not.
-	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 
@@ -1200,21 +1152,16 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.YoloV3ChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("yolov3x")).Uint64() // "yolov3x"
-		}
-		cfg.Genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
 		}
 		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
-	case params.AleutChainName:
+	case params.BaikalChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 7822 // aleut
+			cfg.NetworkID = 1642 // baikal
 		}
-		cfg.Genesis = core.DefaultAleutGenesisBlock()
+		cfg.Genesis = core.DefaultBaikalGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1298,12 +1245,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.YoloV3ChainName:
-		genesis = core.DefaultYoloV3GenesisBlock()
 	case params.TurboMineName:
 		genesis = core.DefaultTurboMineGenesisBlock()
-	case params.AleutChainName:
-		genesis = core.DefaultAleutGenesisBlock()
+	case params.BaikalChainName:
+		genesis = core.DefaultBaikalGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

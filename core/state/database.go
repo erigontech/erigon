@@ -211,6 +211,7 @@ func (b *Buffer) merge(other *Buffer) {
 }
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
+//Deprecated
 type TrieDbState struct {
 	t                 *trie.Trie
 	tMu               *sync.Mutex
@@ -220,7 +221,6 @@ type TrieDbState struct {
 	aggregateBuffer   *Buffer // Merge of all buffers
 	currentBuffer     *Buffer
 	historical        bool
-	noHistory         bool
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
 	newStream         trie.Stream
@@ -230,6 +230,7 @@ type TrieDbState struct {
 	incarnationMap    map[common.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
+//Deprecated
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
 
@@ -257,10 +258,6 @@ func (tds *TrieDbState) SetHistorical(h bool) {
 
 func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
-}
-
-func (tds *TrieDbState) SetNoHistory(nh bool) {
-	tds.noHistory = nh
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -320,7 +317,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
 		historical:        tds.historical,
-		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
 		pw:                tds.pw,
@@ -784,7 +780,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 
 	// Not present in the trie, try the database
 	var a accounts.Account
-	if ok, err := rawdb.ReadAccount(tds.db, addrHash, &a); err != nil {
+	if ok, err := rawdb.ReadAccountDeprecated(tds.db, addrHash, &a); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, nil

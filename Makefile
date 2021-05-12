@@ -3,7 +3,7 @@ GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GOBUILD = env GO111MODULE=on CGO_CFLAGS='-DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
+GOBUILD = env GO111MODULE=on go build -trimpath -tags=mdbx -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
 GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx,debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
@@ -37,7 +37,7 @@ docker-compose:
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth:
+geth: mdbx
 	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -88,6 +88,26 @@ cons:
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
+
+evm:
+	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/evm\" to run EVM"
+
+seeder:
+	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
+
+sndownloader:
+	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
+
+tracker:
+	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
 db-tools: mdbx
 	@echo "Building bb-tools"
@@ -185,7 +205,8 @@ grpc:
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
 		consensus_engine/consensus.proto \
-		testing/testing.proto
+		testing/testing.proto \
+		txpool/txpool.proto
 
 prometheus:
 	docker-compose up prometheus grafana

@@ -29,10 +29,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return HeadersForward(s, u, ctx, world.TX, headers, world.InitialCycle)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return HeadersForward(s, u, ctx, tx, headers, world.InitialCycle)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return HeadersUnwind(u, s, world.TX)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return HeadersUnwind(u, s, tx, headers)
 					},
 				}
 			},
@@ -44,10 +52,14 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.TX, world.TmpDir, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnBlockHashStage(s, world.DB.RwKV(), tx, world.TmpDir, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.DB)
+						return u.Done(world.TX)
 					},
 				}
 			},
@@ -59,10 +71,14 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return BodiesForward(s, ctx, world.TX, bodies)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return BodiesForward(s, ctx, tx, bodies)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.DB)
+						return u.Done(world.TX)
 					},
 				}
 			},
@@ -74,10 +90,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnRecoverSendersStage(senders, s, world.TX, 0, world.TmpDir, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnRecoverSendersStage(senders, s, tx, 0, world.TmpDir, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, s, world.TX)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindSendersStage(u, s, tx, senders)
 					},
 				}
 			},
@@ -89,10 +113,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX, 0, ctx.Done(), exec)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnExecuteBlocksStage(s, tx, 0, ctx.Done(), exec)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, ctx.Done(), exec)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec)
 					},
 				}
 			},
@@ -104,10 +136,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, hashState, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnHashStateStage(s, tx, hashState, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, hashState, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindHashStateStage(u, s, tx, hashState, ctx.Done())
 					},
 				}
 			},
@@ -119,11 +159,19 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						_, err := SpawnIntermediateHashesStage(s, world.TX, trieCfg, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx.Done())
 						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, trieCfg, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx.Done())
 					},
 				}
 			},
@@ -137,10 +185,18 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, history, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnAccountHistoryIndex(s, tx, history, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, s, world.TX, history, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindAccountHistoryIndex(u, s, tx, history, ctx.Done())
 					},
 				}
 			},
@@ -154,10 +210,18 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, history, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnStorageHistoryIndex(s, tx, history, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, s, world.TX, history, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindStorageHistoryIndex(u, s, tx, history, ctx.Done())
 					},
 				}
 			},
@@ -171,10 +235,18 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, logIndex, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnLogIndex(s, tx, logIndex, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, logIndex, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindLogIndex(u, s, tx, logIndex, ctx.Done())
 					},
 				}
 			},
@@ -185,13 +257,21 @@ func ReplacementStages(ctx context.Context,
 				return &Stage{
 					ID:                  stages.CallTraces,
 					Description:         "Generate call traces index",
-					Disabled:            !sm.CallTraces,
 					DisabledDescription: "Work In Progress",
+					Disabled:            !sm.CallTraces,
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, ctx.Done(), callTraces)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnCallTraces(s, tx, ctx.Done(), callTraces)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, ctx.Done(), callTraces)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindCallTraces(u, s, tx, ctx.Done(), callTraces)
 					},
 				}
 			},
@@ -205,10 +285,18 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            !sm.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, txLookup, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTxLookup(s, tx, txLookup, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, txLookup, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTxLookup(u, s, tx, txLookup, ctx.Done())
 					},
 				}
 			},
@@ -220,10 +308,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return SpawnTxPool(s, world.TX, txPool, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTxPool(s, tx, txPool, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxPool(u, s, world.TX, txPool, ctx.Done())
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTxPool(u, s, tx, txPool, ctx.Done())
 					},
 				}
 			},
@@ -235,10 +331,18 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return FinishForward(s, world.DB, world.notifier)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return FinishForward(s, world.DB, world.notifier, tx, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindFinish(u, s, world.DB)
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindFinish(u, s, world.DB, tx)
 					},
 				}
 			},

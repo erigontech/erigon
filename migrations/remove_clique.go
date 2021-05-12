@@ -22,5 +22,4 @@ var removeCliqueBucket = Migration{
 
 		return CommitProgress(db, nil, true)
 	},
-
 }

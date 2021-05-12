@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
@@ -35,6 +36,10 @@ type OptionalParameters struct {
 	Notifier ChainEventNotifier
 
 	SilkwormExecutionFunc unsafe.Pointer
+
+	SnapshotDir      string
+	TorrnetClient    *snapshotsync.Client
+	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -62,7 +67,6 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
-	senders SendersCfg,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -100,7 +104,9 @@ func (stagedSync *StagedSync) Prepare(
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 			InitialCycle:          initialCycle,
 			mining:                miningConfig,
-			senders:               senders,
+			snapshotsDir:          stagedSync.params.SnapshotDir,
+			btClient:              stagedSync.params.TorrnetClient,
+			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
 		},
 	)
 	state := NewState(stages)
@@ -118,4 +124,10 @@ func (stagedSync *StagedSync) Prepare(
 		return nil, err
 	}
 	return state, nil
+}
+
+func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
+	stagedSync.params.TorrnetClient = client
+	stagedSync.params.SnapshotDir = snapshotsDir
+	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }

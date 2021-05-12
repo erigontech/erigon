@@ -10,7 +10,7 @@
 #cmakedefine ENABLE_GCOV
 #cmakedefine ENABLE_ASAN
 #cmakedefine ENABLE_UBSAN
-#cmakedefine MDBX_FORCE_ASSERTIONS
+#cmakedefine01 MDBX_FORCE_ASSERTIONS
 
 /* Common */
 #cmakedefine01 MDBX_TXN_CHECKOWNER
@@ -29,8 +29,7 @@
 #cmakedefine01 MDBX_DISABLE_PAGECHECKS
 
 /* Windows */
-#cmakedefine01 MDBX_CONFIG_MANUAL_TLS_CALLBACK
-#cmakedefine01 MDBX_AVOID_CRT
+#cmakedefine01 MDBX_WITHOUT_MSVC_CRT
 
 /* MacOS & iOS */
 #cmakedefine01 MDBX_OSX_SPEED_INSTEADOF_DURABILITY

@@ -29,4 +29,3 @@ func EncodeBlockNumber(number uint64) []byte {
 	binary.BigEndian.PutUint64(enc, number)
 	return enc
 }
-

@@ -103,7 +103,7 @@ func ExampleGenerateChain() {
 	}
 
 	st := state.New(state.NewDbStateReader(db))
-	fmt.Printf("last block: #%d\n", rawdb.ReadCurrentBlock(db).Number())
+	fmt.Printf("last block: #%d\n", rawdb.ReadCurrentBlockDeprecated(db).Number())
 	fmt.Println("balance of addr1:", st.GetBalance(addr1))
 	fmt.Println("balance of addr2:", st.GetBalance(addr2))
 	fmt.Println("balance of addr3:", st.GetBalance(addr3))

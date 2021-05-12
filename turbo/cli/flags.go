@@ -24,8 +24,8 @@ var (
 	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
-		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db.",
-		Value: -1,
+		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
+		Value: 2,
 	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
@@ -55,13 +55,19 @@ var (
 		Usage: "enable experimental downloader v2",
 	}
 
+	PruningFlag = cli.BoolFlag{
+		Name:  "prune",
+		Usage: "Enable pruning ancient data",
+	}
+
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
 * h - write history to the DB
 * r - write receipts to the DB
-* t - write tx lookup index to the DB`,
-		Value: ethdb.DefaultStorageMode.ToString(),
+* t - write tx lookup index to the DB
+* c - write call traces index to the DB`,
+		Value: "default",
 	}
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",
@@ -76,6 +82,11 @@ var (
 	SeedSnapshotsFlag = cli.BoolTFlag{
 		Name:  "snapshot.seed",
 		Usage: `Seed snapshot seeding(default: true)`,
+	}
+	//todo replace to BoolT
+	SnapshotDatabaseLayoutFlag = cli.BoolFlag{
+		Name:  "snapshot.layout",
+		Usage: `Enable snapshot db layout(default: false)`,
 	}
 
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
@@ -119,17 +130,23 @@ var (
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
+
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
+	if ctx.GlobalBool(PruningFlag.Name) {
+		cfg.StorageMode.Pruning = true
+		cfg.StorageMode.Initialised = true
+	}
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+	cfg.SnapshotLayout = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))

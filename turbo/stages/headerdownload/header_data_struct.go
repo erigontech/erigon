@@ -6,10 +6,10 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -76,6 +76,7 @@ func (lq *LinkQueue) Pop() interface{} {
 type Anchor struct {
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
+	peerID      string
 	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
 	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 	links       []*Link // Links attached immediately to this anchor
@@ -133,6 +134,7 @@ const (
 	InvalidSealPenalty
 	TooFarFuturePenalty
 	TooFarPastPenalty
+	AbandonedAnchorPenalty
 )
 
 type PeerPenalty struct {
@@ -149,6 +151,15 @@ type HeaderRequest struct {
 	Length  uint64
 	Skip    uint64
 	Reverse bool
+}
+
+type PenaltyItem struct {
+	Reason Penalty
+	PeerID string
+}
+type Announce struct {
+	Hash   common.Hash
+	Number uint64
 }
 
 type VerifySealFunc func(header *types.Header) error
@@ -171,10 +182,13 @@ type HeaderDownload struct {
 	stageReadyCh       chan struct{}
 	stageHeight        uint64
 	topSeenHeight      uint64
-	insertList         []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
+	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
+	toAnnounce         []Announce
 	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
+	DeliveryNotify     chan struct{}
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -201,6 +215,8 @@ func NewHeaderDownload(
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
+		seenAnnounces:      NewSeenAnnounces(),
+		DeliveryNotify:     make(chan struct{}, 1),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)
@@ -238,24 +254,48 @@ func (pp PeerPenalty) String() string {
 // HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
-	logPrefix      string
-	batch          ethdb.DbWithPendingMutations
-	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
-	prevHeight     uint64
-	newCanonical   bool
-	unwindPoint    uint64
-	highest        uint64
-	highestHash    common.Hash
-	localTd        *big.Int
-	headerProgress uint64
+	logPrefix        string
+	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
+	prevHeight       uint64
+	newCanonical     bool
+	unwindPoint      uint64
+	highest          uint64
+	highestHash      common.Hash
+	highestTimestamp uint64
+	localTd          *big.Int
+	headerProgress   uint64
 }
 
-func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
 		logPrefix:      logPrefix,
-		batch:          batch,
 		localTd:        localTd,
 		headerProgress: headerProgress,
 		unwindPoint:    headerProgress,
 	}
+}
+
+// SeenAnnounces - external announcement hashes, after header verification if hash is in this set - will broadcast it further
+type SeenAnnounces struct {
+	hashes *lru.Cache
+}
+
+func NewSeenAnnounces() *SeenAnnounces {
+	cache, err := lru.New(1000)
+	if err != nil {
+		panic("error creating prefetching cache for blocks")
+	}
+	return &SeenAnnounces{hashes: cache}
+}
+
+func (s *SeenAnnounces) Pop(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
+	if ok {
+		s.hashes.Remove(hash)
+	}
+	return ok
+}
+
+func (s *SeenAnnounces) Add(b common.Hash) {
+	s.hashes.ContainsOrAdd(b, struct{}{})
 }

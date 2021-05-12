@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -86,27 +85,6 @@ const (
 	TriesInMemory      = 128
 )
 
-// CacheConfig contains the configuration values for the trie caching/pruning
-// that's resident in a blockchain.
-type CacheConfig struct {
-	Pruning bool
-
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruneTimeout        time.Duration
-	DownloadOnly        bool
-	NoHistory           bool
-}
-
-// defaultCacheConfig are the default caching values if none are specified by the
-// user (also used during testing).
-var defaultCacheConfig = &CacheConfig{
-	Pruning:             false,
-	BlocksBeforePruning: 1024,
-	DownloadOnly:        false,
-	NoHistory:           false,
-}
-
 // BlockChain represents the canonical chain given a database with a genesis
 // block. The Blockchain manages chain imports, reverts, chain reorganisations.
 //
@@ -123,7 +101,6 @@ var defaultCacheConfig = &CacheConfig{
 // canonical chain.
 type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
-	cacheConfig *CacheConfig        // Cache configuration for pruning
 
 	db ethdb.Database // Low level persistent database to store final content in
 
@@ -166,17 +143,12 @@ type BlockChain struct {
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator and
 // Processor.
-func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
-	if cacheConfig == nil {
-		cacheConfig = defaultCacheConfig
-	}
-
+func NewBlockChain(db ethdb.Database, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool, senderCacher *TxSenderCacher) (*BlockChain, error) {
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
 
 	bc := &BlockChain{
 		chainConfig:         chainConfig,
-		cacheConfig:         cacheConfig,
 		db:                  db,
 		quit:                make(chan struct{}),
 		shouldPreserve:      shouldPreserve,
@@ -239,7 +211,7 @@ func (bc *BlockChain) loadLastState() error {
 		return fmt.Errorf("empty or corrupt database")
 	}
 	// Make sure the entire head block is available
-	currentBlock, err := rawdb.ReadBlockByHash(bc.db, head)
+	currentBlock, err := rawdb.ReadBlockByHashDeprecated(bc.db, head)
 	if err != nil {
 		return err
 	}
@@ -276,7 +248,7 @@ func (bc *BlockChain) loadLastState() error {
 func (bc *BlockChain) CurrentBlock() *types.Block {
 	headHash := rawdb.ReadHeadBlockHash(bc.db)
 	headNumber := rawdb.ReadHeaderNumber(bc.db, headHash)
-	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
+	return rawdb.ReadBlockDeprecated(bc.db, headHash, *headNumber)
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -288,7 +260,7 @@ func (bc *BlockChain) Genesis() *types.Block {
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	// Short circuit if the block's already in the cache, retrieve otherwise
-	block := rawdb.ReadBlock(bc.db, hash, number)
+	block := rawdb.ReadBlockDeprecated(bc.db, hash, number)
 	if block == nil {
 		return nil
 	}
@@ -328,7 +300,7 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	if number == nil {
 		return nil
 	}
-	receipts := rawdb.ReadReceipts(bc.db, hash, *number)
+	receipts := rawdb.ReadReceiptsDeprecated(bc.db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -440,18 +412,6 @@ func (bc *BlockChain) CurrentHeader() *types.Header {
 	return bc.hc.CurrentHeader()
 }
 
-// GetTd retrieves a block's total difficulty in the canonical chain from the
-// database by hash and number, caching it if found.
-func (bc *BlockChain) GetTd(hash common.Hash, number uint64) *big.Int {
-	return bc.hc.GetTd(bc.db, hash, number)
-}
-
-// GetTdByHash retrieves a block's total difficulty in the canonical chain from the
-// database by hash, caching it if found.
-func (bc *BlockChain) GetTdByHash(hash common.Hash) *big.Int {
-	return bc.hc.GetTdByHash(hash)
-}
-
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -462,12 +422,6 @@ func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
 // found.
 func (bc *BlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
 	return bc.hc.GetHeaderByHash(hash)
-}
-
-// HasHeader checks if a block header is present in the database or not, caching
-// it if present.
-func (bc *BlockChain) HasHeader(hash common.Hash, number uint64) bool {
-	return bc.hc.HasHeader(hash, number)
 }
 
 // GetCanonicalHash returns the canonical hash for a given block number
@@ -532,10 +486,6 @@ func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
 }
 
-func (bc *BlockChain) NoHistory() bool {
-	return bc.cacheConfig.NoHistory
-}
-
 type Pruner interface {
 	Start() error
 	Stop()
@@ -560,20 +510,14 @@ func ExecuteBlockEphemerally(
 	var receipts types.Receipts
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	if chainConfig.IsAleut(block.NumberU64()) {
-		gp.AddGas(block.GasLimit() * params.ElasticityMultiplier)
-	} else {
-		gp.AddGas(block.GasLimit())
-	}
+	gp.AddGas(block.GasLimit())
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		if !vmConfig.NoReceipts {
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
-		}
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})

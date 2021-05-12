@@ -79,10 +79,6 @@ func must(err error) {
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
 }
-func withSnapshotData(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
-}
 
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")

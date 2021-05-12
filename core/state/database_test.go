@@ -1015,7 +1015,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	addrHash := crypto.Keccak256(contractAddress[:])
 	var acc accounts.Account
-	ok, err := rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
+	ok, err := rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1037,7 +1037,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
-	ok, err = rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
+	ok, err = rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1174,7 +1174,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	addrHash := crypto.Keccak256(contractAddress[:])
 	var acc accounts.Account
-	ok, err := rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
+	ok, err := rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1189,7 +1189,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, err = rawdb.ReadAccount(db, common.BytesToHash(addrHash), &acc)
+	ok, err = rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
 	if err != nil {
 		t.Fatal(err)
 	}
