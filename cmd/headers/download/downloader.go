@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -128,6 +129,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		controlServer,
 		tmpdir,
 		nil,
+		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -245,6 +247,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		controlServer,
 		tmpdir,
 		nil,
+		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -292,6 +295,7 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
+	notifier stagedsync.ChainEventNotifier,
 ) (*stagedsync.StagedSync, error) {
 	var increment uint64
 	if sm.Pruning {
@@ -342,6 +346,7 @@ func NewStagedSync(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool),
+		notifier,
 	), nil
 }
 

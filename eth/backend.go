@@ -381,6 +381,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.downloadServer,
 			tmpdir,
 			eth.txPool,
+			eth.events,
 		)
 		if err != nil {
 			return nil, err
