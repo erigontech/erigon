@@ -188,7 +188,6 @@ func HeadersForward(
 			batch = ethdb.NewBatch(tx)
 			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
-		timer.Stop()
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -213,6 +212,7 @@ func HeadersForward(
 		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
+		timer.Stop()
 	}
 	if headerInserter.AnythingDone() {
 		if err := s.Update(batch, headerInserter.GetHighest()); err != nil {
