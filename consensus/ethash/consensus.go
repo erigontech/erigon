@@ -205,11 +205,11 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, header *types.He
 	return nil
 }
 
-func getUncles(chain consensus.ChainReader, block *types.Header) (mapset.Set, map[common.Hash]*types.Header) {
+func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set, map[common.Hash]*types.Header) {
 	// Gather the set of past uncles and ancestors
 	uncles, ancestors := mapset.NewSet(), make(map[common.Hash]*types.Header)
 
-	number, parent := block.Number.Uint64()-1, block.ParentHash
+	number, parent := header.Number.Uint64()-1, header.ParentHash
 	for i := 0; i < 7; i++ {
 		ancestor := chain.GetBlock(parent, number)
 		if ancestor == nil {
@@ -221,8 +221,8 @@ func getUncles(chain consensus.ChainReader, block *types.Header) (mapset.Set, ma
 		}
 		parent, number = ancestor.ParentHash(), number-1
 	}
-	ancestors[block.Hash()] = block
-	uncles.Add(block.Hash())
+	ancestors[header.Hash()] = header
+	uncles.Add(header.Hash())
 	return uncles, ancestors
 }
 
