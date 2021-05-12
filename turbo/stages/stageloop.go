@@ -18,10 +18,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
-const (
-	logInterval = 30 * time.Second
-)
-
 func NewStagedSync(
 	ctx context.Context,
 	sm ethdb.StorageMode,
