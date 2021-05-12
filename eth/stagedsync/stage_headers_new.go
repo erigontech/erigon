@@ -165,7 +165,8 @@ func HeadersForward(
 			}
 		}
 		// Load headers into the database
-		if err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch)); err != nil {
+		var inSync bool
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch), logPrefix, logEvery.C); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= int(cfg.batchSize) {
@@ -187,7 +188,6 @@ func HeadersForward(
 			batch = ethdb.NewBatch(tx)
 			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
-		timer.Stop()
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -196,10 +196,10 @@ func HeadersForward(
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
 		}
-		if initialCycle && cfg.hd.InSync() {
-			log.Debug("Top seen", "height", cfg.hd.TopSeenHeight())
+		if initialCycle && inSync {
 			break
 		}
+		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():

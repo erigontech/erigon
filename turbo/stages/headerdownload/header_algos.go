@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -537,11 +538,19 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
+// InsertHeaders attempts to insert headers into the database, verifying them first
+// It returns true in the first return value if the system is "in sync"
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
 	for len(hd.insertList) > 0 {
+		// Make sure long insertions do not appear as a stuck stage 1
+		select {
+		case <-logChannel:
+			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
+		default:
+		}
 		link := hd.insertList[len(hd.insertList)-1]
 		if link.blockHeight <= hd.preverifiedHeight && !link.preverified {
 			// Header should be preverified, but not yet, try again later
@@ -571,7 +580,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			continue
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
-			return err
+			return false, err
 		}
 		if link.blockHeight > hd.highestInDb {
 			hd.highestInDb = link.blockHeight
@@ -590,7 +599,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = append(hd.insertList, linksInFuture...)
 		linksInFuture = nil
 	}
-	return nil
+	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
 // GrabAnnounces - returns all available announces and forget them
