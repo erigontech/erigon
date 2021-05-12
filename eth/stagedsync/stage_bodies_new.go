@@ -161,8 +161,9 @@ func BodiesForward(
 		}
 		start := time.Now()
 		// can't use same transaction from another goroutine
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
 		var verifyUncles = func(peerID string, header *types.Header, uncles []*types.Header) error {
+			/* TODO: it always fail now, because parent block is not in db yet
+			cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
 			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
 			if err != nil {
 				if penalty != headerdownload.NoPenalty {
@@ -171,6 +172,7 @@ func BodiesForward(
 				}
 				return err
 			}
+			*/
 			return nil
 		}
 		d, err := cfg.bd.GetDeliveries(verifyUncles)
