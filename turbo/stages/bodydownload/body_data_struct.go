@@ -16,6 +16,7 @@ type Delivery struct {
 	txs             [][]types.Transaction
 	uncles          [][]*types.Header
 	lenOfP2PMessage uint64
+	peerID          string
 }
 
 // BodyDownload represents the state of body downloading process

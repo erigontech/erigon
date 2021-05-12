@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -81,17 +82,9 @@ func StageLoopStep(
 ) (err error) {
 	// avoid crash because TG's core does many things -
 	defer func() {
-		if r := recover(); r != nil {
-			switch x := r.(type) {
-			case error:
-				err = fmt.Errorf("%w, trace: %s", x, debug.Stack())
-			case string:
-				err = fmt.Errorf("%s, trace: %s", x, debug.Stack())
-			case fmt.Stringer:
-				err = fmt.Errorf("%s, trace: %s", x, debug.Stack())
-			default:
-				err = fmt.Errorf("%+v, trace: %s", x, debug.Stack())
-			}
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			err = fmt.Errorf("%w, trace: %s", r, panicReplacer.Replace(string(debug.Stack())))
 		}
 	}()
 

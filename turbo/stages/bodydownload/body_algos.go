@@ -176,8 +176,8 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header, lenOfP2PMsg uint64) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg}
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID string) {
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -197,7 +197,7 @@ Loop:
 		}
 
 		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage
+		txs, uncles, lenOfP2PMessage, peerID := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
 		var delivered, undelivered int
 
 		for i := range txs {
@@ -223,7 +223,7 @@ Loop:
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 
-			if err = verifyUnclesFunc(string(req.peerID), block.Header(), uncles[i]); err != nil {
+			if err = verifyUnclesFunc(peerID, block.Header(), uncles[i]); err != nil {
 				return err
 			}
 

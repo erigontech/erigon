@@ -609,7 +609,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
 	txs, uncles := request.BlockBodiesPacket.Unpack()
-	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)))
+	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 
