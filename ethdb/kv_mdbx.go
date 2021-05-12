@@ -11,7 +11,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -179,7 +178,6 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		opts:     opts,
 		env:      env,
 		log:      logger,
-		wg:       &sync.WaitGroup{},
 		buckets:  dbutils.BucketsCfg{},
 		pageSize: pageSize,
 		txSize:   dirtyPagesLimit * pageSize,
@@ -281,7 +279,6 @@ type MdbxKV struct {
 	env      *mdbx.Env
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
-	wg       *sync.WaitGroup
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -292,10 +289,6 @@ func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	if db.env != nil {
-		db.wg.Wait()
-	}
-
 	if db.env != nil {
 		env := db.env
 		db.env = nil
@@ -345,11 +338,6 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	defer func() {
-		if err == nil {
-			db.wg.Add(1)
-		}
-	}()
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
@@ -368,11 +356,6 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 		return nil, fmt.Errorf("db closed")
 	}
 	runtime.LockOSThread()
-	defer func() {
-		if err == nil {
-			db.wg.Add(1)
-		}
-	}()
 
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
@@ -469,8 +452,6 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
-	db.wg.Add(1)
-	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
 	tx, err := db.BeginRo(ctx)
@@ -486,8 +467,6 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
-	db.wg.Add(1)
-	defer db.wg.Done()
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -642,7 +621,6 @@ func (tx *MdbxTx) Commit() error {
 	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
 		if !tx.readOnly {
 			runtime.UnlockOSThread()
 		}
@@ -697,7 +675,6 @@ func (tx *MdbxTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
 		if !tx.readOnly {
 			runtime.UnlockOSThread()
 		}
