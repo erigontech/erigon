@@ -12,9 +12,15 @@ type DoubleHash [2 * common.HashLength]byte
 
 const MaxBodiesInRequest = 1024
 
+type Delivery struct {
+	txs             [][]types.Transaction
+	uncles          [][]*types.Header
+	lenOfP2PMessage uint64
+}
+
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	deliveryCh       chan eth.BlockBodiesPacket66
+	deliveryCh       chan Delivery
 	delivered        *roaring64.Bitmap
 	deliveries       []*types.Block
 	deliveredCount   float64
@@ -51,7 +57,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
 		DeliveryNotify:   make(chan struct{}, 1),
-		deliveryCh:       make(chan eth.BlockBodiesPacket66, outstandingLimit+MaxBodiesInRequest),
+		deliveryCh:       make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
 	}
 	return bd
 }

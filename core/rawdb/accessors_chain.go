@@ -886,16 +886,16 @@ func ReadBlock(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func HasBlock(db ethdb.KVGetter, hash common.Hash, number uint64) bool {
-	header := ReadHeader(db, hash, number)
-	if header == nil {
-		return false
-	}
+func HasBlockDeprecated(db ethdb.Getter, hash common.Hash, number uint64) bool {
 	body := ReadStorageBodyRLP(db, hash, number)
-	if len(body) == 0 {
-		return false
-	}
-	return true
+	return len(body) > 0
+}
+
+// HasBlock - is more efficient than ReadBlock because doesn't read transactions.
+// It's is not equivalent of HasHeader because headers and bodies written by different stages
+func HasBlock(db ethdb.KVGetter, hash common.Hash, number uint64) bool {
+	body := ReadStorageBodyRLP(db, hash, number)
+	return len(body) > 0
 }
 
 func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {

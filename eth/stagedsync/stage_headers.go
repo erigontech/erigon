@@ -73,6 +73,11 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlockDeprecated(cr.Db, hash, number)
 }
 
+// HasBlock retrieves a block from the database by hash and number.
+func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
+	return rawdb.HasBlock(cr.Db, hash, number)
+}
+
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))

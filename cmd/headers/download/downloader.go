@@ -133,16 +133,13 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		return err
 	}
 
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
-
+	)
 	return nil
 }
 
@@ -611,7 +608,8 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
-	cs.bd.DeliverBodies(request.BlockBodiesPacket)
+	txs, uncles := request.BlockBodiesPacket.Unpack()
+	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)))
 	return nil
 }
 

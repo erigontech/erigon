@@ -139,7 +139,7 @@ func BodiesForward(
 		for req != nil && peer != nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagato)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
 			}

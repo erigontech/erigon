@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/protocol/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -177,8 +176,8 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(packet eth.BlockBodiesPacket66) (delivered int, undelivered int, penalties []headerdownload.PenaltyItem) {
-	bd.deliveryCh <- packet
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header, lenOfP2PMsg uint64) {
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -190,12 +189,16 @@ func (bd *BodyDownload) DoDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (pena
 	reqMap := make(map[uint64]*BodyRequest)
 	var txs [][]types.Transaction
 	var uncles [][]*types.Header
+	var lenOfP2PMessage uint64
+	var delivered, undelivered int
+
+Loop:
 	for i := 0; ; i++ {
 		select { // read as much as we can, but don't wait
-		case packet <- bd.deliveryCh:
-			txs, uncles = packet.Unpack()
+		case delivery := <-bd.deliveryCh:
+			txs, uncles, lenOfP2PMessage = delivery.txs, delivery.uncles, delivery.lenOfP2PMessage
 		default:
-			break
+			break Loop
 		}
 
 		uncleHash := types.CalcUncleHash(uncles[i])
@@ -222,7 +225,7 @@ func (bd *BodyDownload) DoDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (pena
 
 		penalty, reason, err := verifyUnclesFunc(block.Header(), uncles[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if penalty != headerdownload.NoPenalty {
@@ -245,9 +248,9 @@ func (bd *BodyDownload) DoDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (pena
 	total := delivered + undelivered
 	if total > 0 {
 		// Approximate numbers
-		bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
+		bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 	}
-	return penalties
+	return penalties, nil
 }
 
 func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
@@ -281,7 +284,10 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 }
 
 func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
-	penalties := bd.DoDeliverBodies(verifyUnclesFunc)
+	penalties, err := bd.DoDeliverBodies(verifyUnclesFunc)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var i uint64
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
