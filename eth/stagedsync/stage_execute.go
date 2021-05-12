@@ -175,10 +175,12 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 				v[common.AddressLength] |= 2
 			}
 			if j == 0 {
+				fmt.Printf("Append %d %x %x\n", j, blockNumEnc, v)
 				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			} else {
+				fmt.Printf("AppendDup %d %x %x\n", j, blockNumEnc, v)
 				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
