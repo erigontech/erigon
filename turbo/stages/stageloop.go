@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime/debug"
 	"time"
@@ -84,12 +83,14 @@ func StageLoopStep(
 	defer func() {
 		if r := recover(); r != nil {
 			switch x := r.(type) {
-			case string:
-				err = errors.New(x + " " + string(debug.Stack()))
 			case error:
-				err = fmt.Errorf("err: %w, trace: %s", x, debug.Stack())
+				err = fmt.Errorf("%w, trace: %s", x, debug.Stack())
+			case string:
+				err = fmt.Errorf("%s, trace: %s", x, debug.Stack())
+			case fmt.Stringer:
+				err = fmt.Errorf("%s, trace: %s", x, debug.Stack())
 			default:
-				panic(r)
+				err = fmt.Errorf("%+v, trace: %s", x, debug.Stack())
 			}
 		}
 	}()
