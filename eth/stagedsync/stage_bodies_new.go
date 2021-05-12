@@ -162,7 +162,7 @@ func BodiesForward(
 		start := time.Now()
 		// can't use same transaction from another goroutine
 		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-		var verifyUncles = func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error, error) {
+		var verifyUncles = func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error) {
 			return cfg.bd.VerifyUncles(header, uncles, cr)
 		}
 		d, penalties, err := cfg.bd.GetDeliveries(verifyUncles)

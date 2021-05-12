@@ -263,16 +263,16 @@ func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Header, r consensus.ChainReader) (headerdownload.Penalty, error, error) {
+func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Header, r consensus.ChainReader) (headerdownload.Penalty, error) {
 	// Check whether the block's known, and if not, that it's linkable
 	if r.HasBlock(header.Hash(), header.Number.Uint64()) {
-		return headerdownload.BadBlockPenalty, core.ErrKnownBlock, nil
+		return headerdownload.BadBlockPenalty, core.ErrKnownBlock
 	}
 
 	// Header validity is known at this point, check the uncles and transactions
 	//header := block.Header()
 	if err := bd.Engine.VerifyUncles(r, header, uncles); err != nil {
-		return headerdownload.BadBlockPenalty, err, nil
+		return headerdownload.BadBlockPenalty, err
 	}
 	//if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
 	//	return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash), nil
@@ -280,7 +280,7 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 	//if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
 	//	return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash), nil
 	//}
-	return headerdownload.NoPenalty, nil, nil
+	return headerdownload.NoPenalty, nil
 }
 
 func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
