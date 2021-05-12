@@ -297,6 +297,11 @@ func (s *SeenAnnounces) Pop(hash common.Hash) bool {
 	return ok
 }
 
+func (s SeenAnnounces) Seen(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
+	return ok
+}
+
 func (s *SeenAnnounces) Add(b common.Hash) {
 	s.hashes.ContainsOrAdd(b, struct{}{})
 }

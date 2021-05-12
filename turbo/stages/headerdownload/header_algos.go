@@ -788,7 +788,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	if newBlock || hd.topSeenHeight > 0 {
+	hash := segment.Headers[len(segment.Headers)-1].Hash()
+	if newBlock || hd.seenAnnounces.Seen(hash) {
 		if height > hd.topSeenHeight {
 			hd.topSeenHeight = height
 		}
