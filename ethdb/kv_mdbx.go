@@ -740,10 +740,6 @@ func (tx *MdbxTx) PrintDebugInfo() {
 	}
 }
 
-func (tx *MdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) { //nolint: unused
-	return tx.tx.Get(dbi, key)
-}
-
 func (tx *MdbxTx) closeCursors() {
 	for _, c := range tx.cursors {
 		if c != nil {

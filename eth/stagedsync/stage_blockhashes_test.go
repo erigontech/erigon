@@ -47,7 +47,7 @@ func TestBlockHashStage(t *testing.T) {
 		t.Fatalf("setting headers progress: %v", err)
 	}
 	blockHashCfg := StageBlockHashesCfg(db, "")
-	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db.RwKV(), dbtx, blockHashCfg, nil)
+	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, dbtx, blockHashCfg, nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(tx, h.Hash())

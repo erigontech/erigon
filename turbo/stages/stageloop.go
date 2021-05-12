@@ -81,7 +81,13 @@ func StageLoopStep(
 	defer func() {
 		if r := recover(); r != nil { // just log is enough
 			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			err = fmt.Errorf("%w, trace: %s", r, panicReplacer.Replace(string(debug.Stack())))
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				err = fmt.Errorf("%w, trace: %s", typed, stack)
+			default:
+				err = fmt.Errorf("%+v, trace: %s", typed, stack)
+			}
 		}
 	}()
 
@@ -90,11 +96,10 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
+	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, nil, nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
-
 
 	origin, err := stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
@@ -107,14 +112,14 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
-		var tx ethdb.RwTx // on this variable will run sync cycle.
-		if canRunCycleInOneTransaction {
-			tx, err = db.RwKV().BeginRw(context.Background())
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
+	var tx ethdb.RwTx // on this variable will run sync cycle.
+	if canRunCycleInOneTransaction {
+		tx, err = db.RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
+	}
 
 	err = st.Run(db, tx)
 	if err != nil {

@@ -199,7 +199,7 @@ func HeadersForward(
 		if initialCycle && inSync {
 			break
 		}
-		timer = time.NewTimer(1 * time.Second)
+		timer := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			stopped = true

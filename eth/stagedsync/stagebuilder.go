@@ -365,10 +365,6 @@ func DefaultStages() StageBuilders {
 						return FinishForward(s, world.DB, world.notifier, nil, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						var tx ethdb.RwTx
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
-							tx = hasTx.Tx().(ethdb.RwTx)
-						}
 						return UnwindFinish(u, s, world.DB, tx)
 					},
 				}
@@ -522,14 +518,10 @@ func WithSnapshotsStages() StageBuilders {
 			return &Stage{
 				ID:          stages.CreateHeadersSnapshot,
 				Description: "Create headers snapshot",
-				ExecFunc: func(s *StageState, u Unwinder) error {
-					var tx ethdb.RwTx
-					if hasTx, ok := world.TX.(ethdb.HasTx); ok {
-						tx = hasTx.Tx().(ethdb.RwTx)
-					}
+				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 					return SpawnHeadersSnapshotGenerationStage(s, world.DB, tx, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
-				UnwindFunc: func(u *UnwindState, s *StageState) error {
+				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 					return u.Done(world.DB)
 				},
 			}
@@ -542,10 +534,10 @@ func WithSnapshotsStages() StageBuilders {
 			return &Stage{
 				ID:          stages.CreateBodiesSnapshot,
 				Description: "Create bodies snapshot",
-				ExecFunc: func(s *StageState, u Unwinder) error {
+				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 					return SpawnBodiesSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
-				UnwindFunc: func(u *UnwindState, s *StageState) error {
+				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 					return u.Done(world.DB)
 				},
 			}
@@ -558,10 +550,10 @@ func WithSnapshotsStages() StageBuilders {
 			return &Stage{
 				ID:          stages.CreateStateSnapshot,
 				Description: "Create state snapshot",
-				ExecFunc: func(s *StageState, u Unwinder) error {
+				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 					return SpawnStateSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
-				UnwindFunc: func(u *UnwindState, s *StageState) error {
+				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 					return u.Done(world.DB)
 				},
 			}

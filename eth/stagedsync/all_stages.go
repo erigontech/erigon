@@ -225,10 +225,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, world.DB, world.notifier, world.DB, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, world.DB, world.notifier, tx, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindFinish(u, s, world.DB)
+						return UnwindFinish(u, s, world.DB, tx)
 					},
 				}
 			},
