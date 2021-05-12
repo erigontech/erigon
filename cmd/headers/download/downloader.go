@@ -133,16 +133,13 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		return err
 	}
 
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
-
+	)
 	return nil
 }
 
@@ -256,29 +253,25 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
 	go RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
 
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
+	)
 	return nil
 }
 
+//Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl) {
-	if err := stages.StageLoop(
+	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
-	); err != nil {
-		log.Error("Stage loop failure", "error", err)
-	}
-
+	)
 }
 
 func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
@@ -320,10 +313,11 @@ func NewStagedSync(
 			db,
 			controlServer.bd,
 			controlServer.sendBodyRequest,
-			controlServer.penalise,
+			controlServer.penalize,
 			controlServer.updateHead,
 			controlServer,
 			bodyDownloadTimeout,
+			*controlServer.chainConfig,
 			batchSize,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
@@ -420,7 +414,7 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chainConfig.ChainID)
 
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
-	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
+	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
 
 	cs := &ControlServerImpl{
 		nodeName: nodeName,
@@ -560,21 +554,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, in *proto_sentry.
 	return nil
 }
 
-// sending list of penalties to all sentries
-func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
-	for i := range penalties {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
-			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-		}
-		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-				log.Error("Could not send penalty", "err", err1)
-			}
-		}
-	}
-}
-
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
@@ -630,12 +609,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sen
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
 	txs, uncles := request.BlockBodiesPacket.Unpack()
-	delivered, undelivered := cs.bd.DeliverBodies(txs, uncles)
-	total := delivered + undelivered
-	if total > 0 {
-		// Approximate numbers
-		cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
-	}
+	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 

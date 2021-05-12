@@ -12,7 +12,7 @@ import (
 
 //var prev common.Hash
 
-func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, engine consensus.Engine, chainConfig *params.ChainConfig, results chan<- *types.Block, sealCancel <-chan struct{}, quit <-chan struct{}) error {
+func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, engine consensus.Engine, chainConfig params.ChainConfig, results chan<- *types.Block, sealCancel <-chan struct{}, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 
 	// Short circuit when receiving duplicate result caused by resubmitting.

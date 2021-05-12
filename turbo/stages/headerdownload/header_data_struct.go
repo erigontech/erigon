@@ -154,8 +154,8 @@ type HeaderRequest struct {
 }
 
 type PenaltyItem struct {
-	Reason Penalty
-	PeerID string
+	Penalty Penalty
+	PeerID  string
 }
 type Announce struct {
 	Hash   common.Hash
