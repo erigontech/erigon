@@ -71,6 +71,7 @@ func (m *getPutkvMachine) Cleanup() {
 	m.snKV.Close()
 	m.modelKV.Close()
 }
+
 func (m *getPutkvMachine) Check(t *rapid.T) {
 }
 
@@ -90,6 +91,7 @@ func (m *getPutkvMachine) Get(t *rapid.T) {
 	require.Equal(t, err1, err2)
 	require.Equal(t, v1, v2)
 }
+
 func (m *getPutkvMachine) Put(t *rapid.T) {
 	if len(m.newKeys) == 0 {
 		return
@@ -110,6 +112,7 @@ func (m *getPutkvMachine) Put(t *rapid.T) {
 	err = m.modelTX.Put(m.bucket, key[:], []byte("put"+common.Bytes2Hex(key[:])))
 	require.NoError(t, err)
 }
+
 func (m *getPutkvMachine) Delete(t *rapid.T) {
 	if m.snTX == nil && m.modelTX == nil {
 		return
@@ -134,6 +137,7 @@ func (m *getPutkvMachine) Begin(t *rapid.T) {
 	m.modelTX = mtx
 	m.snTX = sntx
 }
+
 func (m *getPutkvMachine) Rollback(t *rapid.T) {
 	if m.modelTX == nil && m.snTX == nil {
 		return
@@ -155,107 +159,6 @@ func (m *getPutkvMachine) Commit(t *rapid.T) {
 	m.snTX = nil
 	m.modelTX = nil
 }
-
-func TestCursor(t *testing.T) {
-	rapid.Check(t, rapid.Run(&cursorKVMachine{}))
-}
-
-type cursorKVMachine struct {
-	bucket  string
-	snKV    RwKV
-	modelKV RwKV
-
-	snTX    RwTx
-	modelTX RwTx
-
-	snapshotKeys [][20]byte
-	newKeys      [][20]byte
-	allKeys      [][20]byte
-}
-
-func (m *cursorKVMachine) Init(t *rapid.T) {
-	m.bucket = dbutils.PlainStateBucket
-	m.snKV = NewMemKV()
-	m.modelKV = NewMemKV()
-	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
-		return len(_v) > 0
-	}).Draw(t, "generate keys").([][20]byte)
-	m.newKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
-		return len(_v) > 0
-	}).Draw(t, "generate new keys").([][20]byte)
-	notExistingKeys := rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
-		return len(_v) > 0
-	}).Draw(t, "generate not excisting keys").([][20]byte)
-	m.allKeys = append(m.snapshotKeys, notExistingKeys...)
-
-	txSn, err := m.snKV.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer txSn.Rollback()
-
-	txModel, err := m.modelKV.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer txModel.Rollback()
-	for _, key := range m.snapshotKeys {
-		innerErr := txSn.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
-		require.NoError(t, innerErr)
-		innerErr = txModel.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
-		require.NoError(t, innerErr)
-	}
-
-	//save snapshot and wrap new write db
-	err = txSn.Commit()
-	require.NoError(t, err)
-	err = txModel.Commit()
-	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
-}
-func (m *cursorKVMachine) Check(t *rapid.T) {
-}
-func (m *cursorKVMachine) Clean() {
-	if m.snTX != nil {
-		m.snTX.Rollback()
-	}
-	if m.modelTX != nil {
-		m.modelTX.Rollback()
-	}
-	m.snKV.Close()
-	m.modelKV.Close()
-
-}
-
-func (m *cursorKVMachine) Begin(t *rapid.T) {
-	if m.modelTX != nil && m.snTX != nil {
-		return
-	}
-	mtx, err := m.modelKV.BeginRw(context.Background())
-	require.NoError(t, err)
-	sntx, err := m.snKV.BeginRw(context.Background())
-	require.NoError(t, err)
-	m.modelTX = mtx
-	m.snTX = sntx
-}
-func (m *cursorKVMachine) Rollback(t *rapid.T) {
-	if m.modelTX == nil && m.snTX == nil {
-		return
-	}
-	m.snTX.Rollback()
-	m.modelTX.Rollback()
-	m.snTX = nil
-	m.modelTX = nil
-}
-
-func (m *cursorKVMachine) Commit(t *rapid.T) {
-	if m.modelTX == nil && m.snTX == nil {
-		return
-	}
-	err := m.modelTX.Commit()
-	require.NoError(t, err)
-	err = m.snTX.Commit()
-	require.NoError(t, err)
-	m.snTX = nil
-	m.modelTX = nil
-}
-
 
 type getKVMachine struct {
 	bucket        string
@@ -319,6 +222,7 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	err = txModel.Commit()
 	require.NoError(t, err)
 }
+
 func (m *getKVMachine) Cleanup() {
 	m.snKV.Close()
 	m.modelKV.Close()
@@ -349,4 +253,138 @@ func (m *getKVMachine) Get(t *rapid.T) {
 
 func TestGet(t *testing.T) {
 	rapid.Check(t, rapid.Run(&getKVMachine{}))
+}
+
+
+
+func TestCursorWithTX(t *testing.T) {
+	rapid.Check(t, rapid.Run(&cursorKVMachine{}))
+}
+
+
+type cursorKVMachine struct {
+	bucket  string
+	snKV    RwKV
+	modelKV RwKV
+
+	snTX    RwTx
+	modelTX RwTx
+
+	snCursor  RwCursor
+	modelCursor  RwCursor
+
+	snapshotKeys [][20]byte
+	newKeys      [][20]byte
+	allKeys      [][20]byte
+}
+
+func (m *cursorKVMachine) Init(t *rapid.T) {
+	m.bucket = dbutils.PlainStateBucket
+	m.snKV = NewMemKV()
+	m.modelKV = NewMemKV()
+	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
+		return len(_v) > 0
+	}).Draw(t, "generate keys").([][20]byte)
+	m.newKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
+		return len(_v) > 0
+	}).Draw(t, "generate new keys").([][20]byte)
+	notExistingKeys := rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
+		return len(_v) > 0
+	}).Draw(t, "generate not excisting keys").([][20]byte)
+	m.allKeys = append(m.snapshotKeys, notExistingKeys...)
+
+	txSn, err := m.snKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer txSn.Rollback()
+
+	txModel, err := m.modelKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer txModel.Rollback()
+	for _, key := range m.snapshotKeys {
+		innerErr := txSn.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+		innerErr = txModel.Put(m.bucket, key[:], []byte("sn_"+common.Bytes2Hex(key[:])))
+		require.NoError(t, innerErr)
+	}
+
+	//save snapshot and wrap new write db
+	err = txSn.Commit()
+	require.NoError(t, err)
+	err = txModel.Commit()
+	require.NoError(t, err)
+	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
+}
+
+func (m *cursorKVMachine) Check(t *rapid.T) {
+}
+
+func (m *cursorKVMachine) Clean() {
+	if m.snTX != nil {
+		m.snTX.Rollback()
+	}
+	if m.modelTX != nil {
+		m.modelTX.Rollback()
+	}
+	m.snKV.Close()
+	m.modelKV.Close()
+
+}
+
+func (m *cursorKVMachine) Begin(t *rapid.T) {
+	if m.modelTX != nil && m.snTX != nil {
+		return
+	}
+	mtx, err := m.modelKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	sntx, err := m.snKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	m.modelTX = mtx
+	m.snTX = sntx
+}
+
+func (m *cursorKVMachine) Rollback(t *rapid.T) {
+	if m.modelTX == nil && m.snTX == nil {
+		return
+	}
+	m.snTX.Rollback()
+	m.modelTX.Rollback()
+	m.snTX = nil
+	m.modelTX = nil
+}
+
+func (m *cursorKVMachine) Commit(t *rapid.T) {
+	if m.modelTX == nil && m.snTX == nil {
+		return
+	}
+	err := m.modelTX.Commit()
+	require.NoError(t, err)
+	err = m.snTX.Commit()
+	require.NoError(t, err)
+	m.snTX = nil
+	m.modelTX = nil
+}
+
+func (m *cursorKVMachine) Cursor(t *rapid.T) {
+	if m.modelTX == nil && m.snTX == nil {
+		return
+	}
+	if m.modelCursor != nil && m.snCursor != nil {
+		return
+	}
+	var err error
+	m.modelCursor, err = m.modelTX.RwCursor(m.bucket)
+	require.NoError(t, err)
+	m.snCursor, err = m.snTX.RwCursor(m.bucket)
+	require.NoError(t, err)
+}
+
+func (m *cursorKVMachine) CloseCursor(t *rapid.T) {
+	if m.modelTX == nil && m.snTX == nil {
+		return
+	}
+	if m.modelCursor == nil && m.snCursor == nil {
+		return
+	}
+	m.modelCursor.Close()
+	m.snCursor.Close()
 }
