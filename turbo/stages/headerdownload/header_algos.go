@@ -499,7 +499,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 			} else {
 				// Ancestors of this anchor seem to be unavailable, invalidate and move on
 				hd.invalidateAnchor(anchor)
-				penalties = append(penalties, PenaltyItem{Reason: AbandonedAnchorPenalty, PeerID: anchor.peerID})
+				penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on

@@ -162,14 +162,21 @@ func BodiesForward(
 		start := time.Now()
 		// can't use same transaction from another goroutine
 		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-		var verifyUncles = func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error) {
-			return cfg.bd.VerifyUncles(header, uncles, cr)
+		var verifyUncles = func(peerID string, header *types.Header, uncles []*types.Header) error {
+			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
+			if err != nil {
+				if penalty != headerdownload.NoPenalty {
+					log.Trace("penalize", "peer", peerID, "reason", err)
+					cfg.penalise(ctx, []headerdownload.PenaltyItem{{PeerID: peerID, Penalty: penalty}})
+				}
+				return err
+			}
+			return nil
 		}
-		d, penalties, err := cfg.bd.GetDeliveries(verifyUncles)
+		d, err := cfg.bd.GetDeliveries(verifyUncles)
 		if err != nil {
 			return err
 		}
-		cfg.penalise(ctx, penalties)
 		d4 += time.Since(start)
 		start = time.Now()
 		for _, block := range d {

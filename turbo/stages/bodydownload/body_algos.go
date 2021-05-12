@@ -26,7 +26,7 @@ const BlockBufferSize = 128
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-type VerifyUnclesFunc func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error, error)
+type VerifyUnclesFunc func(peerID string, header *types.Header, uncles []*types.Header) error
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -185,7 +185,7 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 	}
 }
 
-func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (penalties []headerdownload.PenaltyItem, err error) {
+func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (err error) {
 Loop:
 	for {
 		var delivery Delivery
@@ -223,16 +223,8 @@ Loop:
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 
-			penalty, reason, err := verifyUnclesFunc(block.Header(), uncles[i])
-			if err != nil {
-				return nil, err
-			}
-
-			if penalty != headerdownload.NoPenalty {
-				if reason != nil {
-					log.Trace("penalize", "peer", bd.requests[i].peerID, "reason", reason)
-				}
-				penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[i].peerID), Reason: headerdownload.BadBlockPenalty})
+			if err = verifyUnclesFunc(string(req.peerID), block.Header(), uncles[i]); err != nil {
+				return err
 			}
 
 			bd.deliveries[blockNum-bd.requestedLow] = block
@@ -251,7 +243,7 @@ Loop:
 			bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 		}
 	}
-	return penalties, nil
+	return nil
 }
 
 func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
@@ -284,10 +276,10 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 	return headerdownload.NoPenalty, nil
 }
 
-func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
-	penalties, err := bd.doDeliverBodies(verifyUnclesFunc) // TODO: join this 2 funcs and simplify
+func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, error) {
+	err := bd.doDeliverBodies(verifyUnclesFunc) // TODO: join this 2 funcs and simplify
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var i uint64
@@ -308,7 +300,7 @@ func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*typ
 		}
 		bd.requestedLow += i
 	}
-	return d, penalties, nil
+	return d, nil
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
