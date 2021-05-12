@@ -59,7 +59,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		prefetchedBlocks: NewPrefetchedBlocks(),
 		DeliveryNotify:   make(chan struct{}, 1),
 		deliveryCh:       make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
-		engine:           engine,
+		Engine:           engine,
 	}
 	return bd
 }
