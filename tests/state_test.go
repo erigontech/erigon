@@ -63,7 +63,7 @@ func TestState(t *testing.T) {
 		legacyStateTestDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
-			db := ethdb.NewMemDatabase()
+			db := ethdb.NewMemKV()
 			defer db.Close()
 
 			for _, subtest := range test.Subtests() {
@@ -77,7 +77,7 @@ func TestState(t *testing.T) {
 						}
 						ctx := config.WithEIPsFlags(context.Background(), 1)
 
-						tx, err := db.Begin(context.Background(), ethdb.RW)
+						tx, err := db.BeginRw(context.Background())
 						if err != nil {
 							t.Fatal(err)
 						}
