@@ -471,7 +471,7 @@ func MiningStages() StageBuilders {
 						}
 						return SpawnMiningCreateBlockStage(s, tx,
 							world.mining.Block,
-							world.ChainConfig,
+							*world.ChainConfig,
 							world.Engine,
 							world.mining.ExtraData,
 							world.mining.GasFloor,
@@ -561,7 +561,7 @@ func MiningStages() StageBuilders {
 						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
 							tx = hasTx.Tx().(ethdb.RwTx)
 						}
-						return SpawnMiningFinishStage(s, tx, world.mining.Block, world.Engine, world.ChainConfig, world.mining.resultCh, world.mining.sealCancel, world.QuitCh)
+						return SpawnMiningFinishStage(s, tx, world.mining.Block, world.Engine, *world.ChainConfig, world.mining.resultCh, world.mining.sealCancel, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}

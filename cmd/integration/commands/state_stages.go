@@ -317,7 +317,7 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					miningWorld.Block,
-					chainConfig,
+					*chainConfig,
 					engine,
 					miningWorld.ExtraData,
 					miningWorld.GasFloor,
