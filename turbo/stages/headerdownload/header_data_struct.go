@@ -189,6 +189,7 @@ type HeaderDownload struct {
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
+	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -293,6 +294,11 @@ func (s *SeenAnnounces) Pop(hash common.Hash) bool {
 	if ok {
 		s.hashes.Remove(hash)
 	}
+	return ok
+}
+
+func (s SeenAnnounces) Seen(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
 	return ok
 }
 

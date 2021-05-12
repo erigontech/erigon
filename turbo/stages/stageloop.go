@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -36,11 +35,12 @@ func NewStagedSync(
 	callTraces stagedsync.CallTracesCfg,
 	txLookup stagedsync.TxLookupCfg,
 	txPool stagedsync.TxPoolCfg,
+	notifier stagedsync.ChainEventNotifier,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
 		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool),
 		stagedsync.ReplacementUnwindOrder(),
-		stagedsync.OptionalParameters{Notifier: remotedbserver.NewEvents()},
+		stagedsync.OptionalParameters{Notifier: notifier},
 	)
 }
 
@@ -69,6 +69,7 @@ func StageLoop(
 		}
 
 		initialCycle = false
+		hd.EnableRequestChaining()
 	}
 }
 

@@ -51,7 +51,7 @@ var downloadCmd = &cobra.Command{
 		tmpdir := path.Join(nodeConfig.DataDir, etl.TmpDirName)
 
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName, tmpdir)
+			return download.Combined(nodeConfig.DataDir, natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window, chain, nodeName, tmpdir)
 		}
 
 		return download.Download(sentryAddrs, db, timeout, window, chain, nodeName, tmpdir)

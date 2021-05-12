@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -128,6 +129,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		controlServer,
 		tmpdir,
 		nil,
+		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -200,10 +202,10 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
+func Combined(datadir string, natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
 	ctx := rootContext()
 
-	sentryServer := NewSentryServer(ctx)
+	sentryServer := NewSentryServer(ctx, datadir)
 	sentry := &SentryClientDirect{}
 	sentry.SetServer(sentryServer)
 	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
@@ -222,7 +224,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return res
 	}
 
-	sentryServer.P2pServer, err = p2pServer(ctx, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
+	sentryServer.P2pServer, err = p2pServer(ctx, datadir, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
 	if err != nil {
 		return err
 	}
@@ -245,6 +247,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		controlServer,
 		tmpdir,
 		nil,
+		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -292,6 +295,7 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
+	notifier stagedsync.ChainEventNotifier,
 ) (*stagedsync.StagedSync, error) {
 	var increment uint64
 	if sm.Pruning {
@@ -342,6 +346,7 @@ func NewStagedSync(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool),
+		notifier,
 	), nil
 }
 
@@ -391,6 +396,16 @@ func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, gene
 		networkID = 5
 		genesis = core.DefaultGoerliGenesisBlock()
 		genesisHash = params.GoerliGenesisHash
+		consensusConfig = cliqueConfig
+	case "rinkeby":
+		networkID = 4
+		genesis = core.DefaultRinkebyGenesisBlock()
+		genesisHash = params.RinkebyGenesisHash
+		consensusConfig = cliqueConfig
+	case "baikal":
+		networkID = 1642
+		genesis = core.DefaultBaikalGenesisBlock()
+		genesisHash = params.BaikalGenesisHash
 		consensusConfig = cliqueConfig
 	default:
 		panic(fmt.Errorf("chain %s is not known", chain))

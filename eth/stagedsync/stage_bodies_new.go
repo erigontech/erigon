@@ -81,11 +81,9 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
-	penalties := true
 	if headerProgress-bodyProgress <= 16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
 		timeout = 1
-		penalties = false
 	}
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
@@ -103,14 +101,6 @@ func BodiesForward(
 	var headHash common.Hash
 	var headSet bool
 	for !stopped {
-		/*
-			if penalties {
-				penaltyPeers := bd.GetPenaltyPeers()
-				for _, penaltyPeer := range penaltyPeers {
-					penalise(ctx, penaltyPeer)
-				}
-			}
-		*/
 		// TODO: this is incorrect use
 		if req == nil {
 			start := time.Now()
@@ -129,9 +119,6 @@ func BodiesForward(
 		}
 		if req != nil && peer != nil {
 			start := time.Now()
-			if !penalties {
-				log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
-			}
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
@@ -152,9 +139,6 @@ func BodiesForward(
 			}
 			if req != nil && peer != nil {
 				start = time.Now()
-				if !penalties {
-					log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
-				}
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 			}

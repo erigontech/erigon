@@ -788,7 +788,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	if newBlock || hd.topSeenHeight > 0 {
+	hash := segment.Headers[len(segment.Headers)-1].Hash()
+	if newBlock || hd.seenAnnounces.Seen(hash) {
 		if height > hd.topSeenHeight {
 			hd.topSeenHeight = height
 		}
@@ -869,7 +870,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	default:
 	}
 
-	return requestMore
+	return hd.requestChaining && requestMore
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
@@ -878,16 +879,16 @@ func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	return hd.topSeenHeight
 }
 
-func (hd *HeaderDownload) InSync() bool {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight
-}
-
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headerReader = headerReader
+}
+
+func (hd *HeaderDownload) EnableRequestChaining() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.requestChaining = true
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
