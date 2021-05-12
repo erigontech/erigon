@@ -74,7 +74,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlockWithoutTransactions(tx, hash, *number)
+			block := rawdb.ReadBlock(tx, hash, *number)
 			if block == nil {
 				break
 			}

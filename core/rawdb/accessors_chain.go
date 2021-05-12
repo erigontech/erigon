@@ -886,16 +886,16 @@ func ReadBlock(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithoutTransactions(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
+func HasBlock(db ethdb.KVGetter, hash common.Hash, number uint64) bool {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
-		return nil
+		return false
 	}
-	body := ReadBody(db, hash, number)
-	if body == nil {
-		return nil
+	body := ReadStorageBodyRLP(db, hash, number)
+	if len(body) == 0 {
+		return false
 	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+	return true
 }
 
 func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {

@@ -1,8 +1,6 @@
 package bodydownload
 
 import (
-	"sync"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -16,7 +14,7 @@ const MaxBodiesInRequest = 1024
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	lock             sync.RWMutex
+	deliveryCh       chan eth.BlockBodiesPacket66
 	delivered        *roaring64.Bitmap
 	deliveries       []*types.Block
 	deliveredCount   float64
@@ -36,11 +34,10 @@ type BodyDownload struct {
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
-	BlockNums        []uint64
-	Hashes           []common.Hash
-	peerID           []byte
-	waitUntil        uint64
-	verifyUnclesFunc VerifyUnclesFunc
+	BlockNums []uint64
+	Hashes    []common.Hash
+	peerID    []byte
+	waitUntil uint64
 }
 
 // NewBodyDownload create a new body download state object
@@ -54,6 +51,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
 		DeliveryNotify:   make(chan struct{}, 1),
+		deliveryCh:       make(chan eth.BlockBodiesPacket66, outstandingLimit+MaxBodiesInRequest),
 	}
 	return bd
 }
