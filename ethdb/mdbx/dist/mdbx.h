@@ -454,6 +454,15 @@ typedef mode_t mdbx_mode_t;
 #endif
 #endif /* MDBX_PRINTF_ARGS */
 
+#if defined(DOXYGEN) || (__has_cpp_attribute(maybe_unused) &&                  \
+                         (defined(__cplusplus) || __STDC_VERSION__ > 202005L))
+#define MDBX_MAYBE_UNUSED [[maybe_unused]]
+#elif defined(__GNUC__) || __has_attribute(__unused__)
+#define MDBX_MAYBE_UNUSED __attribute__((__unused__))
+#else
+#define MDBX_MAYBE_UNUSED
+#endif /* MDBX_MAYBE_UNUSED */
+
 /* Oh, below are some songs and dances since:
  *  - C++ requires explicit definition of the necessary operators.
  *  - the proper implementation of DEFINE_ENUM_FLAG_OPERATORS for C++ required
@@ -2275,7 +2284,8 @@ struct MDBX_envinfo {
   /** Statistics of page operations.
    * \details Overall statistics of page operations of all (running, completed
    * and aborted) transactions in the current multi-process session (since the
-   * first process opened the database). */
+   * first process opened the database after everyone had previously closed it).
+   */
   struct {
     uint64_t newly;   /**< Quantity of a new pages added */
     uint64_t cow;     /**< Quantity of pages copied for update */
