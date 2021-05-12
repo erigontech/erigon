@@ -185,7 +185,7 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 	}
 }
 
-func (bd *BodyDownload) DoDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (penalties []headerdownload.PenaltyItem, err error) {
+func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (penalties []headerdownload.PenaltyItem, err error) {
 	reqMap := make(map[uint64]*BodyRequest)
 	var txs [][]types.Transaction
 	var uncles [][]*types.Header
@@ -284,7 +284,7 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 }
 
 func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
-	penalties, err := bd.DoDeliverBodies(verifyUnclesFunc)
+	penalties, err := bd.doDeliverBodies(verifyUnclesFunc) // TODO: join this 2 funcs and simplify
 	if err != nil {
 		return nil, nil, err
 	}
