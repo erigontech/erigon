@@ -343,7 +343,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				eth.sentries = append(eth.sentries, sentry)
 			}
 		} else {
-			eth.sentryServer = download.NewSentryServer(eth.downloadV2Ctx)
+			eth.sentryServer = download.NewSentryServer(eth.downloadV2Ctx, stack.Config().DataDir)
 			sentry := &download.SentryClientDirect{}
 			eth.sentryServer.P2pServer = eth.p2pServer
 			sentry.SetServer(eth.sentryServer)
