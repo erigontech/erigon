@@ -130,10 +130,14 @@ func makeP2PServer(
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
+	var dialCandidates enode.Iterator
+	var err error
 	dns := params.KnownDNSNetwork(genesisHash, "all")
-	dialCandidates, err := client.NewIterator(dns)
-	if err != nil {
-		return nil, fmt.Errorf("create discovery candidates: %v", err)
+	if dns != "" {
+		dialCandidates, err = client.NewIterator(dns)
+		if err != nil {
+			return nil, fmt.Errorf("create discovery candidates: %v", err)
+		}
 	}
 
 	serverKey := nodeKey()
