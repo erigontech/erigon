@@ -191,6 +191,10 @@ func MakeProtocols(ctx context.Context,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.ID().String()
+				if _, ok := peers.Load(peerID); ok {
+					log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+					return nil
+				}
 				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
 				if err := handShake(ctx, statusFn(), peerID, rw, eth.ProtocolVersions[0], eth.ProtocolVersions[0]); err != nil {
 					return fmt.Errorf("handshake to peer %s: %v", peerID, err)
@@ -778,12 +782,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 			return true
 		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
-			if x, ok := ss.Peers.Load(peerID); ok {
-				peerInfo := x.(*PeerInfo)
-				if peerInfo != nil {
-					peerInfo.Remove()
-				}
-			}
+			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
 			return false
@@ -818,12 +817,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 			return true
 		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
-			if x, ok := ss.Peers.Load(peerID); ok {
-				peerInfo := x.(*PeerInfo)
-				if peerInfo != nil {
-					peerInfo.Remove()
-				}
-			}
+			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
 			return false
