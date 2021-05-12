@@ -186,69 +186,70 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 }
 
 func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (penalties []headerdownload.PenaltyItem, err error) {
-	reqMap := make(map[uint64]*BodyRequest)
-	var txs [][]types.Transaction
-	var uncles [][]*types.Header
-	var lenOfP2PMessage uint64
-	var delivered, undelivered int
-
 Loop:
-	for i := 0; ; i++ {
+	for {
+		var delivery Delivery
+
 		select { // read as much as we can, but don't wait
-		case delivery := <-bd.deliveryCh:
-			txs, uncles, lenOfP2PMessage = delivery.txs, delivery.uncles, delivery.lenOfP2PMessage
+		case delivery = <-bd.deliveryCh:
 		default:
 			break Loop
 		}
 
-		uncleHash := types.CalcUncleHash(uncles[i])
-		txHash := types.DeriveSha(types.Transactions(txs[i]))
-		var doubleHash DoubleHash
-		copy(doubleHash[:], uncleHash.Bytes())
-		copy(doubleHash[common.HashLength:], txHash.Bytes())
+		reqMap := make(map[uint64]*BodyRequest)
+		txs, uncles, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage
+		var delivered, undelivered int
 
-		// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
-		// Also, block numbers can be added to bd.delivered for empty blocks, above
-		blockNum, ok := bd.requestedMap[doubleHash]
-		if !ok {
-			undelivered++
-			continue
+		for i := range txs {
+			uncleHash := types.CalcUncleHash(uncles[i])
+			txHash := types.DeriveSha(types.Transactions(txs[i]))
+			var doubleHash DoubleHash
+			copy(doubleHash[:], uncleHash.Bytes())
+			copy(doubleHash[common.HashLength:], txHash.Bytes())
+
+			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
+			// Also, block numbers can be added to bd.delivered for empty blocks, above
+			blockNum, ok := bd.requestedMap[doubleHash]
+			if !ok {
+				undelivered++
+				continue
+			}
+			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			req := bd.requests[blockNum-bd.requestedLow]
+			if req != nil {
+				if _, ok := reqMap[req.BlockNums[0]]; !ok {
+					reqMap[req.BlockNums[0]] = req
+				}
+			}
+			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+
+			penalty, reason, err := verifyUnclesFunc(block.Header(), uncles[i])
+			if err != nil {
+				return nil, err
+			}
+
+			if penalty != headerdownload.NoPenalty {
+				if reason != nil {
+					log.Trace("penalize", "peer", bd.requests[i].peerID, "reason", reason)
+				}
+				penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[i].peerID), Reason: headerdownload.BadBlockPenalty})
+			}
+
+			bd.deliveries[blockNum-bd.requestedLow] = block
+			bd.delivered.Add(blockNum)
+			delivered++
 		}
-		block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
-		req := bd.requests[blockNum-bd.requestedLow]
-		if req != nil {
-			if _, ok := reqMap[req.BlockNums[0]]; !ok {
-				reqMap[req.BlockNums[0]] = req
+		// Clean up the requests
+		for _, req := range reqMap {
+			for _, blockNum := range req.BlockNums {
+				bd.requests[blockNum-bd.requestedLow] = nil
 			}
 		}
-		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
-
-		penalty, reason, err := verifyUnclesFunc(block.Header(), uncles[i])
-		if err != nil {
-			return nil, err
+		total := delivered + undelivered
+		if total > 0 {
+			// Approximate numbers
+			bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 		}
-
-		if penalty != headerdownload.NoPenalty {
-			if reason != nil {
-				log.Trace("penalize", "peer", bd.requests[i].peerID, "reason", reason)
-			}
-			penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[i].peerID), Reason: headerdownload.BadBlockPenalty})
-		}
-
-		bd.deliveries[blockNum-bd.requestedLow] = block
-		bd.delivered.Add(blockNum)
-		delivered++
-	}
-	// Clean up the requests
-	for _, req := range reqMap {
-		for _, blockNum := range req.BlockNums {
-			bd.requests[blockNum-bd.requestedLow] = nil
-		}
-	}
-	total := delivered + undelivered
-	if total > 0 {
-		// Approximate numbers
-		bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 	}
 	return penalties, nil
 }
