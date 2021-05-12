@@ -444,7 +444,7 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	log.Debug(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
+	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes: %v", err)

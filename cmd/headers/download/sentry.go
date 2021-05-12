@@ -191,6 +191,10 @@ func MakeProtocols(ctx context.Context,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.ID().String()
+				if _, ok := peers.Load(peerID); ok {
+					log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+					return nil
+				}
 				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
 				if err := handShake(ctx, statusFn(), peerID, rw, eth.ProtocolVersions[0], eth.ProtocolVersions[0]); err != nil {
 					return fmt.Errorf("handshake to peer %s: %v", peerID, err)
@@ -710,10 +714,6 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	x, ok := ss.Peers.Load(peerID)
 	if !ok {
-		ss.Peers.Range(func(key, value interface{}) bool {
-			fmt.Printf("peerID: %s\n", key.(string))
-			return true
-		})
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
 	peerInfo := x.(*PeerInfo)
