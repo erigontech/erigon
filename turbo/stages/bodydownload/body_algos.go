@@ -21,12 +21,12 @@ import (
 
 const BlockBufferSize = 128
 
-// ValidateBodyFunc validates the given block's uncles and verifies the block
+// VerifyUnclesFunc validates the given block's uncles and verifies the block
 // header's transaction and uncle roots. The headers are assumed to be already
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-type ValidateBodyFunc func(block *types.Block) (headerdownload.Penalty, error, error)
+type VerifyUnclesFunc func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error, error)
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -74,7 +74,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator, verifyUnclesFunc VerifyUnclesFunc) (*BodyRequest, uint64, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
@@ -158,7 +158,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 		}
 	}
 	if len(blockNums) > 0 {
-		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
+		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes, verifyUnclesFunc: verifyUnclesFunc}
 		for _, blockNum := range blockNums {
 			bd.requests[blockNum-bd.requestedLow] = bodyReq
 		}
@@ -182,34 +182,47 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (int, int) {
+func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header) (delivered int, undelivered int, penalties []headerdownload.PenaltyItem) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)
-	var delivered, undelivered int
 	for i := range txs {
 		uncleHash := types.CalcUncleHash(uncles[i])
 		txHash := types.DeriveSha(types.Transactions(txs[i]))
 		var doubleHash DoubleHash
 		copy(doubleHash[:], uncleHash.Bytes())
 		copy(doubleHash[common.HashLength:], txHash.Bytes())
+
 		// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
 		// Also, block numbers can be added to bd.delivered for empty blocks, above
-		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
-			bd.delivered.Add(blockNum)
-			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
-			bd.deliveries[blockNum-bd.requestedLow] = block
-			req := bd.requests[blockNum-bd.requestedLow]
-			if req != nil {
-				if _, ok := reqMap[req.BlockNums[0]]; !ok {
-					reqMap[req.BlockNums[0]] = req
-				}
-			}
-			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
-			delivered++
-		} else {
+		blockNum, ok := bd.requestedMap[doubleHash]
+		if !ok {
 			undelivered++
+			continue
 		}
+		block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+		req := bd.requests[blockNum-bd.requestedLow]
+		if req != nil {
+			if _, ok := reqMap[req.BlockNums[0]]; !ok {
+				reqMap[req.BlockNums[0]] = req
+			}
+		}
+		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+
+		penalty, reason, err := bd.requests[i].verifyUnclesFunc(block.Header(), uncles[i])
+		if err != nil {
+			_ = err // handle me
+		}
+		if penalty != headerdownload.NoPenalty {
+			if reason != nil {
+				log.Trace("penalize", "peer", bd.requests[i].peerID, "reason", reason)
+			}
+			penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[i].peerID), Reason: headerdownload.BadBlockPenalty})
+		}
+
+		bd.deliveries[blockNum-bd.requestedLow] = block
+		bd.delivered.Add(blockNum)
+		delivered++
 	}
 	// Clean up the requests
 	for _, req := range reqMap {
@@ -221,7 +234,7 @@ func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*typ
 	case bd.DeliveryNotify <- struct{}{}:
 	default:
 	}
-	return delivered, undelivered
+	return delivered, undelivered, penalties
 }
 
 func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
@@ -236,31 +249,31 @@ func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-func (bd *BodyDownload) ValidateBody(block *types.Block, r consensus.ChainReader) (headerdownload.Penalty, error, error) {
+func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Header, r consensus.ChainReader) (headerdownload.Penalty, error, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 
 	// Check whether the block's known, and if not, that it's linkable
-	foundInDB := r.GetBlock(block.Hash(), block.NumberU64())
+	foundInDB := r.GetBlock(header.Hash(), header.Number.Uint64())
 	if foundInDB != nil {
 		return headerdownload.BadBlockPenalty, core.ErrKnownBlock, nil
 	}
 
 	// Header validity is known at this point, check the uncles and transactions
-	header := block.Header()
-	if err := bd.Engine.VerifyUncles(r, block); err != nil {
+	//header := block.Header()
+	if err := bd.Engine.VerifyUncles(r, header, uncles); err != nil {
 		return headerdownload.BadBlockPenalty, err, nil
 	}
-	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
-		return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash), nil
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
-		return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash), nil
-	}
+	//if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
+	//	return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash), nil
+	//}
+	//if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
+	//	return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash), nil
+	//}
 	return headerdownload.NoPenalty, nil, nil
 }
 
-func (bd *BodyDownload) GetDeliveries(validateBody ValidateBodyFunc) ([]*types.Block, []headerdownload.PenaltyItem, error) {
+func (bd *BodyDownload) GetDeliveries() ([]*types.Block, []headerdownload.PenaltyItem, error) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	var i uint64
@@ -275,20 +288,6 @@ func (bd *BodyDownload) GetDeliveries(validateBody ValidateBodyFunc) ([]*types.B
 		d = make([]*types.Block, i)
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
-		for j := uint64(0); j < i; j++ {
-			penalty, reason, err := validateBody(d[j])
-			if err != nil {
-				return nil, nil, err
-			}
-			if penalty == headerdownload.NoPenalty {
-				continue
-			}
-			if reason != nil {
-				log.Trace("penalize", "peer", bd.requests[j].peerID, "reason", reason)
-			}
-			penalties = append(penalties, headerdownload.PenaltyItem{PeerID: string(bd.requests[j].peerID), Reason: headerdownload.BadBlockPenalty})
-		}
-
 		copy(bd.requests[:], bd.requests[i:])
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil

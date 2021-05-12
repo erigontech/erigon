@@ -275,8 +275,8 @@ func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
-func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error {
-	if len(block.Uncles()) > 0 {
+func (c *Clique) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	if len(uncles) > 0 {
 		return errors.New("uncles not allowed")
 	}
 	return nil

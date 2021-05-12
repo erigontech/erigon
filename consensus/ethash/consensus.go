@@ -186,30 +186,30 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
 // rules of the stock Ethereum ethash engine.
-func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
+func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
 	// Verify that there are at most 2 uncles included in this block
-	if len(block.Uncles()) > maxUncles {
+	if len(uncles) > maxUncles {
 		return errTooManyUncles
 	}
-	if len(block.Uncles()) == 0 {
+	if len(uncles) == 0 {
 		return nil
 	}
-	uncles, ancestors := getUncles(chain, block)
+	uncleBlocks, ancestors := getUncles(chain, header)
 
 	// Verify each of the uncles that it's recent, but not an ancestor
-	for _, uncle := range block.Uncles() {
-		if err := ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
+	for _, uncle := range uncles {
+		if err := ethash.VerifyUncle(chain, header, uncle, uncleBlocks, ancestors, true); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func getUncles(chain consensus.ChainReader, block *types.Block) (mapset.Set, map[common.Hash]*types.Header) {
+func getUncles(chain consensus.ChainReader, block *types.Header) (mapset.Set, map[common.Hash]*types.Header) {
 	// Gather the set of past uncles and ancestors
 	uncles, ancestors := mapset.NewSet(), make(map[common.Hash]*types.Header)
 
-	number, parent := block.NumberU64()-1, block.ParentHash()
+	number, parent := block.Number.Uint64()-1, block.ParentHash
 	for i := 0; i < 7; i++ {
 		ancestor := chain.GetBlock(parent, number)
 		if ancestor == nil {
@@ -221,12 +221,12 @@ func getUncles(chain consensus.ChainReader, block *types.Block) (mapset.Set, map
 		}
 		parent, number = ancestor.ParentHash(), number-1
 	}
-	ancestors[block.Hash()] = block.Header()
+	ancestors[block.Hash()] = block
 	uncles.Add(block.Hash())
 	return uncles, ancestors
 }
 
-func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
+func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
 	// Make sure every uncle is rewarded only once
 	hash := uncle.Hash()
 	if uncles.Contains(hash) {
@@ -238,7 +238,7 @@ func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *type
 	if ancestors[hash] != nil {
 		return errUncleIsAncestor
 	}
-	if ancestors[uncle.ParentHash] == nil || uncle.ParentHash == block.ParentHash() {
+	if ancestors[uncle.ParentHash] == nil || uncle.ParentHash == header.ParentHash {
 		return errDanglingUncle
 	}
 

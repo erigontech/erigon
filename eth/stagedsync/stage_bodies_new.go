@@ -111,10 +111,16 @@ func BodiesForward(
 				}
 			}
 		*/
+		// TODO: this is incorrect use
+		// can't use same transaction from another goroutine
+		var verifyUncles = func(header *types.Header, uncles []*types.Header) (headerdownload.Penalty, error, error) {
+			cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
+			return cfg.bd.VerifyUncles(header, uncles, cr)
+		}
 		if req == nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator, verifyUncles)
 			if err != nil {
 				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
 			}
@@ -138,7 +144,7 @@ func BodiesForward(
 		for req != nil && peer != nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator, verifyUncles)
 			if err != nil {
 				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
 			}
@@ -159,10 +165,7 @@ func BodiesForward(
 			}
 		}
 		start := time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-		d, penalties, err := cfg.bd.GetDeliveries(func(block *types.Block) (headerdownload.Penalty, error, error) {
-			return cfg.bd.ValidateBody(block, cr)
-		})
+		d, penalties, err := cfg.bd.GetDeliveries()
 		if err != nil {
 			return err
 		}

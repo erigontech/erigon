@@ -75,7 +75,7 @@ type Engine interface {
 
 	// VerifyUncles verifies that the given block's uncles conform to the consensus
 	// rules of a given engine.
-	VerifyUncles(chain ChainReader, block *types.Block) error
+	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
 
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
