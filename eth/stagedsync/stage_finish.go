@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -11,10 +12,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.RwTx, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+func FinishForward(s *StageState, db ethdb.Database, tx ethdb.RwTx, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = db.(ethdb.HasRwKV).RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	var executionAt uint64
 	var err error
-	if executionAt, err = s.ExecutionAt(db); err != nil {
+	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
 	if executionAt <= s.BlockNumber {
@@ -29,7 +40,16 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 	if tx == nil {
 		return s.DoneAndUpdate(db, executionAt)
 	}
-	return s.DoneAndUpdate(tx, executionAt)
+	err = s.DoneAndUpdate(tx, executionAt)
+	if err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UnwindFinish(u *UnwindState, s *StageState, db ethdb.Database, tx ethdb.RwTx) error {

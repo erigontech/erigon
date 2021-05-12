@@ -362,7 +362,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, world.DB, world.notifier, nil, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, world.DB, tx, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindFinish(u, s, world.DB, tx)
