@@ -16,7 +16,7 @@ func TestEmptyQuery(t *testing.T) {
 		t.Fatalf("create test db: %v", err)
 	}
 	defer db.Close()
-	api := NewTraceAPI(db, nil, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
@@ -36,7 +36,7 @@ func TestCoinbaseBalance(t *testing.T) {
 		t.Fatalf("create test db: %v", err)
 	}
 	defer db.Close()
-	api := NewTraceAPI(db, nil, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`

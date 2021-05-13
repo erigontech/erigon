@@ -31,6 +31,8 @@ type (
 type Filters struct {
 	mu sync.RWMutex
 
+	pendingBlock *types.Block
+
 	headsSubs        map[HeadsSubID]chan *types.Header
 	pendingLogsSubs  map[PendingLogsSubID]func(types.Logs)
 	pendingBlockSubs map[PendingBlockSubID]func(*types.Block)
@@ -69,9 +71,19 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 			time.Sleep(time.Second)
 		}
+		if err := ff.subscribeToPendingLogs(ctx, txPool); err != nil {
+			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+			time.Sleep(time.Second)
+		}
 	}()
 
 	return ff
+}
+
+func (ff *Filters) LastPendingBlock() *types.Block {
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	return ff.pendingBlock
 }
 
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
@@ -106,6 +118,12 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, txPool txpool.T
 		return err
 	}
 	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
 		event, err := subscription.Recv()
 		if err == io.EOF {
 			log.Info("rpcdaemon: the subscription channel was closed")
@@ -115,9 +133,69 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, txPool txpool.T
 			return err
 		}
 
-		ff.OnPendingBlock(event)
+		ff.onPendingBlock(event)
 	}
 	return nil
+}
+
+func (ff *Filters) onPendingBlock(reply *txpool.OnPendingBlockReply) {
+	var b *types.Block
+	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
+		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+	}
+
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	ff.pendingBlock = b
+
+	for _, v := range ff.pendingBlockSubs {
+		v(b)
+	}
+}
+
+func (ff *Filters) subscribeToPendingLogs(ctx context.Context, txPool txpool.TxpoolClient) error {
+	return nil
+	/*
+		subscription, err := txPool.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+		if err != nil {
+			if s, ok := status.FromError(err); ok {
+				return errors.New(s.Message())
+			}
+			return err
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+
+			event, err := subscription.Recv()
+			if err == io.EOF {
+				log.Info("rpcdaemon: the subscription channel was closed")
+				break
+			}
+			if err != nil {
+				return err
+			}
+
+			ff.onPendingLogs(event)
+		}
+		return nil
+	*/
+}
+
+func (ff *Filters) onPendingLogs(reply *txpool.OnPendingBlockReply) {
+	var l types.Logs
+	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), l); err != nil {
+		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+	}
+
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	for _, v := range ff.pendingLogsSubs {
+		v(l)
+	}
 }
 
 func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
@@ -238,16 +316,6 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	}
 	for _, v := range ff.pendingTxsSubs {
 		v <- txs
-	}
-}
-
-func (ff *Filters) OnPendingBlock(reply *txpool.OnPendingBlockReply) {
-	var b *types.Block
-	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
-		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
-	}
-	for _, v := range ff.pendingBlockSubs {
-		v(b)
 	}
 }
 

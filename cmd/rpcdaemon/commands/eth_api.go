@@ -6,20 +6,19 @@ import (
 	"math/big"
 	"sync"
 
-	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/filters"
+	ethFilters "github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -40,7 +39,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) ([]*types.Log, error)
 	GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
@@ -95,10 +94,14 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
+	filters         *filters.Filters
 	_chainConfig    *params.ChainConfig
 	_genesis        *types.Block
 	_genesisSetOnce sync.Once
-	pending         *rpchelper.Pending
+}
+
+func NewBaseApi(f *filters.Filters) *BaseAPI {
+	return &BaseAPI{filters: f}
 }
 
 func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
@@ -134,9 +137,13 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 	return cc, genesisBlock, nil
 }
 
+func (api *BaseAPI) pendingBlock() *types.Block {
+	return api.filters.LastPendingBlock()
+}
+
 func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx ethdb.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
-		return api.pending.Block(), nil
+		return api.pendingBlock(), nil
 	}
 
 	n, err := getBlockNumber(number, tx)
@@ -155,22 +162,20 @@ type APIImpl struct {
 	txPool     txpool.TxpoolClient
 	db         ethdb.RoKV
 	GasCap     uint64
-	filters    *rpcfilters.Filters
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, gascap uint64, filters *rpcfilters.Filters, pending *rpchelper.Pending) *APIImpl {
+func NewEthAPI(base *BaseAPI, db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
-		BaseAPI:    &BaseAPI{},
+		BaseAPI:    base,
 		db:         db,
 		ethBackend: eth,
 		txPool:     txPool,
 		GasCap:     gascap,
-		filters:    filters,
 	}
 }
 

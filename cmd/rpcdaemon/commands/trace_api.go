@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // TraceAPI RPC interface into tracing API
@@ -36,17 +35,15 @@ type TraceAPIImpl struct {
 	maxTraces uint64
 	traceType string
 	gasCap    uint64
-	pending   *rpchelper.Pending
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(kv ethdb.RoKV, pending *rpchelper.Pending, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv ethdb.RoKV, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
-		BaseAPI:   &BaseAPI{},
+		BaseAPI:   base,
 		kv:        kv,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,
 		gasCap:    cfg.Gascap,
-		pending:   pending,
 	}
 }
