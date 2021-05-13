@@ -28,6 +28,8 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, gitCommit string) 
 	return &EthBackendServer{eth: eth, events: events, gitCommit: gitCommit}
 }
 
+// Version
+// 2.0.0 - move all mining-related methods to 'txpool/mining' server
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}, nil
 }
