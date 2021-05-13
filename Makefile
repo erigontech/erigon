@@ -206,7 +206,7 @@ grpc:
 		snapshot_downloader/external_downloader.proto \
 		consensus_engine/consensus.proto \
 		testing/testing.proto \
-		txpool/txpool.proto
+		txpool/txpool.proto txpool/mining.proto
 
 prometheus:
 	docker-compose up prometheus grafana

@@ -3,18 +3,17 @@ package remotedbserver
 import (
 	"bytes"
 	"context"
-	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/turbo-geth/gointerfaces/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type EthBackendServer struct {
@@ -22,12 +21,15 @@ type EthBackendServer struct {
 
 	eth       core.EthBackend
 	events    *Events
-	ethash    *ethash.API
 	gitCommit string
 }
 
-func NewEthBackendServer(eth core.EthBackend, events *Events, ethashApi *ethash.API, gitCommit string) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events, ethash: ethashApi, gitCommit: gitCommit}
+func NewEthBackendServer(eth core.EthBackend, events *Events, gitCommit string) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events, gitCommit: gitCommit}
+}
+
+func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+	return &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}, nil
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
@@ -146,49 +148,6 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	<-subscribeServer.Context().Done()
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
-}
-
-func (s *EthBackendServer) GetWork(context.Context, *remote.GetWorkRequest) (*remote.GetWorkReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	res, err := s.ethash.GetWork()
-	if err != nil {
-		return nil, err
-	}
-	return &remote.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
-}
-
-func (s *EthBackendServer) SubmitWork(_ context.Context, req *remote.SubmitWorkRequest) (*remote.SubmitWorkReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	var nonce types.BlockNonce
-	copy(nonce[:], req.BlockNonce)
-	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.PowHash), common.BytesToHash(req.Digest))
-	return &remote.SubmitWorkReply{Ok: ok}, nil
-}
-
-func (s *EthBackendServer) SetHashRate(_ context.Context, req *remote.SubmitHashRateRequest) (*remote.SubmitHashRateReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), common.BytesToHash(req.Id))
-	return &remote.SubmitHashRateReply{Ok: ok}, nil
-}
-
-func (s *EthBackendServer) GetHashRate(_ context.Context, req *remote.GetHashRateRequest) (*remote.GetHashRateReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	return &remote.GetHashRateReply{HashRate: s.ethash.GetHashrate()}, nil
-}
-
-func (s *EthBackendServer) Mining(_ context.Context, req *remote.MiningRequest) (*remote.MiningReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	return &remote.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {

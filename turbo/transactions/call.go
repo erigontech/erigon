@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -23,7 +24,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig, pending *rpchelper.Pending) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -31,7 +32,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 			return state, block.Header(), nil
 		}
 	*/
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err
 	}

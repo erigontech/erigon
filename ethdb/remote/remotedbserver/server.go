@@ -36,7 +36,7 @@ type KvServer struct {
 	kv ethdb.RwKV
 }
 
-func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -79,6 +79,7 @@ func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPo
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
+	txpool.RegisterMiningServer(grpcServer, miningServer)
 	remote.RegisterKVServer(grpcServer, kv)
 
 	if metrics.Enabled {
@@ -98,7 +99,7 @@ func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
-// GetInterfaceVersion returns the service-side interface version number
+// Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
 	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
 		return &KvServiceAPIVersion, nil

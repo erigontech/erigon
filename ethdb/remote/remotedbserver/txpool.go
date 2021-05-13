@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -23,10 +22,8 @@ type txPool interface {
 
 type TxPoolServer struct {
 	proto_txpool.UnimplementedTxpoolServer
-	ctx                 context.Context
-	txPool              txPool
-	pendingBlockStreams PendingBlockStreams
-	minedBlockStreams   MinedBlockStreams
+	ctx    context.Context
+	txPool txPool
 }
 
 func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
@@ -127,128 +124,4 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 	}
 
 	return reply, nil
-}
-
-func (s *TxPoolServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Txpool_OnPendingBlockServer) error {
-	remove := s.pendingBlockStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
-}
-
-func (s *TxPoolServer) BroadcastPendingBlock(block *types.Block) error {
-	var buf bytes.Buffer
-	if err := block.EncodeRLP(&buf); err != nil {
-		return err
-	}
-	reply := &proto_txpool.OnPendingBlockReply{RplBlock: buf.Bytes()}
-	s.pendingBlockStreams.Broadcast(reply)
-	return nil
-}
-
-func (s *TxPoolServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Txpool_OnMinedBlockServer) error {
-	remove := s.minedBlockStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
-}
-
-func (s *TxPoolServer) BroadcastMinedBlock(block *types.Block) error {
-	var buf bytes.Buffer
-	if err := block.EncodeRLP(&buf); err != nil {
-		return err
-	}
-	reply := &proto_txpool.OnMinedBlockReply{RplBlock: buf.Bytes()}
-	s.minedBlockStreams.Broadcast(reply)
-	return nil
-}
-
-// MinedBlockStreams - it's safe to use this class as non-pointer
-type MinedBlockStreams struct {
-	sync.Mutex
-	id    uint
-	chans map[uint]proto_txpool.Txpool_OnMinedBlockServer
-}
-
-func (s *MinedBlockStreams) Add(stream proto_txpool.Txpool_OnMinedBlockServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Txpool_OnMinedBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
-	s.Lock()
-	defer s.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *MinedBlockStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
-
-// PendingBlockStreams - it's safe to use this class as non-pointer
-type PendingBlockStreams struct {
-	sync.Mutex
-	id    uint
-	chans map[uint]proto_txpool.Txpool_OnPendingBlockServer
-}
-
-func (s *PendingBlockStreams) Add(stream proto_txpool.Txpool_OnPendingBlockServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Txpool_OnPendingBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
-	s.Lock()
-	defer s.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *PendingBlockStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
 }

@@ -271,8 +271,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
-	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, ethashApi, gitCommit)
+	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, gitCommit)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
+	miningRPC := remotedbserver.NewMiningServer(context.Background(), eth, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
@@ -312,6 +313,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,
+				miningRPC,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
 				&creds)
@@ -323,6 +325,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,
+				miningRPC,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
 				nil)
@@ -422,11 +425,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			select {
 			case b := <-backend.minedBlocks:
 				// todo: broadcast p2p
-				if err := txPoolRPC.BroadcastMinedBlock(b); err != nil {
+				if err := miningRPC.BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
 			case b := <-backend.pendingBlocks:
-				if err := txPoolRPC.BroadcastMinedBlock(b); err != nil {
+				if err := miningRPC.BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
 			case <-backend.quitMining:

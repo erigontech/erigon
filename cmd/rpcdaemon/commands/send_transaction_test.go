@@ -26,7 +26,7 @@ func TestSendRawTransaction(t *testing.T) {
 	conn := createTestGrpcConn()
 	defer conn.Close()
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := filters.New(context.Background(), nil, txPool)
+	ff := filters.New(context.Background(), nil, txPool, nil)
 	api := NewEthAPI(NewBaseApi(ff), db, nil, txPool, 5000000)
 
 	// Call GetTransactionReceipt for un-protected transaction

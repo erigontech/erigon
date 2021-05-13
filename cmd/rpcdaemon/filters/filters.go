@@ -39,7 +39,7 @@ type Filters struct {
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
-func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolClient) *Filters {
+func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
 	ff := &Filters{
@@ -67,11 +67,11 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 			time.Sleep(time.Second)
 		}
-		if err := ff.subscribeToPendingBlocks(ctx, txPool); err != nil {
+		if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
 			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 			time.Sleep(time.Second)
 		}
-		if err := ff.subscribeToPendingLogs(ctx, txPool); err != nil {
+		if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
 			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 			time.Sleep(time.Second)
 		}
@@ -109,8 +109,8 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	return nil
 }
 
-func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, txPool txpool.TxpoolClient) error {
-	subscription, err := txPool.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
+	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return errors.New(s.Message())
@@ -153,41 +153,38 @@ func (ff *Filters) onPendingBlock(reply *txpool.OnPendingBlockReply) {
 	}
 }
 
-func (ff *Filters) subscribeToPendingLogs(ctx context.Context, txPool txpool.TxpoolClient) error {
-	return nil
-	/*
-		subscription, err := txPool.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
+	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			log.Info("rpcdaemon: the subscription channel was closed")
+			break
+		}
 		if err != nil {
-			if s, ok := status.FromError(err); ok {
-				return errors.New(s.Message())
-			}
 			return err
 		}
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-			}
 
-			event, err := subscription.Recv()
-			if err == io.EOF {
-				log.Info("rpcdaemon: the subscription channel was closed")
-				break
-			}
-			if err != nil {
-				return err
-			}
-
-			ff.onPendingLogs(event)
-		}
-		return nil
-	*/
+		ff.onPendingLogs(event)
+	}
+	return nil
 }
 
-func (ff *Filters) onPendingLogs(reply *txpool.OnPendingBlockReply) {
+func (ff *Filters) onPendingLogs(reply *txpool.OnPendingLogsReply) {
 	var l types.Logs
-	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), l); err != nil {
+	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), l); err != nil {
 		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
 	}
 
