@@ -165,7 +165,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	var pervK []byte
+	var pervK, pervV []byte
 
 	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
@@ -213,8 +213,10 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 				pervK = k
 			} else {
 				if err := c.Append(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, append: k=%x, %w", logPrefix, bucket, k, err)
+					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x,prevK=%x, prevV=%x, %w", logPrefix, bucket, k, v, pervK, pervV, err)
 				}
+				pervK = k
+				pervV = v
 			}
 
 			return nil

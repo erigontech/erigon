@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 10aa116f5f6a1fca4ccea1310d3d331a39161abc5b63b6a30e01812eab671e7c_v0_10_0_0_gaa1f6fbd
+#define MDBX_BUILD_SOURCERY 4cd104d866e6e237b90b2ba78aca6f4bf346e47f05dc08b41c1c0d9c9fdf2df8_v0_10_0_19_gc5268f1d
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -228,14 +228,6 @@
 #   endif
 #endif /* __must_check_result */
 
-#ifndef __maybe_unused
-#   if defined(__GNUC__) || __has_attribute(__unused__)
-#       define __maybe_unused __attribute__((__unused__))
-#   else
-#       define __maybe_unused
-#   endif
-#endif /* __maybe_unused */
-
 #if !defined(__noop) && !defined(_MSC_VER)
 #   define __noop(...) do {} while(0)
 #endif /* __noop */
@@ -381,7 +373,7 @@
 #endif /* __anonymous_struct_extension__ */
 
 #ifndef __Wpedantic_format_voidptr
-    static __inline __maybe_unused const void* MDBX_PURE_FUNCTION
+    MDBX_MAYBE_UNUSED MDBX_PURE_FUNCTION static __inline  const void*
         __Wpedantic_format_voidptr(const void* ptr) {return ptr;}
 #   define __Wpedantic_format_voidptr(ARG) __Wpedantic_format_voidptr(ARG)
 #endif /* __Wpedantic_format_voidptr */
@@ -993,7 +985,7 @@ typedef pthread_mutex_t mdbx_fastmutex_t;
 /* Get the size of a memory page for the system.
  * This is the basic size that the platform's memory manager uses, and is
  * fundamental to the use of memory-mapped files. */
-MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused __inline size_t
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __inline size_t
 mdbx_syspagesize(void) {
 #if defined(_WIN32) || defined(_WIN64)
   SYSTEM_INFO si;
@@ -1080,7 +1072,7 @@ extern void mdbx_osal_jitter(bool tiny);
 #include <sys/cachectl.h>
 #endif
 
-static __maybe_unused __inline void mdbx_compiler_barrier(void) {
+MDBX_MAYBE_UNUSED static __inline void mdbx_compiler_barrier(void) {
 #if defined(__clang__) || defined(__GNUC__)
   __asm__ __volatile__("" ::: "memory");
 #elif defined(_MSC_VER)
@@ -1100,7 +1092,7 @@ static __maybe_unused __inline void mdbx_compiler_barrier(void) {
 #endif
 }
 
-static __maybe_unused __inline void mdbx_memory_barrier(void) {
+MDBX_MAYBE_UNUSED static __inline void mdbx_memory_barrier(void) {
 #ifdef MDBX_HAVE_C11ATOMICS
   atomic_thread_fence(memory_order_seq_cst);
 #elif defined(__ATOMIC_SEQ_CST)
@@ -1140,8 +1132,8 @@ static __maybe_unused __inline void mdbx_memory_barrier(void) {
 #define mdbx_asprintf asprintf
 #define mdbx_vasprintf vasprintf
 #else
-MDBX_INTERNAL_FUNC MDBX_PRINTF_ARGS(2, 3) int __maybe_unused
-    mdbx_asprintf(char **strp, const char *fmt, ...);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL_FUNC
+    MDBX_PRINTF_ARGS(2, 3) int mdbx_asprintf(char **strp, const char *fmt, ...);
 MDBX_INTERNAL_FUNC int mdbx_vasprintf(char **strp, const char *fmt, va_list ap);
 #endif
 
@@ -1164,7 +1156,7 @@ MDBX_INTERNAL_VAR bool mdbx_RunningOnWSL1 /* Windows Subsystem 1 for Linux */;
 LIBMDBX_API char *mdbx_strdup(const char *str);
 #endif
 
-static __maybe_unused __inline int mdbx_get_errno(void) {
+MDBX_MAYBE_UNUSED static __inline int mdbx_get_errno(void) {
 #if defined(_WIN32) || defined(_WIN64)
   DWORD rc = GetLastError();
 #else
@@ -1266,7 +1258,7 @@ MDBX_INTERNAL_FUNC int mdbx_msync(mdbx_mmap_t *map, size_t offset,
 MDBX_INTERNAL_FUNC int mdbx_check_fs_rdonly(mdbx_filehandle_t handle,
                                             const char *pathname, int err);
 
-static __maybe_unused __inline uint32_t mdbx_getpid(void) {
+MDBX_MAYBE_UNUSED static __inline uint32_t mdbx_getpid(void) {
   STATIC_ASSERT(sizeof(mdbx_pid_t) <= sizeof(uint32_t));
 #if defined(_WIN32) || defined(_WIN64)
   return GetCurrentProcessId();
@@ -1275,7 +1267,7 @@ static __maybe_unused __inline uint32_t mdbx_getpid(void) {
 #endif
 }
 
-static __maybe_unused __inline uintptr_t mdbx_thread_self(void) {
+MDBX_MAYBE_UNUSED static __inline uintptr_t mdbx_thread_self(void) {
   mdbx_tid_t thunk;
   STATIC_ASSERT(sizeof(uintptr_t) >= sizeof(thunk));
 #if defined(_WIN32) || defined(_WIN64)
@@ -1286,7 +1278,7 @@ static __maybe_unused __inline uintptr_t mdbx_thread_self(void) {
   return (uintptr_t)thunk;
 }
 
-MDBX_INTERNAL_FUNC void __maybe_unused mdbx_osal_jitter(bool tiny);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL_FUNC void mdbx_osal_jitter(bool tiny);
 MDBX_INTERNAL_FUNC uint64_t mdbx_osal_monotime(void);
 MDBX_INTERNAL_FUNC uint64_t
 mdbx_osal_16dot16_to_monotime(uint32_t seconds_16dot16);
@@ -2057,7 +2049,7 @@ static __always_inline memory_order mo_c11_load(enum MDBX_memory_order fence) {
 
 static __inline void mdbx_jitter4testing(bool tiny);
 
-static __maybe_unused __always_inline void
+MDBX_MAYBE_UNUSED static __always_inline void
 mdbx_memory_fence(enum MDBX_memory_order order, bool write) {
 #ifdef MDBX_HAVE_C11ATOMICS
   atomic_thread_fence(write ? mo_c11_store(order) : mo_c11_load(order));
@@ -2069,7 +2061,7 @@ mdbx_memory_fence(enum MDBX_memory_order order, bool write) {
 #endif /* MDBX_HAVE_C11ATOMICS */
 }
 
-static __maybe_unused __always_inline uint32_t
+MDBX_MAYBE_UNUSED static __always_inline uint32_t
 atomic_store32(MDBX_atomic_uint32_t *p, const uint32_t value,
                enum MDBX_memory_order order) {
   STATIC_ASSERT(sizeof(MDBX_atomic_uint32_t) == 4);
@@ -2085,7 +2077,7 @@ atomic_store32(MDBX_atomic_uint32_t *p, const uint32_t value,
   return value;
 }
 
-static __maybe_unused __always_inline uint32_t
+MDBX_MAYBE_UNUSED static __always_inline uint32_t
 atomic_load32(const MDBX_atomic_uint32_t *p, enum MDBX_memory_order order) {
   STATIC_ASSERT(sizeof(MDBX_atomic_uint32_t) == 4);
 #ifdef MDBX_HAVE_C11ATOMICS
@@ -2100,7 +2092,7 @@ atomic_load32(const MDBX_atomic_uint32_t *p, enum MDBX_memory_order order) {
 #endif /* MDBX_HAVE_C11ATOMICS */
 }
 
-static __maybe_unused __always_inline uint64_t
+MDBX_MAYBE_UNUSED static __always_inline uint64_t
 atomic_store64(MDBX_atomic_uint64_t *p, const uint64_t value,
                enum MDBX_memory_order order) {
   STATIC_ASSERT(sizeof(MDBX_atomic_uint64_t) == 8);
@@ -2124,7 +2116,7 @@ atomic_store64(MDBX_atomic_uint64_t *p, const uint64_t value,
   return value;
 }
 
-static __maybe_unused
+MDBX_MAYBE_UNUSED static
 #if MDBX_64BIT_ATOMIC
     __always_inline
 #endif /* MDBX_64BIT_ATOMIC */
@@ -2712,15 +2704,7 @@ typedef struct MDBX_dbx {
  * Every operation requires a transaction handle. */
 struct MDBX_txn {
 #define MDBX_MT_SIGNATURE UINT32_C(0x93D53A31)
-  size_t mt_signature;
-  MDBX_txn *mt_parent; /* parent of a nested txn */
-  /* Nested txn under this txn, set together with flag MDBX_TXN_HAS_CHILD */
-  MDBX_txn *mt_child;
-  MDBX_geo mt_geo;
-  /* next unallocated page */
-#define mt_next_pgno mt_geo.next
-  /* corresponding to the current size of datafile */
-#define mt_end_pgno mt_geo.now
+  uint32_t mt_signature;
 
   /* Transaction Flags */
   /* mdbx_txn_begin() flags */
@@ -2749,8 +2733,17 @@ struct MDBX_txn {
      MDBX_SHRINK_ALLOWED)
 #error "Oops, some flags overlapped or wrong"
 #endif
+  uint32_t mt_flags;
 
-  unsigned mt_flags;
+  MDBX_txn *mt_parent; /* parent of a nested txn */
+  /* Nested txn under this txn, set together with flag MDBX_TXN_HAS_CHILD */
+  MDBX_txn *mt_child;
+  MDBX_geo mt_geo;
+  /* next unallocated page */
+#define mt_next_pgno mt_geo.next
+  /* corresponding to the current size of datafile */
+#define mt_end_pgno mt_geo.now
+
   /* The ID of this transaction. IDs are integers incrementing from 1.
    * Only committed write transactions increment the ID. If a transaction
    * aborts, the ID may be re-used by the next writer. */
@@ -3170,7 +3163,7 @@ void mdbx_assert_fail(const MDBX_env *env, const char *msg, const char *func,
 #define mdbx_flush_incoherent_cpu_writeback() mdbx_compiler_barrier()
 #endif /* MDBX_CPU_WRITEBACK_INCOHERENT */
 
-static __maybe_unused __inline void
+MDBX_MAYBE_UNUSED static __inline void
 mdbx_flush_incoherent_mmap(void *addr, size_t nbytes, const intptr_t pagesize) {
 #if MDBX_MMAP_INCOHERENT_FILE_WRITE
   char *const begin = (char *)(-pagesize & (intptr_t)addr);
@@ -3212,7 +3205,7 @@ MDBX_INTERNAL_FUNC void mdbx_rthc_global_init(void);
 MDBX_INTERNAL_FUNC void mdbx_rthc_global_dtor(void);
 MDBX_INTERNAL_FUNC void mdbx_rthc_thread_dtor(void *ptr);
 
-static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
+MDBX_MAYBE_UNUSED static __inline void mdbx_jitter4testing(bool tiny) {
 #if MDBX_DEBUG
   if (MDBX_DBG_JITTER & mdbx_runtime_flags)
     mdbx_osal_jitter(tiny);
@@ -3365,35 +3358,35 @@ typedef struct MDBX_node {
 /* Do not spill pages to disk if txn is getting full, may fail instead */
 #define MDBX_NOSPILL 0x8000
 
-MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused __inline pgno_t
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __inline pgno_t
 pgno_add(pgno_t base, pgno_t augend) {
   assert(base <= MAX_PAGENO);
   return (augend < MAX_PAGENO - base) ? base + augend : MAX_PAGENO;
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused __inline pgno_t
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __inline pgno_t
 pgno_sub(pgno_t base, pgno_t subtrahend) {
   assert(base >= MIN_PAGENO);
   return (subtrahend < base - MIN_PAGENO) ? base - subtrahend : MIN_PAGENO;
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __always_inline __maybe_unused bool
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __always_inline bool
 is_powerof2(size_t x) {
   return (x & (x - 1)) == 0;
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __always_inline __maybe_unused size_t
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __always_inline size_t
 floor_powerof2(size_t value, size_t granularity) {
   assert(is_powerof2(granularity));
   return value & ~(granularity - 1);
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __always_inline __maybe_unused size_t
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static __always_inline size_t
 ceil_powerof2(size_t value, size_t granularity) {
   return floor_powerof2(value + granularity - 1, granularity);
 }
 
-MDBX_NOTHROW_CONST_FUNCTION static __maybe_unused unsigned
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_CONST_FUNCTION static unsigned
 log2n_powerof2(size_t value) {
   assert(value > 0 && value < INT32_MAX && is_powerof2(value));
   assert((value & -(int32_t)value) == value);
@@ -3423,7 +3416,7 @@ log2n_powerof2(size_t value) {
 #define ENV_USABLE_FLAGS (ENV_CHANGEABLE_FLAGS | ENV_CHANGELESS_FLAGS)
 
 #if !defined(__cplusplus) || CONSTEXPR_ENUM_FLAGS_OPERATIONS
-static __maybe_unused void static_checks(void) {
+MDBX_MAYBE_UNUSED static void static_checks(void) {
   STATIC_ASSERT_MSG(INT16_MAX - CORE_DBS == MDBX_MAX_DBI,
                     "Oops, MDBX_MAX_DBI or CORE_DBS?");
   STATIC_ASSERT_MSG((unsigned)(MDBX_DB_ACCEDE | MDBX_CREATE) ==
@@ -3556,14 +3549,16 @@ static void print_stat(MDBX_stat *ms) {
 
 static void usage(const char *prog) {
   fprintf(stderr,
-          "usage: %s [-V] [-e] [-f[f[f]]] [-r[r]] [-a|-s name] dbpath\n"
+          "usage: %s [-V] [-q] [-e] [-f[f[f]]] [-r[r]] [-a|-s name] dbpath\n"
           "  -V\t\tprint version and exit\n"
+          "  -q\t\tbe quiet\n"
+          "  -p\t\tshow statistics of page operations for current session\n"
           "  -e\t\tshow whole DB info\n"
           "  -f\t\tshow GC info\n"
           "  -r\t\tshow readers\n"
           "  -a\t\tprint stat of main DB and all subDBs\n"
-          "  \t\t(default) print stat of only the main DB\n"
-          "  -s name\tprint stat of only the named subDB\n",
+          "  -s name\tprint stat of only the specified named subDB\n"
+          "  \t\tby default print stat of only the main DB\n",
           prog);
   exit(EXIT_FAILURE);
 }
@@ -3590,12 +3585,15 @@ static int reader_list_func(void *ctx, int num, int slot, mdbx_pid_t pid,
 }
 
 const char *prog;
+bool quiet = false;
 static void error(const char *func, int rc) {
-  fprintf(stderr, "%s: %s() error %d %s\n", prog, func, rc, mdbx_strerror(rc));
+  if (!quiet)
+    fprintf(stderr, "%s: %s() error %d %s\n", prog, func, rc,
+            mdbx_strerror(rc));
 }
 
 int main(int argc, char *argv[]) {
-  int o, rc;
+  int opt, rc;
   MDBX_env *env;
   MDBX_txn *txn;
   MDBX_dbi dbi;
@@ -3603,20 +3601,23 @@ int main(int argc, char *argv[]) {
   prog = argv[0];
   char *envname;
   char *subname = nullptr;
-  int alldbs = 0, envinfo = 0, envflags = 0, freinfo = 0, rdrinfo = 0;
+  bool alldbs = false, envinfo = false, envflags = false, pgop = false;
+  int freinfo = 0, rdrinfo = 0;
 
   if (argc < 2)
     usage(prog);
 
-  while ((o = getopt(argc, argv,
-                     "V"
-                     "a"
-                     "e"
-                     "f"
-                     "n"
-                     "r"
-                     "s:")) != EOF) {
-    switch (o) {
+  while ((opt = getopt(argc, argv,
+                       "V"
+                       "q"
+                       "p"
+                       "a"
+                       "e"
+                       "f"
+                       "n"
+                       "r"
+                       "s:")) != EOF) {
+    switch (opt) {
     case 'V':
       printf("mdbx_stat version %d.%d.%d.%d\n"
              " - source: %s %s, commit %s, tree %s\n"
@@ -3631,22 +3632,28 @@ int main(int argc, char *argv[]) {
              mdbx_build.target, mdbx_build.compiler, mdbx_build.flags,
              mdbx_build.options);
       return EXIT_SUCCESS;
+    case 'q':
+      quiet = true;
+      break;
+    case 'p':
+      pgop = true;
+      break;
     case 'a':
       if (subname)
         usage(prog);
-      alldbs++;
+      alldbs = true;
       break;
     case 'e':
-      envinfo++;
+      envinfo = true;
       break;
     case 'f':
-      freinfo++;
+      freinfo += 1;
       break;
     case 'n':
       envflags |= MDBX_NOSUBDIR;
       break;
     case 'r':
-      rdrinfo++;
+      rdrinfo += 1;
       break;
     case 's':
       if (alldbs)
@@ -3676,10 +3683,12 @@ int main(int argc, char *argv[]) {
 
   envname = argv[optind];
   envname = argv[optind];
-  printf("mdbx_stat %s (%s, T-%s)\nRunning for %s...\n",
-         mdbx_version.git.describe, mdbx_version.git.datetime,
-         mdbx_version.git.tree, envname);
-  fflush(nullptr);
+  if (!quiet) {
+    printf("mdbx_stat %s (%s, T-%s)\nRunning for %s...\n",
+           mdbx_version.git.describe, mdbx_version.git.datetime,
+           mdbx_version.git.tree, envname);
+    fflush(nullptr);
+  }
 
   rc = mdbx_env_create(&env);
   if (unlikely(rc != MDBX_SUCCESS)) {
@@ -3707,7 +3716,7 @@ int main(int argc, char *argv[]) {
     goto txn_abort;
   }
 
-  if (envinfo || freinfo) {
+  if (envinfo || freinfo || pgop) {
     rc = mdbx_env_info_ex(env, txn, &mei, sizeof(mei));
     if (unlikely(rc != MDBX_SUCCESS)) {
       error("mdbx_env_info_ex", rc);
@@ -3716,6 +3725,33 @@ int main(int argc, char *argv[]) {
   } else {
     /* LY: zap warnings from gcc */
     memset(&mei, 0, sizeof(mei));
+  }
+
+  if (pgop) {
+    printf("Page Operations (for current session):\n");
+    printf("      New: %8" PRIu64 "\t// quantity of a new pages added\n",
+           mei.mi_pgop_stat.newly);
+    printf("      CoW: %8" PRIu64
+           "\t// quantity of pages copied for altering\n",
+           mei.mi_pgop_stat.cow);
+    printf("    Clone: %8" PRIu64 "\t// quantity of parent's dirty pages "
+           "clones for nested transactions\n",
+           mei.mi_pgop_stat.clone);
+    printf("    Split: %8" PRIu64
+           "\t// page splits during insertions or updates\n",
+           mei.mi_pgop_stat.split);
+    printf("    Merge: %8" PRIu64
+           "\t// page merges during deletions or updates\n",
+           mei.mi_pgop_stat.merge);
+    printf("    Spill: %8" PRIu64 "\t// quantity of spilled/ousted `dirty` "
+           "pages during large transactions\n",
+           mei.mi_pgop_stat.spill);
+    printf("  Unspill: %8" PRIu64 "\t// quantity of unspilled/redone `dirty` "
+           "pages during large transactions\n",
+           mei.mi_pgop_stat.unspill);
+    printf("      WOP: %8" PRIu64
+           "\t// number of explicit write operations (not a pages) to a disk\n",
+           mei.mi_pgop_stat.wops);
   }
 
   if (envinfo) {
@@ -3858,7 +3894,8 @@ int main(int argc, char *argv[]) {
     case MDBX_NOTFOUND:
       break;
     case MDBX_EINTR:
-      fprintf(stderr, "Interrupted by signal/user\n");
+      if (!quiet)
+        fprintf(stderr, "Interrupted by signal/user\n");
       goto txn_abort;
     default:
       error("mdbx_cursor_get", rc);
@@ -3964,7 +4001,8 @@ int main(int argc, char *argv[]) {
   case MDBX_NOTFOUND:
     break;
   case MDBX_EINTR:
-    fprintf(stderr, "Interrupted by signal/user\n");
+    if (!quiet)
+      fprintf(stderr, "Interrupted by signal/user\n");
     break;
   default:
     if (unlikely(rc != MDBX_SUCCESS))

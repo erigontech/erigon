@@ -154,8 +154,8 @@ transaction journal. No crash recovery needed. No maintenance is required.
 ## Limitations
 
 - **Page size**: a power of 2, minimum `256` (mostly for testing), maximum `65536` bytes, default `4096` bytes.
-- **Key size**: minimum `0`, maximum ≈¼ pagesize (`1348` bytes for default 4K pagesize, `21828` bytes for 64K pagesize).
-- **Value size**: minimum `0`, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈¼ pagesize for multimaps (`1348` bytes for default 4K pagesize, `21828` bytes for 64K pagesize).
+- **Key size**: minimum `0`, maximum ≈½ pagesize (`2022` bytes for default 4K pagesize, `32742` bytes for 64K pagesize).
+- **Value size**: minimum `0`, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈½ pagesize for multimaps (`2022` bytes for default 4K pagesize, `32742` bytes for 64K pagesize).
 - **Write transaction size**: up to `1327217884` pages (`4.944272` TiB for default 4K pagesize, `79.108351` TiB for 64K pagesize).
 - **Database size**: up to `2147483648` pages (≈`8.0` TiB for default 4K pagesize, ≈`128.0` TiB for 64K pagesize).
 - **Maximum sub-databases**: `32765`.
@@ -200,8 +200,8 @@ the user's point of view.
 ## Added Features
 
 1. Keys could be more than 2 times longer than _LMDB_.
-  > For DB with default page size _libmdbx_ support keys up to 1300 bytes
-  > and up to 21780 bytes for 64K page size. _LMDB_ allows key size up to
+  > For DB with default page size _libmdbx_ support keys up to 2022 bytes
+  > and up to 32742 bytes for 64K page size. _LMDB_ allows key size up to
   > 511 bytes and may silently loses data with large values.
 
 2. Up to 30% faster than _LMDB_ in [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) benchmarks.
