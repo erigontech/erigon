@@ -47,6 +47,7 @@ func StageLoop(
 	sync *stagedsync.StagedSync,
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
+	notifier stagedsync.ChainEventNotifier,
 ) {
 	initialCycle := true
 
@@ -59,7 +60,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, initialCycle); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
 			log.Error("Stage loop failure", "error", err)
 			continue
 		}
@@ -75,6 +76,7 @@ func StageLoopStep(
 	sync *stagedsync.StagedSync,
 	highestSeenHeader uint64,
 	chainConfig *params.ChainConfig,
+	notifier stagedsync.ChainEventNotifier,
 	initialCycle bool,
 ) (err error) {
 	// avoid crash because TG's core does many things -
@@ -109,10 +111,10 @@ func StageLoopStep(
 	if err1 != nil {
 		return err1
 	}
-		finishProgressBefore, err1 := stages.GetStageProgress(db, stages.Finish) // TODO: shift this when more stages are added
-		if err1 != nil {
-			return err1
-		}
+	finishProgressBefore, err1 := stages.GetStageProgress(db, stages.Finish) // TODO: shift this when more stages are added
+	if err1 != nil {
+		return err1
+	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
@@ -143,7 +145,7 @@ func StageLoopStep(
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
 
-	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, unwindTo, sync.Notifier, db)
+	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, unwindTo, notifier, db)
 	if err != nil {
 		return err
 	}
