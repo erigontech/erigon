@@ -68,6 +68,7 @@ var CheckpointOracles = map[common.Hash]*CheckpointOracleConfig{
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
+		ChainName:           MainnetChainName,
 		ChainID:             big.NewInt(1),
 		HomesteadBlock:      big.NewInt(1_150_000),
 		DAOForkBlock:        big.NewInt(1_920_000),
@@ -108,6 +109,7 @@ var (
 
 	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
 	RopstenChainConfig = &ChainConfig{
+		ChainName:           RopstenChainName,
 		ChainID:             big.NewInt(3),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -148,6 +150,7 @@ var (
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = &ChainConfig{
+		ChainName:           RinkebyChainName,
 		ChainID:             big.NewInt(4),
 		HomesteadBlock:      big.NewInt(1),
 		DAOForkBlock:        nil,
@@ -190,6 +193,7 @@ var (
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
 	GoerliChainConfig = &ChainConfig{
+		ChainName:           GoerliChainName,
 		ChainID:             big.NewInt(5),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -232,6 +236,7 @@ var (
 
 	// MainnetChainConfig is the chain parameters to run a PoW dev net to test turbo-geth mining
 	TurboMineChainConfig = &ChainConfig{
+		ChainName:           TurboMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("turbo-mine")),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -250,6 +255,7 @@ var (
 
 	// BaikalChainConfig contains the chain parameters to run a node on the Baikal test network.
 	BaikalChainConfig = &ChainConfig{
+		ChainName:           BaikalChainName,
 		ChainID:             big.NewInt(1642),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -393,7 +399,8 @@ type CheckpointOracleConfig struct {
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
 type ChainConfig struct {
-	ChainID *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
+	ChainName string
+	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
 
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 

@@ -410,14 +410,14 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
+func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
 	switch chain {
-	case params.MainnetChainConfig.ChainID:
+	case params.MainnetChainName:
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
-	case params.RopstenChainConfig.ChainID:
+	case params.RopstenChainName:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
