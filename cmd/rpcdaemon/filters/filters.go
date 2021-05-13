@@ -32,8 +32,8 @@ type Filters struct {
 	mu sync.RWMutex
 
 	headsSubs        map[HeadsSubID]chan *types.Header
-	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
-	pendingBlockSubs []func(block *types.Block)
+	pendingLogsSubs  map[PendingLogsSubID]func(types.Logs)
+	pendingBlockSubs map[PendingBlockSubID]func(*types.Block)
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
@@ -41,9 +41,10 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	log.Info("rpc filters: subscribing to tg events")
 
 	ff := &Filters{
-		headsSubs:       make(map[HeadsSubID]chan *types.Header),
-		pendingLogsSubs: make(map[PendingLogsSubID]chan types.Logs),
-		pendingTxsSubs:  make(map[PendingTxsSubID]chan []types.Transaction),
+		headsSubs:        make(map[HeadsSubID]chan *types.Header),
+		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
+		pendingLogsSubs:  make(map[PendingLogsSubID]func(types.Logs)),
+		pendingBlockSubs: make(map[PendingBlockSubID]func(*types.Block)),
 	}
 
 	go func() {
@@ -133,24 +134,30 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) {
 	delete(ff.headsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingLogs(out chan types.Logs) PendingLogsSubID {
+func (ff *Filters) SubscribePendingLogs(ctx context.Context, f func(types.Logs)) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := PendingLogsSubID(generateSubscriptionID())
-	ff.pendingLogsSubs[id] = out
-	return id
+	ff.pendingLogsSubs[id] = f
+	go func() {
+		<-ctx.Done()
+		ff.mu.Lock()
+		defer ff.mu.Unlock()
+		delete(ff.pendingLogsSubs, id)
+	}()
 }
 
-func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+func (ff *Filters) SubscribePendingBlock(ctx context.Context, f func(*types.Block)) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	delete(ff.pendingLogsSubs, id)
-}
-
-func (ff *Filters) SubscribePendingBlock(f func(block *types.Block)) {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	ff.pendingBlockSubs = append(ff.pendingBlockSubs, f)
+	id := PendingBlockSubID(generateSubscriptionID())
+	ff.pendingBlockSubs[id] = f
+	go func() {
+		<-ctx.Done()
+		ff.mu.Lock()
+		defer ff.mu.Unlock()
+		delete(ff.pendingBlockSubs, id)
+	}()
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {

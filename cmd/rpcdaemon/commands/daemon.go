@@ -16,7 +16,7 @@ import (
 func APIList(ctx context.Context, kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	pending := rpchelper.NewPending(filters, ctx.Done())
+	pending := rpchelper.NewPending(ctx, filters)
 	ethImpl := NewEthAPI(kv, eth, txPool, cfg.Gascap, filters, pending)
 	tgImpl := NewTgAPI(kv, pending)
 	netImpl := NewNetAPIImpl(eth)

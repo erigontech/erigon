@@ -1,6 +1,7 @@
 package rpchelper
 
 import (
+	"context"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
@@ -13,38 +14,18 @@ type Pending struct {
 	logs  types.Logs
 }
 
-func NewPending(filters *filters.Filters, quit <-chan struct{}) *Pending {
+func NewPending(ctx context.Context, filters *filters.Filters) *Pending {
 	pending := &Pending{}
-	go func() {
-		if filters == nil {
-			return
-		}
-
-		logs := make(chan types.Logs)
-		defer close(logs)
-		logsId := filters.SubscribePendingLogs(logs)
-		defer filters.UnsubscribePendingLogs(logsId)
-
-		blocks := make(chan *types.Block)
-		defer close(blocks)
-		blocksId := filters.SubscribePendingBlock(blocks)
-		defer filters.UnsubscribePendingBlock(blocksId)
-
-		for {
-			select {
-			case l := <-logs:
-				pending.Lock()
-				pending.logs = l
-				pending.Unlock()
-			case block := <-blocks:
-				pending.Lock()
-				pending.block = block
-				pending.Unlock()
-			case <-quit:
-				return
-			}
-		}
-	}()
+	filters.SubscribePendingLogs(ctx, func(l types.Logs) {
+		pending.Lock()
+		pending.logs = l
+		pending.Unlock()
+	})
+	filters.SubscribePendingBlock(ctx, func(block *types.Block) {
+		pending.Lock()
+		pending.block = block
+		pending.Unlock()
+	})
 	return pending
 }
 

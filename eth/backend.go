@@ -421,13 +421,14 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		for {
 			select {
 			case b := <-backend.minedBlocks:
-				// todo: broadcast
-				// todo: send to rpcdaemon
-				txPoolRPC.SendMinedBlock(b)
-				_ = b
+				// todo: broadcast p2p
+				if err := txPoolRPC.BroadcastMinedBlock(b); err != nil {
+					log.Error("txpool rpc mined block broadcast", "err", err)
+				}
 			case b := <-backend.pendingBlocks:
-				txPoolRPC.SendPendingBlock(b)
-				_ = b
+				if err := txPoolRPC.BroadcastMinedBlock(b); err != nil {
+					log.Error("txpool rpc mined block broadcast", "err", err)
+				}
 			case <-backend.quitMining:
 				return
 			}

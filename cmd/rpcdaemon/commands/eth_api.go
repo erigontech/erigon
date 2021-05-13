@@ -95,11 +95,10 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	_chainConfig      *params.ChainConfig
-	_genesis          *types.Block
-	_pendingBlock     *types.Block
-	_pendingBlockLock sync.RWMutex
-	_genesisSetOnce   sync.Once
+	_chainConfig    *params.ChainConfig
+	_genesis        *types.Block
+	_genesisSetOnce sync.Once
+	pending         *rpchelper.Pending
 }
 
 func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
@@ -135,21 +134,9 @@ func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *t
 	return cc, genesisBlock, nil
 }
 
-func (api *BaseAPI) pendingBlock() *types.Block {
-	api._pendingBlockLock.RLock()
-	defer api._pendingBlockLock.RUnlock()
-	return api._pendingBlock
-}
-
-func (api *BaseAPI) setPendingBlock(b *types.Block) {
-	api._pendingBlockLock.Lock()
-	defer api._pendingBlockLock.Unlock()
-	api._pendingBlock = b
-}
-
 func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx ethdb.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil
+		return api.pending.Block(), nil
 	}
 
 	n, err := getBlockNumber(number, tx)
@@ -169,7 +156,6 @@ type APIImpl struct {
 	db         ethdb.RoKV
 	GasCap     uint64
 	filters    *rpcfilters.Filters
-	pending    *rpchelper.Pending
 }
 
 // NewEthAPI returns APIImpl instance
@@ -185,7 +171,6 @@ func NewEthAPI(db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, g
 		txPool:     txPool,
 		GasCap:     gascap,
 		filters:    filters,
-		pending:    pending,
 	}
 }
 
