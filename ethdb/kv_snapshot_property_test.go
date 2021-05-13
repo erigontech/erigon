@@ -2,7 +2,6 @@ package ethdb
 
 import (
 	"context"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/require"
@@ -456,8 +455,7 @@ func (m *cursorKVMachine) Next(t *rapid.T) {
 	}
 	k1, v1, err1 := m.modelCursor.Next()
 	k2, v2, err2 := m.snCursor.Next()
-	fmt.Println(k1, v1, err1)
-	fmt.Println(k2, v2, err2)
+
 	require.Equal(t, k1, k2)
 	require.Equal(t, v1, v2)
 	require.Equal(t, err1, err2)
