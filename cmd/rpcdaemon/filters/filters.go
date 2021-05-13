@@ -133,13 +133,13 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 			return err
 		}
 
-		ff.onPendingBlock(event)
+		ff.HandlePendingBlock(event)
 	}
 	return nil
 }
 
-func (ff *Filters) onPendingBlock(reply *txpool.OnPendingBlockReply) {
-	var b *types.Block
+func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
+	b := &types.Block{}
 	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
 		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
 	}
@@ -177,14 +177,14 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 			return err
 		}
 
-		ff.onPendingLogs(event)
+		ff.HandlePendingLogs(event)
 	}
 	return nil
 }
 
-func (ff *Filters) onPendingLogs(reply *txpool.OnPendingLogsReply) {
-	var l types.Logs
-	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), l); err != nil {
+func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
+	l := []*types.Log{}
+	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
 		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
 	}
 
