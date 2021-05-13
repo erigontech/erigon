@@ -20,6 +20,7 @@ func ReplacementStages(ctx context.Context,
 	callTraces CallTracesCfg,
 	txLookup TxLookupCfg,
 	txPool TxPoolCfg,
+	finish FinishCfg,
 ) StageBuilders {
 	return []StageBuilder{
 		{
@@ -236,10 +237,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, world.DB, tx, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, tx, finish, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindFinish(u, s, world.DB, tx)
+						return UnwindFinish(u, s, tx, finish)
 					},
 				}
 			},

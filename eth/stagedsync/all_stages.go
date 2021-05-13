@@ -221,14 +221,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Finish,
 			Build: func(world StageParameters) *Stage {
+				finishCfg := StageFinishCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, world.DB, tx, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, tx, finishCfg, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindFinish(u, s, world.DB, tx)
+						return UnwindFinish(u, s, tx, finishCfg)
 					},
 				}
 			},

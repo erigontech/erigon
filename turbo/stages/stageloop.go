@@ -31,12 +31,12 @@ func NewStagedSync(
 	callTraces stagedsync.CallTracesCfg,
 	txLookup stagedsync.TxLookupCfg,
 	txPool stagedsync.TxPoolCfg,
-	notifier stagedsync.ChainEventNotifier,
+	finish stagedsync.FinishCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool),
+		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
 		stagedsync.ReplacementUnwindOrder(),
-		stagedsync.OptionalParameters{Notifier: notifier},
+		stagedsync.OptionalParameters{},
 	)
 }
 

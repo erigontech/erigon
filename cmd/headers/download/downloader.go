@@ -346,7 +346,7 @@ func NewStagedSync(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool),
-		notifier,
+		stagedsync.StageFinishCfg(db, tmpdir),
 	), nil
 }
 

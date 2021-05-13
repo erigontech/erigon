@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -358,14 +359,15 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.Finish,
 			Build: func(world StageParameters) *Stage {
+				finishCfg := StageFinishCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, world.DB, tx, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, tx, finishCfg, world.btClient, world.SnapshotBuilder)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindFinish(u, s, world.DB, tx)
+						return UnwindFinish(u, s, tx, finishCfg)
 					},
 				}
 			},
@@ -515,14 +517,34 @@ func WithSnapshotsStages() StageBuilders {
 	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
 		ID: stages.CreateHeadersSnapshot,
 		Build: func(world StageParameters) *Stage {
+			headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
 			return &Stage{
 				ID:          stages.CreateHeadersSnapshot,
 				Description: "Create headers snapshot",
 				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnHeadersSnapshotGenerationStage(s, world.DB, tx, world.SnapshotBuilder, world.snapshotsDir, world.btClient, world.QuitCh)
+					return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-					return u.Done(world.DB)
+					useExternalTx := tx != nil
+					if !useExternalTx {
+						var err error
+						tx, err = headersSnapshotGenCfg.db.BeginRw(context.Background())
+						if err != nil {
+							return err
+						}
+						defer tx.Rollback()
+					}
+
+					err := u.Done(tx)
+					if err != nil {
+						return err
+					}
+					if !useExternalTx {
+						if err := tx.Commit(); err != nil {
+							return err
+						}
+					}
+					return nil
 				},
 			}
 		},
@@ -535,10 +557,29 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateBodiesSnapshot,
 				Description: "Create bodies snapshot",
 				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnBodiesSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
+					return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-					return u.Done(world.DB)
+					useExternalTx := tx != nil
+					if !useExternalTx {
+						var err error
+						tx, err = world.DB.RwKV().BeginRw(context.Background())
+						if err != nil {
+							return err
+						}
+						defer tx.Rollback()
+					}
+
+					err := u.Done(tx)
+					if err != nil {
+						return err
+					}
+					if !useExternalTx {
+						if err := tx.Commit(); err != nil {
+							return err
+						}
+					}
+					return nil
 				},
 			}
 		},
@@ -551,7 +592,7 @@ func WithSnapshotsStages() StageBuilders {
 				ID:          stages.CreateStateSnapshot,
 				Description: "Create state snapshot",
 				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnStateSnapshotGenerationStage(s, world.DB, world.snapshotsDir, world.btClient, world.QuitCh)
+					return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
 				},
 				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 					return u.Done(world.DB)

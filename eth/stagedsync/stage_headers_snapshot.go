@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,13 +11,35 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, tx ethdb.RwTx, sm *snapshotsync.SnapshotMigrator, snapshotDir string, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
-	to, err := stages.GetStageProgress(db, stages.Headers)
+type HeadersSnapshotGenCfg struct {
+	db          ethdb.RwKV
+	snapshotDir string
+}
+
+func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapshotGenCfg {
+	return HeadersSnapshotGenCfg{
+		db:          db,
+		snapshotDir: snapshotDir,
+	}
+}
+
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	to, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
 
-	currentSnapshotBlock, err := stages.GetStageProgress(db, stages.CreateHeadersSnapshot)
+	currentSnapshotBlock, err := stages.GetStageProgress(tx, stages.CreateHeadersSnapshot)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
@@ -45,7 +68,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, tx et
 		return nil
 	}
 
-	err = sm.Migrate(db, tx, snapshotBlock, torrentClient)
+	err = sm.Migrate(cfg.db, tx, snapshotBlock, torrentClient)
 	if err != nil {
 		return err
 	}
@@ -55,12 +78,23 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, db ethdb.Database, tx et
 			break
 		default:
 			log.Info("Migrating to new snapshot", "stage", sm.GetStage())
-			err = sm.Migrate(db, tx, snapshotBlock, torrentClient)
+			err = sm.Migrate(cfg.db, tx, snapshotBlock, torrentClient)
 			if err != nil {
 				return err
 			}
 		}
 		time.Sleep(time.Second * 10)
 	}
-	return s.DoneAndUpdate(db, snapshotBlock)
+	err = s.DoneAndUpdate(tx, snapshotBlock)
+	if err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+
 }
