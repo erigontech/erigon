@@ -432,7 +432,8 @@ func RemoveHeadersData(db ethdb.Database, tx ethdb.RwTx, currentSnapshot, newSna
 	}
 
 	snapshotDB := ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
-	c, err := tx.RwCursor(dbutils.HeadersBucket)
+	writeTX := tx.(ethdb.DBTX).DBTX()
+	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)
 	}

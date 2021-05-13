@@ -23,8 +23,11 @@ var (
 
 type SnapshotUpdater interface {
 	UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{})
-	WriteDB() RwKV
 	SnapshotKV(bucket string) RoKV
+}
+
+type WriteDB interface {
+	WriteDB() RwKV
 }
 
 func NewSnapshotKV() snapshotOpts {
