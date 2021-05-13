@@ -24,12 +24,6 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
-
-	Mining(ctx context.Context) (bool, error)
-	GetWork(ctx context.Context) ([4]string, error)
-	SubmitWork(ctx context.Context, nonce types.BlockNonce, hash, digest common.Hash) (bool, error)
-	SubmitHashRate(ctx context.Context, rate hexutil.Uint64, id common.Hash) (bool, error)
-	GetHashRate(ctx context.Context) (uint64, error)
 }
 
 type EthBackend interface {
