@@ -18,7 +18,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 		t.Fatalf("create test db: %v", err)
 	}
 	defer db.Close()
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)

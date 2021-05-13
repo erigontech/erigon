@@ -27,7 +27,7 @@ func TestSendRawTransaction(t *testing.T) {
 	defer conn.Close()
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(context.Background(), nil, txPool, nil)
-	api := NewEthAPI(NewBaseApi(ff), db, nil, txPool, 5000000)
+	api := NewEthAPI(NewBaseApi(ff), db, nil, txPool, nil, 5000000)
 
 	// Call GetTransactionReceipt for un-protected transaction
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

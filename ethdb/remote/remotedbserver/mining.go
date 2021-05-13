@@ -65,11 +65,11 @@ func (s *MiningServer) SubmitHashRate(_ context.Context, req *proto_txpool.Submi
 	return &proto_txpool.SubmitHashRateReply{Ok: ok}, nil
 }
 
-func (s *MiningServer) GetHashRate(_ context.Context, req *proto_txpool.GetHashRateRequest) (*proto_txpool.GetHashRateReply, error) {
+func (s *MiningServer) GetHashRate(_ context.Context, req *proto_txpool.HashRateRequest) (*proto_txpool.HashRateReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	return &proto_txpool.GetHashRateReply{HashRate: s.ethash.GetHashrate()}, nil
+	return &proto_txpool.HashRateReply{HashRate: s.ethash.GetHashrate()}, nil
 }
 
 func (s *MiningServer) Mining(_ context.Context, req *proto_txpool.MiningRequest) (*proto_txpool.MiningReply, error) {

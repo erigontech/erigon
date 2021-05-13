@@ -47,8 +47,8 @@ type MiningClient interface {
 	// It accepts the miner hash rate and an identifier which must be unique
 	// between nodes.
 	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
-	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
-	GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error)
+	// HashRate returns the current hashrate for local CPU miner and remote miner.
+	HashRate(ctx context.Context, in *HashRateRequest, opts ...grpc.CallOption) (*HashRateReply, error)
 	// Mining returns an indication if this node is currently mining and it's mining configuration
 	Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error)
 }
@@ -193,9 +193,9 @@ func (c *miningClient) SubmitHashRate(ctx context.Context, in *SubmitHashRateReq
 	return out, nil
 }
 
-func (c *miningClient) GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error) {
-	out := new(GetHashRateReply)
-	err := c.cc.Invoke(ctx, "/txpool.Mining/GetHashRate", in, out, opts...)
+func (c *miningClient) HashRate(ctx context.Context, in *HashRateRequest, opts ...grpc.CallOption) (*HashRateReply, error) {
+	out := new(HashRateReply)
+	err := c.cc.Invoke(ctx, "/txpool.Mining/HashRate", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +242,8 @@ type MiningServer interface {
 	// It accepts the miner hash rate and an identifier which must be unique
 	// between nodes.
 	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
-	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
-	GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error)
+	// HashRate returns the current hashrate for local CPU miner and remote miner.
+	HashRate(context.Context, *HashRateRequest) (*HashRateReply, error)
 	// Mining returns an indication if this node is currently mining and it's mining configuration
 	Mining(context.Context, *MiningRequest) (*MiningReply, error)
 	mustEmbedUnimplementedMiningServer()
@@ -274,8 +274,8 @@ func (UnimplementedMiningServer) SubmitWork(context.Context, *SubmitWorkRequest)
 func (UnimplementedMiningServer) SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitHashRate not implemented")
 }
-func (UnimplementedMiningServer) GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetHashRate not implemented")
+func (UnimplementedMiningServer) HashRate(context.Context, *HashRateRequest) (*HashRateReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HashRate not implemented")
 }
 func (UnimplementedMiningServer) Mining(context.Context, *MiningRequest) (*MiningReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Mining not implemented")
@@ -428,20 +428,20 @@ func _Mining_SubmitHashRate_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Mining_GetHashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetHashRateRequest)
+func _Mining_HashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HashRateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MiningServer).GetHashRate(ctx, in)
+		return srv.(MiningServer).HashRate(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/txpool.Mining/GetHashRate",
+		FullMethod: "/txpool.Mining/HashRate",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MiningServer).GetHashRate(ctx, req.(*GetHashRateRequest))
+		return srv.(MiningServer).HashRate(ctx, req.(*HashRateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -488,8 +488,8 @@ var Mining_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Mining_SubmitHashRate_Handler,
 		},
 		{
-			MethodName: "GetHashRate",
-			Handler:    _Mining_GetHashRate_Handler,
+			MethodName: "HashRate",
+			Handler:    _Mining_HashRate_Handler,
 		},
 		{
 			MethodName: "Mining",

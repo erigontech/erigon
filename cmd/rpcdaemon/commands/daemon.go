@@ -12,11 +12,11 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(ctx context.Context, db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters)
-	ethImpl := NewEthAPI(base, db, eth, txPool, cfg.Gascap)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	tgImpl := NewTgAPI(base, db)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
