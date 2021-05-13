@@ -34,8 +34,8 @@ type Filters struct {
 	pendingBlock *types.Block
 
 	headsSubs        map[HeadsSubID]chan *types.Header
-	pendingLogsSubs  map[PendingLogsSubID]func(types.Logs)
-	pendingBlockSubs map[PendingBlockSubID]func(*types.Block)
+	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
+	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
@@ -45,8 +45,8 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 	ff := &Filters{
 		headsSubs:        make(map[HeadsSubID]chan *types.Header),
 		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
-		pendingLogsSubs:  make(map[PendingLogsSubID]func(types.Logs)),
-		pendingBlockSubs: make(map[PendingBlockSubID]func(*types.Block)),
+		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
+		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
 	}
 
 	go func() {
@@ -149,7 +149,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 	ff.pendingBlock = b
 
 	for _, v := range ff.pendingBlockSubs {
-		v(b)
+		v <- b
 	}
 }
 
@@ -191,7 +191,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 	for _, v := range ff.pendingLogsSubs {
-		v(l)
+		v <- l
 	}
 }
 
@@ -209,30 +209,32 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) {
 	delete(ff.headsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingLogs(ctx context.Context, f func(types.Logs)) {
+func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := PendingLogsSubID(generateSubscriptionID())
-	ff.pendingLogsSubs[id] = f
-	go func() {
-		<-ctx.Done()
-		ff.mu.Lock()
-		defer ff.mu.Unlock()
-		delete(ff.pendingLogsSubs, id)
-	}()
+	ff.pendingLogsSubs[id] = c
+	return id
 }
 
-func (ff *Filters) SubscribePendingBlock(ctx context.Context, f func(*types.Block)) {
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.pendingLogsSubs, id)
+}
+
+func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := PendingBlockSubID(generateSubscriptionID())
 	ff.pendingBlockSubs[id] = f
-	go func() {
-		<-ctx.Done()
-		ff.mu.Lock()
-		defer ff.mu.Unlock()
-		delete(ff.pendingBlockSubs, id)
-	}()
+	return id
+}
+
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.pendingBlockSubs, id)
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {

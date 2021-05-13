@@ -22,15 +22,21 @@ func TestPendingBlock(t *testing.T) {
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)
-	txsCh := make(chan []types.Transaction, 1)
-	defer close(txsCh)
-	id := api.filters.SubscribePendingTxs(txsCh)
-	defer api.filters.UnsubscribePendingTxs(id)
+	ch := make(chan *types.Block, 1)
+	defer close(ch)
+	id := api.filters.SubscribePendingBlock(ch)
+	defer api.filters.UnsubscribePendingBlock(id)
 
 	api.filters.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
 	block := api.pendingBlock()
 
 	require.Equal(t, block.Number().Uint64(), expect)
+	select {
+	case got := <-ch:
+		require.Equal(t, expect, got.Number().Uint64())
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout waiting for  expected notification")
+	}
 }
 
 func TestPendingLogs(t *testing.T) {
@@ -41,16 +47,17 @@ func TestPendingLogs(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
 	expect := []byte{211}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	api.filters.SubscribePendingLogs(ctx, func(logs types.Logs) {
-		require.Equal(t, expect, logs[0].Data)
-		cancel()
-	})
+	ch := make(chan types.Logs, 1)
+	defer close(ch)
+	id := api.filters.SubscribePendingLogs(ch)
+	defer api.filters.UnsubscribePendingLogs(id)
+
 	b, err := rlp.EncodeToBytes([]*types.Log{{Data: expect}})
 	require.NoError(t, err)
 	api.filters.HandlePendingLogs(&txpool.OnPendingLogsReply{RplLogs: b})
 	select {
-	case <-ctx.Done():
+	case logs := <-ch:
+		require.Equal(t, expect, logs[0].Data)
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("timeout waiting for  expected notification")
 	}
