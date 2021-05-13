@@ -94,11 +94,13 @@ func NotifyNewHeaders2(finishStageBeforeSync, unwindTo uint64, notifier ChainEve
 	}
 	return NotifyNewHeaders(notifyFrom, finishAt, notifier, db)
 }
+
 func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
 	}
+	log.Info("Update current block for the RPC API", "from", from, "to", to)
 	for i := from; i <= to; i++ {
 		header := rawdb.ReadHeaderByNumber(db, i)
 		if header == nil {
