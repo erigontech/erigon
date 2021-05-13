@@ -339,7 +339,20 @@ func runPeer(
 	receiveUploadCh chan<- StreamMsg,
 	receiveTxCh chan<- StreamMsg,
 ) error {
+	printTime := time.Now().Add(time.Minute)
+	peerPrinted := false
+	defer func() {
+		if peerPrinted {
+			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()))
+		}
+	}()
 	for {
+		if !peerPrinted {
+			if time.Now().After(printTime) {
+				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()))
+				peerPrinted = true
+			}
+		}
 		var err error
 		if err = common.Stopped(ctx.Done()); err != nil {
 			return err
