@@ -19,6 +19,7 @@ package downloader
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -496,9 +498,13 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return nil, nil
 	})
 
-	unwindTo, err := d.stagedSyncState.GetUnwindTo(d.stateDB)
+	v, err := d.stateDB.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
 	if err != nil {
 		return err
+	}
+	notifyFrom := finishAtBefore
+	if len(v) > 0 {
+		notifyFrom = binary.BigEndian.Uint64(v)
 	}
 
 	err = d.stagedSyncState.Run(d.stateDB, nil)
@@ -506,7 +512,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return err
 	}
 
-	err = stagedsync.NotifyNewHeaders2(finishAtBefore, unwindTo, d.stagedSync.Notifier, d.stateDB)
+	err = stagedsync.NotifyNewHeaders2(finishAtBefore, notifyFrom, d.stagedSync.Notifier, d.stateDB)
 	if err != nil {
 		return err
 	}
