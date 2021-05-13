@@ -113,7 +113,6 @@ func HeadersForward(
 
 	var peer []byte
 	stopped := false
-	var timer *time.Timer // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 
 	// FIXME: remove this hack
