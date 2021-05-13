@@ -2,12 +2,14 @@ package stages
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -127,6 +129,15 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
+	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
+	if err != nil {
+		return err
+	}
+	notifyFrom := finishProgressBefore
+	if len(v) > 0 {
+		notifyFrom = binary.BigEndian.Uint64(v)
+	}
+
 	unwindTo, err := st.GetUnwindTo(db)
 	if err != nil {
 		return err
@@ -145,7 +156,7 @@ func StageLoopStep(
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
 
-	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, unwindTo, notifier, db)
+	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, notifyFrom, notifier, db)
 	if err != nil {
 		return err
 	}
