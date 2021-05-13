@@ -6,8 +6,6 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
