@@ -137,12 +137,7 @@ func StageLoopStep(
 	if len(v) > 0 {
 		notifyFrom = binary.BigEndian.Uint64(v)
 	}
-
-	unwindTo, err := st.GetUnwindTo(db)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("unwindTo: %d\n", unwindTo)
+	fmt.Printf("unwindTo: %d, %d\n", finishProgressBefore, notifyFrom)
 	err = st.Run(db, tx)
 	if err != nil {
 		return err
