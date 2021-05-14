@@ -118,5 +118,5 @@ func MigrateSnapshot(to uint64, tx ethdb.RwTx, db ethdb.RwKV, btClient *snapshot
 	}
 
 	snBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
-	return mg.Migrate(ethdb.NewObjectDatabase(db), tx, snBlock, btClient)
+	return mg.Migrate(db, tx, snBlock, btClient)
 }
