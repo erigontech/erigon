@@ -70,7 +70,7 @@ func setupTxPool() (*TxPool, *ecdsa.PrivateKey, func()) {
 	diskdb := ethdb.NewMemDatabase()
 
 	key, _ := crypto.GenerateKey()
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
+	txCacher := NewTxSenderCacher(1)
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
 	//nolint:errcheck
 	pool.Start(1000000000, 0)

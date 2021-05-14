@@ -487,7 +487,7 @@ func DefaultUnwindOrder() UnwindOrder {
 		3, 4,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 5,
-		7, 8, 9, 10, 11,
+		7, 8, 9, 10, 11, 13,
 	}
 }
 

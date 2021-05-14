@@ -3,8 +3,9 @@ package stagedsync
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -736,7 +737,7 @@ func TestSnapshotUnwindOrderEqualDefault(t *testing.T) {
 	for _, i := range snUnwindOrder {
 		snUnwindIDs = append(snUnwindIDs, stagesWithSnapshots[len(stagesWithSnapshots)-i-2].ID)
 	}
-	for _, i := range unwindOrder {
+	for _, i := range unwindOrder[:len(unwindOrder)-1] {
 		unwindIDs = append(unwindIDs, defaultStages[len(defaultStages)-i-2].ID)
 	}
 

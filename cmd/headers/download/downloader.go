@@ -319,7 +319,7 @@ func NewStagedSync(
 			controlServer.sendBodyRequest,
 			controlServer.penalize,
 			controlServer.updateHead,
-			controlServer,
+			controlServer.BroadcastNewBlock,
 			bodyDownloadTimeout,
 			*controlServer.chainConfig,
 			batchSize,

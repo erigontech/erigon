@@ -504,7 +504,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}
 	notifyFrom := finishAtBefore
 	if len(v) > 0 {
-		notifyFrom = binary.BigEndian.Uint64(v)
+		n := binary.BigEndian.Uint64(v)
+		if n != 0 {
+			notifyFrom = binary.BigEndian.Uint64(v)
+		}
 	}
 
 	err = d.stagedSyncState.Run(d.stateDB, nil)
