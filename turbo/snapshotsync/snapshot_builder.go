@@ -432,18 +432,24 @@ func RemoveHeadersData(db ethdb.RwKV, tx ethdb.RwTx, currentSnapshot, newSnapsho
 	if headerSnapshot == nil {
 		return nil
 	}
-
-	snapshotDB := ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
 	writeTX := tx.(ethdb.DBTX).DBTX()
 	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)
 	}
-	return snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
-		innerErr := c.Delete(k, nil)
-		if innerErr != nil {
-			return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
+
+	return headerSnapshot.View(context.Background(), func(tx ethdb.Tx) error {
+		c2, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
 		}
-		return true, nil
+		defer c2.Close()
+		return ethdb.Walk(c2, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
+			innerErr := c.Delete(k, nil)
+			if innerErr != nil {
+				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
+			}
+			return true, nil
+		})
 	})
 }
