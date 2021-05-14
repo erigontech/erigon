@@ -128,7 +128,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 				} else if parent != nil {
 					td = new(big.Int).Add(block.Difficulty(), parent)
-					go blockPropagator.BroadcastNewBlock(context.Background(), block, td)
+					go blockPropagator(context.Background(), block, td)
 				} else {
 					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 				}
