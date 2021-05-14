@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"math"
 	"os"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -71,39 +72,42 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		panic(err)
 	}
 	generateChan := make(chan int)
+	StageSyncStep := func() {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		defer tx.Rollback()
+
+		select {
+		case newHeight := <-generateChan:
+			err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
+			if err != nil {
+				t.Error(err)
+				tx.Rollback()
+			}
+			currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
+		default:
+
+		}
+
+		err = sb.Migrate(db, tx, currentSnapshotBlock, btCli)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		time.Sleep(time.Second)
+	}
 	go func() {
 		//this gorutine emulates staged sync.
 		for {
-			tx, err := db.BeginRw(context.Background())
-			if err != nil {
-				t.Error(err)
-			}
-defer tx.Rollback()
-
-			select {
-			case newHeight := <-generateChan:
-				err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
-				if err != nil {
-					t.Error(err)
-					tx.Rollback()
-				}
-				currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
-			default:
-
-			}
-
-			err = sb.Migrate(db, tx, currentSnapshotBlock, btCli)
-			if err != nil {
-				t.Error(err)
-				panic(err)
-			}
-
-			err = tx.Commit()
-			if err != nil {
-				t.Error(err)
-				panic(err)
-			}
-			time.Sleep(time.Second)
+			StageSyncStep()
 		}
 	}()
 
@@ -111,7 +115,7 @@ defer tx.Rollback()
 		time.Sleep(time.Second)
 	}
 
-	sa := db.RwKV().(ethdb.WriteDB)
+	sa := db.(ethdb.WriteDB)
 	rotx, err := sa.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
@@ -132,7 +136,7 @@ defer tx.Rollback()
 		t.Fatal(headerNumber)
 	}
 
-	snodb := ethdb.NewObjectDatabase(db.RwKV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
+	snodb := ethdb.NewObjectDatabase(db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -242,7 +246,7 @@ defer tx.Rollback()
 	}
 
 	headerNumber = 0
-	err = ethdb.NewObjectDatabase(db.RwKV().(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
