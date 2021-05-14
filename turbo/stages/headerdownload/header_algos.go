@@ -193,16 +193,6 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	return nil
 }
 
-func (hd *HeaderDownload) Ready() (bool, uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	return hd.stageReady, hd.stageHeight
-}
-
-func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
-	return hd.stageReadyCh
-}
-
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
@@ -467,6 +457,19 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 		return err
 	}
 	hd.highestInDb, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReadProgressFromDb updates highestInDb field according to the information
+// in the database. It is useful in the situations when transaction was
+// aborted and highestInDb became out-of-sync
+func (hd *HeaderDownload) ReadProgressFromDb(tx ethdb.RwTx) (err error) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}

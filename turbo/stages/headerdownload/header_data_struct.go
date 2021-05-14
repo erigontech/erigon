@@ -178,9 +178,6 @@ type HeaderDownload struct {
 	engine             consensus.Engine
 	headerReader       consensus.ChainHeaderReader
 	highestInDb        uint64 // Height of the highest block header in the database
-	stageReady         bool
-	stageReadyCh       chan struct{}
-	stageHeight        uint64
 	topSeenHeight      uint64
 	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -212,7 +209,6 @@ func NewHeaderDownload(
 		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
-		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},

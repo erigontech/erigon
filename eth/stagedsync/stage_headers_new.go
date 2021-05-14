@@ -69,10 +69,10 @@ func HeadersForward(
 		}
 		defer tx.Rollback()
 	}
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
+	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
+	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
 	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
