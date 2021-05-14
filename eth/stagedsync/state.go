@@ -17,9 +17,9 @@ type State struct {
 	unwindOrder  []*Stage
 	currentStage uint
 
-	beforeStageRun    map[string]func() error
-	onBeforeUnwind    func(stages.SyncStage) error
-	beforeStageUnwind map[string]func() error
+	beforeStageRun    map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)
+	onBeforeUnwind    func(stages.SyncStage, ethdb.RwTx) (ethdb.RwTx, error)
+	beforeStageUnwind map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)
 }
 
 func (s *State) Len() int {
@@ -72,17 +72,21 @@ func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 	return state.BlockNumber, err
 }
 
-func (s *State) UnwindTo(blockNumber uint64, r ethdb.KVGetter, w ethdb.Putter) error {
+func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb) error {
 	log.Info("UnwindTo", "block", blockNumber)
 	for _, stage := range s.unwindOrder {
 		if stage.Disabled {
 			continue
 		}
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, r, w); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, tx); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *State) GetUnwindTo(db ethdb.KVGetter) (uint64, error) {
+	return stages.GetStageUnwind(db, stages.Finish)
 }
 
 func (s *State) IsDone() bool {
@@ -124,8 +128,8 @@ func NewState(stagesList []*Stage) *State {
 		stages:            stagesList,
 		currentStage:      0,
 		unwindStack:       NewPersistentUnwindStack(),
-		beforeStageRun:    make(map[string]func() error),
-		beforeStageUnwind: make(map[string]func() error),
+		beforeStageRun:    make(map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)),
+		beforeStageUnwind: make(map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)),
 	}
 }
 
@@ -146,7 +150,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
+func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
@@ -155,12 +159,16 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 					return err
 				}
 				if s.onBeforeUnwind != nil {
-					if err := s.onBeforeUnwind(unwind.Stage); err != nil {
+					var err error
+					tx, err = s.onBeforeUnwind(unwind.Stage, tx)
+					if err != nil {
 						return err
 					}
 				}
 				if hook, ok := s.beforeStageUnwind[string(unwind.Stage)]; ok {
-					if err := hook(); err != nil {
+					var err error
+					tx, err = hook(tx)
+					if err != nil {
 						return err
 					}
 				}
@@ -177,7 +185,9 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 
 		_, stage := s.CurrentStage()
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
-			if err := hook(); err != nil {
+			var err error
+			tx, err = hook(tx)
+			if err != nil {
 				return err
 			}
 		}
@@ -213,8 +223,8 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.KVGetter) error {
-	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.RwTx) error {
+	if tx != nil {
 		db = tx
 	}
 	stageState, err := s.StageState(stage.ID, db)
@@ -224,7 +234,7 @@ func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.KVGetter) err
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	if err = stage.ExecFunc(stageState, s); err != nil {
+	if err = stage.ExecFunc(stageState, s, tx); err != nil {
 		return err
 	}
 
@@ -234,10 +244,7 @@ func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.KVGetter) err
 	return nil
 }
 
-func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
-	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		db = tx
-	}
+func (s *State) UnwindStage(unwind *UnwindState, db TxOrDb, tx ethdb.RwTx) error {
 	start := time.Now()
 	log.Info("Unwinding...", "stage", string(unwind.Stage))
 	stage, err := s.StageByID(unwind.Stage)
@@ -247,7 +254,9 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	if stage.UnwindFunc == nil {
 		return nil
 	}
-
+	if tx != nil {
+		db = tx
+	}
 	stageState, err := s.StageState(unwind.Stage, db)
 	if err != nil {
 		return err
@@ -260,7 +269,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 		return nil
 	}
 
-	err = stage.UnwindFunc(unwind, stageState)
+	err = stage.UnwindFunc(unwind, stageState, tx)
 	if err != nil {
 		return err
 	}
@@ -307,14 +316,14 @@ func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	}
 }
 
-func (s *State) BeforeStageRun(id stages.SyncStage, f func() error) {
+func (s *State) BeforeStageRun(id stages.SyncStage, f func(tx ethdb.RwTx) (ethdb.RwTx, error)) {
 	s.beforeStageRun[string(id)] = f
 }
 
-func (s *State) BeforeStageUnwind(id stages.SyncStage, f func() error) {
+func (s *State) BeforeStageUnwind(id stages.SyncStage, f func(tx ethdb.RwTx) (ethdb.RwTx, error)) {
 	s.beforeStageUnwind[string(id)] = f
 }
 
-func (s *State) OnBeforeUnwind(f func(id stages.SyncStage) error) {
+func (s *State) OnBeforeUnwind(f func(id stages.SyncStage, tx ethdb.RwTx) (ethdb.RwTx, error)) {
 	s.onBeforeUnwind = f
 }

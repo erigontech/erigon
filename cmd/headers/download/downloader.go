@@ -129,7 +129,6 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		controlServer,
 		tmpdir,
 		nil,
-		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -141,6 +140,7 @@ func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chai
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
+		remotedbserver.NewEvents(),
 	)
 	return nil
 }
@@ -247,7 +247,6 @@ func Combined(datadir string, natSetting string, port int, staticPeers []string,
 		controlServer,
 		tmpdir,
 		nil,
-		remotedbserver.NewEvents(),
 	)
 	if err != nil {
 		return err
@@ -262,18 +261,20 @@ func Combined(datadir string, natSetting string, port int, staticPeers []string,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
+		remotedbserver.NewEvents(),
 	)
 	return nil
 }
 
 //Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl) {
+func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier) {
 	stages.StageLoop(
 		ctx,
 		db,
 		sync,
 		controlServer.hd,
 		controlServer.chainConfig,
+		notifier,
 	)
 }
 
@@ -295,7 +296,6 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	notifier stagedsync.ChainEventNotifier,
 ) (*stagedsync.StagedSync, error) {
 	var increment uint64
 	if sm.Pruning {
@@ -346,7 +346,7 @@ func NewStagedSync(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool),
-		notifier,
+		stagedsync.StageFinishCfg(db, tmpdir),
 	), nil
 }
 

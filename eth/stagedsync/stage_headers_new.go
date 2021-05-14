@@ -113,7 +113,6 @@ func HeadersForward(
 
 	var peer []byte
 	stopped := false
-	var timer *time.Timer // Check periodically even in the absence of incoming messages
 	prevProgress := headerProgress
 
 	// FIXME: remove this hack
@@ -199,7 +198,7 @@ func HeadersForward(
 		if initialCycle && inSync {
 			break
 		}
-		timer = time.NewTimer(1 * time.Second)
+		timer := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			stopped = true
@@ -220,7 +219,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch, batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {

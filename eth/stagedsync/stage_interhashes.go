@@ -90,7 +90,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 		}
 	} else if to > s.BlockNumber {
 		log.Warn("Unwinding due to error", "to", s.BlockNumber, "err", err)
-		if err1 := u.UnwindTo(s.BlockNumber, tx, tx); err1 != nil {
+		if err1 := u.UnwindTo(s.BlockNumber, tx); err1 != nil {
 			return trie.EmptyRoot, err1
 		}
 	} else {

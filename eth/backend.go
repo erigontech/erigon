@@ -381,7 +381,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.downloadServer,
 			tmpdir,
 			eth.txPool,
-			eth.events,
 		)
 		if err != nil {
 			return nil, err
@@ -713,20 +712,19 @@ func (s *Ethereum) miningLoop(newTransactions chan core.NewTxsEvent, sub event.S
 }
 
 func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
+	sealCancel := make(chan struct{})
 	tx, err := s.chainKV.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	txdb := ethdb.NewRwTxDb(tx)
-	sealCancel := make(chan struct{})
 	miningState, err := mining.Prepare(
 		nil,
 		s.chainConfig,
 		s.engine,
 		&vm.Config{},
 		nil,
-		txdb,
+		tx,
 		"",
 		ethdb.DefaultStorageMode,
 		tmpdir,
@@ -740,7 +738,7 @@ func (s *Ethereum) miningStep(resultCh chan *types.Block, mining *stagedsync.Sta
 	if err != nil {
 		return err
 	}
-	if err = miningState.Run(txdb, txdb); err != nil {
+	if err = miningState.Run(nil, tx); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -796,7 +794,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
-		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer)
+		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events)
 	} else {
 		// Start the networking layer and the light server if requested
 		s.handler.Start(maxPeers)
