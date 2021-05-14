@@ -85,3 +85,28 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit 
 	}
 	return nil
 }
+
+func UnwindBlockHashStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	err := u.Done(tx)
+	logPrefix := s.state.LogPrefix()
+	if err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}

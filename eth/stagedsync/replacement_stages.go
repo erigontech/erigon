@@ -49,7 +49,8 @@ func ReplacementStages(ctx context.Context,
 						return SpawnBlockHashStage(s, tx, blockHashCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return u.Done(tx)
+						blockHashCfg := StageBlockHashesCfg(world.DB.RwKV(), world.TmpDir)
+						return UnwindBlockHashStage(u, s, tx, blockHashCfg)
 					},
 				}
 			},
@@ -64,7 +65,7 @@ func ReplacementStages(ctx context.Context,
 						return BodiesForward(s, ctx, tx, bodies)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return u.Done(tx)
+						return UnwindBodiesStage(u, s, tx, bodies)
 					},
 				}
 			},
@@ -260,5 +261,6 @@ func ReplacementUnwindOrder() UnwindOrder {
 		9,  // log index
 		10, // call traces
 		11, // tx lookup
+		13,
 	}
 }

@@ -135,7 +135,10 @@ func StageLoopStep(
 	}
 	notifyFrom := finishProgressBefore
 	if len(v) > 0 {
-		notifyFrom = binary.BigEndian.Uint64(v)
+		n := binary.BigEndian.Uint64(v)
+		if n != 0 {
+			notifyFrom = n
+		}
 	}
 	err = st.Run(db, tx)
 	if err != nil {
