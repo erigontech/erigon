@@ -84,7 +84,6 @@ func TestSnapshotMigratorStage(t *testing.T) {
 			err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
 			if err != nil {
 				t.Error(err)
-				tx.Rollback()
 			}
 			currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
 		default:
