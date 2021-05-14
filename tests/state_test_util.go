@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -185,14 +186,12 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, writeBlockNr)
 
-	_, tds, err := MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
-	//_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	statedb := state.New(state.NewDbStateReader(tx))
-	tds.StartNewBuffer()
-	w := state.NewDbStateWriter(tx, readBlockNr+1)
+	w := state.NewDbStateWriter(tx, writeBlockNr)
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
@@ -215,7 +214,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	}
 
 	// Commit block
-	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+	if err = statedb.FinalizeTx(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
@@ -225,19 +224,18 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+	if err = statedb.FinalizeTx(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	if err = statedb.CommitBlock(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
 
-	roots, err := tds.ComputeTrieRoots()
+	root, err := trie.CalcRoot("", tx)
 	if err != nil {
 		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
 
-	root := roots[len(roots)-1]
 	return statedb, root, nil
 }
 
@@ -287,11 +285,15 @@ func MakePreState2(ctx context.Context, db ethdb.Database, accounts core.Genesis
 			val := uint256.NewInt().SetBytes(v.Bytes())
 			statedb.SetState(addr, &key, *val)
 		}
+
+		if len(a.Code) > 0 || len(a.Storage) > 0 {
+			statedb.SetIncarnation(addr, 1)
+		}
 	}
 	// Commit and re-open to start with a clean state.
-	//if err := statedb.FinalizeTx(ctx, state.NewNoopWriter()); err != nil {
-	//	return nil, err
-	//}
+	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+		return nil, err
+	}
 	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		return nil, err
 	}
