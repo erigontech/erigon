@@ -64,14 +64,8 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
 
 }
 func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.RwKV, toBlock uint64, snapshotPath string) error {
-	tx, err := chainDB.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	// remove created snapshot if it's not saved in main db(to avoid append error)
-	err = os.RemoveAll(snapshotPath)
+	err := os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
@@ -89,6 +83,12 @@ func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.RwKV, toBlock uint
 		return fmt.Errorf("begin err: %w", err)
 	}
 	defer sntx.Rollback()
+
+	tx, err := chainDB.BeginRo(context.Background())
+	if err != nil {
+		return fmt.Errorf("begin err: %w", err)
+	}
+	defer tx.Rollback()
 	err = GenerateHeadersSnapshot(ctx, tx, sntx, toBlock)
 	if err != nil {
 		return fmt.Errorf("generate err: %w", err)
@@ -102,7 +102,7 @@ func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.RwKV, toBlock uint
 	return nil
 }
 
-func GenerateHeadersSnapshot(ctx context.Context, tx ethdb.Tx, sntx ethdb.RwTx, toBlock uint64) error {
+func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, toBlock uint64) error {
 	headerCursor, err := sntx.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return err
@@ -121,11 +121,11 @@ func GenerateHeadersSnapshot(ctx context.Context, tx ethdb.Tx, sntx ethdb.RwTx, 
 			log.Info("Headers snapshot generation", "t", time.Since(tt), "block", i)
 		default:
 		}
-		hash, err = rawdb.ReadCanonicalHash(tx, i)
+		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
 			return err
 		}
-		header = rawdb.ReadHeaderRLP(tx, hash, i)
+		header = rawdb.ReadHeaderRLP(db, hash, i)
 		if len(header) < 2 {
 			return fmt.Errorf("header %d is empty, %v", i, header)
 		}
@@ -316,13 +316,25 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.RwKV, tx ethdb.RwTx, toBlock uint64
 		}()
 
 	case StagePruneDB:
+		var wtx ethdb.RwTx
+		var err error
 		tt := time.Now()
-		err := sm.RemoveHeadersData(db, tx)
+		log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", sm.HeadersNewSnapshot)
+		if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			wtx = tx.(ethdb.HasTx).Tx().(ethdb.DBTX).DBTX()
+		} else if wtx1, ok := tx.(ethdb.RwTx); ok {
+			wtx = wtx1
+		} else {
+			log.Error("Incorrect db type", "type", tx)
+			return nil
+		}
+
+		err = sm.RemoveHeadersData(db, wtx)
 		if err != nil {
 			log.Error("Remove headers data", "err", err)
 			return err
 		}
-		c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
+		c, err := wtx.RwCursor(dbutils.BittorrentInfoBucket)
 		if err != nil {
 			return err
 		}
@@ -387,6 +399,9 @@ func (sm *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.RwKV, snapshotP
 		log.Error("snapshot path is empty")
 		return errors.New("snapshot path is empty")
 	}
+	if _, ok := chainDB.(ethdb.SnapshotUpdater); !ok {
+		return errors.New("db don't implement snapshotUpdater interface")
+	}
 	snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
 	if err != nil {
 		return err
@@ -418,23 +433,17 @@ func RemoveHeadersData(db ethdb.RwKV, tx ethdb.RwTx, currentSnapshot, newSnapsho
 		return nil
 	}
 
-	cForDelete, err := tx.RwCursor(dbutils.HeadersBucket)
+	snapshotDB := ethdb.NewObjectDatabase(headerSnapshot.(ethdb.RwKV))
+	writeTX := tx.(ethdb.DBTX).DBTX()
+	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)
 	}
-	return headerSnapshot.View(context.Background(), func(snTx ethdb.Tx) error {
-		snapshotCursor, err := snTx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return fmt.Errorf("get headers cursor %w", err)
+	return snapshotDB.Walk(dbutils.HeadersBucket, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
+		innerErr := c.Delete(k, nil)
+		if innerErr != nil {
+			return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
 		}
-		defer snapshotCursor.Close()
-
-		return ethdb.Walk(snapshotCursor, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
-			innerErr := cForDelete.Delete(k, nil)
-			if innerErr != nil {
-				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
-			}
-			return true, nil
-		})
+		return true, nil
 	})
 }
