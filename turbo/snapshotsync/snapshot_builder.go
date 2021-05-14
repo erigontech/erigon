@@ -444,6 +444,7 @@ func RemoveHeadersData(db ethdb.RwKV, tx ethdb.RwTx, currentSnapshot, newSnapsho
 			return err
 		}
 		defer c2.Close()
+		defer c2.Close()
 		return ethdb.Walk(c2, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
 			innerErr := c.Delete(k, nil)
 			if innerErr != nil {
