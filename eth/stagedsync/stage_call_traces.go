@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -131,7 +130,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			m, ok := tos[mapKey]
 			if !ok {
 				m = roaring64.New()
-				froms[mapKey] = m
+				tos[mapKey] = m
 			}
 			m.Add(blockNum)
 		}
@@ -184,9 +183,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 }
 
 func finaliseCallTraces(froms, tos map[string]*roaring64.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
-	var currentBitmap = roaring.New()
+	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if _, err := currentBitmap.ReadFrom(bytes.NewReader(v)); err != nil {
+			return err
+		}
 		lastChunkKey := make([]byte, len(k)+4)
 		copy(lastChunkKey, k)
 		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
@@ -195,19 +197,16 @@ func finaliseCallTraces(froms, tos map[string]*roaring64.Bitmap, collectorFrom, 
 			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 
-		lastChunk := roaring.New()
+		lastChunk := roaring64.New()
 		if len(lastChunkBytes) > 0 {
-			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 		}
 
-		if _, err := currentBitmap.FromBuffer(v); err != nil {
-			return err
-		}
 		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
-		if err := bitmapdb.WalkChunkWithKeys(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+		if err := bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err
