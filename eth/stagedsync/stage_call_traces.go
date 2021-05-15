@@ -130,7 +130,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			m, ok := tos[mapKey]
 			if !ok {
 				m = roaring64.New()
-				froms[mapKey] = m
+				tos[mapKey] = m
 			}
 			m.Add(blockNum)
 		}
