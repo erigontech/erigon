@@ -1,4 +1,4 @@
-package download
+package stagedsync
 
 import (
 	"context"
@@ -20,18 +20,24 @@ import (
 )
 
 type TxPoolServer struct {
+	ctx       context.Context
 	sentries  []proto_sentry.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
+		ctx:      ctx,
 		sentries: sentries,
 		txPool:   txPool,
 	}
 
 	return cs, nil
+}
+
+func (tp *TxPoolServer) Start() {
+	go RecvTxMessage(tp.ctx, tp.sentries[0], tp.HandleInboundMessage)
 }
 
 func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {

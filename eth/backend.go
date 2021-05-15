@@ -108,7 +108,7 @@ type Ethereum struct {
 	downloadV2Cancel context.CancelFunc
 	downloadServer   *download.ControlServerImpl
 	sentryServer     *download.SentryServerImpl
-	txPoolServer     *download.TxPoolServer
+	txPoolServer     *stagedsync.TxPoolServer
 	sentries         []proto_sentry.SentryClient
 	stagedSync2      *stagedsync.StagedSync
 }
@@ -357,7 +357,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err = download.SetSentryStatus(eth.downloadV2Ctx, eth.sentries, eth.downloadServer); err != nil {
 			return nil, err
 		}
-		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
+		eth.txPoolServer, err = stagedsync.NewTxPoolServer(eth.downloadV2Ctx, eth.sentries, eth.txPool)
 		if err != nil {
 			return nil, err
 		}
@@ -368,8 +368,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 
 		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
-		eth.txPoolServer.TxFetcher.Start()
-		eth.txPool.Start(0, 0)           // Start tx pool to avoid deadlocks in the initial stages (before TxPool stage starts working)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 		eth.stagedSync2, err = download.NewStagedSync(
@@ -381,6 +379,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			eth.downloadServer,
 			tmpdir,
 			eth.txPool,
+			eth.txPoolServer,
 		)
 		if err != nil {
 			return nil, err
@@ -474,94 +473,9 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) vm.Config {
 	return vmConfig
 }
 
-// func makeExtraData(extra []byte) []byte {
-// 	if len(extra) == 0 {
-// 		// create default extradata
-// 		extra, _ = rlp.EncodeToBytes([]interface{}{
-// 			uint(params.VersionMajor<<16 | params.VersionMinor<<8 | params.VersionMicro),
-// 			"turbo-geth",
-// 			runtime.GOOS,
-// 		})
-// 	}
-// 	if uint64(len(extra)) > params.MaximumExtraDataSize {
-// 		log.Warn("Miner extra data exceed limit", "extra", hexutil.Bytes(extra), "limit", params.MaximumExtraDataSize)
-// 		extra = nil
-// 	}
-// 	return extra
-// }
-
 func (s *Ethereum) APIs() []rpc.API {
 	return []rpc.API{}
 }
-
-/*
-// APIs return the collection of RPC services the ethereum package offers.
-// NOTE, some of these services probably need to be moved to somewhere else.
-func (s *Ethereum) APIs() []rpc.API {
-	if s.APIBackend == nil {
-		return []rpc.API{}
-	}
-	apis := ethapi.GetAPIs(s.APIBackend)
-
-	// Append any APIs exposed explicitly by the consensus engine
-	//apis = append(apis, s.engine.APIs(s.BlockChain())...)
-
-	// Append all the local APIs and return
-	return append(apis, []rpc.API{
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   NewPublicEthereumAPI(s),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   NewPublicMinerAPI(s),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   downloader.NewPublicDownloaderAPI(s.handler.downloader, s.eventMux),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "miner",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateMinerAPI(s),
-		//	Public:    false,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   filters.NewPublicFilterAPI(s.APIBackend, 5*time.Minute),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "admin",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateAdminAPI(s),
-		//},
-		//{
-		//	Namespace: "debug",
-		//	Version:   "1.0",
-		//	Service:   NewPublicDebugAPI(s),
-		//	Public:    true,
-		//}, {
-		//	Namespace: "debug",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateDebugAPI(s),
-		//},
-		{
-			Namespace: "net",
-			Version:   "1.0",
-			Service:   s.netRPCService,
-			Public:    true,
-		},
-	}...)
-}
-*/
 
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
@@ -793,7 +707,6 @@ func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
 		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events)
 	} else {
 		// Start the networking layer and the light server if requested

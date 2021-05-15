@@ -15,14 +15,18 @@ import (
 )
 
 type TxPoolCfg struct {
-	db   ethdb.RwKV
-	pool *core.TxPool
+	db           ethdb.RwKV
+	pool         *core.TxPool
+	v2           bool
+	txPoolServer *TxPoolServer
 }
 
-func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool) TxPoolCfg {
+func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool, v2 bool, txPoolServer *TxPoolServer) TxPoolCfg {
 	return TxPoolCfg{
-		db:   db,
-		pool: pool,
+		db:           db,
+		pool:         pool,
+		v2:           v2,
+		txPoolServer: txPoolServer,
 	}
 }
 
@@ -56,8 +60,14 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan stru
 			return err
 		}
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
+		if cfg.v2 {
+			cfg.txPoolServer.TxFetcher.Start()
+		}
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
+		}
+		if cfg.v2 {
+			cfg.txPoolServer.Start()
 		}
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {

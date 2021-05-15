@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -54,95 +53,6 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
 	return proto_sentry.NewSentryClient(conn), nil
-}
-
-// Download creates and starts standalone downloader
-func Download(sentryAddrs []string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
-	ctx := rootContext()
-
-	log.Info("Starting Sentry client", "connecting to sentry", sentryAddrs)
-	sentries := make([]proto_sentry.SentryClient, len(sentryAddrs))
-	for i, addr := range sentryAddrs {
-		sentry, err := GrpcSentryClient(ctx, addr)
-		if err != nil {
-			return err
-		}
-		sentries[i] = sentry
-	}
-
-	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	controlServer, err1 := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
-	if err1 != nil {
-		return fmt.Errorf("create core P2P server: %w", err1)
-	}
-
-	// TODO: Make a reconnection loop
-	statusMsg := makeStatusData(controlServer)
-
-	for _, sentry := range sentries {
-		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("setting initial status message: %w", err)
-		}
-	}
-
-	for _, sentry := range sentries {
-		go func(sentry proto_sentry.SentryClient) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
-				// Wait before trying to reconnect to prevent log flooding
-				time.Sleep(2 * time.Second)
-			}
-		}(sentry)
-	}
-	for _, sentry := range sentries {
-		go func(sentry proto_sentry.SentryClient) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
-				// Wait before trying to reconnect to prevent log flooding
-				time.Sleep(2 * time.Second)
-			}
-		}(sentry)
-	}
-
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		return err
-	}
-
-	batchSize := 512 * datasize.MB
-	sync, err := NewStagedSync(
-		ctx,
-		db.(ethdb.HasRwKV).RwKV(),
-		sm,
-		batchSize,
-		timeout,
-		controlServer,
-		tmpdir,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	stages.StageLoop(
-		ctx,
-		db,
-		sync,
-		controlServer.hd,
-		controlServer.chainConfig,
-		remotedbserver.NewEvents(),
-	)
-	return nil
 }
 
 func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
@@ -201,71 +111,6 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 	}
 }
 
-// Combined creates and starts sentry and downloader in the same process
-func Combined(datadir string, natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int, chain string, nodeName string, tmpdir string) error {
-	ctx := rootContext()
-
-	sentryServer := NewSentryServer(ctx, datadir)
-	sentry := &SentryClientDirect{}
-	sentry.SetServer(sentryServer)
-	chainConfig, genesisHash, engine, networkID := cfg(db, chain)
-	sentries := []proto_sentry.SentryClient{sentry}
-	controlServer, err := NewControlServer(db, nodeName, chainConfig, genesisHash, engine, networkID, sentries, window)
-	if err != nil {
-		return fmt.Errorf("create core P2P server: %w", err)
-	}
-
-	var readNodeInfo = func() *eth.NodeInfo {
-		var res *eth.NodeInfo
-		_ = db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-			res = eth.ReadNodeInfo(db, controlServer.chainConfig, controlServer.genesisHash, controlServer.networkId)
-			return nil
-		})
-		return res
-	}
-
-	sentryServer.P2pServer, err = p2pServer(ctx, datadir, sentryServer.nodeName, readNodeInfo, sentryServer, natSetting, port, staticPeers, discovery, netRestrict, controlServer.genesisHash)
-	if err != nil {
-		return err
-	}
-
-	if err = SetSentryStatus(ctx, sentries, controlServer); err != nil {
-		log.Error("failed to set sentry status", "error", err)
-		return nil
-	}
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		return err
-	}
-	batchSize := 512 * datasize.MB
-	sync, err := NewStagedSync(
-		ctx,
-		db.(ethdb.HasRwKV).RwKV(),
-		sm,
-		batchSize,
-		timeout,
-		controlServer,
-		tmpdir,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	go RecvMessage(ctx, sentry, controlServer.HandleInboundMessage)
-	go RecvUploadMessage(ctx, sentry, controlServer.HandleInboundMessage)
-
-	stages.StageLoop(
-		ctx,
-		db,
-		sync,
-		controlServer.hd,
-		controlServer.chainConfig,
-		remotedbserver.NewEvents(),
-	)
-	return nil
-}
-
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier) {
 	stages.StageLoop(
@@ -296,6 +141,7 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
+	txPoolServer *stagedsync.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
 	var increment uint64
 	if sm.Pruning {
@@ -345,7 +191,7 @@ func NewStagedSync(
 		stagedsync.StageLogIndexCfg(db, tmpdir),
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool),
+		stagedsync.StageTxPoolCfg(db, txPool, true /* v2 */, txPoolServer),
 		stagedsync.StageFinishCfg(db, tmpdir),
 	), nil
 }
