@@ -141,7 +141,7 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	txPoolServer *stagedsync.TxPoolServer,
+	txPoolServer *eth.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
 	var increment uint64
 	if sm.Pruning {
@@ -191,7 +191,10 @@ func NewStagedSync(
 		stagedsync.StageLogIndexCfg(db, tmpdir),
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool, true /* v2 */, txPoolServer),
+		stagedsync.StageTxPoolCfg(db, txPool, func() {
+			txPoolServer.Start()
+			txPoolServer.TxFetcher.Start()
+		}),
 		stagedsync.StageFinishCfg(db, tmpdir),
 	), nil
 }

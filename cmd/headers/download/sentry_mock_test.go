@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
@@ -96,7 +97,7 @@ func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 	txSentryClient := &SentryClientDirect{}
 	txSentry := &MockSentry{}
 	txSentryClient.SetServer(txSentry)
-	txPoolServer, err := stagedsync.NewTxPoolServer(ctx, []sentry.SentryClient{txSentryClient}, txPool)
+	txPoolServer, err := eth.NewTxPoolServer(ctx, []sentry.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,10 @@ func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 		stagedsync.StageLogIndexCfg(db, tmpdir),
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, chainConfig, engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool, true /* v2 */, txPoolServer),
+		stagedsync.StageTxPoolCfg(db, txPool, func() {
+			txPoolServer.Start()
+			txPoolServer.TxFetcher.Start()
+		}),
 		stagedsync.StageFinishCfg(db, tmpdir),
 	)
 }
