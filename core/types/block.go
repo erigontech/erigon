@@ -536,6 +536,14 @@ type Body struct {
 	Uncles       []*Header
 }
 
+// RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
+// It is useful in the situations when actual transaction context is not important, for example
+// when downloading Block bodies from other peers or serving them to other peers
+type RawBody struct {
+	Transactions [][]byte
+	Uncles       []*Header
+}
+
 type BodyForStorage struct {
 	BaseTxId uint64
 	TxAmount uint32
@@ -603,6 +611,112 @@ func (b *Body) SendersFromTxs() []common.Address {
 		}
 	}
 	return senders
+}
+
+func (rb RawBody) EncodingSize() int {
+	payloadSize, _, _ := rb.payloadSize()
+	return payloadSize
+}
+
+func (rb RawBody) payloadSize() (payloadSize int, txsLen, unclesLen int) {
+	// size of Transactions
+	payloadSize++
+	for _, tx := range rb.Transactions {
+		txsLen++
+		var txLen = len(tx)
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	payloadSize += txsLen
+	// size of Uncles
+	payloadSize++
+	for _, uncle := range rb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (rb RawBody) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := rb.payloadSize()
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range rb.Transactions {
+		if _, err := w.Write(tx); err != nil {
+			return nil
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range rb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx Transaction
+	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+		bb.Transactions = append(bb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Uncles = append(bb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 func (bb Body) EncodingSize() int {
