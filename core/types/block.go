@@ -687,9 +687,9 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx Transaction
-	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
-		bb.Transactions = append(bb.Transactions, tx)
+	var tx []byte
+	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
+		rb.Transactions = append(rb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -707,7 +707,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		if err = uncle.DecodeRLP(s); err != nil {
 			break
 		}
-		bb.Uncles = append(bb.Uncles, &uncle)
+		rb.Uncles = append(rb.Uncles, &uncle)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -1114,6 +1114,20 @@ func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles}
 	bd.SendersFromTxs()
 	return bd
+}
+
+// RawBody creates a RawBody based on the block. It is not very efficient, so
+// will probably be removed in favour of RawBlock. Also it panics
+func (b *Block) RawBody() *RawBody {
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles}
+	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
