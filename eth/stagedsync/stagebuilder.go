@@ -343,7 +343,7 @@ func DefaultStages() StageBuilders {
 		{
 			ID: stages.TxPool,
 			Build: func(world StageParameters) *Stage {
-				txPoolCfg := StageTxPoolCfg(world.DB.RwKV(), world.txPool)
+				txPoolCfg := StageTxPoolCfg(world.DB.RwKV(), world.txPool, nil /* startFunc */)
 				return &Stage{
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",

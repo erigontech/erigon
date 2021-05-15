@@ -108,7 +108,7 @@ type Ethereum struct {
 	downloadV2Cancel context.CancelFunc
 	downloadServer   *download.ControlServerImpl
 	sentryServer     *download.SentryServerImpl
-	txPoolServer     *download.TxPoolServer
+	txPoolServer     *eth.TxPoolServer
 	sentries         []proto_sentry.SentryClient
 	stagedSync2      *stagedsync.StagedSync
 }
@@ -169,7 +169,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	eth := &Ethereum{
+	backend := &Ethereum{
 		config:        config,
 		chainDB:       chainDb,
 		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
@@ -180,7 +180,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		chainConfig:   chainConfig,
 		genesisHash:   genesisHash,
 	}
-	eth.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
+	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	var consensusConfig interface{}
 
@@ -190,7 +190,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		consensusConfig = &config.Ethash
 	}
 
-	eth.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
@@ -210,9 +210,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	if sm.Pruning && !eth.config.EnableDownloadV2 {
+	if sm.Pruning && !backend.config.EnableDownloadV2 {
 		log.Info("Pruning is on, switching to new downloader")
-		eth.config.EnableDownloadV2 = true
+		backend.config.EnableDownloadV2 = true
 	}
 
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
@@ -226,12 +226,12 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	stagedSync := config.StagedSync
 
 	// setting notifier to support streaming events to rpc daemon
-	eth.events = remotedbserver.NewEvents()
+	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
@@ -247,14 +247,14 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
 		if config.SnapshotLayout {
-			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: eth.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
+			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: backend.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
 		} else {
-			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: eth.events})
+			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: backend.events})
 		}
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
-			stagedSync.Notifier = eth.events
+			stagedSync.Notifier = backend.events
 		}
 		if config.SnapshotLayout {
 			stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
@@ -265,7 +265,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
-	if casted, ok := eth.engine.(*ethash.Ethash); ok {
+	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	if stack.Config().PrivateApiAddr != "" {
@@ -301,29 +301,29 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
-				eth,
-				eth.txPool,
+				backend,
+				backend.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
 				&creds,
-				eth.events,
+				backend.events,
 				gitCommit)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = remotedbserver.StartGrpc(
 				chainDb.(ethdb.HasRwKV).RwKV(),
-				eth,
-				eth.txPool,
+				backend,
+				backend.txPool,
 				ethashApi,
 				stack.Config().PrivateApiAddr,
 				stack.Config().PrivateApiRateLimit,
 				nil,
-				eth.events,
+				backend.events,
 				gitCommit)
 			if err != nil {
 				return nil, err
@@ -332,55 +332,54 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	checkpoint := config.Checkpoint
-	if eth.config.EnableDownloadV2 {
-		eth.downloadV2Ctx, eth.downloadV2Cancel = context.WithCancel(context.Background())
+	if backend.config.EnableDownloadV2 {
+		backend.downloadV2Ctx, backend.downloadV2Cancel = context.WithCancel(context.Background())
 		if len(stack.Config().P2P.SentryAddr) > 0 {
 			for _, addr := range stack.Config().P2P.SentryAddr {
-				sentry, err := download.GrpcSentryClient(eth.downloadV2Ctx, addr)
+				sentry, err := download.GrpcSentryClient(backend.downloadV2Ctx, addr)
 				if err != nil {
 					return nil, err
 				}
-				eth.sentries = append(eth.sentries, sentry)
+				backend.sentries = append(backend.sentries, sentry)
 			}
 		} else {
-			eth.sentryServer = download.NewSentryServer(eth.downloadV2Ctx, stack.Config().DataDir)
+			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir)
 			sentry := &download.SentryClientDirect{}
-			eth.sentryServer.P2pServer = eth.p2pServer
-			sentry.SetServer(eth.sentryServer)
-			eth.sentries = []proto_sentry.SentryClient{sentry}
+			backend.sentryServer.P2pServer = backend.p2pServer
+			sentry.SetServer(backend.sentryServer)
+			backend.sentries = []proto_sentry.SentryClient{sentry}
 		}
 		blockDownloaderWindow := 65536
-		eth.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, eth.engine, eth.config.NetworkID, eth.sentries, blockDownloaderWindow)
+		backend.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
-		if err = download.SetSentryStatus(eth.downloadV2Ctx, eth.sentries, eth.downloadServer); err != nil {
+		if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
 			return nil, err
 		}
-		eth.txPoolServer, err = download.NewTxPoolServer(eth.sentries, eth.txPool)
+		backend.txPoolServer, err = eth.NewTxPoolServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
 		if err != nil {
 			return nil, err
 		}
 
 		fetchTx := func(peerID string, hashes []common.Hash) error {
-			eth.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+			backend.txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
 			return nil
 		}
 
-		eth.txPoolServer.TxFetcher = fetcher.NewTxFetcher(eth.txPool.Has, eth.txPool.AddRemotes, fetchTx)
-		eth.txPoolServer.TxFetcher.Start()
-		eth.txPool.Start(0, 0)           // Start tx pool to avoid deadlocks in the initial stages (before TxPool stage starts working)
+		backend.txPoolServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 		bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
-		eth.stagedSync2, err = download.NewStagedSync(
-			eth.downloadV2Ctx,
-			eth.chainKV,
+		backend.stagedSync2, err = download.NewStagedSync(
+			backend.downloadV2Ctx,
+			backend.chainKV,
 			sm,
 			config.BatchSize,
 			bodyDownloadTimeoutSeconds,
-			eth.downloadServer,
+			backend.downloadServer,
 			tmpdir,
-			eth.txPool,
+			backend.txPool,
+			backend.txPoolServer,
 		)
 		if err != nil {
 			return nil, err
@@ -392,13 +391,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, core.ErrNoGenesis
 		}
 
-		if eth.handler, err = newHandler(&handlerConfig{
+		if backend.handler, err = newHandler(&handlerConfig{
 			Database:    chainDb,
 			ChainConfig: chainConfig,
 			genesis:     genesisBlock,
 			vmConfig:    &vmConfig,
-			engine:      eth.engine,
-			TxPool:      eth.txPool,
+			engine:      backend.engine,
+			TxPool:      backend.txPool,
 			Network:     config.NetworkID,
 			Checkpoint:  checkpoint,
 
@@ -407,14 +406,14 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, err
 		}
 
-		eth.handler.SetTmpDir(tmpdir)
-		eth.handler.SetBatchSize(config.BatchSize)
-		eth.handler.SetStagedSync(stagedSync)
+		backend.handler.SetTmpDir(tmpdir)
+		backend.handler.SetBatchSize(config.BatchSize)
+		backend.handler.SetStagedSync(stagedSync)
 	}
 
-	go SendPendingTxsToRpcDaemon(eth.txPool, eth.events)
+	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	if err := eth.StartMining(mining, tmpdir); err != nil {
+	if err := backend.StartMining(mining, tmpdir); err != nil {
 		return nil, err
 	}
 
@@ -424,25 +423,24 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
+	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
 	}
 
-	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
+	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Register the backend on the node
-	stack.RegisterAPIs(eth.APIs())
-	if eth.config.P2PEnabled {
-		stack.RegisterProtocols(eth.Protocols())
+	stack.RegisterAPIs(backend.APIs())
+	if backend.config.P2PEnabled {
+		stack.RegisterProtocols(backend.Protocols())
 	}
 
-	stack.RegisterLifecycle(eth)
-	// Check for unclean shutdown
-	return eth, nil
+	stack.RegisterLifecycle(backend)
+	return backend, nil
 }
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
@@ -474,94 +472,9 @@ func BlockchainRuntimeConfig(config *ethconfig.Config) vm.Config {
 	return vmConfig
 }
 
-// func makeExtraData(extra []byte) []byte {
-// 	if len(extra) == 0 {
-// 		// create default extradata
-// 		extra, _ = rlp.EncodeToBytes([]interface{}{
-// 			uint(params.VersionMajor<<16 | params.VersionMinor<<8 | params.VersionMicro),
-// 			"turbo-geth",
-// 			runtime.GOOS,
-// 		})
-// 	}
-// 	if uint64(len(extra)) > params.MaximumExtraDataSize {
-// 		log.Warn("Miner extra data exceed limit", "extra", hexutil.Bytes(extra), "limit", params.MaximumExtraDataSize)
-// 		extra = nil
-// 	}
-// 	return extra
-// }
-
 func (s *Ethereum) APIs() []rpc.API {
 	return []rpc.API{}
 }
-
-/*
-// APIs return the collection of RPC services the ethereum package offers.
-// NOTE, some of these services probably need to be moved to somewhere else.
-func (s *Ethereum) APIs() []rpc.API {
-	if s.APIBackend == nil {
-		return []rpc.API{}
-	}
-	apis := ethapi.GetAPIs(s.APIBackend)
-
-	// Append any APIs exposed explicitly by the consensus engine
-	//apis = append(apis, s.engine.APIs(s.BlockChain())...)
-
-	// Append all the local APIs and return
-	return append(apis, []rpc.API{
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   NewPublicEthereumAPI(s),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   NewPublicMinerAPI(s),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   downloader.NewPublicDownloaderAPI(s.handler.downloader, s.eventMux),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "miner",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateMinerAPI(s),
-		//	Public:    false,
-		//},
-		//{
-		//	Namespace: "eth",
-		//	Version:   "1.0",
-		//	Service:   filters.NewPublicFilterAPI(s.APIBackend, 5*time.Minute),
-		//	Public:    true,
-		//},
-		//{
-		//	Namespace: "admin",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateAdminAPI(s),
-		//},
-		//{
-		//	Namespace: "debug",
-		//	Version:   "1.0",
-		//	Service:   NewPublicDebugAPI(s),
-		//	Public:    true,
-		//}, {
-		//	Namespace: "debug",
-		//	Version:   "1.0",
-		//	Service:   NewPrivateDebugAPI(s),
-		//},
-		{
-			Namespace: "net",
-			Version:   "1.0",
-			Service:   s.netRPCService,
-			Public:    true,
-		},
-	}...)
-}
-*/
 
 func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
@@ -793,7 +706,6 @@ func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.RecvTxMessage(s.downloadV2Ctx, s.sentries[0], s.txPoolServer.HandleInboundMessage)
 		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events)
 	} else {
 		// Start the networking layer and the light server if requested

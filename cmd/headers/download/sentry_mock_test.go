@@ -1,4 +1,4 @@
-package stages
+package download
 
 import (
 	"context"
@@ -15,15 +15,54 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type MockSentry struct {
+	sentry.UnimplementedSentryServer
+}
+
+func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (ms *MockSentry) PeerMinBlock(context.Context, *sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (ms *MockSentry) SendMessageByMinBlock(context.Context, *sentry.SendMessageByMinBlockRequest) (*sentry.SentPeers, error) {
+	return nil, nil
+}
+func (ms *MockSentry) SendMessageById(context.Context, *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
+	return nil, nil
+}
+func (ms *MockSentry) SendMessageToRandomPeers(context.Context, *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+	return nil, nil
+}
+func (ms *MockSentry) SendMessageToAll(context.Context, *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
+	return nil, nil
+}
+func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (ms *MockSentry) ReceiveMessages(*emptypb.Empty, sentry.Sentry_ReceiveMessagesServer) error {
+	return nil
+}
+func (ms *MockSentry) ReceiveUploadMessages(*emptypb.Empty, sentry.Sentry_ReceiveUploadMessagesServer) error {
+	return nil
+}
+func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxMessagesServer) error {
+	return nil
+}
+
 // passing tmpdir because it is renponsibility of the caller to clean it up
-func testStagedSync(tmpdir string) *stagedsync.StagedSync {
+func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 	ctx := context.Background()
 	memDb := ethdb.NewMemDatabase()
 	defer memDb.Close()
@@ -55,7 +94,14 @@ func testStagedSync(tmpdir string) *stagedsync.StagedSync {
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
 	txPool := core.NewTxPool(txPoolConfig, chainConfig, memDb, txCacher)
-	return NewStagedSync(ctx, sm,
+	txSentryClient := &SentryClientDirect{}
+	txSentry := &MockSentry{}
+	txSentryClient.SetServer(txSentry)
+	txPoolServer, err := eth.NewTxPoolServer(ctx, []sentry.SentryClient{txSentryClient}, txPool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
 			db,
 			hd,
@@ -98,7 +144,10 @@ func testStagedSync(tmpdir string) *stagedsync.StagedSync {
 		stagedsync.StageLogIndexCfg(db, tmpdir),
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, chainConfig, engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool),
+		stagedsync.StageTxPoolCfg(db, txPool, func() {
+			txPoolServer.Start()
+			txPoolServer.TxFetcher.Start()
+		}),
 		stagedsync.StageFinishCfg(db, tmpdir),
 	)
 }
@@ -110,5 +159,5 @@ func TestEmptyStageSync(t *testing.T) {
 	}
 
 	defer os.RemoveAll(tmpdir) // clean up
-	testStagedSync(tmpdir)
+	testStagedSync(t, tmpdir)
 }
