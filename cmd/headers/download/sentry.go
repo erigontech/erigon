@@ -920,7 +920,7 @@ func trySend(ch chan<- StreamMsg, msg *StreamMsg) {
 	select {
 	case ch <- *msg:
 	default:
-		log.Warn("Dropped stream message", "type", msg.msgName)
+		//log.Warn("Dropped stream message", "type", msg.msgName)
 	}
 }
 
