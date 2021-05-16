@@ -430,8 +430,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				}
 			case b := <-backend.pendingBlocks:
 				fmt.Printf("abs pending\n")
-				if err := miningRPC.BroadcastMinedBlock(b); err != nil {
-					log.Error("txpool rpc mined block broadcast", "err", err)
+				if err := miningRPC.BroadcastPendingBlock(b); err != nil {
+					log.Error("txpool rpc pending block broadcast", "err", err)
 				}
 			case <-backend.quitMining:
 				return
