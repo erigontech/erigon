@@ -98,8 +98,13 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
 	results := make([]StatetestResult, 0, len(tests))
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
+
+	tx, txErr := db.BeginRw(context.Background())
+	if txErr != nil {
+		return txErr
+	}
 
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
@@ -108,13 +113,13 @@ func stateTestCmd(ctx *cli.Context) error {
 
 			var root common.Hash
 
-			statedb, err := test.Run(context.Background(), db, st, cfg)
+			statedb, err := test.Run(context.Background(), tx, st, cfg)
 
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
 			} else {
-				root, err = trie.CalcRoot("", db)
+				root, err = trie.CalcRoot("", ethdb.NewRwTxDb(tx))
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}

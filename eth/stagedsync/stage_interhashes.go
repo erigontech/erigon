@@ -22,18 +22,16 @@ import (
 )
 
 type TrieCfg struct {
-	db                ethdb.RwKV
-	checkRoot         bool
-	saveNewHashesToDB bool
-	tmpDir            string
+	db        ethdb.RwKV
+	checkRoot bool
+	tmpDir    string
 }
 
 func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
-		db:                db,
-		checkRoot:         checkRoot,
-		saveNewHashesToDB: saveNewHashesToDB,
-		tmpDir:            tmpDir,
+		db:        db,
+		checkRoot: checkRoot,
+		tmpDir:    tmpDir,
 	}
 }
 
