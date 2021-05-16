@@ -59,23 +59,26 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 		}
 	}()
 
-	go func() {
-		if txPool == nil {
-			return
-		}
-		if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
-			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-			time.Sleep(time.Second)
-		}
-		if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
-			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-			time.Sleep(time.Second)
-		}
-		if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
-			log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-			time.Sleep(time.Second)
-		}
-	}()
+	if txPool != nil {
+		go func() {
+			if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+		go func() {
+			if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+		go func() {
+			if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+	}
 
 	return ff
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -104,7 +103,7 @@ func (s *MiningServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 	return reply.Context().Err()
 }
 
-func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
+func (s *MiningServer) dBroadcastPendingBlock(block *types.Block) error {
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
@@ -156,7 +155,7 @@ func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Error("failed send to mined block stream", "err", err)
+			log.Debug("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -192,18 +191,16 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 	s.id++
 	id := s.id
 	s.chans[id] = stream
-	fmt.Printf("subscribed pending block: %d\n", len(s.chans))
 	return func() { s.remove(id) }
 }
 
 func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
 	s.Lock()
 	defer s.Unlock()
-	fmt.Printf("broadcasting pending block: %d\n", len(s.chans))
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Error("failed send to mined block stream", "err", err)
+			log.Debug("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
