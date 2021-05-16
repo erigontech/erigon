@@ -273,7 +273,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
 	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, gitCommit)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := remotedbserver.NewMiningServer(context.Background(), eth, ethashApi)
+	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
