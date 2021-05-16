@@ -85,7 +85,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), blockNr)
-	state, err := MakePreState2(ctx, db, t.json.Pre, blockNr)
+	state, err := MakePreState(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}
