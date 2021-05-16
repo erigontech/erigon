@@ -649,7 +649,7 @@ func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, m
 		s.chainConfig,
 		s.engine,
 		&vm.Config{},
-		nil,
+		ethdb.NewObjectDatabase(kv),
 		tx,
 		"",
 		ethdb.DefaultStorageMode,
