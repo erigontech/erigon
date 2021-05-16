@@ -103,7 +103,7 @@ func (s *MiningServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, r
 	return reply.Context().Err()
 }
 
-func (s *MiningServer) dBroadcastPendingBlock(block *types.Block) error {
+func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
