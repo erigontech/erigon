@@ -128,7 +128,6 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 		}
 
 		event, err := subscription.Recv()
-		fmt.Printf("recv pending block\n")
 		if err == io.EOF {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
