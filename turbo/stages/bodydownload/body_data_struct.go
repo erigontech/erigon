@@ -59,9 +59,16 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
-		DeliveryNotify:   make(chan struct{}, 1),
-		deliveryCh:       make(chan Delivery, 1),
-		Engine:           engine,
+		// DeliveryNotify has capacity 1, and it is also used so that senders never block
+		// This makes this channel a mailbox with no more than one letter in it, meaning
+		// that there is something to collect
+		DeliveryNotify: make(chan struct{}, 1),
+		// delivery channel needs to have enough capacity not to create contention
+		// between delivery and collections. since we assume that there will be
+		// no more than `outstandingLimit+MaxBodiesInRequest` requested
+		// deliveris, this is a good number for the channel capacity
+		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
+		Engine:     engine,
 	}
 	return bd
 }
