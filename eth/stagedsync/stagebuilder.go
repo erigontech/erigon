@@ -426,11 +426,12 @@ func MiningStages() StageBuilders {
 		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
+				cfg := StageHashStateCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHashStateStage(s, tx, StageHashStateCfg(world.DB.RwKV(), world.TmpDir), world.QuitCh)
+						return SpawnHashStateStage(s, tx, cfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}
@@ -439,11 +440,12 @@ func MiningStages() StageBuilders {
 		{
 			ID: stages.IntermediateHashes,
 			Build: func(world StageParameters) *Stage {
+				cfg := StageTrieCfg(world.DB.RwKV(), false, true, world.TmpDir)
 				return &Stage{
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, StageTrieCfg(world.DB.RwKV(), false, true, world.TmpDir), world.QuitCh)
+						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, cfg, world.QuitCh)
 						if err != nil {
 							return err
 						}
