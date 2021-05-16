@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -218,11 +218,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
-	var allBlocks roaring.Bitmap
+	var allBlocks roaring64.Bitmap
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get(dbtx, dbutils.CallFromIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
+			b, err := bitmapdb.Get64(dbtx, dbutils.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
+				stream.WriteNil()
 				return err
 			}
 			allBlocks.Or(b)
@@ -231,8 +232,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get(dbtx, dbutils.CallToIndex, addr.Bytes(), uint32(fromBlock), uint32(toBlock))
+			b, err := bitmapdb.Get64(dbtx, dbutils.CallToIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
+				stream.WriteNil()
 				return err
 			}
 			allBlocks.Or(b)
@@ -244,6 +246,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -262,6 +265,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, b)
 		if bErr != nil {
+			stream.WriteNil()
 			return bErr
 		}
 		if block == nil {
@@ -287,6 +291,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					pt.TransactionPosition = &txPosition
 					b, err := json.Marshal(pt)
 					if err != nil {
+						stream.WriteNil()
 						return err
 					}
 					if first {
@@ -314,6 +319,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			tr.TraceAddress = []int{}
 			b, err := json.Marshal(tr)
 			if err != nil {
+				stream.WriteNil()
 				return err
 			}
 			if first {
@@ -340,6 +346,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					tr.TraceAddress = []int{}
 					b, err := json.Marshal(tr)
 					if err != nil {
+						stream.WriteNil()
 						return err
 					}
 					if first {

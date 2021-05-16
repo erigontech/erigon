@@ -106,6 +106,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
+	defer traceCursor.Close()
 
 	var k, v []byte
 	prev := startBlock
@@ -176,22 +177,23 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		return err
 	}
 
-	if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
+	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	return nil
 }
 
-func finaliseCallTraces(froms, tos map[string]*roaring64.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
+func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
 	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
+	lastChunkKey := make([]byte, 128)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if _, err := currentBitmap.ReadFrom(bytes.NewReader(v)); err != nil {
 			return err
 		}
-		lastChunkKey := make([]byte, len(k)+4)
+		lastChunkKey = lastChunkKey[:len(k)+8]
 		copy(lastChunkKey, k)
-		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
+		binary.BigEndian.PutUint64(lastChunkKey[len(k):], ^uint64(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil {
 			return fmt.Errorf("find last chunk failed: %w", err)
