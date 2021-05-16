@@ -186,7 +186,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, writeBlockNr)
 
-	_, err = MakePreState2(context.Background(), tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -243,7 +243,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState2(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
 	statedb := state.New(r)
 	for addr, a := range accounts {
