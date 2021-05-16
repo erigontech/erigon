@@ -153,7 +153,6 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (
 func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
 	s.Lock()
 	defer s.Unlock()
-	fmt.Printf("broadcasting pending block: %d\n", len(s.chans))
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
@@ -193,16 +192,18 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 	s.id++
 	id := s.id
 	s.chans[id] = stream
+	fmt.Printf("subscribed pending block: %d\n", len(s.chans))
 	return func() { s.remove(id) }
 }
 
 func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
 	s.Lock()
 	defer s.Unlock()
+	fmt.Printf("broadcasting pending block: %d\n", len(s.chans))
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
+			log.Error("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
