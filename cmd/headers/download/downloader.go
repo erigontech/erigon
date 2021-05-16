@@ -468,11 +468,11 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 }
 
 func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var request eth.BlockBodiesPacket66
+	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
-	txs, uncles := request.BlockBodiesPacket.Unpack()
+	txs, uncles := request.BlockRawBodiesPacket.Unpack()
 	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }

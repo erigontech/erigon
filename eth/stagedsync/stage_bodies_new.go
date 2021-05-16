@@ -87,8 +87,6 @@ func BodiesForward(
 	}
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
-	batch := ethdb.NewBatch(tx)
-	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var prevDeliveredCount float64 = 0
@@ -159,44 +157,26 @@ func BodiesForward(
 			*/
 			return nil
 		}
-		d, err := cfg.bd.GetDeliveries(verifyUncles)
+		headers, rawBodies, err := cfg.bd.GetDeliveries(verifyUncles)
 		if err != nil {
 			return err
 		}
 		d4 += time.Since(start)
 		start = time.Now()
-		for _, block := range d {
-			if err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+		for i, header := range headers {
+			rawBody := rawBodies[i]
+			blockHeight := header.Number.Uint64()
+			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
-			blockHeight := block.NumberU64()
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
-				if err = stages.SaveStageProgress(batch, stages.Bodies, blockHeight); err != nil {
+				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
 					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
 				}
-				headHash = block.Header().Hash()
-				rawdb.WriteHeadBlockHash(batch, headHash)
+				headHash = header.Hash()
+				rawdb.WriteHeadBlockHash(tx, headHash)
 				headSet = true
-			}
-
-			if batch.BatchSize() >= int(cfg.batchSize) {
-				if err = batch.Commit(); err != nil {
-					return err
-				}
-				if !useExternalTx {
-					if err := s.Update(tx, bodyProgress); err != nil {
-						return err
-					}
-					if err = tx.Commit(); err != nil {
-						return err
-					}
-					tx, err = cfg.db.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-				}
-				batch = ethdb.NewBatch(tx)
 			}
 		}
 		d5 += time.Since(start)
@@ -211,7 +191,7 @@ func BodiesForward(
 			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := cfg.bd.DeliveryCounts()
-			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
+			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
@@ -222,9 +202,6 @@ func BodiesForward(
 		}
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
-	}
-	if err := batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if headSet {
 		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
@@ -247,7 +224,7 @@ func BodiesForward(
 	return nil
 }
 
-func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, batch ethdb.DbWithPendingMutations) {
+func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
@@ -256,7 +233,6 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"number committed", committed,
 		"delivery /second", common.StorageSize(speed),
 		"wasted /second", common.StorageSize(wastedSpeed),
-		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))

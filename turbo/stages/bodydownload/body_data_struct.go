@@ -13,7 +13,7 @@ type DoubleHash [2 * common.HashLength]byte
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
-	txs             [][]types.Transaction
+	txs             [][][]byte
 	uncles          [][]*types.Header
 	lenOfP2PMessage uint64
 	peerID          string
@@ -23,7 +23,8 @@ type Delivery struct {
 type BodyDownload struct {
 	deliveryCh       chan Delivery
 	delivered        *roaring64.Bitmap
-	deliveries       []*types.Block
+	deliveriesH      []*types.Header
+	deliveriesB      []*types.RawBody
 	deliveredCount   float64
 	wastedCount      float64
 	requests         []*BodyRequest
@@ -53,13 +54,21 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		requestedMap:     make(map[DoubleHash]uint64),
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
-		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
+		deliveriesH:      make([]*types.Header, outstandingLimit+MaxBodiesInRequest),
+		deliveriesB:      make([]*types.RawBody, outstandingLimit+MaxBodiesInRequest),
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
-		DeliveryNotify:   make(chan struct{}, 1),
-		deliveryCh:       make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
-		Engine:           engine,
+		// DeliveryNotify has capacity 1, and it is also used so that senders never block
+		// This makes this channel a mailbox with no more than one letter in it, meaning
+		// that there is something to collect
+		DeliveryNotify: make(chan struct{}, 1),
+		// delivery channel needs to have enough capacity not to create contention
+		// between delivery and collections. since we assume that there will be
+		// no more than `outstandingLimit+MaxBodiesInRequest` requested
+		// deliveris, this is a good number for the channel capacity
+		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
+		Engine:     engine,
 	}
 	return bd
 }

@@ -1,6 +1,7 @@
 package bodydownload
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -48,8 +49,9 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	for i := 0; i < len(bd.deliveries); i++ {
-		bd.deliveries[i] = nil
+	for i := 0; i < len(bd.deliveriesH); i++ {
+		bd.deliveriesH[i] = nil
+		bd.deliveriesB[i] = nil
 		bd.requests[i] = nil
 	}
 	bd.peerMap = make(map[string]int)
@@ -101,9 +103,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 		var header *types.Header
 		var err error
 		request := true
-		if bd.deliveries[blockNum-bd.requestedLow] != nil {
+		if bd.deliveriesH[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
-			header = bd.deliveries[blockNum-bd.requestedLow].Header()
+			header = bd.deliveriesH[blockNum-bd.requestedLow]
 			if header == nil {
 				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
 			}
@@ -120,7 +122,8 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
 				// Block is prefetched, no need to request
-				bd.deliveries[blockNum-bd.requestedLow] = block
+				bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
+				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 
 				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 				var td *big.Int
@@ -134,13 +137,14 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 				}
 				request = false
 			} else {
-				bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
+				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					var doubleHash DoubleHash
 					copy(doubleHash[:], header.UncleHash.Bytes())
 					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
 					bd.requestedMap[doubleHash] = blockNum
 				} else {
+					bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{}
 					request = false
 				}
 			}
@@ -176,13 +180,38 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][]types.Transaction, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID string) {
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID string) {
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
 	default:
 	}
+}
+
+// RawTransaction implements core/types.DerivableList interface for hashing
+type RawTransactions [][]byte
+
+func (rt RawTransactions) Len() int {
+	return len(rt)
+}
+
+// EncodeIndex is part of core/types.DerivableList
+// It strips the transaction envelope from the transaction RLP
+func (rt RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+	if len(rt[i]) > 0 {
+		firstByte := rt[i][0]
+		if firstByte >= 128 && firstByte < 184 {
+			// RLP string < 56 bytes long, just strip first byte
+			w.Write(rt[i][1:]) //nolint:errcheck
+			return
+		} else if firstByte >= 184 && firstByte < 192 {
+			// RLP striong >= 56 bytes long, firstByte-183 is the length of encoded size
+			w.Write(rt[i][1+firstByte-183:]) //nolint:errcheck
+			return
+		}
+	}
+	w.Write(rt[i]) //nolint:errcheck
 }
 
 func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (err error) {
@@ -202,7 +231,7 @@ Loop:
 
 		for i := range txs {
 			uncleHash := types.CalcUncleHash(uncles[i])
-			txHash := types.DeriveSha(types.Transactions(txs[i]))
+			txHash := types.DeriveSha(RawTransactions(txs[i]))
 			var doubleHash DoubleHash
 			copy(doubleHash[:], uncleHash.Bytes())
 			copy(doubleHash[common.HashLength:], txHash.Bytes())
@@ -214,7 +243,7 @@ Loop:
 				undelivered++
 				continue
 			}
-			block := bd.deliveries[blockNum-bd.requestedLow].WithBody(txs[i], uncles[i])
+			header := bd.deliveriesH[blockNum-bd.requestedLow]
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
@@ -223,11 +252,11 @@ Loop:
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 
-			if err = verifyUnclesFunc(peerID, block.Header(), uncles[i]); err != nil {
+			if err = verifyUnclesFunc(peerID, header, uncles[i]); err != nil {
 				return err
 			}
 
-			bd.deliveries[blockNum-bd.requestedLow] = block
+			bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{Transactions: txs[i], Uncles: uncles[i]}
 			bd.delivered.Add(blockNum)
 			delivered++
 		}
@@ -276,10 +305,10 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 	return headerdownload.NoPenalty, nil
 }
 
-func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Block, error) {
+func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Header, []*types.RawBody, error) {
 	err := bd.doDeliverBodies(verifyUnclesFunc) // TODO: join this 2 funcs and simplify
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var i uint64
@@ -288,19 +317,24 @@ func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*typ
 	}
 	// Move the deliveries back
 	// bd.requestedLow can only be moved forward if there are consecutive block numbers present in the bd.delivered map
-	var d []*types.Block
+	var headers []*types.Header
+	var rawBodies []*types.RawBody
 	if i > 0 {
-		d = make([]*types.Block, i)
-		copy(d, bd.deliveries[:i])
-		copy(bd.deliveries[:], bd.deliveries[i:])
+		headers = make([]*types.Header, i)
+		rawBodies = make([]*types.RawBody, i)
+		copy(headers, bd.deliveriesH[:i])
+		copy(rawBodies, bd.deliveriesB[:i])
+		copy(bd.deliveriesH[:], bd.deliveriesH[i:])
+		copy(bd.deliveriesB[:], bd.deliveriesB[i:])
 		copy(bd.requests[:], bd.requests[i:])
-		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
-			bd.deliveries[j] = nil
+		for j := len(bd.deliveriesH) - int(i); j < len(bd.deliveriesH); j++ {
+			bd.deliveriesH[j] = nil
+			bd.deliveriesB[j] = nil
 			bd.requests[j] = nil
 		}
 		bd.requestedLow += i
 	}
-	return d, nil
+	return headers, rawBodies, nil
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {

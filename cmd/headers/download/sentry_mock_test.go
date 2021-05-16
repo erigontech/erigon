@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -18,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
@@ -28,6 +30,17 @@ import (
 
 type MockSentry struct {
 	sentry.UnimplementedSentryServer
+	ctx         context.Context
+	memDb       ethdb.Database
+	tmpdir      string
+	chainConfig *params.ChainConfig
+	hd          *headerdownload.HeaderDownload
+	sync        *stagedsync.StagedSync
+}
+
+func (ms *MockSentry) Close() {
+	ms.memDb.Close()
+	os.RemoveAll(ms.tmpdir)
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
@@ -61,17 +74,22 @@ func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxM
 	return nil
 }
 
-// passing tmpdir because it is renponsibility of the caller to clean it up
-func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
-	ctx := context.Background()
-	memDb := ethdb.NewMemDatabase()
-	defer memDb.Close()
-	db := memDb.RwKV()
+func mock(t *testing.T) *MockSentry {
+	mockSentry := &MockSentry{}
+	mockSentry.ctx = context.Background()
+	mockSentry.memDb = ethdb.NewMemDatabase()
+	var err error
+	mockSentry.tmpdir, err = ioutil.TempDir("", "stagesync-test")
+	if err != nil {
+		log.Fatal(err)
+	}
+	db := mockSentry.memDb.RwKV()
 	sm := ethdb.DefaultStorageMode
 	engine := ethash.NewFaker()
 	hd := headerdownload.NewHeaderDownload(1024 /* anchorLimit */, 1024 /* linkLimit */, engine)
-	chainConfig := params.AllEthashProtocolChanges
-	sendHeaderRequest := func(context.Context, *headerdownload.HeaderRequest) []byte {
+	mockSentry.chainConfig = params.AllEthashProtocolChanges
+	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte {
+		fmt.Printf("sendHeaderRequest %+v\n", r)
 		return nil
 	}
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {
@@ -93,19 +111,18 @@ func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 	txPoolConfig := core.DefaultTxPoolConfig
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
-	txPool := core.NewTxPool(txPoolConfig, chainConfig, memDb, txCacher)
+	txPool := core.NewTxPool(txPoolConfig, mockSentry.chainConfig, mockSentry.memDb, txCacher)
 	txSentryClient := &SentryClientDirect{}
-	txSentry := &MockSentry{}
-	txSentryClient.SetServer(txSentry)
-	txPoolServer, err := eth.NewTxPoolServer(ctx, []sentry.SentryClient{txSentryClient}, txPool)
+	txSentryClient.SetServer(mockSentry)
+	txPoolServer, err := eth.NewTxPoolServer(mockSentry.ctx, []sentry.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return stages.NewStagedSync(ctx, sm,
+	mockSentry.sync = stages.NewStagedSync(mockSentry.ctx, sm,
 		stagedsync.StageHeadersCfg(
 			db,
 			hd,
-			*chainConfig,
+			*mockSentry.chainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
 			penalize,
@@ -120,10 +137,10 @@ func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 			updateHead,
 			blockPropagator,
 			blockDowloadTimeout,
-			*chainConfig,
+			*mockSentry.chainConfig,
 			batchSize,
 		),
-		stagedsync.StageSendersCfg(db, chainConfig),
+		stagedsync.StageSendersCfg(db, mockSentry.chainConfig),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,
@@ -133,31 +150,38 @@ func testStagedSync(t *testing.T, tmpdir string) *stagedsync.StagedSync {
 			nil,
 			nil,
 			nil,
-			chainConfig,
+			mockSentry.chainConfig,
 			engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
-			tmpdir,
+			mockSentry.tmpdir,
 		),
-		stagedsync.StageHashStateCfg(db, tmpdir),
-		stagedsync.StageTrieCfg(db, true, true, tmpdir),
-		stagedsync.StageHistoryCfg(db, tmpdir),
-		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, chainConfig, engine),
-		stagedsync.StageTxLookupCfg(db, tmpdir),
+		stagedsync.StageHashStateCfg(db, mockSentry.tmpdir),
+		stagedsync.StageTrieCfg(db, true, true, mockSentry.tmpdir),
+		stagedsync.StageHistoryCfg(db, mockSentry.tmpdir),
+		stagedsync.StageLogIndexCfg(db, mockSentry.tmpdir),
+		stagedsync.StageCallTracesCfg(db, 0, batchSize, mockSentry.tmpdir, mockSentry.chainConfig, engine),
+		stagedsync.StageTxLookupCfg(db, mockSentry.tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			txPoolServer.Start()
 			txPoolServer.TxFetcher.Start()
 		}),
-		stagedsync.StageFinishCfg(db, tmpdir),
+		stagedsync.StageFinishCfg(db, mockSentry.tmpdir),
 	)
+	return mockSentry
 }
 
 func TestEmptyStageSync(t *testing.T) {
-	tmpdir, err := ioutil.TempDir("", "stagesync-test")
-	if err != nil {
-		log.Fatal(err)
-	}
+	m := mock(t)
+	defer m.Close()
+}
 
-	defer os.RemoveAll(tmpdir) // clean up
-	testStagedSync(t, tmpdir)
+func TestHeaderStep(t *testing.T) {
+	m := mock(t)
+	defer m.Close()
+	highestSeenHeader := uint64(100)
+	notifier := &remotedbserver.Events{}
+	initialCycle := true
+	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+		t.Fatal(err)
+	}
 }
