@@ -38,6 +38,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 		return nil
 	}
 
+	fmt.Printf("sent pending block\n")
 	pendingBlocksCh <- block
 
 	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
