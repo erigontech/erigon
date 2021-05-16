@@ -195,7 +195,22 @@ type RawTransactions [][]byte
 func (rt RawTransactions) Len() int {
 	return len(rt)
 }
+
+// EncodeIndex is part of core/types.DerivableList
+// It strips the transaction envelope from the transaction RLP
 func (rt RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+	if len(rt[i]) > 0 {
+		firstByte := rt[i][0]
+		if firstByte >= 128 && firstByte < 184 {
+			// RLP string < 56 bytes long, just strip first byte
+			w.Write(rt[i][1:]) //nolint:errcheck
+			return
+		} else if firstByte >= 184 && firstByte < 192 {
+			// RLP striong >= 56 bytes long, firstByte-183 is the length of encoded size
+			w.Write(rt[i][1+firstByte-183:]) //nolint:errcheck
+			return
+		}
+	}
 	w.Write(rt[i]) //nolint:errcheck
 }
 
