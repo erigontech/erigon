@@ -243,35 +243,6 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
-	tds := state.NewTrieDbState(common.Hash{}, db, blockNr)
-	statedb := state.New(tds)
-	tds.StartNewBuffer()
-	for addr, a := range accounts {
-		statedb.SetCode(addr, a.Code)
-		statedb.SetNonce(addr, a.Nonce)
-		balance, _ := uint256.FromBig(a.Balance)
-		statedb.SetBalance(addr, balance)
-		for k, v := range a.Storage {
-			key := k
-			val := uint256.NewInt().SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
-		}
-	}
-	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, nil, err
-	}
-
-	if _, err := tds.ComputeTrieRoots(); err != nil {
-		return nil, nil, err
-	}
-	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
-		return nil, nil, err
-	}
-	return statedb, tds, nil
-}
-
 func MakePreState2(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
 	statedb := state.New(r)
