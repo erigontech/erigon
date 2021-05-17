@@ -17,9 +17,6 @@
 package vm
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 

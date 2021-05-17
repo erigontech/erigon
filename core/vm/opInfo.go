@@ -17,8 +17,6 @@
 package vm
 
 import (
-"fmt"
-"os"
 	"github.com/holiman/uint256"
 )
 
