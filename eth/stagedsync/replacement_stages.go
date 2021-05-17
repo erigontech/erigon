@@ -56,6 +56,43 @@ func ReplacementStages(ctx context.Context,
 			},
 		},
 		{
+			ID: stages.CreateHeadersSnapshot,
+			Build: func(world StageParameters) *Stage {
+				headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
+				return &Stage{
+					ID:          stages.CreateHeadersSnapshot,
+					Description: "Create headers snapshot",
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						useExternalTx := tx != nil
+						if !useExternalTx {
+							var err error
+							tx, err = headersSnapshotGenCfg.db.BeginRw(context.Background())
+							if err != nil {
+								return err
+							}
+							defer tx.Rollback()
+						}
+
+						err := u.Done(tx)
+						if err != nil {
+							return err
+						}
+						if !useExternalTx {
+							if err := tx.Commit(); err != nil {
+								return err
+							}
+						}
+						return nil
+					},
+				}
+			},
+		},
+		{
 			ID: stages.Bodies,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -66,6 +103,42 @@ func ReplacementStages(ctx context.Context,
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindBodiesStage(u, s, tx, bodies)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.CreateBodiesSnapshot,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.CreateBodiesSnapshot,
+					Description: "Create bodies snapshot",
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						useExternalTx := tx != nil
+						if !useExternalTx {
+							var err error
+							tx, err = world.DB.RwKV().BeginRw(context.Background())
+							if err != nil {
+								return err
+							}
+							defer tx.Rollback()
+						}
+
+						err := u.Done(tx)
+						if err != nil {
+							return err
+						}
+						if !useExternalTx {
+							if err := tx.Commit(); err != nil {
+								return err
+							}
+						}
+						return nil
 					},
 				}
 			},
@@ -96,6 +169,23 @@ func ReplacementStages(ctx context.Context,
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.CreateStateSnapshot,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.CreateStateSnapshot,
+					Description: "Create state snapshot",
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -251,16 +341,16 @@ func ReplacementStages(ctx context.Context,
 
 func ReplacementUnwindOrder() UnwindOrder {
 	return []int{
-		0, 1, 2, // download headers/bodies
+		0, 1, 2, 3, 4,// download headers/bodies + haders&body snapshots
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		12,
-		3, 4, // senders, exec
-		6, 5, // Unwinding of IHashes needs to happen after unwinding HashState
-		7, 8, // history
-		9,  // log index
-		10, // call traces
-		11, // tx lookup
+		15,
+		5, 6, 7, // senders, exec, state snapshot
+		9, 8, // Unwinding of IHashes needs to happen after unwinding HashState
+		10, 11, // history
+		12,  // log index
+		13, // call traces
+		14, // tx lookup
 		13,
 	}
 }

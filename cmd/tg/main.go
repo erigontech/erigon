@@ -41,21 +41,12 @@ func runTurboGeth(cliCtx *cli.Context) {
 		}
 	}
 
-	var sync *stagedsync.StagedSync
-	if cliCtx.Bool(turbocli.SnapshotDatabaseLayoutFlag.Name) {
-		sync = stagedsync.New(
-			stagedsync.WithSnapshotsStages(),
-			stagedsync.UnwindOrderWithSnapshots(),
-			stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
-		)
-	} else {
-		// creating staged sync with all default parameters
-		sync = stagedsync.New(
-			stagedsync.DefaultStages(),
-			stagedsync.DefaultUnwindOrder(),
-			stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
-		)
-	}
+	// creating staged sync with all default parameters
+	sync := stagedsync.New(
+		stagedsync.DefaultStages(),
+		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc},
+	)
 
 	ctx, _ := utils.RootContext()
 

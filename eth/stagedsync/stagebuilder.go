@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
@@ -160,6 +159,43 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
+			ID: stages.CreateHeadersSnapshot,
+			Build: func(world StageParameters) *Stage {
+				headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
+				return &Stage{
+					ID:          stages.CreateHeadersSnapshot,
+					Description: "Create headers snapshot",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						useExternalTx := tx != nil
+						if !useExternalTx {
+							var err error
+							tx, err = headersSnapshotGenCfg.db.BeginRw(context.Background())
+							if err != nil {
+								return err
+							}
+							defer tx.Rollback()
+						}
+
+						err := u.Done(tx)
+						if err != nil {
+							return err
+						}
+						if !useExternalTx {
+							if err := tx.Commit(); err != nil {
+								return err
+							}
+						}
+						return nil
+					},
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+				}
+			},
+		},
+		{
 			ID: stages.Bodies,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -170,6 +206,42 @@ func DefaultStages() StageBuilders {
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return unwindBodyDownloadStage(u, world.DB)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.CreateBodiesSnapshot,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.CreateBodiesSnapshot,
+					Description: "Create bodies snapshot",
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						useExternalTx := tx != nil
+						if !useExternalTx {
+							var err error
+							tx, err = world.DB.RwKV().BeginRw(context.Background())
+							if err != nil {
+								return err
+							}
+							defer tx.Rollback()
+						}
+
+						err := u.Done(tx)
+						if err != nil {
+							return err
+						}
+						if !useExternalTx {
+							if err := tx.Commit(); err != nil {
+								return err
+							}
+						}
+						return nil
 					},
 				}
 			},
@@ -215,6 +287,23 @@ func DefaultStages() StageBuilders {
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.CreateStateSnapshot,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.CreateStateSnapshot,
+					Description: "Create state snapshot",
+					Disabled:            world.snapshotsDir!="",
+					DisabledDescription: "Enable by --snapshot.layout",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -483,139 +572,25 @@ type UnwindOrder []int
 // Just adding stages that don't do unwinding, don't require altering the default order.
 func DefaultUnwindOrder() UnwindOrder {
 	return []int{
-		0, 1, 2,
-		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		0, //headers
+		1, //block hashes
+		2, //headers snapshot
+		3, //bodies
+		4, //bodies snapshot
+		15, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		12,
-		3, 4,
+		5, //senders
+		6, //execution
+		7, //state snapshot
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		6, 5,
-		7, 8, 9, 10, 11, 13,
-	}
-}
-
-func WithSnapshotsStages() StageBuilders {
-	defaultStages := DefaultStages()
-	blockHashesStageIndex := -1
-	sendersStageIndex := -1
-	hashedStateStageIndex := -1
-	for i := range defaultStages {
-		if defaultStages[i].ID == stages.Bodies {
-			blockHashesStageIndex = i
-		}
-		if defaultStages[i].ID == stages.Senders {
-			sendersStageIndex = i
-		}
-		if defaultStages[i].ID == stages.HashState {
-			hashedStateStageIndex = i
-		}
-	}
-	if blockHashesStageIndex < 0 || sendersStageIndex < 0 || hashedStateStageIndex < 0 {
-		log.Error("Unrecognized block hashes stage", "blockHashesStageIndex < 0", blockHashesStageIndex < 0, "sendersStageIndex < 0", sendersStageIndex < 0, "hashedStateStageIndex < 0", hashedStateStageIndex < 0)
-		return DefaultStages()
-	}
-
-	stagesWithSnapshots := make(StageBuilders, 0, len(defaultStages)+1)
-	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[:blockHashesStageIndex]...)
-	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
-		ID: stages.CreateHeadersSnapshot,
-		Build: func(world StageParameters) *Stage {
-			headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
-			return &Stage{
-				ID:          stages.CreateHeadersSnapshot,
-				Description: "Create headers snapshot",
-				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
-				},
-				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-					useExternalTx := tx != nil
-					if !useExternalTx {
-						var err error
-						tx, err = headersSnapshotGenCfg.db.BeginRw(context.Background())
-						if err != nil {
-							return err
-						}
-						defer tx.Rollback()
-					}
-
-					err := u.Done(tx)
-					if err != nil {
-						return err
-					}
-					if !useExternalTx {
-						if err := tx.Commit(); err != nil {
-							return err
-						}
-					}
-					return nil
-				},
-			}
-		},
-	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[blockHashesStageIndex:sendersStageIndex]...)
-	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
-		ID: stages.CreateBodiesSnapshot,
-		Build: func(world StageParameters) *Stage {
-			return &Stage{
-				ID:          stages.CreateBodiesSnapshot,
-				Description: "Create bodies snapshot",
-				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
-				},
-				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-					useExternalTx := tx != nil
-					if !useExternalTx {
-						var err error
-						tx, err = world.DB.RwKV().BeginRw(context.Background())
-						if err != nil {
-							return err
-						}
-						defer tx.Rollback()
-					}
-
-					err := u.Done(tx)
-					if err != nil {
-						return err
-					}
-					if !useExternalTx {
-						if err := tx.Commit(); err != nil {
-							return err
-						}
-					}
-					return nil
-				},
-			}
-		},
-	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[sendersStageIndex:hashedStateStageIndex]...)
-	stagesWithSnapshots = append(stagesWithSnapshots, StageBuilder{
-		ID: stages.CreateStateSnapshot,
-		Build: func(world StageParameters) *Stage {
-			return &Stage{
-				ID:          stages.CreateStateSnapshot,
-				Description: "Create state snapshot",
-				ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-					return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
-				},
-				UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-					return u.Done(world.DB)
-				},
-			}
-		},
-	})
-	stagesWithSnapshots = append(stagesWithSnapshots, defaultStages[hashedStateStageIndex:]...)
-	return stagesWithSnapshots
-}
-
-func UnwindOrderWithSnapshots() UnwindOrder {
-	return []int{
-		0, 1, 2,
-		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-		// also tx pool is before senders because senders unwind is inside cycle transaction
-		15,
-		// Unwinding of IHashes needs to happen after unwinding HashState
-		3, 4, 6, 5,
-		7, 9, 10, 12, 14,
+		9, //intermediate hashes
+		8, //hash state
+		10, //acc history
+		11, //st history
+		12, //log index
+		13, //call traces
+		14, //tx lookup
+		16,
 	}
 }
 
