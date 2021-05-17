@@ -138,6 +138,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
+
 	// Increment the call depth which is restricted to 1024
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
@@ -187,10 +188,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 
+	err = enterBlock(callContext, pc)
+	if err != nil {
+		return nil, err
+	}
 	for {
 		op := contract.GetOp(pc)
-		
-		// none of the bare ops can resize memory or use dynamic gas
+
+		// none of these bare ops can resize memory or use dynamic gas
 		switch op {
 		case ADD:
 			x, y := locStack.Pop(), locStack.Peek()
@@ -330,7 +335,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			locStack.Pop()
 
 		case PUSH1:
-			info := callContext.contract.opsInfo[pc].(PushInfo)
+			info := callContext.contract.opsInfo[pc].(*PushInfo)
 			integer := info.data
 			callContext.stack.Push(&integer)
 		case PUSH2:
@@ -338,10 +343,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			integer := info.data
 			callContext.stack.Push(&integer)
 
-        // TODO -- analysis needs to check destinations
+		// TODO -- analysis needs to check destinations
 		case JMP:
 			info := callContext.contract.opsInfo[pc].(JumpInfo)
 			pc = info.dest
+			continue
 		case JMPI:
 			cond := locStack.Pop()
 			if !cond.IsZero() {
@@ -354,7 +360,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 					return nil, err
 				}
 			}
-        case JUMPDEST:
+			continue
+		case JUMPDEST:
 			err = enterBlock(callContext, pc)
 			if err != nil {
 				return nil, err
@@ -375,17 +382,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				in.returnData = common.CopyBytes(res)
 			}
 			switch {
+			case err != nil:
+				return res, err
 			case operation.halts:
-				return res, err
-			case operation.reverts:
-				return res, err
-			case !operation.jumps:
-				pc++
+				return res, nil
+			case operation.jumps:
+				continue
 			}
 		}
-		if err != nil {
-			return nil, err
-		}
+		pc++
 	}
 	return nil, nil
 }

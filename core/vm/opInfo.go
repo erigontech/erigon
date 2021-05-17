@@ -17,6 +17,8 @@
 package vm
 
 import (
+"fmt"
+"os"
 	"github.com/holiman/uint256"
 )
 
@@ -32,10 +34,9 @@ type BlockInfo struct {
 	constantGas uint64	// gas used by block - statically known
 }
 func (BlockInfo) opInfo() {}
-func NewBlockInfo(c *Contract, pc uint64) *BlockInfo {
+func NewBlockInfo(pc uint64) *BlockInfo {
 	p := new(BlockInfo)
 	p.pc = pc
-	c.opsInfo[pc] = p
 	return p
 }
 
@@ -44,10 +45,9 @@ type JumpInfo struct {
 	dest uint64 // pc to jump to
 }
 func (JumpInfo) opInfo() {}
-func NewJumpInfo(c *Contract, pc uint64, dest uint64) *JumpInfo {
+func NewJumpInfo(pc uint64, dest uint64) *JumpInfo {
 	p := new(JumpInfo)
 	p.dest = dest
-	c.opsInfo[pc] = p
 	return p
 }
 
@@ -56,15 +56,20 @@ type PushInfo struct {
 	data uint256.Int
 }
 func (PushInfo) opInfo() {}
-func NewPushInfo(c *Contract, pc uint64, data uint256.Int) *PushInfo {
+func NewPushInfo(pc uint64, data uint256.Int) *PushInfo {
 	p := new(PushInfo)
 	p.data = data
-	c.opsInfo[pc] = p
 	return p
 }
 
+// Will create one or more of the above for a basic block
 func getBlockInfo(ctx *callCtx, pc uint64) (*BlockInfo, error) {
-	info := (ctx.contract.opsInfo[pc])
+	contract := ctx.contract
+	if contract.opsInfo == nil {
+		contract.opsInfo = make([]OpInfo, len(contract.Code), len(contract.Code))
+	}
+
+	info := contract.opsInfo[pc]
 	if info != nil {
 		return info.(*BlockInfo), nil
 	}

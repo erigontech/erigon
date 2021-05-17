@@ -738,7 +738,6 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 }
 
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-if false { fmt.Fprintf(os.Stderr,"CALL: %v\n",*pc) }	
 	stack := callContext.stack
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	// We use it as a temporary value

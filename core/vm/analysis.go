@@ -24,14 +24,16 @@ import (
 
 // fill in segment of operation information array for a block
 func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
-	blockInfo := NewBlockInfo(ctx.contract, pc)
+	blockInfo := NewBlockInfo(pc)
+	ctx.contract.opsInfo[pc] = blockInfo
 	code := ctx.contract.Code
+	codeLen := len(code)
 	jumpTable := ctx.interpreter.jt
 
 	height := 0
 	minHeight := 0
 	maxHeight := 0
-	for ; pc < uint64(len(code)); pc++ {
+	for ; pc < uint64(codeLen); pc++ {
 		op := OpCode(code[pc])
 		oper := jumpTable[op]
 		if oper == nil {
@@ -47,7 +49,6 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 
 		if PUSH1 <= op && op <= PUSH32 {
 		    pushByteSize := int(op) - int(PUSH1) + 1
-			codeLen := len(ctx.contract.Code)
 
 			startMin := int(pc + 1)
 			if startMin >= codeLen {
@@ -61,13 +62,16 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 			integer := new(uint256.Int)
 			integer.SetBytes(common.RightPadBytes(
 				// So it doesn't matter what we push onto the stack.
-				ctx.contract.Code[startMin:endMin], pushByteSize))
+				code[startMin:endMin], pushByteSize))
 
 			// attach PushInfo with decoded push data to PUSHn
-			NewPushInfo(ctx.contract, pc, *integer)
+			pushInfo := NewPushInfo(pc, *integer)
+			ctx.contract.opsInfo[pc] = pushInfo
 
 			continue
 		}
+		
+		// check jump destinations and optimize static jumps
 		if op == JUMP || op == JUMPI {
 			prevPC := pc - 1
 			prevOp := OpCode(code[prevPC])
@@ -77,7 +81,8 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 				if valid, _ := ctx.contract.validJumpdest(&pos); !valid {
 					return nil, ErrInvalidJump
 				}
-				NewJumpInfo(ctx.contract, pc, pos.Uint64())
+				jumpInfo := NewJumpInfo(pc, pos.Uint64())
+				ctx.contract.opsInfo[pc] = jumpInfo
 				ctx.contract.opsInfo[prevPC] = nil
 
 				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
@@ -104,7 +109,6 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	blockInfo.minStack = -minHeight
 	blockInfo.maxStack = maxHeight
 
-	ctx.contract.opsInfo[pc] = blockInfo
 	return blockInfo, nil
 }
 

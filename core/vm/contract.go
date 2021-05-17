@@ -85,8 +85,6 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 
 	c.skipAnalysis = skipAnalysis
 	
-//	c.opInfo = make([]OpInfo, len(c.Code), len(c.Code))
-
 	return c
 }
 
