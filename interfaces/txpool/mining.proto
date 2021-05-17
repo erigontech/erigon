@@ -50,8 +50,8 @@ message SubmitHashRateReply {
   bool ok = 1;
 }
 
-message HashRateRequest {}
-message HashRateReply {
+message GetHashRateRequest {}
+message GetHashRateReply {
   uint64 hashRate = 1;
 }
 
@@ -95,8 +95,8 @@ service Mining {
   // between nodes.
   rpc SubmitHashRate(SubmitHashRateRequest) returns (SubmitHashRateReply);
 
-  // HashRate returns the current hashrate for local CPU miner and remote miner.
-  rpc HashRate(HashRateRequest) returns (HashRateReply);
+  // GetHashRate returns the current hashrate for local CPU miner and remote miner.
+  rpc GetHashRate(GetHashRateRequest) returns (GetHashRateReply);
 
   // Mining returns an indication if this node is currently mining and it's mining configuration
   rpc Mining(MiningRequest) returns (MiningReply);
