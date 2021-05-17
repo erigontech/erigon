@@ -77,7 +77,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	cfg.PrivateKey = newkey()
-	db, err := enode.OpenDB(t.TempDir())
+	db, err := enode.OpenDB(t.TempDir(), true)
 	if err != nil {
 		panic(err)
 	}
@@ -717,7 +717,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	}
 	t.Cleanup(test.close)
 	var err error
-	test.db, err = enode.OpenDB(test.t.TempDir())
+	test.db, err = enode.OpenDB(test.t.TempDir(),true)
 	if err != nil {
 		panic(err)
 	}
@@ -767,7 +767,7 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr) *enode.
 	id := encodePubkey(&key.PublicKey).id()
 	ln := test.nodesByID[id]
 	if ln == nil {
-		db, err := enode.OpenDB(test.t.TempDir())
+		db, err := enode.OpenDB(test.t.TempDir(), true)
 		if err != nil {
 			panic(err)
 		}

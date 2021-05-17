@@ -42,7 +42,7 @@ func init() {
 }
 
 func newTestTable(t transport) (*Table, *enode.DB) {
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("", true)
 	if err != nil {
 		panic(err)
 	}
