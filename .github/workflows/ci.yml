@@ -71,7 +71,7 @@ jobs:
           cd ./../../..
           go build ./cmd/...
           ls C:\Users\RUNNER~1\AppData\Local\Temp
-          TEST_DB=mdbx go test -v ./...
+          make test-mdbx
 
   docker:
     runs-on: ubuntu-18.04
