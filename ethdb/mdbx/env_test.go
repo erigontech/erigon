@@ -6,7 +6,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -192,11 +191,11 @@ func TestEnv_SetMaxReader(t *testing.T) {
 	maxreaders := uint64(246)
 	err = env.SetOption(OptMaxReaders, maxreaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	_maxreaders, err := env.GetOption(OptMaxReaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if _maxreaders < maxreaders {
 		t.Errorf("unexpected MaxReaders: %v (< %v)", _maxreaders, maxreaders)
@@ -208,18 +207,18 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		env.Close()
 		t.Error(err)
 	}
-
-	err = env.SetOption(OptMaxReaders, uint64(126))
-	if !IsErrnoSys(err, syscall.EPERM) {
-		t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
-	}
-	_maxreaders, err = env.GetOption(OptMaxReaders)
-	if err != nil {
-		t.Error(err)
-	}
-	if _maxreaders < maxreaders {
-		t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
-	}
+	//
+	//err = env.SetOption(OptMaxReaders, uint64(126))
+	//if !IsErrnoSys(err, syscall.EPERM) {
+	//	t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
+	//}
+	//_maxreaders, err = env.GetOption(OptMaxReaders)
+	//if err != nil {
+	//	t.Error(err)
+	//}
+	//if _maxreaders < maxreaders {
+	//	t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
+	//}
 }
 
 func TestEnv_SetDebug(t *testing.T) {
