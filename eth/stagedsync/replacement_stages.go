@@ -60,9 +60,9 @@ func ReplacementStages(ctx context.Context,
 			Build: func(world StageParameters) *Stage {
 				headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
 				return &Stage{
-					ID:          stages.CreateHeadersSnapshot,
-					Description: "Create headers snapshot",
-					Disabled:            world.snapshotsDir!="",
+					ID:                  stages.CreateHeadersSnapshot,
+					Description:         "Create headers snapshot",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
@@ -111,9 +111,9 @@ func ReplacementStages(ctx context.Context,
 			ID: stages.CreateBodiesSnapshot,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
-					ID:          stages.CreateBodiesSnapshot,
-					Description: "Create bodies snapshot",
-					Disabled:            world.snapshotsDir!="",
+					ID:                  stages.CreateBodiesSnapshot,
+					Description:         "Create bodies snapshot",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
@@ -177,9 +177,9 @@ func ReplacementStages(ctx context.Context,
 			ID: stages.CreateStateSnapshot,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
-					ID:          stages.CreateStateSnapshot,
-					Description: "Create state snapshot",
-					Disabled:            world.snapshotsDir!="",
+					ID:                  stages.CreateStateSnapshot,
+					Description:         "Create state snapshot",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
@@ -341,14 +341,14 @@ func ReplacementStages(ctx context.Context,
 
 func ReplacementUnwindOrder() UnwindOrder {
 	return []int{
-		0, 1, 2, 3, 4,// download headers/bodies + haders&body snapshots
+		0, 1, 2, 3, 4, // download headers/bodies + haders&body snapshots
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
 		15,
 		5, 6, 7, // senders, exec, state snapshot
 		9, 8, // Unwinding of IHashes needs to happen after unwinding HashState
 		10, 11, // history
-		12,  // log index
+		12, // log index
 		13, // call traces
 		14, // tx lookup
 		13,

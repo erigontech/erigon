@@ -190,7 +190,7 @@ func DefaultStages() StageBuilders {
 						}
 						return nil
 					},
-					Disabled:            world.snapshotsDir!="",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 				}
 			},
@@ -214,9 +214,9 @@ func DefaultStages() StageBuilders {
 			ID: stages.CreateBodiesSnapshot,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
-					ID:          stages.CreateBodiesSnapshot,
-					Description: "Create bodies snapshot",
-					Disabled:            world.snapshotsDir!="",
+					ID:                  stages.CreateBodiesSnapshot,
+					Description:         "Create bodies snapshot",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
@@ -295,9 +295,9 @@ func DefaultStages() StageBuilders {
 			ID: stages.CreateStateSnapshot,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
-					ID:          stages.CreateStateSnapshot,
-					Description: "Create state snapshot",
-					Disabled:            world.snapshotsDir!="",
+					ID:                  stages.CreateStateSnapshot,
+					Description:         "Create state snapshot",
+					Disabled:            world.snapshotsDir != "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
@@ -572,19 +572,19 @@ type UnwindOrder []int
 // Just adding stages that don't do unwinding, don't require altering the default order.
 func DefaultUnwindOrder() UnwindOrder {
 	return []int{
-		0, //headers
-		1, //block hashes
-		2, //headers snapshot
-		3, //bodies
-		4, //bodies snapshot
+		0,  //headers
+		1,  //block hashes
+		2,  //headers snapshot
+		3,  //bodies
+		4,  //bodies snapshot
 		15, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
 		5, //senders
 		6, //execution
 		7, //state snapshot
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		9, //intermediate hashes
-		8, //hash state
+		9,  //intermediate hashes
+		8,  //hash state
 		10, //acc history
 		11, //st history
 		12, //log index

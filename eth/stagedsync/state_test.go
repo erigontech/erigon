@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -724,19 +723,4 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
 	return stages.SyncStage(append([]byte(s), 0xF0))
-}
-
-func TestSnapshotUnwindOrderEqualDefault(t *testing.T) {
-	defaultStages := DefaultStages()
-	unwindOrder := DefaultUnwindOrder()
-	t.Log(len(defaultStages))
-	t.Log(len(unwindOrder))
-	unwindIDs := make([]stages.SyncStage, 0)
-	for _, i := range unwindOrder[:len(unwindOrder)-1] {
-		//fmt.Println(i, defaultStages[len(defaultStages)-i-2].ID)
-		fmt.Println(i, defaultStages[i].ID)
-		unwindIDs = append(unwindIDs, defaultStages[len(defaultStages)-i-2].ID)
-	}
-
-	//require.Equal(t, snUnwindIDs, unwindIDs)
 }
