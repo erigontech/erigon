@@ -26,12 +26,13 @@ func TestSendRawTransaction(t *testing.T) {
 	conn := createTestGrpcConn()
 	defer conn.Close()
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := filters.New(context.Background(), nil, txPool)
-	api := NewEthAPI(db, nil, txPool, 5000000, ff, nil)
+	ff := filters.New(context.Background(), nil, txPool, nil)
+	api := NewEthAPI(NewBaseApi(ff), db, nil, txPool, nil, 5000000)
 
 	// Call GetTransactionReceipt for un-protected transaction
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	txn := transaction(40, 1000000, testKey)
+	expect := uint64(40)
+	txn := transaction(expect, 1000000, testKey)
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(t, err)
@@ -44,7 +45,8 @@ func TestSendRawTransaction(t *testing.T) {
 	_, err = api.SendRawTransaction(context.Background(), buf.Bytes())
 	require.NoError(t, err)
 	select {
-	case <-txsCh:
+	case got := <-txsCh:
+		require.Equal(t, expect, got[0].GetNonce())
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("timeout waiting for  expected notification")
 	}

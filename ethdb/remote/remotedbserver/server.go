@@ -12,8 +12,6 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
@@ -38,16 +36,13 @@ type KvServer struct {
 	kv ethdb.RwKV
 }
 
-func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
+func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}
 
-	kv2Srv := NewKvServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
-	txPoolServer := NewTxPoolServer(context.Background(), txPool)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -84,7 +79,8 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashAp
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
-	remote.RegisterKVServer(grpcServer, kv2Srv)
+	txpool.RegisterMiningServer(grpcServer, miningServer)
+	remote.RegisterKVServer(grpcServer, kv)
 
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -103,7 +99,7 @@ func NewKvServer(kv ethdb.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
-// GetInterfaceVersion returns the service-side interface version number
+// Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
 	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
 		return &KvServiceAPIVersion, nil

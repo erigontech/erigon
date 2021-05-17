@@ -469,7 +469,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -626,7 +626,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return nil, err
 	}

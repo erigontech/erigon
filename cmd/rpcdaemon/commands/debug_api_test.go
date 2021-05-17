@@ -40,7 +40,7 @@ func TestTraceTransaction(t *testing.T) {
 		t.Fatalf("create test db: %v", err)
 	}
 	defer db.Close()
-	api := NewPrivateDebugAPI(db, 0, nil)
+	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -73,7 +73,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 		t.Fatalf("create test db: %v", err)
 	}
 	defer db.Close()
-	api := NewPrivateDebugAPI(db, 0, nil)
+	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)

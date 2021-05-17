@@ -29,6 +29,7 @@ type TxPoolServer struct {
 func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
+
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
 	return nil, fmt.Errorf("unimplemented")
 	/*

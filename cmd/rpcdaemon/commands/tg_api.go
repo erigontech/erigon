@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // TgAPI TurboGeth specific routines
@@ -32,15 +31,13 @@ type TgAPI interface {
 // TgImpl is implementation of the TgAPI interface
 type TgImpl struct {
 	*BaseAPI
-	db      ethdb.RoKV
-	pending *rpchelper.Pending
+	db ethdb.RoKV
 }
 
 // NewTgAPI returns TgImpl instance
-func NewTgAPI(db ethdb.RoKV, pending *rpchelper.Pending) *TgImpl {
+func NewTgAPI(base *BaseAPI, db ethdb.RoKV) *TgImpl {
 	return &TgImpl{
-		BaseAPI: &BaseAPI{},
+		BaseAPI: base,
 		db:      db,
-		pending: pending,
 	}
 }

@@ -15,7 +15,10 @@ import (
 func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
 	if blockNumber == rpc.PendingBlockNumber {
-		block := api.pending.Block()
+		block := api.pendingBlock()
+		if block == nil {
+			return nil, nil
+		}
 		return block.Header(), nil
 	}
 

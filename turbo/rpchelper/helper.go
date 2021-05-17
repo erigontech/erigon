@@ -3,6 +3,7 @@ package rpchelper
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -12,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *Pending) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -26,7 +27,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *P
 		} else if number == rpc.EarliestBlockNumber {
 			blockNumber = 0
 		} else if number == rpc.PendingBlockNumber {
-			pendingBlock := pending.Block()
+			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
 				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 				if err != nil {

@@ -432,6 +432,18 @@ func ReadBodyDeprecated(db ethdb.Getter, hash common.Hash, number uint64) *types
 	return body
 }
 
+func ReadBodyByNumber(db ethdb.Tx, number uint64) (*types.Body, uint64, uint32, error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, 0, 0, nil
+	}
+	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	return body, baseTxId, txAmount, nil
+}
+
 func ReadBody(db ethdb.Tx, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
