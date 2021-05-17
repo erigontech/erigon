@@ -41,24 +41,24 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-const PlainStateBucket = "PLAIN-CST2"
-const PlainStateBucketOld1 = "PLAIN-CST"
+const PlainStateBucket = "PlainState"
+const PlainStateBucketOld1 = "PlainState"
 
 const (
 	//PlainContractCodeBucket -
 	//key - address+incarnation
 	//value - code hash
-	PlainContractCodeBucket = "PLAIN-contractCode"
+	PlainContractCodeBucket = "PlainCodeHash"
 
 	// AccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	AccountChangeSetBucket = "PLAIN-ACS"
+	AccountChangeSetBucket = "AccountChangeSet"
 
 	// StorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket = "PLAIN-SCS"
+	StorageChangeSetBucket = "StorageChangeSet"
 
 	//HashedAccountsBucket
 	// key - address hash
@@ -66,31 +66,31 @@ const (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	HashedAccountsBucket   = "hashed_accounts"
-	HashedStorageBucket    = "hashed_storage"
-	CurrentStateBucketOld2 = "CST2"
+	HashedAccountsBucket   = "HashedAccount"
+	HashedStorageBucket    = "HashedStorage"
+	CurrentStateBucketOld2 = "HashedState"
 	CurrentStateBucketOld1 = "CST"
 
 	//key - address + shard_id_u64
 	//value - roaring bitmap  - list of block where it changed
-	AccountsHistoryBucket = "hAT"
+	AccountsHistoryBucket = "AccountHistory"
 
 	//key - address + storage_key + shard_id_u64
 	//value - roaring bitmap - list of block where it changed
-	StorageHistoryBucket = "hST"
+	StorageHistoryBucket = "StorageHistory"
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket = "CODE"
+	CodeBucket = "Code"
 
 	//key - addressHash+incarnation
 	//value - code hash
-	ContractCodeBucket = "contractCode"
+	ContractCodeBucket = "HashedCodeHash"
 
 	// IncarnationMapBucket for deleted accounts
 	//key - address
 	//value - incarnation of account when it was last deleted
-	IncarnationMapBucket = "incarnationMap"
+	IncarnationMapBucket = "IncarnationMap"
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket
@@ -133,32 +133,31 @@ Invariants:
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
-const TrieOfAccountsBucket = "trie_account"
-const TrieOfStorageBucket = "trie_storage"
+const TrieOfAccountsBucket = "TrieAccount"
+const TrieOfStorageBucket = "TrieStorage"
 const IntermediateTrieHashBucketOld1 = "iTh"
 const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket        = "DBINFO"
-	SnapshotInfoBucket        = "SNINFO"
-	BittorrentInfoBucket      = "BTINFO"
-	HeadersSnapshotInfoBucket = "hSNINFO"
-	BodiesSnapshotInfoBucket  = "bSNINFO"
-	StateSnapshotInfoBucket   = "sSNINFO"
+	DatabaseInfoBucket        = "DbInfo"
+	SnapshotInfoBucket        = "SnapshotInfo"
+	BittorrentInfoBucket      = "BittorrentInfo"
+	HeadersSnapshotInfoBucket = "HeadersSnapshotInfo"
+	BodiesSnapshotInfoBucket  = "BodiesSnapshotInfo"
+	StateSnapshotInfoBucket   = "StateSnapshotInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
-	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld       = "h"                      // block_num_u64 + hash -> header
+	HeaderNumberBucket    = "HeaderNumber"           // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderCanonicalBucket = "CanonicalHeader"        // block_num_u64 -> header hash
+	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
+	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
-	HeadersBucket         = "headers"           // block_num_u64 + hash -> header (RLP)
-	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash -> td (RLP)
-
-	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
-	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
-	BlockReceiptsPrefix = "r"      // block_num_u64 + hash -> block receipts
-	Log                 = "log"    // block_num_u64 + hash -> block receipts
+	BlockBodyPrefix     = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx               = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	BlockReceiptsPrefix = "Receipt"          // block_num_u64 + hash -> block receipts
+	Log                 = "TransactionLog"   // block_num_u64 + hash -> block receipts
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -168,58 +167,57 @@ const (
 	// if last existing shard size merge it with delta
 	// if serialized size of delta > ShardLimit - break down to multiple shards
 	// shard number - it's biggest value in bitmap
-	LogTopicIndex   = "log_topic_index"
-	LogAddressIndex = "log_address_index"
+	LogTopicIndex   = "LogTopicIndex"
+	LogAddressIndex = "LogAddressIndex"
 
 	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
 	// touched by call traces. It is DupSort-ed table
 	// 8-byte BE block nunber -> account address -> two bits (one for "from", another for "to")
-	CallTraceSet = "call_trace_set"
+	CallTraceSet = "CallTraceSet"
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
-	CallFromIndex = "call_from_index"
-	CallToIndex   = "call_to_index"
+	CallFromIndex = "CallFromIndex"
+	CallToIndex   = "CallToIndex"
 
-	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	TxLookupPrefix  = "BlockTransactionLookup" // txLookupPrefix + hash -> transaction/receipt lookup metadata
+	BloomBitsPrefix = "BloomBits"              // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
-	PreimagePrefix = "secure-key-"      // preimagePrefix + hash -> preimage
-	ConfigPrefix   = "ethereum-config-" // config prefix for the db
+	PreimagePrefix = "Preimage" // preimagePrefix + hash -> preimage
+	ConfigPrefix   = "Config"   // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix = "iB" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefix = "BloomBitsIndex" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	// Progress of sync stages: stageName -> stageData
-	SyncStageProgress     = "SSP2"
+	SyncStageProgress     = "SyncStage"
 	SyncStageProgressOld1 = "SSP"
 	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind     = "SSU2"
+	SyncStageUnwind     = "SyncStageUnwind"
 	SyncStageUnwindOld1 = "SSU"
 
-	CliqueBucket             = "clique-"
-	CliqueSeparateBucket     = "clique-snapshots-"
-	CliqueSnapshotBucket     = "snap"
-	CliqueLastSnapshotBucket = "lastSnap"
+	CliqueBucket             = "Clique"
+	CliqueSeparateBucket     = "CliqueSeparate"
+	CliqueSnapshotBucket     = "CliqueSnapshot"
+	CliqueLastSnapshotBucket = "CliqueLastSnapshot"
 
 	// this bucket stored in separated database
-	InodesBucket = "inodes"
+	InodesBucket = "Inode"
 
 	// Transaction senders - stored separately from the block bodies
-	Senders = "txSenders"
+	Senders = "TxSender"
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
 
-	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
-	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
+	InvalidBlock    = "InvalidBlock"    // Inherited from go-ethereum, not used in turbo-geth yet
+	UncleanShutdown = "UncleanShutdown" // Inherited from go-ethereum, not used in turbo-geth yet
 
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
-	Migrations = "migrations"
+	Migrations = "Migration"
 
-	Sequence = "sequence" // tbl_name -> seq_u64
-
+	Sequence = "Sequence" // tbl_name -> seq_u64
 )
 
 // Keys
