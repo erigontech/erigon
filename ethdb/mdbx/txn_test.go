@@ -615,7 +615,7 @@ func TestTxn_Flags(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	err = env.SetMaxDBs(1)
+	err = env.SetOption(OptMaxDB, uint64(1))
 	if err != nil {
 		t.Error(err)
 		return
