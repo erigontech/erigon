@@ -500,7 +500,7 @@ func setupFlags(t testing.TB, flags uint) *Env {
 		t.Fatalf("env: %s", err)
 	}
 	path := t.TempDir()
-	err = env.SetOption(OptMaxReaders, 1024)
+	err = env.SetOption(OptMaxDB, 1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
