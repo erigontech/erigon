@@ -154,7 +154,6 @@ func (env *Env) Open(path string, flags uint, mode os.FileMode) error {
 }
 
 var errNotOpen = errors.New("enivornment is not open")
-var errNegSize = errors.New("negative size")
 
 // FD returns the open file descriptor (or Windows file handle) for the given
 // environment.  An error is returned if the environment has not been
