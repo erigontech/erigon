@@ -120,15 +120,6 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
-	var tx ethdb.RwTx // on this variable will run sync cycle.
-	if canRunCycleInOneTransaction {
-		tx, err = db.RwKV().BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
 	if err != nil {
 		return err
@@ -140,6 +131,16 @@ func StageLoopStep(
 			notifyFrom = n
 		}
 	}
+
+	var tx ethdb.RwTx // on this variable will run sync cycle.
+	if canRunCycleInOneTransaction {
+		tx, err = db.RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	err = st.Run(db, tx)
 	if err != nil {
 		return err
