@@ -34,7 +34,7 @@ import (
 )
 
 func newTestLmdb() *ObjectDatabase {
-	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+	return NewObjectDatabase(NewMemKV())
 }
 
 var testBucket = dbutils.HashedAccountsBucket

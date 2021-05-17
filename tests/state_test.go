@@ -62,14 +62,14 @@ func TestState(t *testing.T) {
 	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/3`, "bug in test")
 
 	// For Istanbul, older tests were moved into LegacyTests
+	db := ethdb.NewMemKV()
+	t.Cleanup(db.Close)
+
 	for _, dir := range []string{
 		stateTestDir,
 		legacyStateTestDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
-			db := ethdb.NewMemKV()
-			defer db.Close()
-
 			for _, subtest := range test.Subtests() {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)

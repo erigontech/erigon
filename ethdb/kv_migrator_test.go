@@ -13,7 +13,7 @@ import (
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	kv := NewLMDB().InMem().MustOpen()
+	kv := NewMemKV()
 	defer kv.Close()
 
 	ctx := context.Background()
