@@ -30,7 +30,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	// check thad buckets have unique DBI's
 	uniquness := map[dbutils.DBI]bool{}
-	castedKv := kv.(*LmdbKV)
+	castedKv := kv.(*MdbxKV)
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
 			continue
