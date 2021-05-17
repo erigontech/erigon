@@ -66,22 +66,16 @@ func testPutGet(db RwKV, t *testing.T) {
 	//}
 
 	_, err = tx.GetOne(testBucket, []byte("non-exist-key"))
-	if err == nil {
-		t.Fatalf("expect to return a not found error")
-	}
+	require.NoError(t, err)
 
 	for _, v := range testValues {
 		err := tx.Put(testBucket, []byte(v), []byte(v))
-		if err != nil {
-			t.Fatalf("put failed: %v", err)
-		}
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
 		data, err := tx.GetOne(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		require.NoError(t, err)
 		if !bytes.Equal(data, []byte(v)) {
 			t.Fatalf("get returned wrong result, got %q expected %q", string(data), v)
 		}
@@ -89,16 +83,12 @@ func testPutGet(db RwKV, t *testing.T) {
 
 	for _, v := range testValues {
 		err := tx.Put(testBucket, []byte(v), []byte("?"))
-		if err != nil {
-			t.Fatalf("put override failed: %v", err)
-		}
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
 		data, err := tx.GetOne(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		require.NoError(t, err)
 		if !bytes.Equal(data, []byte("?")) {
 			t.Fatalf("get returned wrong result, got %q expected ?", string(data))
 		}
@@ -106,14 +96,10 @@ func testPutGet(db RwKV, t *testing.T) {
 
 	for _, v := range testValues {
 		orig, err := tx.GetOne(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		require.NoError(t, err)
 		orig[0] = byte(0xff)
 		data, err := tx.GetOne(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		require.NoError(t, err)
 		if !bytes.Equal(data, []byte("?")) {
 			fmt.Printf("Error: %s %s\n", v, data)
 			t.Fatalf("get returned wrong result, got %s expected ?", string(data))
@@ -122,16 +108,12 @@ func testPutGet(db RwKV, t *testing.T) {
 
 	for _, v := range testValues {
 		err := tx.Delete(testBucket, []byte(v), nil)
-		if err != nil {
-			t.Fatalf("delete %q failed: %v", v, err)
-		}
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
 		_, err := tx.GetOne(testBucket, []byte(v))
-		if err == nil {
-			t.Fatalf("got deleted value %q", v)
-		}
+		require.NoError(t, err)
 	}
 }
 
