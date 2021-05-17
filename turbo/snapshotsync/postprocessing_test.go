@@ -17,7 +17,7 @@ import (
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
-	snPath, err := ioutil.TempDir(".", "sn")
+	snPath, err := ioutil.TempDir("", "sn")
 	require.NoError(t, err)
 	snVK := ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
