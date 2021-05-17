@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"testing"
@@ -26,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/turbo-geth/gointerfaces/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
@@ -98,7 +98,7 @@ func mock(t *testing.T) *MockSentry {
 	var err error
 	mock.tmpdir, err = ioutil.TempDir("", "stagesync-test")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	db := mock.memDb.RwKV()
 	sm := ethdb.DefaultStorageMode
@@ -221,6 +221,7 @@ func TestEmptyStageSync(t *testing.T) {
 }
 
 func TestHeaderStep(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 	defer m.Close()
 
@@ -256,7 +257,124 @@ func TestHeaderStep(t *testing.T) {
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
-	highestSeenHeader := uint64(100)
+	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
+	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReorg(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	m := mock(t)
+	defer m.Close()
+
+	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+	// Send NewBlock message
+	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: blocks[len(blocks)-1],
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+
+	// Send all the headers
+	headers := make([]*types.Header, len(blocks))
+	for i, block := range blocks {
+		headers[i] = block.Header()
+	}
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: headers,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+
+	notifier := &remotedbserver.Events{}
+	initialCycle := true
+	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
+	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now generate two competing branches, one short one longer
+	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb, 2, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate short fork: %v", err)
+	}
+	long, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate short fork: %v", err)
+	}
+
+	// Send NewBlock message for short branch
+	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: short[len(short)-1],
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+
+	// Send headers of the short branch
+	headers = make([]*types.Header, len(short))
+	for i, block := range short {
+		headers[i] = block.Header()
+	}
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          2,
+		BlockHeadersPacket: headers,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+
+	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
+	initialCycle = false
+	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+		t.Fatal(err)
+	}
+
+	// Send NewBlock message for long branch
+	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: long[len(long)-1],
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+
+	// Send headers of the long branch
+	headers = make([]*types.Header, len(long))
+	for i, block := range long {
+		headers[i] = block.Header()
+	}
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          3,
+		BlockHeadersPacket: headers,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.stream.Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+
+	// This is unwind step
+	highestSeenHeader = uint64(long[len(long)-1].NumberU64())
 	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
