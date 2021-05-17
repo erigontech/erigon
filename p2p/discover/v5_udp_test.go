@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"reflect"
@@ -719,7 +720,11 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr) *enode.
 	id := encodePubkey(&key.PublicKey).id()
 	ln := test.nodesByID[id]
 	if ln == nil {
-		db, err := enode.OpenDB("")
+		dir, err := ioutil.TempDir(".", "dnsv45")
+		if err != nil {
+			panic(err)
+		}
+		db, err := enode.OpenDB(dir)
 		if err != nil {
 			panic(err)
 		}
