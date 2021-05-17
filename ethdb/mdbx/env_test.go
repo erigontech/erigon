@@ -505,7 +505,7 @@ func setupFlags(t testing.TB, flags uint) *Env {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
 	const pageSize = 4096
-	err = env.SetGeometry(-1, -1, 4*1024*pageSize, -1, -1, pageSize)
+	err = env.SetGeometry(-1, -1, 64*1024*pageSize, -1, -1, pageSize)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
