@@ -133,7 +133,7 @@ details about dealing with such situations.
 package mdbx
 
 /*
-#cgo CFLAGS: -O2 -g -Wno-deprecated-declarations -std=gnu17 -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo CFLAGS: -O2 -g -Wno-deprecated-declarations -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 #cgo windows CFLAGS: -Wno-bad-function-cast -Wno-cast-function-type
 
 #cgo !windows LDFLAGS: -L"${SRCDIR}"/dist -lmdbx-static
