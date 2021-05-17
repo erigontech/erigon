@@ -59,5 +59,4 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Docker
-        run: docker build .
+      - run: docker build .
