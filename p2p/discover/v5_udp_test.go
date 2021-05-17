@@ -719,7 +719,10 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr) *enode.
 	id := encodePubkey(&key.PublicKey).id()
 	ln := test.nodesByID[id]
 	if ln == nil {
-		db, _ := enode.OpenDB("")
+		db, err := enode.OpenDB("")
+		if err != nil {
+			panic(err)
+		}
 		ln = enode.NewLocalNode(db, key)
 		ln.SetStaticIP(addr.IP)
 		ln.Set(enr.UDP(addr.Port))
