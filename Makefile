@@ -153,7 +153,7 @@ test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 
-test-mdbx: mdbx
+test-mdbx:
 	TEST_DB=mdbx $(GOTEST)
 
 lint:
