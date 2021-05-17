@@ -3,6 +3,7 @@ package mdbx
 import (
 	"fmt"
 	"runtime"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -503,12 +504,12 @@ func setupFlags(t testing.TB, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	err = env.SetGeometry(-1, -1, 10*1024*1024, -1, -1, 4096)
+	const pageSize = 4096
+	err = env.SetGeometry(-1, -1, 4*1024*pageSize, -1, -1, pageSize)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= UtterlyNoSync | NoMetaSync
-	err = env.Open(path, flags, 0664)
+	err = env.Open(Durable, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)
 	}
