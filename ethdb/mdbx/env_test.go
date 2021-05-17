@@ -509,7 +509,7 @@ func setupFlags(t testing.TB, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	err = env.Open(Durable, flags, 0664)
+	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)
 	}
