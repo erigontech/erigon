@@ -56,7 +56,7 @@ jobs:
         with:
           go-version: 1.16.x
       - run: |
-          du -ha
+          df -ha
           choco upgrade mingw cmake -y --no-progress
       - uses: actions/cache@v2
         with:
