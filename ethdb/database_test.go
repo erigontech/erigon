@@ -202,9 +202,12 @@ func testParallelPutGet(db RwKV) {
 		go func(key string) {
 			defer pending.Done()
 			_ = db.Update(context.Background(), func(tx RwTx) error {
-				_, err := tx.GetOne(testBucket, []byte(key))
-				if err == nil {
-					panic("get succeeded")
+				v, err := tx.GetOne(testBucket, []byte(key))
+				if err != nil {
+					panic(err)
+				}
+				if v != nil {
+					panic("get returned something")
 				}
 				return nil
 			})
