@@ -2,6 +2,7 @@ package snapshotsync
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -17,7 +18,8 @@ import (
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
-	snPath, err := ioutil.TempDir("", "sn")
+	snPath, err := ioutil.TempDir(os.TempDir(), "sn")
+	fmt.Printf("dir: %s,%s\n", os.TempDir(), snPath)
 	require.NoError(t, err)
 	snVK := ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
