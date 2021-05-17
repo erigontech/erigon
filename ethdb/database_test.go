@@ -100,8 +100,7 @@ func testPutGet(db RwKV, t *testing.T) {
 		orig[0] = byte(0xff)
 		data, err := tx.GetOne(testBucket, []byte(v))
 		require.NoError(t, err)
-		if !bytes.Equal(data, []byte("?")) {
-			fmt.Printf("Error: %s %s\n", v, data)
+		if !bytes.Equal(data, []byte(v)) {
 			t.Fatalf("get returned wrong result, got %s expected ?", string(data))
 		}
 	}
