@@ -19,7 +19,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	snVK := ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
-	err = snVK.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := snVK.Update(context.Background(), func(tx ethdb.RwTx) error {
 		for _, header := range headers {
 			headerBytes, innerErr := rlp.EncodeToBytes(header)
 			if innerErr != nil {
