@@ -517,7 +517,7 @@ func TestTxn_Commit(t *testing.T) {
 	txn.Abort()
 	_, err = txn.Commit()
 	if !IsErrnoSys(err, syscall.EINVAL) {
-		t.Errorf("mdb_txn_commit: %v", err)
+		t.Errorf("mdb_txn_commit: %s", err.Error())
 	}
 }
 
