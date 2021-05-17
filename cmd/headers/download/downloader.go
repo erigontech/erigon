@@ -15,11 +15,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -215,55 +213,6 @@ type ControlServerImpl struct {
 	networkId       uint64
 	db              ethdb.Database
 	engine          consensus.Engine
-}
-
-func cfg(db ethdb.Database, chain string) (chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64) {
-	ethashConfig := &ethash.Config{
-		CachesInMem:      1,
-		CachesLockMmap:   false,
-		DatasetDir:       "ethash",
-		DatasetsInMem:    1,
-		DatasetsOnDisk:   0,
-		DatasetsLockMmap: false,
-	}
-	cliqueConfig := params.NewSnapshotConfig(10, 1024, 16384, false /* inMemory */, "clique", false /* mdbx */)
-	var err error
-	var genesis *core.Genesis
-	var consensusConfig interface{}
-	switch chain {
-	case "mainnet":
-		networkID = 1
-		genesis = core.DefaultGenesisBlock()
-		genesisHash = params.MainnetGenesisHash
-		consensusConfig = ethashConfig
-	case "ropsten":
-		networkID = 3
-		genesis = core.DefaultRopstenGenesisBlock()
-		genesisHash = params.RopstenGenesisHash
-		consensusConfig = ethashConfig
-	case "goerli":
-		networkID = 5
-		genesis = core.DefaultGoerliGenesisBlock()
-		genesisHash = params.GoerliGenesisHash
-		consensusConfig = cliqueConfig
-	case "rinkeby":
-		networkID = 4
-		genesis = core.DefaultRinkebyGenesisBlock()
-		genesisHash = params.RinkebyGenesisHash
-		consensusConfig = cliqueConfig
-	case "baikal":
-		networkID = 1642
-		genesis = core.DefaultBaikalGenesisBlock()
-		genesisHash = params.BaikalGenesisHash
-		consensusConfig = cliqueConfig
-	default:
-		panic(fmt.Errorf("chain %s is not known", chain))
-	}
-	if chainConfig, _, err = core.SetupGenesisBlock(db, genesis, false /* history */, false /* overwrite */); err != nil {
-		panic(fmt.Errorf("setup genesis block: %w", err))
-	}
-	engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, nil, false)
-	return chainConfig, genesisHash, engine, networkID
 }
 
 func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {

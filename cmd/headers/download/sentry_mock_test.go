@@ -34,7 +34,6 @@ type MockSentry struct {
 	memDb       ethdb.Database
 	tmpdir      string
 	chainConfig *params.ChainConfig
-	hd          *headerdownload.HeaderDownload
 	sync        *stagedsync.StagedSync
 }
 
