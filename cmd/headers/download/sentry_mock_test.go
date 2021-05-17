@@ -3,7 +3,6 @@ package download
 import (
 	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -19,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -80,7 +80,6 @@ func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*emptypb.E
 	return nil, nil
 }
 func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveMessagesServer) error {
-	fmt.Printf("ReceiveMessages\n")
 	ms.stream = stream
 	<-ms.ctx.Done()
 	return nil
@@ -104,7 +103,6 @@ func mock(t *testing.T) *MockSentry {
 	db := mock.memDb.RwKV()
 	sm := ethdb.DefaultStorageMode
 	mock.engine = ethash.NewFaker()
-	hd := headerdownload.NewHeaderDownload(1024 /* anchorLimit */, 1024 /* linkLimit */, mock.engine)
 	mock.chainConfig = params.AllEthashProtocolChanges
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte {
 		return nil
@@ -115,7 +113,6 @@ func mock(t *testing.T) *MockSentry {
 	}
 	batchSize := 1 * datasize.MB
 	increment := uint64(0)
-	bd := bodydownload.NewBodyDownload(1024 /* outstandingLimit */, mock.engine)
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte {
 		return nil
 	}
@@ -135,10 +132,36 @@ func mock(t *testing.T) *MockSentry {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fetchTx := func(peerID string, hashes []common.Hash) error {
+		txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+		return nil
+	}
+
+	txPoolServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
+	mock.key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	mock.address = crypto.PubkeyToAddress(mock.key.PublicKey)
+	funds := big.NewInt(1000000000)
+	gspec := &core.Genesis{
+		Config: mock.chainConfig,
+		Alloc: core.GenesisAlloc{
+			mock.address: {Balance: funds},
+		},
+	}
+	// Committed genesis will be shared between download and mock sentry
+	mock.genesis = gspec.MustCommit(mock.memDb)
+	blockDownloaderWindow := 128
+	networkID := uint64(1)
+	mock.sentryClient = &SentryClientDirect{}
+	mock.sentryClient.SetServer(mock)
+	sentries := []sentry.SentryClient{mock.sentryClient}
+	mock.downloader, err = NewControlServer(mock.memDb, "mock", mock.chainConfig, mock.genesis.Hash(), mock.engine, networkID, sentries, blockDownloaderWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mock.sync = stages.NewStagedSync(mock.ctx, sm,
 		stagedsync.StageHeadersCfg(
 			db,
-			hd,
+			mock.downloader.hd,
 			*mock.chainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
@@ -148,7 +171,7 @@ func mock(t *testing.T) *MockSentry {
 		),
 		stagedsync.StageBodiesCfg(
 			db,
-			bd,
+			mock.downloader.bd,
 			sendBodyRequest,
 			penalize,
 			updateHead,
@@ -184,26 +207,6 @@ func mock(t *testing.T) *MockSentry {
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),
 	)
-	mock.key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	mock.address = crypto.PubkeyToAddress(mock.key.PublicKey)
-	funds := big.NewInt(1000000000)
-	gspec := &core.Genesis{
-		Config: mock.chainConfig,
-		Alloc: core.GenesisAlloc{
-			mock.address: {Balance: funds},
-		},
-	}
-	// Committed genesis will be shared between download and mock sentry
-	mock.genesis = gspec.MustCommit(mock.memDb)
-	blockDownloaderWindow := 128
-	networkID := uint64(1)
-	mock.sentryClient = &SentryClientDirect{}
-	mock.sentryClient.SetServer(mock)
-	sentries := []sentry.SentryClient{mock.sentryClient}
-	mock.downloader, err = NewControlServer(mock.memDb, "mock", mock.chainConfig, mock.genesis.Hash(), mock.engine, networkID, sentries, blockDownloaderWindow)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err = SetSentryStatus(mock.ctx, sentries, mock.downloader); err != nil {
 		t.Fatal(err)
 	}
