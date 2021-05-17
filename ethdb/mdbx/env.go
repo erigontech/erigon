@@ -474,26 +474,6 @@ func (env *Env) SetGeometry(sizeLower int, sizeNow int, sizeUpper int, growthSte
 	return operrno("mdbx_env_set_geometry", ret)
 }
 
-// SetMaxReaders sets the maximum number of reader slots in the environment.
-//
-// See mdbx_env_set_maxreaders.
-func (env *Env) SetMaxReaders(size int) error {
-	if size < 0 {
-		return errNegSize
-	}
-	ret := C.mdbx_env_set_maxreaders(env._env, C.uint(size))
-	return operrno("mdbx_env_set_maxreaders", ret)
-}
-
-// MaxReaders returns the maximum number of reader slots for the environment.
-//
-// See mdbx_env_get_maxreaders.
-func (env *Env) MaxReaders() (int, error) {
-	var max C.uint
-	ret := C.mdbx_env_get_maxreaders(env._env, &max)
-	return int(max), operrno("mdbx_env_get_maxreaders", ret)
-}
-
 // MaxKeySize returns the maximum allowed length for a key.
 //
 // See mdbx_env_get_maxkeysize.
@@ -502,17 +482,6 @@ func (env *Env) MaxKeySize() int {
 		return int(C.mdbx_env_get_maxkeysize_ex(nil, 0))
 	}
 	return int(C.mdbx_env_get_maxkeysize_ex(env._env, 0))
-}
-
-// SetMaxDBs sets the maximum number of named databases for the environment.
-//
-// See mdbx_env_set_maxdbs.
-func (env *Env) SetMaxDBs(size int) error {
-	if size < 0 {
-		return errNegSize
-	}
-	ret := C.mdbx_env_set_maxdbs(env._env, C.MDBX_dbi(size))
-	return operrno("mdbx_env_set_maxdbs", ret)
 }
 
 // BeginTxn is an unsafe, low-level method to initialize a new transaction on

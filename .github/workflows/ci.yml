@@ -60,13 +60,13 @@ jobs:
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - name: Test
         run: |
-          - cd mdbx/dist
-          - cmake -G "MinGW Makefiles" . -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D CMAKE_C_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function" -D CMAKE_CXX_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function"
-          - cmake --build .
-          - cp libmdbx.dll C:/WINDOWS/SYSTEM32/
-          - cd ./..
-          - go build ./cmd/...
-          - go test -v ./...
+          cd mdbx/dist
+          cmake -G "MinGW Makefiles" . -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D CMAKE_C_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function" -D CMAKE_CXX_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function"
+          cmake --build .
+          cp libmdbx.dll C:/WINDOWS/SYSTEM32/
+          cd ./..
+          go build ./cmd/...
+          go test -v ./...
 
   docker:
     runs-on: ubuntu-18.04

@@ -161,12 +161,12 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		t.Error(err)
 	}
 
-	maxreaders := 246
-	err = env.SetMaxReaders(maxreaders)
+	maxreaders := uint64(246)
+	err = env.SetOption(OptMaxReaders, maxreaders)
 	if err != nil {
 		t.Error(err)
 	}
-	_maxreaders, err := env.MaxReaders()
+	_maxreaders, err := env.GetOption(OptMaxReaders)
 	if err != nil {
 		t.Error(err)
 	}
@@ -181,11 +181,11 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		t.Error(err)
 	}
 
-	err = env.SetMaxReaders(126)
+	err = env.SetOption(OptMaxReaders, uint64(126))
 	if !IsErrnoSys(err, syscall.EPERM) {
 		t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
 	}
-	_maxreaders, err = env.MaxReaders()
+	_maxreaders, err = env.GetOption(OptMaxReaders)
 	if err != nil {
 		t.Error(err)
 	}
@@ -500,7 +500,7 @@ func setupFlags(t testing.TB, flags uint) *Env {
 		t.Fatalf("env: %s", err)
 	}
 	path := t.TempDir()
-	err = env.SetMaxDBs(1024)
+	err = env.SetOption(OptMaxReaders, 1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
