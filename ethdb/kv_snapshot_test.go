@@ -991,7 +991,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	checkKVErr(t, k, v, err, []byte{1}, []byte{1})
 
 	done := make(chan struct{})
-	kv.(*SnapshotKV).UpdateSnapshots([]string{dbutils.PlainStateBucket}, snapshotDB2, done)
+	kv.UpdateSnapshots([]string{dbutils.PlainStateBucket}, snapshotDB2, done)
 
 	tx2, err := kv.BeginRo(context.Background())
 	if err != nil {

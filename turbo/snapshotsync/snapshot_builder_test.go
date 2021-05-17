@@ -115,8 +115,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 
-	sa := db.(ethdb.WriteDB)
-	rotx, err := sa.WriteDB().BeginRo(context.Background())
+	rotx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
 	roc, err := rotx.Cursor(dbutils.HeadersBucket)
@@ -136,7 +135,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 
-	snodb := ethdb.NewObjectDatabase(db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
+	snodb := ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -231,7 +230,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal("it's not possible to close db without rollback. something went wrong")
 	}
 
-	rotx, err = sa.WriteDB().BeginRo(context.Background())
+	rotx, err = db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
 	roc, err = rotx.Cursor(dbutils.HeadersBucket)
@@ -246,7 +245,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = ethdb.NewObjectDatabase(db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}

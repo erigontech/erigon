@@ -34,7 +34,8 @@ var verifyStateSnapshotCmd = &cobra.Command{
 }
 
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
-	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	var snkv ethdb.RwKV
+	snkv = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
