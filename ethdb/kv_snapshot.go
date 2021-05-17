@@ -56,7 +56,7 @@ func (opts snapshotOpts) DB(db RwKV) snapshotOpts {
 	return opts
 }
 
-func (opts snapshotOpts) Open() RwKV {
+func (opts snapshotOpts) Open() *SnapshotKV {
 	snapshots := make(map[string]snapshotData)
 	for i, v := range opts.snapshots {
 		for _, bucket := range v.buckets {
