@@ -95,17 +95,6 @@ func testPutGet(db RwKV, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		orig, err := tx.GetOne(testBucket, []byte(v))
-		require.NoError(t, err)
-		orig[0] = byte(0xff)
-		data, err := tx.GetOne(testBucket, []byte(v))
-		require.NoError(t, err)
-		if !bytes.Equal(data, []byte(v)) {
-			t.Fatalf("get returned wrong result, got %s expected ?", string(data))
-		}
-	}
-
-	for _, v := range testValues {
 		err := tx.Delete(testBucket, []byte(v), nil)
 		require.NoError(t, err)
 	}
