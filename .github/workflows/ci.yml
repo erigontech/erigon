@@ -10,7 +10,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15, windows-2019 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -53,6 +53,26 @@ jobs:
       - name: Test (non-windows)
         if: matrix.os != 'windows-2019'
         run: make test
+
+  win:
+    strategy:
+      matrix:
+        os: [  windows-2019 ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16.x
+      - run: choco upgrade mingw cmake -y --no-progress
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Test
+        run: make test
+
   docker:
     runs-on: ubuntu-18.04
     steps:

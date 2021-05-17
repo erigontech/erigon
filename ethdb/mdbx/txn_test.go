@@ -418,8 +418,14 @@ func TestTxn_OpenDBI_emptyName(t *testing.T) {
 		_, err = txn.OpenDBISimple("", Create)
 		return err
 	})
-	if !IsErrnoSys(err, syscall.EACCES) {
-		t.Errorf("mdb_dbi_open: %v", err)
+	if runtime.GOOS == "windows" {
+		if !IsErrnoSys(err, syscall.EIO) {
+			t.Errorf("mdb_dbi_open: %v", err)
+		}
+	} else {
+		if !IsErrnoSys(err, syscall.EACCES) {
+			t.Errorf("mdb_dbi_open: %v", err)
+		}
 	}
 }
 
