@@ -75,7 +75,6 @@ func TestEnv_Open(t *testing.T) {
 	if err != nil {
 		t.Errorf("open: %s", err)
 	}
-	env.Close()
 }
 
 func TestEnv_FD(t *testing.T) {
