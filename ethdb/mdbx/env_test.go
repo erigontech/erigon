@@ -498,11 +498,11 @@ func TestEnv_Sync(t *testing.T) {
 	}
 }
 
-func setup(t *testing.T) *Env {
+func setup(t testing.TB) *Env {
 	return setupFlags(t, 0)
 }
 
-func setupFlags(t *testing.T, flags uint) *Env {
+func setupFlags(t testing.TB, flags uint) *Env {
 	env, err := NewEnv()
 	if err != nil {
 		t.Fatalf("env: %s", err)
