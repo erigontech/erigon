@@ -2,7 +2,7 @@ package mdbx
 
 import (
 	"fmt"
-	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -67,11 +67,7 @@ func TestEnv_Open(t *testing.T) {
 		t.Error(err1)
 		return
 	}
-	defer func() {
-		if err := env.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer env.Close()
 
 	// open an environment at a temporary path.
 	path := t.TempDir()
@@ -79,20 +75,18 @@ func TestEnv_Open(t *testing.T) {
 	if err != nil {
 		t.Errorf("open: %s", err)
 	}
-	env.Close()
 }
 
 func TestEnv_FD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FD funcs not supported on windows")
+	}
 	env, err1 := NewEnv()
 	if err1 != nil {
 		t.Error(err1)
 		return
 	}
-	defer func() {
-		if err := env.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer env.Close()
 
 	fd, err := env.FD()
 	if err != nil && !strings.Contains(err.Error(), "operation not permitted") {
@@ -117,7 +111,6 @@ func TestEnv_FD(t *testing.T) {
 
 func TestEnv_Flags(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	flags, err := env.Flags()
 	if err != nil {
@@ -214,7 +207,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_SetMapSize(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	const minsize = 100 << 20 // 100MB
 //	err := env.SetMapSize(minsize)
@@ -239,7 +232,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_ReaderList(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	var numreaders = 2
 //
@@ -285,7 +278,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_ReaderList_error(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	var numreaders = 2
 //
@@ -358,7 +351,6 @@ func TestEnv_SetDebug(t *testing.T) {
 
 func TestEnv_ReaderCheck(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	numDead, err := env.ReaderCheck()
 	if err != nil {
@@ -413,7 +405,7 @@ func TestEnv_ReaderCheck(t *testing.T) {
 //	}
 //
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	item := struct{ k, v []byte }{
 //		[]byte("k0"),
@@ -477,7 +469,6 @@ func TestEnv_ReaderCheck(t *testing.T) {
 
 func TestEnv_Sync(t *testing.T) {
 	env := setupFlags(t, SafeNoSync)
-	defer clean(env, t)
 
 	item := struct{ k, v []byte }{[]byte("k0"), []byte("v0")}
 
@@ -532,31 +523,8 @@ type T interface {
 	Fatalf(format string, vals ...interface{})
 }
 
-func clean(env *Env, t T) {
-	path, err := env.Path()
-	if err != nil {
-		t.Errorf("path: %v", err)
-	}
-	err = env.Close()
-	if err != nil {
-		t.Errorf("close: %s", err)
-	}
-	if path != "" {
-		err = os.RemoveAll(path)
-		if err != nil {
-			t.Errorf("remove: %v", err)
-		}
-	}
-}
-
-func TestEnvCopy(t *testing.T) {
-	env := setup(t)
-	defer clean(env, t)
-}
-
 func TestEnv_MaxKeySize(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	n := env.MaxKeySize()
 	if n <= 0 {
@@ -575,7 +543,6 @@ func TestEnv_MaxKeySize_nil(t *testing.T) {
 
 func TestEnv_CloseDBI(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	const numdb = 1000
 	for i := 0; i < numdb; i++ {

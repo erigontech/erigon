@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"runtime"
 	"syscall"
 	"testing"
@@ -13,7 +12,6 @@ import (
 
 func TestTxn_ID(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var id0, id1, id2, id3 uintptr
 	var txnInvalid *Txn
@@ -100,7 +98,6 @@ func TestTxn_ID(t *testing.T) {
 
 func TestTxn_errLogf(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -116,7 +113,6 @@ func TestTxn_errLogf(t *testing.T) {
 
 func TestTxn_Drop(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	db, err := openDBI(env, "db", Create)
 	if err != nil {
@@ -168,7 +164,6 @@ func TestTxn_Drop(t *testing.T) {
 
 func TestTxn_Del(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -204,7 +199,6 @@ func TestTxn_Del(t *testing.T) {
 
 func TestTxn_Del_dup(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -246,7 +240,6 @@ func TestTxn_Del_dup(t *testing.T) {
 
 func TestTexn_Put_emptyValue(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -275,7 +268,6 @@ func TestTexn_Put_emptyValue(t *testing.T) {
 
 func TestTxn_PutReserve(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -318,7 +310,6 @@ func TestTxn_PutReserve(t *testing.T) {
 
 func TestTxn_bytesBuffer(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	db, err := openRoot(env, 0)
 	if err != nil {
@@ -358,7 +349,6 @@ func TestTxn_bytesBuffer(t *testing.T) {
 
 func TestTxn_Put_overwrite(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	db, err := openRoot(env, 0)
 	if err != nil {
@@ -404,7 +394,6 @@ func TestTxn_Put_overwrite(t *testing.T) {
 
 func TestTxn_OpenDBI_emptyName(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	err := env.View(func(txn *Txn) (err error) {
 		_, err = txn.OpenDBISimple("", 0)
@@ -425,7 +414,6 @@ func TestTxn_OpenDBI_emptyName(t *testing.T) {
 
 func TestTxn_OpenDBI_zero(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	err := env.View(func(txn *Txn) (err error) {
 		_, err = txn.OpenRoot(0)
@@ -442,7 +430,6 @@ func TestTxn_OpenDBI_zero(t *testing.T) {
 
 func TestTxn_Commit_managed(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	err := env.View(func(txn *Txn) (err error) {
 		defer func() {
@@ -498,7 +485,6 @@ func TestTxn_Commit_managed(t *testing.T) {
 
 func TestTxn_Commit(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -517,7 +503,6 @@ func TestTxn_Commit(t *testing.T) {
 
 func TestTxn_Update(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -556,11 +541,8 @@ func TestTxn_Flags(t *testing.T) {
 	env := setup(t)
 	path, err := env.Path()
 	if err != nil {
-		_ = env.Close()
-		t.Error(err)
-		return
+		t.Fatal(err)
 	}
-	defer os.RemoveAll(path)
 
 	dbflags := uint(ReverseKey | ReverseDup | DupSort | DupFixed)
 	err = env.Update(func(txn *Txn) (err error) {
@@ -597,7 +579,7 @@ func TestTxn_Flags(t *testing.T) {
 		}
 		return nil
 	})
-	_ = env.Close()
+	env.Close()
 	if err != nil {
 		t.Error(err)
 		return
@@ -656,20 +638,12 @@ func TestTxn_Flags(t *testing.T) {
 
 func TestTxn_Renew(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	// It is not necessary to call runtime.LockOSThread in this test because
 	// the only unmanaged Txn is Readonly.
 
 	var dbroot DBI
-	err = env.Update(func(txn *Txn) (err error) {
+	err := env.Update(func(txn *Txn) (err error) {
 		dbroot, err = txn.OpenRoot(0)
 		return err
 	})
@@ -721,14 +695,6 @@ func TestTxn_Renew(t *testing.T) {
 
 func TestTxn_Reset_doubleReset(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	txn, err := env.BeginTxn(nil, Readonly)
 	if err != nil {
@@ -745,15 +711,6 @@ func TestTxn_Reset_doubleReset(t *testing.T) {
 // transactions. The transaction may be committed after Reset/Renew are called.
 func TestTxn_Reset_writeTxn(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
-
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -802,20 +759,12 @@ func TestTxn_Reset_writeTxn(t *testing.T) {
 
 func TestTxn_UpdateLocked(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	var dbi DBI
-	err = env.UpdateLocked(func(txn *Txn) (err error) {
+	err := env.UpdateLocked(func(txn *Txn) (err error) {
 		dbi, err = txn.OpenRoot(0)
 		if err != nil {
 			return err
@@ -843,17 +792,9 @@ func TestTxn_UpdateLocked(t *testing.T) {
 
 func TestTxn_RunTxn(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var dbi DBI
-	err = env.RunTxn(0, func(txn *Txn) (err error) {
+	err := env.RunTxn(0, func(txn *Txn) (err error) {
 		dbi, err = txn.OpenRoot(0)
 		if err != nil {
 			return err
@@ -885,17 +826,9 @@ func TestTxn_RunTxn(t *testing.T) {
 
 func TestTxn_Stat(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var dbi DBI
-	err = env.Update(func(txn *Txn) (err error) {
+	err := env.Update(func(txn *Txn) (err error) {
 		dbi, err = txn.OpenDBISimple("testdb", Create)
 		return err
 	})
@@ -935,17 +868,9 @@ func TestTxn_Stat(t *testing.T) {
 
 func TestTxn_StatOnEmpty(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var dbi DBI
-	err = env.Update(func(txn *Txn) (err error) {
+	err := env.Update(func(txn *Txn) (err error) {
 		dbi, err = txn.OpenDBISimple("testdb", Create|DupSort)
 		return err
 	})
@@ -976,18 +901,10 @@ func TestTxn_StatOnEmpty(t *testing.T) {
 
 func TestSequence(t *testing.T) {
 	env := setup(t)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		t.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var dbi1 DBI
 	var dbi2 DBI
-	err = env.Update(func(txn *Txn) (err error) {
+	err := env.Update(func(txn *Txn) (err error) {
 		dbi1, err = txn.OpenDBISimple("testdb", Create)
 		if err != nil {
 			return err
@@ -1054,14 +971,6 @@ func TestSequence(t *testing.T) {
 
 func BenchmarkTxn_abort(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var e = fmt.Errorf("abort")
 
@@ -1073,17 +982,9 @@ func BenchmarkTxn_abort(b *testing.B) {
 
 func BenchmarkTxn_commit(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	var db DBI
-	err = env.Update(func(txn *Txn) (err error) {
+	err := env.Update(func(txn *Txn) (err error) {
 		db, err = txn.OpenDBISimple("testdb", Create)
 		if err != nil {
 			return err
@@ -1115,14 +1016,6 @@ func BenchmarkTxn_commit(b *testing.B) {
 
 func BenchmarkTxn_ro(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -1136,14 +1029,6 @@ func BenchmarkTxn_ro(b *testing.B) {
 
 func BenchmarkTxn_unmanaged_abort(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -1161,14 +1046,6 @@ func BenchmarkTxn_unmanaged_abort(b *testing.B) {
 
 func BenchmarkTxn_unmanaged_commit(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -1186,14 +1063,6 @@ func BenchmarkTxn_unmanaged_commit(b *testing.B) {
 
 func BenchmarkTxn_unmanaged_ro(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	// It is not necessary to call runtime.LockOSThread here because the txn is
 	// Readonly
@@ -1211,14 +1080,6 @@ func BenchmarkTxn_unmanaged_ro(b *testing.B) {
 
 func BenchmarkTxn_renew(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
 
 	// It is not necessary to call runtime.LockOSThread here because the txn is
 	// Readonly
@@ -1243,15 +1104,7 @@ func BenchmarkTxn_renew(b *testing.B) {
 
 func BenchmarkTxn_Put_append(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
-	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
+	err := env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
 	if err != nil {
 		b.Error(err)
 		return
@@ -1291,15 +1144,7 @@ func BenchmarkTxn_Put_append(b *testing.B) {
 
 func BenchmarkTxn_Put_append_noflag(b *testing.B) {
 	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		_ = env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
-	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
+	err := env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
 	if err != nil {
 		b.Fatalf("Cannot set mapsize: %s", err)
 	}

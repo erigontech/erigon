@@ -288,26 +288,20 @@ func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	if db.env != nil {
-		db.wg.Wait()
+	if db.env == nil {
+		return
 	}
 
-	if db.env != nil {
-		env := db.env
-		db.env = nil
-		if err := env.Close(); err != nil {
-			db.log.Warn("failed to close DB", "err", err)
-		} else {
-			db.log.Info("database closed (MDBX)")
-		}
-	}
+	db.wg.Wait()
+	db.env.Close()
+	db.env = nil
 
 	if db.opts.inMem {
 		if err := os.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
-
+	db.log.Info("database closed (MDBX)")
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
