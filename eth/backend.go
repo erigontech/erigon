@@ -209,6 +209,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if !reflect.DeepEqual(sm, config.StorageMode) {
 			return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 		}
+	} else {
+		config.StorageMode = sm
 	}
 
 	if sm.Pruning && !backend.config.EnableDownloadV2 {
