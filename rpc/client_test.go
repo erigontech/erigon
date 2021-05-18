@@ -196,7 +196,7 @@ func testClientCancel(transport string, t *testing.T) {
 		defer hs.Close()
 		client = c
 	case "ipc":
-		c, l := ipcTestClient(server, fl)
+		c, l := ipcTestClient(t, server, fl)
 		defer l.Close()
 		client = c
 	default:
@@ -602,13 +602,13 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 	return client, hs
 }
 
-func ipcTestClient(srv *Server, fl *flakeyListener) (*Client, net.Listener) {
+func ipcTestClient(t *testing.T, srv *Server, fl *flakeyListener) (*Client, net.Listener) {
 	// Listen on a random endpoint.
 	endpoint := fmt.Sprintf("go-ethereum-test-ipc-%d-%d", os.Getpid(), rand.Int63())
 	if runtime.GOOS == "windows" {
 		endpoint = `\\.\pipe\` + endpoint
 	} else {
-		endpoint = os.TempDir() + "/" + endpoint
+		endpoint = t.TempDir() + "/" + endpoint
 	}
 	l, err := ipcListen(endpoint)
 	if err != nil {
