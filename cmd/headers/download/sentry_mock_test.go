@@ -92,6 +92,7 @@ func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxM
 
 func mock(t *testing.T) *MockSentry {
 	mock := &MockSentry{}
+	t.Cleanup(mock.Close)
 	mock.ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.memDb = ethdb.NewMemDatabase()
 	var err error
@@ -212,14 +213,12 @@ func mock(t *testing.T) *MockSentry {
 }
 
 func TestEmptyStageSync(t *testing.T) {
-	m := mock(t)
-	defer m.Close()
+	mock(t)
 }
 
 func TestHeaderStep(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
-	defer m.Close()
 
 	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -262,7 +261,6 @@ func TestHeaderStep(t *testing.T) {
 func TestReorg(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
-	defer m.Close()
 
 	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
