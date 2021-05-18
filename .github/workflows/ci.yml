@@ -60,6 +60,7 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - run: |
+          go env
           choco upgrade mingw cmake -y --no-progress
       - name: Test
         run: |
