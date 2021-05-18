@@ -122,7 +122,7 @@ func TestUnwindStackPopAndEmpty(t *testing.T) {
 }
 
 func TestUnwindOverrideWithLower(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 
 	stack := NewPersistentUnwindStack()
 

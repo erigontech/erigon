@@ -39,8 +39,7 @@ import (
 
 func TestSelfDestructReceive(t *testing.T) {
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)

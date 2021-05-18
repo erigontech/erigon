@@ -58,8 +58,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		DatasetsLockMmap: false,
 	}, nil, false)
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 
 	config, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {

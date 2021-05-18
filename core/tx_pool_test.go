@@ -149,8 +149,7 @@ func deriveSender(tx types.Transaction) (common.Address, error) {
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -535,8 +534,7 @@ func TestTransactionDropping(t *testing.T) {
 // postponed back into the future queue to prevent broadcasting them.
 func TestTransactionPostponing(t *testing.T) {
 	// Create the pool to test the postponing with
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 
 	txCacher := NewTxSenderCacher(runtime.NumCPU())
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
