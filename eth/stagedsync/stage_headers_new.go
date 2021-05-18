@@ -80,6 +80,7 @@ func HeadersForward(
 		return err
 	}
 	if hash == (common.Hash{}) {
+		fmt.Printf("fixCaninicalChain will be called\n")
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
@@ -261,6 +262,8 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
 			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
+		} else {
+			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
