@@ -27,7 +27,7 @@ func NewMemDatabase() *ObjectDatabase {
 	return NewObjectDatabase(NewMemKV())
 }
 
-func NewTestDB(t *testing.T) *ObjectDatabase {
+func NewTestDB(t testing.TB) *ObjectDatabase {
 	return NewObjectDatabase(NewTestKV(t))
 }
 
