@@ -64,6 +64,9 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
 			log.Error("Stage loop failure", "error", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				log.Error("Failed to recover header downoader", "error", recoveryErr)
+			}
 			continue
 		}
 
