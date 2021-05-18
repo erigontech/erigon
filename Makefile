@@ -154,7 +154,7 @@ test-lmdb:
 
 
 test-mdbx:
-	TEST_DB=mdbx $(GOTEST)
+	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
 	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
