@@ -264,7 +264,10 @@ func TestDBSeedQuery(t *testing.T) {
 }
 
 func testSeedQuery() error {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Insert a batch of nodes for querying
@@ -422,7 +425,10 @@ var nodeDBExpirationNodes = []struct {
 }
 
 func TestDBExpiration(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Add all the test nodes and set their last pong time.
@@ -465,7 +471,10 @@ func TestDBExpiration(t *testing.T) {
 // This test checks that expiration works when discovery v5 data is present
 // in the database.
 func TestDBExpireV5(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	ip := net.IP{127, 0, 0, 1}

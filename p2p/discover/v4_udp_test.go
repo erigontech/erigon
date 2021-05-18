@@ -556,7 +556,10 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	ln := enode.NewLocalNode(db, cfg.PrivateKey)
 
 	// Prefix logs with node ID.

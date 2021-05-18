@@ -80,6 +80,9 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 		panic(err)
 	}
 	t.Cleanup(db.Close)
+	if err != nil {
+		panic(err)
+	}
 	ln := enode.NewLocalNode(db, cfg.PrivateKey)
 
 	// Prefix logs with node ID.
@@ -220,7 +223,10 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 				test.t.Fatalf("wrong request ID in response: %v", p.ReqID)
 			}
 			for _, record := range p.Nodes {
-				n, _ := enode.New(enode.ValidSchemesForTesting, record)
+				n, err := enode.New(enode.ValidSchemesForTesting, record)
+				if err != nil {
+					panic(err)
+				}
 				want := nodeSet[n.ID()]
 				if want == nil {
 					test.t.Fatalf("unexpected node in response: %v", n)
@@ -629,7 +635,10 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	var authTag v5wire.Nonce
 	binary.BigEndian.PutUint64(authTag[:], c.ctr)
 
-	penc, _ := rlp.EncodeToBytes(p)
+	penc, err := rlp.EncodeToBytes(p)
+	if err != nil {
+		panic(err)
+	}
 	frame, err := rlp.EncodeToBytes(testCodecFrame{c.id, authTag, p.Kind(), penc})
 	return frame, authTag, err
 }
@@ -681,11 +690,14 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
-	test.udp, _ = ListenV5(test.pipe, ln, Config{
+	test.udp, err = ListenV5(test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlTrace),
 		ValidSchemes: enode.ValidSchemesForTesting,
 	})
+	if err != nil {
+		panic(err)
+	}
 	test.udp.codec = &testCodec{test: test, id: ln.ID()}
 	test.table = test.udp.tab
 	test.nodesByID[ln.ID()] = ln
