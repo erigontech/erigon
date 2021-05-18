@@ -26,11 +26,12 @@ type OpInfo interface {
 
 // info used to check validity and use constant gas at JUMPDEST or JUMPI entry to a block
 type BlockInfo struct {
-	pc uint64			// pc of block in contract code
-	minStack int		// min stack length for this block to not underflow
-	maxStack int		// max stack length for this block to not overflow
-	constantGas uint64	// gas used by block - statically known
+	pc          uint64 // pc of block in contract code
+	minStack    int    // min stack length for this block to not underflow
+	maxStack    int    // max stack length for this block to not overflow
+	constantGas uint64 // gas used by block - statically known
 }
+
 func (BlockInfo) opInfo() {}
 func NewBlockInfo(pc uint64) *BlockInfo {
 	p := new(BlockInfo)
@@ -42,6 +43,7 @@ func NewBlockInfo(pc uint64) *BlockInfo {
 type JumpInfo struct {
 	dest uint64 // pc to jump to
 }
+
 func (JumpInfo) opInfo() {}
 func NewJumpInfo(pc uint64, dest uint64) *JumpInfo {
 	p := new(JumpInfo)
@@ -53,6 +55,7 @@ func NewJumpInfo(pc uint64, dest uint64) *JumpInfo {
 type PushInfo struct {
 	data uint256.Int
 }
+
 func (PushInfo) opInfo() {}
 func NewPushInfo(pc uint64, data uint256.Int) *PushInfo {
 	p := new(PushInfo)
@@ -73,7 +76,3 @@ func getBlockInfo(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	}
 	return analyzeBlock(ctx, pc)
 }
-
-
-
-

@@ -68,9 +68,10 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 			pushInfo := NewPushInfo(pc, *integer)
 			ctx.contract.opsInfo[pc] = pushInfo
 
+			pc += uint64(pushByteSize)
 			continue
 		}
-		
+
 		// check jump destinations and optimize static jumps
 		if op == JUMP || op == JUMPI {
 			prevPC := pc - 1
