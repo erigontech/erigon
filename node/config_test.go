@@ -81,7 +81,7 @@ func TestIPCPathResolution(t *testing.T) {
 	}{
 		{"", "", false, ""},
 		{"data", "", false, ""},
-		{"", "geth.ipc", false, filepath.Join(t.TempDir(), "geth.ipc")},
+		{"", "geth.ipc", false, filepath.Join(os.TempDir(), "geth.ipc")},
 		{"data", "geth.ipc", false, "data/geth.ipc"},
 		{"data", "./geth.ipc", false, "./geth.ipc"},
 		{"data", "/geth.ipc", false, "/geth.ipc"},
