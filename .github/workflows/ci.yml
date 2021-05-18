@@ -22,6 +22,7 @@ jobs:
           go-version: 1.16.x
       - name: Install dependencies
         run: |
+          df -ha
           if [ "$RUNNER_OS" == "Linux" ]; then
             sudo apt update && sudo apt install build-essential
           fi
