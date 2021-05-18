@@ -80,16 +80,18 @@ func TestReadOnlyMode(t *testing.T) {
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
-	db1.Close()
+	defer db1.Close()
 
 	db2 := NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
+	defer db2.Close()
 
 	tx, err := db2.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
