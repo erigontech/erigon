@@ -349,9 +349,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				backend.sentries = append(backend.sentries, sentry)
 			}
 		} else {
-			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir)
+			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr)
 			sentry := &download.SentryClientDirect{}
-			backend.sentryServer.P2pServer = backend.p2pServer
 			sentry.SetServer(backend.sentryServer)
 			backend.sentries = []proto_sentry.SentryClient{sentry}
 		}
@@ -714,16 +713,15 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())
-
-	// Figure out a max peers count based on the server limits
-	maxPeers := s.p2pServer.MaxPeers
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events)
 	} else {
+		eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())
 		// Start the networking layer and the light server if requested
+		// Figure out a max peers count based on the server limits
+		maxPeers := s.p2pServer.MaxPeers
 		s.handler.Start(maxPeers)
 	}
 	return nil
