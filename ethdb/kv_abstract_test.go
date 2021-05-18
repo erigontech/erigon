@@ -19,10 +19,9 @@ import (
 )
 
 func TestSequence(t *testing.T) {
-	writeDBs, _, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, _ := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return defaultBuckets
 	})
-	defer closeAll()
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
@@ -56,6 +55,7 @@ func TestSequence(t *testing.T) {
 		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
+		tx.Rollback()
 	}
 }
 
@@ -68,7 +68,7 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
-	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
 				Flags:                     dbutils.DupSort,
@@ -81,7 +81,6 @@ func TestManagedTx(t *testing.T) {
 			},
 		}
 	})
-	defer closeAll()
 
 	ctx := context.Background()
 
@@ -140,6 +139,7 @@ func TestRemoteKvVersion(t *testing.T) {
 		return defaultBuckets
 	}
 	writeDb := ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen()
+	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
@@ -180,7 +180,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 }
 
-func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV, close func()) {
+func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
 	writeDBs = []ethdb.RwKV{
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
@@ -204,7 +204,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 		rdb,
 	}
 
-	return writeDBs, readDBs, func() {
+	t.Cleanup(func() {
 		grpcServer.Stop()
 
 		if err := conn.Close(); err != nil {
@@ -218,7 +218,9 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 		for _, db := range writeDBs {
 			db.Close()
 		}
-	}
+
+	})
+	return writeDBs, readDBs
 }
 
 func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {

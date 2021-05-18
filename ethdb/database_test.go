@@ -100,8 +100,10 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 	db := NewTestKV(t)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	writeTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer writeTx.Rollback()
 
 	closeCh := make(chan struct{}, 1)
 	go func() {
