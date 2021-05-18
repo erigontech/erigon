@@ -580,6 +580,10 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 
 // close flushes and closes the database files.
 func (db *DB) Close() {
+	if db.quit == nil {
+		return
+	}
 	close(db.quit)
+	db.quit = nil
 	db.kv.Close()
 }

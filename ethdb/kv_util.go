@@ -3,6 +3,9 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -124,4 +127,22 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 		bucketStart = bucketEnd
 	}
 	return nil
+}
+
+func testKVPath() string {
+	var dir string
+	if runtime.GOOS == "windows" {
+		var err error
+		dir, err = os.UserCacheDir()
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		var err error
+		dir, err = ioutil.TempDir(os.TempDir(), "tg-test-db")
+		if err != nil {
+			panic(err)
+		}
+	}
+	return dir
 }

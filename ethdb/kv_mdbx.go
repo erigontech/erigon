@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -91,10 +90,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	var err error
 	if opts.inMem {
 		logger = log.New("mdbx", "inMem")
-		opts.path, err = ioutil.TempDir(os.TempDir(), "mdbx")
-		if err != nil {
-			return nil, err
-		}
+		opts.path = testKVPath()
 	} else {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
@@ -292,26 +288,20 @@ func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	if db.env != nil {
-		db.wg.Wait()
+	if db.env == nil {
+		return
 	}
 
-	if db.env != nil {
-		env := db.env
-		db.env = nil
-		if err := env.Close(); err != nil {
-			db.log.Warn("failed to close DB", "err", err)
-		} else {
-			db.log.Info("database closed (MDBX)")
-		}
-	}
+	db.wg.Wait()
+	db.env.Close()
+	db.env = nil
 
 	if db.opts.inMem {
 		if err := os.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
-
+	db.log.Info("database closed (MDBX)")
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {

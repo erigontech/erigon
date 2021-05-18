@@ -2,8 +2,6 @@ package mdbx
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
 	"testing"
 )
 
@@ -16,15 +14,7 @@ func TestTest1(t *testing.T) {
 	if err1 != nil {
 		t.Fatalf("Cannot set mapsize: %s", err1)
 	}
-	path, err1 := ioutil.TempDir("", "mdb_test")
-	if err1 != nil {
-		t.Fatalf("Cannot create temporary directory")
-	}
-	err1 = os.MkdirAll(path, 0770)
-	defer os.RemoveAll(path)
-	if err1 != nil {
-		t.Fatalf("Cannot create directory: %s", path)
-	}
+	path := t.TempDir()
 	err1 = env.Open(path, 0, 0664)
 	defer env.Close()
 	if err1 != nil {

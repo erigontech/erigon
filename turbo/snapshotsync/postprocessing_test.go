@@ -15,7 +15,7 @@ import (
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
-	snPath := os.TempDir() + "/sn"
+	snPath := t.TempDir()
 	snVK := ethdb.NewLMDB().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)

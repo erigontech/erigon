@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -115,10 +114,7 @@ func (opts LmdbOpts) Open() (kv *LmdbKV, err error) {
 	var logger log.Logger
 	if opts.inMem {
 		logger = log.New("lmdb", "inMem")
-		opts.path, err = ioutil.TempDir(os.TempDir(), "lmdb")
-		if err != nil {
-			return nil, err
-		}
+		opts.path = testKVPath()
 	} else {
 		logger = log.New("lmdb", path.Base(opts.path))
 	}

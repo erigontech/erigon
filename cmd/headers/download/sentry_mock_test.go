@@ -3,10 +3,10 @@ package download
 import (
 	"context"
 	"crypto/ecdsa"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -93,13 +93,11 @@ func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxM
 
 func mock(t *testing.T) *MockSentry {
 	mock := &MockSentry{}
+	t.Cleanup(mock.Close)
 	mock.ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.memDb = ethdb.NewMemDatabase()
 	var err error
-	mock.tmpdir, err = ioutil.TempDir("", "stagesync-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mock.tmpdir = t.TempDir()
 	db := mock.memDb.RwKV()
 	sm := ethdb.DefaultStorageMode
 	mock.engine = ethash.NewFaker()
@@ -212,18 +210,17 @@ func mock(t *testing.T) *MockSentry {
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage)
+	time.Sleep(time.Millisecond) // prev line has race - need wait for mock.stream to set
 	return mock
 }
 
 func TestEmptyStageSync(t *testing.T) {
-	m := mock(t)
-	defer m.Close()
+	mock(t)
 }
 
 func TestHeaderStep(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
-	defer m.Close()
 
 	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -266,7 +263,6 @@ func TestHeaderStep(t *testing.T) {
 func TestReorg(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
-	defer m.Close()
 
 	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})

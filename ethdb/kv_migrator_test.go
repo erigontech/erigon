@@ -3,7 +3,6 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -78,9 +77,7 @@ func TestBucketCRUD(t *testing.T) {
 }
 
 func TestReadOnlyMode(t *testing.T) {
-	path := os.TempDir() + "/tm1"
-	err := os.RemoveAll(path)
-	require.NoError(t, err)
+	path := t.TempDir()
 	db1 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
