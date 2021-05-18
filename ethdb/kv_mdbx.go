@@ -539,14 +539,17 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 
 func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
-
+	//todo rename
+	// support Old1 buckets
+	// support existing databases (means check if name before renaming exists)
+	rename := dbutils.Rename[name]
 	var dcmp mdbx.CmpFunc
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
 		dcmp = tx.tx.GetCmpExcludeSuffix32()
 	}
 
-	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	dbi, err := tx.tx.OpenDBI(rename, mdbx.DBAccede, nil, dcmp)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -579,7 +582,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	dbi, err = tx.tx.OpenDBI(rename, nativeFlags, nil, dcmp)
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
