@@ -81,11 +81,9 @@ type vmExecMarshaling struct {
 	GasPrice *math.HexOrDecimal256
 }
 
-func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), blockNr)
-	state, err := MakePreState(ctx, db, t.json.Pre, blockNr)
+	state, err := MakePreState(ctx, ethdb.WrapIntoTxDB(tx), t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}
@@ -119,7 +117,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	root, err := trie.CalcRoot("test", db)
+	root, err := trie.CalcRoot("test", ethdb.WrapIntoTxDB(tx))
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}
