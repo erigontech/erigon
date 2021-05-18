@@ -97,8 +97,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = ethdb.NewMemoryDatabase()
-		dbProFork = ethdb.NewMemoryDatabase()
+		dbNoFork  = ethdb.NewTestDB(t)
+		dbProFork = ethdb.NewTestDB(t)
 
 		ethNoFork, _ = newHandler(&handlerConfig{
 			Database:    dbNoFork,
@@ -196,8 +196,7 @@ func TestRecvTransactions66(t *testing.T) { testRecvTransactions(t, eth.ETH66) }
 
 func testRecvTransactions(t *testing.T, protocol uint) {
 	// Create a message handler, configure it to accept transactions and watch them
-	handler := newTestHandler()
-	defer handler.close()
+	handler := newTestHandler(t)
 
 	handler.handler.acceptTxs = 1 // mark synced to accept transactions
 
@@ -255,8 +254,7 @@ func TestSendTransactions66(t *testing.T) { testSendTransactions(t, eth.ETH66) }
 
 func testSendTransactions(t *testing.T, protocol uint) {
 	// Create a message handler and fill the pool with big transactions
-	handler := newTestHandler()
-	defer handler.close()
+	handler := newTestHandler(t)
 
 	insert := make([]types.Transaction, 100)
 	for nonce := range insert {
@@ -352,8 +350,7 @@ func TestBroadcastBlock100Peers(t *testing.T) { testBroadcastBlock(t, 100, 10) }
 func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 	// Create a source handler to broadcast blocks from and a number of sinks
 	// to receive them.
-	source := newTestHandlerWithBlocks(1)
-	defer source.close()
+	source := newTestHandlerWithBlocks(t, 1)
 
 	sinks := make([]*testEthHandler, peers)
 	for i := 0; i < len(sinks); i++ {
@@ -435,8 +432,7 @@ func TestBroadcastMalformedBlock66(t *testing.T) { testBroadcastMalformedBlock(t
 func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 	// Create a source handler to broadcast blocks from and a number of sinks
 	// to receive them.
-	source := newTestHandlerWithBlocks(1)
-	defer source.close()
+	source := newTestHandlerWithBlocks(t, 1)
 
 	// Create a source handler to send messages through and a sink peer to receive them
 	p2pSrc, p2pSink := p2p.MsgPipe()

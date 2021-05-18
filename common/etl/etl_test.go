@@ -81,20 +81,14 @@ func TestNextKeyErr(t *testing.T) {
 
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(1))
 
-	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -118,18 +112,12 @@ func TestFileDataProviders(t *testing.T) {
 
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
-	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -143,8 +131,7 @@ func TestRAMDataProviders(t *testing.T) {
 
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -169,8 +156,7 @@ func TestTransformRAMOnly(t *testing.T) {
 }
 
 func TestEmptySourceBucket(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -194,8 +180,7 @@ func TestEmptySourceBucket(t *testing.T) {
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -220,8 +205,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -248,8 +232,7 @@ func TestTransformThroughFiles(t *testing.T) {
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -274,8 +257,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)

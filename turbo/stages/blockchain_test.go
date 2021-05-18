@@ -668,9 +668,7 @@ func TestChainTxReorgs(t *testing.T) {
 }
 
 func TestLogReorgs(t *testing.T) {
-	db, db2 := ethdb.NewMemDatabase(), ethdb.NewMemoryDatabase()
-	defer db.Close()
-	defer db2.Close()
+	db, db2 := ethdb.NewTestDB(t), ethdb.NewTestDB(t)
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
@@ -2366,7 +2364,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
-		db     = ethdb.NewMemoryDatabase()
+		db     = ethdb.NewTestDB(t)
 
 		// A sender who makes transactions, has some funds
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -2432,7 +2430,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	diskdb := ethdb.NewMemoryDatabase()
+	diskdb := ethdb.NewTestDB(t)
 	gspec.MustCommit(diskdb)
 
 	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {

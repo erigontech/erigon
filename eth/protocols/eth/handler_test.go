@@ -56,15 +56,15 @@ type testBackend struct {
 }
 
 // newTestBackend creates an empty chain and wraps it into a mock backend.
-func newTestBackend(blocks int) *testBackend {
-	return newTestBackendWithGenerator(blocks, nil)
+func newTestBackend(t *testing.T, blocks int) *testBackend {
+	return newTestBackendWithGenerator(t, blocks, nil)
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)) *testBackend {
+func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
-	db := ethdb.NewMemoryDatabase()
+	db := ethdb.NewTestDB(t)
 	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
@@ -83,18 +83,17 @@ func newTestBackendWithGenerator(blocks int, generator func(int, *core.BlockGen)
 
 	chain, _ := core.NewBlockChain(db, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	txCacher := core.NewTxSenderCacher(1)
-	return &testBackend{
+	b := &testBackend{
 		db:        db,
 		txpool:    core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
 		chain:     chain,
 		headBlock: headBlock,
 	}
-}
-
-// close tears down the transaction pool and chain behind the mock backend.
-func (b *testBackend) close() {
-	b.txpool.Stop()
-	b.chain.Stop()
+	t.Cleanup(func() {
+		b.txpool.Stop()
+		b.chain.Stop()
+	})
+	return b
 }
 
 func (b *testBackend) DB() ethdb.RwKV { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
@@ -118,8 +117,7 @@ func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
-	backend := newTestBackend(maxHeadersServe + 15)
-	defer backend.close()
+	backend := newTestBackend(t, maxHeadersServe+15)
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
@@ -290,8 +288,7 @@ func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
-	backend := newTestBackend(maxBodiesServe + 15)
-	defer backend.close()
+	backend := newTestBackend(t, maxBodiesServe+15)
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
@@ -408,8 +405,7 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		}
 	}
 	// Assemble the test environment
-	backend := newTestBackendWithGenerator(4, generator)
-	defer backend.close()
+	backend := newTestBackendWithGenerator(t, 4, generator)
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()

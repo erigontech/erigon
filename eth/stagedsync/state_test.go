@@ -91,8 +91,7 @@ func TestStateDisabledStages(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
@@ -141,8 +140,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()

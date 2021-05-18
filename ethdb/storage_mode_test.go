@@ -8,7 +8,7 @@ import (
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
-	db := NewMemDatabase()
+	db := NewTestDB(t)
 	sm, err := GetStorageModeFromDB(db)
 	if err != nil {
 		t.Fatal(err)

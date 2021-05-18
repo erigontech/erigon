@@ -103,8 +103,7 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	state := state.New(state.NewDbStateReader(db))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{

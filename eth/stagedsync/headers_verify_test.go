@@ -79,11 +79,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 	headerRecs := decodeHeaders(verifyHardCodedHeadersClique)
 	headers := toHeaders(headerRecs)
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
-	cliqueDB := ethdb.NewMemDatabase()
-	defer cliqueDB.Close()
+	db, cliqueDB := ethdb.NewTestDB(t), ethdb.NewTestDB(t)
 
 	engine := clique.New(params.RinkebyChainConfig, params.CliqueSnapshot, cliqueDB)
 

@@ -12,13 +12,7 @@ import (
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	kv := NewMemKV()
-	defer kv.Close()
-
-	ctx := context.Background()
-	tx, err := kv.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+	kv, tx := NewTestTx(t)
 
 	normalBucket := dbutils.Buckets[15]
 	deprecatedBucket := dbutils.DeprecatedBuckets[0]
@@ -29,7 +23,10 @@ func TestBucketCRUD(t *testing.T) {
 
 	// check thad buckets have unique DBI's
 	uniquness := map[dbutils.DBI]bool{}
-	castedKv := kv.(*MdbxKV)
+	castedKv, ok := kv.(*MdbxKV)
+	if !ok {
+		t.Skip()
+	}
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
 			continue

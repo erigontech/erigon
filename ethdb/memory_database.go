@@ -23,13 +23,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 )
 
-// NewMemoryDatabase is just an alias to simplify rebasing (the same name as `rawdb.NewMemoryDatabase` in vanilla geth)
-func NewMemoryDatabase() *ObjectDatabase {
-	return NewMemDatabase()
-}
-
 func NewMemDatabase() *ObjectDatabase {
 	return NewObjectDatabase(NewMemKV())
+}
+
+func NewTestDB(t *testing.T) *ObjectDatabase {
+	return NewObjectDatabase(NewTestKV(t))
 }
 
 func NewMemKV() RwKV {

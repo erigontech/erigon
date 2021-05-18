@@ -131,13 +131,9 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 	//})
 }
 
-func TestMemoryDB_ParallelPutGet(t *testing.T) {
-	db := NewMemKV()
-	defer db.Close()
-	testParallelPutGet(db)
-}
+func TestParallelPutGet(t *testing.T) {
+	db := NewTestKV(t)
 
-func testParallelPutGet(db RwKV) {
 	const n = 8
 	var pending sync.WaitGroup
 
