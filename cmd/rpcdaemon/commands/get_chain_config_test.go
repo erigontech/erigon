@@ -9,8 +9,7 @@ import (
 )
 
 func TestGetChainConfig(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
+	db := ethdb.NewTestKV(t)
 	config, _, err := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)

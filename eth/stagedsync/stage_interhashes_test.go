@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -22,11 +21,7 @@ func addTestAccount(db ethdb.Putter, hash common.Hash, balance uint64) error {
 }
 
 func TestTrieOfAccountsLayout(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, tx := ethdb.NewTestTx(t)
 
 	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 300_000_000_000))
@@ -46,7 +41,7 @@ func TestTrieOfAccountsLayout(t *testing.T) {
 	hash6 := common.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash6, 100_000_000_000))
 
-	_, err = RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	account_trie := make(map[string][]byte)

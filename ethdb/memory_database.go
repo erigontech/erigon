@@ -17,6 +17,9 @@
 package ethdb
 
 import (
+	"context"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 )
 
@@ -41,4 +44,21 @@ func NewMemKV() RwKV {
 		// with mdbx tests time out, especially ./tests package
 		return NewLMDB().InMem().MustOpen()
 	}
+}
+
+func NewTestKV(t testing.TB) RwKV {
+	kv := NewMemKV()
+	t.Cleanup(kv.Close)
+	return kv
+}
+
+func NewTestTx(t testing.TB) (RwKV, RwTx) {
+	kv := NewMemKV()
+	t.Cleanup(kv.Close)
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return kv, tx
 }

@@ -17,7 +17,6 @@
 package rawdb
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
@@ -45,13 +44,7 @@ func TestLookupStorage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			db := ethdb.NewMemKV()
-			defer db.Close()
-			tx, err := db.BeginRw(context.Background())
-			if err != nil {
-				panic(err)
-			}
-			defer tx.Rollback()
+			_, tx := ethdb.NewTestTx(t)
 
 			tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), uint256.NewInt().SetUint64(111), 1111, uint256.NewInt().SetUint64(11111), []byte{0x11, 0x11, 0x11})
 			tx2 := types.NewTransaction(2, common.BytesToAddress([]byte{0x22}), uint256.NewInt().SetUint64(222), 2222, uint256.NewInt().SetUint64(22222), []byte{0x22, 0x22, 0x22})

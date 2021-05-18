@@ -61,7 +61,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	err = mainDB.Update(context.Background(), func(tx RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 		if err != nil {
@@ -236,7 +236,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.HeadersBucket}, sn1).
 		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).Open()
@@ -342,7 +342,7 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
@@ -412,7 +412,7 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -487,7 +487,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -773,7 +773,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -810,7 +810,7 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -872,7 +872,7 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -971,8 +971,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(NewTestKV(t)).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRo(context.Background())
