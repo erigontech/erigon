@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -209,6 +210,7 @@ func mock(t *testing.T) *MockSentry {
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage)
+	time.Sleep(time.Millisecond) // prev line has race - need wait for mock.stream to set
 	return mock
 }
 
