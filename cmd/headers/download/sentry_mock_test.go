@@ -3,7 +3,6 @@ package download
 import (
 	"context"
 	"crypto/ecdsa"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"testing"
@@ -96,10 +95,7 @@ func mock(t *testing.T) *MockSentry {
 	mock.ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.memDb = ethdb.NewMemDatabase()
 	var err error
-	mock.tmpdir, err = ioutil.TempDir("", "stagesync-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mock.tmpdir = t.TempDir()
 	db := mock.memDb.RwKV()
 	sm := ethdb.DefaultStorageMode
 	mock.engine = ethash.NewFaker()

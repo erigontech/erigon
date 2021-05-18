@@ -2,7 +2,6 @@ package mdbx
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 	"syscall"
@@ -33,12 +32,7 @@ func TestEnv_Path(t *testing.T) {
 	}
 
 	// open an environment
-	dir, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
+	dir := t.TempDir()
 	err = env.Open(dir, 0, 0644)
 	defer env.Close()
 	if err != nil {
@@ -80,15 +74,12 @@ func TestEnv_Open(t *testing.T) {
 	}()
 
 	// open an environment at a temporary path.
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(path)
-	err = env.Open(path, 0, 0664)
+	path := t.TempDir()
+	err := env.Open(path, 0, 0664)
 	if err != nil {
 		t.Errorf("open: %s", err)
 	}
+	env.Close()
 }
 
 func TestEnv_FD(t *testing.T) {
@@ -109,11 +100,7 @@ func TestEnv_FD(t *testing.T) {
 	}
 
 	// open an environment at a temporary path.
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 	err = env.Open(path, 0, 0664)
 	if err != nil {
 		t.Errorf("open: %s", err)
@@ -173,11 +160,7 @@ func TestEnv_Flags(t *testing.T) {
 }
 
 func TestEnv_SetMaxReader(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-env-setmaxreaders-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	env, err := NewEnv()
 	if err != nil {
@@ -218,12 +201,6 @@ func TestEnv_SetMaxReader(t *testing.T) {
 }
 
 func TestEnv_SetDebug(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-env-setmdebug-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
 	env, err := NewEnv()
 	if err != nil {
 		t.Error(err)
@@ -521,23 +498,16 @@ func TestEnv_Sync(t *testing.T) {
 	}
 }
 
-func setup(t T) *Env {
+func setup(t *testing.T) *Env {
 	return setupFlags(t, 0)
 }
 
-func setupFlags(t T, flags uint) *Env {
+func setupFlags(t *testing.T, flags uint) *Env {
 	env, err := NewEnv()
 	if err != nil {
 		t.Fatalf("env: %s", err)
 	}
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	err = os.MkdirAll(path, 0770)
-	if err != nil {
-		t.Fatalf("mkdir: %s", path)
-	}
+	path := t.TempDir()
 	err = env.SetMaxDBs(1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
@@ -551,7 +521,9 @@ func setupFlags(t T, flags uint) *Env {
 	if err != nil {
 		t.Fatalf("open: %s", err)
 	}
-
+	t.Cleanup(func() {
+		env.Close()
+	})
 	return env
 }
 

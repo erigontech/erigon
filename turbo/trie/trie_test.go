@@ -20,10 +20,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"math/rand"
-	"os"
 	"reflect"
 	"testing"
 
@@ -36,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -215,51 +212,6 @@ func runRandTest(rt randTest) bool {
 	return true
 }
 
-func BenchmarkGet(b *testing.B)      { benchGet(b, false) }
-func BenchmarkGetDB(b *testing.B)    { benchGet(b, true) }
-func BenchmarkUpdateBE(b *testing.B) { benchUpdate(b, binary.BigEndian) }
-func BenchmarkUpdateLE(b *testing.B) { benchUpdate(b, binary.LittleEndian) }
-
-const benchElemCount = 20000
-
-func benchGet(b *testing.B, commit bool) {
-	trie := new(Trie)
-	var tmpdir string
-	var tmpdb ethdb.Database
-	if commit {
-		tmpdir, tmpdb = tempDB()
-		trie = New(common.Hash{})
-	}
-	k := make([]byte, 32)
-	for i := 0; i < benchElemCount; i++ {
-		binary.LittleEndian.PutUint64(k, uint64(i))
-		trie.Update(k, k)
-	}
-	binary.LittleEndian.PutUint64(k, benchElemCount/2)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		trie.Get(k)
-	}
-	b.StopTimer()
-
-	if commit {
-		tmpdb.Close()
-		os.RemoveAll(tmpdir)
-	}
-}
-
-func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
-	trie := newEmpty()
-	k := make([]byte, 32)
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		e.PutUint64(k, uint64(i))
-		trie.Update(k, k)
-	}
-	return trie
-}
-
 // Benchmarks the trie hashing. Since the trie caches the result of any operation,
 // we cannot use b.N as the number of hashing rouns, since all rounds apart from
 // the first one will be NOOP. As such, we'll use b.N as the number of account to
@@ -293,14 +245,6 @@ func BenchmarkHash(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	trie.Hash()
-}
-
-func tempDB() (string, ethdb.Database) {
-	dir, err := ioutil.TempDir("", "trie-bench")
-	if err != nil {
-		panic(fmt.Sprintf("can't create temporary directory: %v", err))
-	}
-	return dir, ethdb.MustOpen(dir)
 }
 
 func TestDeepHash(t *testing.T) {

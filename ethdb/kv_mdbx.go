@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -91,10 +90,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	var err error
 	if opts.inMem {
 		logger = log.New("mdbx", "inMem")
-		opts.path, err = ioutil.TempDir(os.TempDir(), "mdbx")
-		if err != nil {
-			return nil, err
-		}
+		opts.path = testKVPath()
 	} else {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}

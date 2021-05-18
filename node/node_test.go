@@ -89,11 +89,7 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 // Tests that if the data dir is already in use, an appropriate error is returned.
 func TestNodeUsedDataDir(t *testing.T) {
 	// Create a temporary folder to use as the data directory
-	dir, dirErr := ioutil.TempDir("", "")
-	if dirErr != nil {
-		t.Fatalf("failed to create temporary data directory: %v", dirErr)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	// Create a new node based on the data directory
 	original, originalErr := New(&Config{DataDir: dir})

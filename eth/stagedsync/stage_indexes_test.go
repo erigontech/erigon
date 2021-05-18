@@ -27,7 +27,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
+	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())
@@ -70,7 +70,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
+	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
 

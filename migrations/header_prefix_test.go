@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"os"
 	"strconv"
 	"testing"
 
@@ -44,7 +43,7 @@ func TestHeaderPrefix(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
-	err = migrator.Apply(db, os.TempDir())
+	err = migrator.Apply(db, t.TempDir())
 	require.NoError(err)
 
 	num := 0
