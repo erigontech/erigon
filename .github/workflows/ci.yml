@@ -73,7 +73,6 @@ jobs:
           pwd
           ls .
           go build ./cmd/...
-          ls C:\Users\RUNNER~1\AppData\Local\Temp
           make test-mdbx
 
   docker:
