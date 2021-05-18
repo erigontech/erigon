@@ -70,6 +70,7 @@ jobs:
           ls .
           cp libmdbx.dll C:/WINDOWS/SYSTEM32/
           cd ./../../..
+          go env
           go build ./cmd/...
           make test-mdbx
 
