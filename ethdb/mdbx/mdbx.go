@@ -137,7 +137,7 @@ package mdbx
 #cgo windows CFLAGS: -O2 -g -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 
 #cgo !windows LDFLAGS: ${SRCDIR}/dist/mdbx-static.o
-#cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
+#cgo windows LDFLAGS: -v -L. -L./dist -L"${SRCDIR}" -llibmdbx
 */
 import "C"
 
