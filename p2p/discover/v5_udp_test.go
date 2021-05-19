@@ -79,9 +79,6 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 		panic(err)
 	}
 	t.Cleanup(db.Close)
-	if err != nil {
-		panic(err)
-	}
 	ln := enode.NewLocalNode(db, cfg.PrivateKey)
 
 	// Prefix logs with node ID.

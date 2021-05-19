@@ -40,7 +40,7 @@ func TestPythonInterop(t *testing.T) {
 	}
 	n, err := New(ValidSchemes, &r)
 	if err != nil {
-		t.Fatalf("can't verify record: %v", err)
+		t.Fatalf("can't verify record: %v", err)state_test.go:103
 	}
 
 	var (
