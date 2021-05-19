@@ -74,7 +74,11 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	cfg.PrivateKey = newkey()
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB(t.TempDir())
+	if err != nil {
+		panic(err)
+	}
+	t.Cleanup(db.Close)
 	ln := enode.NewLocalNode(db, cfg.PrivateKey)
 
 	// Prefix logs with node ID.
@@ -667,7 +671,12 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 		nodesByIP:  make(map[string]*enode.LocalNode),
 	}
 	t.Cleanup(test.close)
-	test.db, _ = enode.OpenDB("")
+	var err error
+	test.db, err = enode.OpenDB(test.t.TempDir())
+	if err != nil {
+		panic(err)
+	}
+
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
