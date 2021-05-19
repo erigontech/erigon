@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -23,6 +25,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -1822,6 +1825,165 @@ func snapSizes(chaindata string) error {
 	return nil
 }
 
+func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
+	fmt.Printf("Request=%s\n", request)
+	log.Info("Getting", "url", url, "request", request)
+	start := time.Now()
+	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		return nil, nil, fmt.Errorf("status %s", r.Status)
+	}
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(r.Body); err != nil {
+		return nil, nil, fmt.Errorf("reading http response: %w", err)
+	}
+	var p fastjson.Parser
+	response := buf.Bytes()
+	v, err := p.ParseBytes(response)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing http response: %w", err)
+	}
+	log.Info("Got in", "time", time.Since(start).Seconds())
+	return response, v, nil
+}
+
+func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
+	var vType fastjson.Type = fastjson.TypeNull
+	var vgType fastjson.Type = fastjson.TypeNull
+	if v != nil {
+		vType = v.Type()
+	}
+	if vg != nil {
+		vgType = vg.Type()
+	}
+	if vType != vgType {
+		return fmt.Errorf("different types for prefix %s: %s / %s", prefix, vType.String(), vgType.String())
+	}
+	switch vType {
+	case fastjson.TypeNull:
+		// Nothing to do
+	case fastjson.TypeObject:
+		obj, err := v.Object()
+		if err != nil {
+			return fmt.Errorf("convering tg val to object at prefix %s: %w", prefix, err)
+		}
+		objg, errg := vg.Object()
+		if errg != nil {
+			return fmt.Errorf("convering g val to object at prefix %s: %w", prefix, errg)
+		}
+		objg.Visit(func(key []byte, vg1 *fastjson.Value) {
+			if err != nil {
+				return
+			}
+			v1 := obj.Get(string(key))
+			if v1 == nil && vg1.Type() != fastjson.TypeNull {
+				err = fmt.Errorf("tg missing value at prefix: %s", prefix+"."+string(key))
+				return
+			}
+			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
+				err = e
+			}
+		})
+		if err != nil {
+			return err
+		}
+		// Finding keys that are present in TG but missing in G
+		obj.Visit(func(key []byte, v1 *fastjson.Value) {
+			if err != nil {
+				return
+			}
+			if objg.Get(string(key)) == nil && v1.Type() != fastjson.TypeNull {
+				err = fmt.Errorf("g missing value at prefix: %s", prefix+"."+string(key))
+				return
+			}
+		})
+		if err != nil {
+			return err
+		}
+	case fastjson.TypeArray:
+		arr, err := v.Array()
+		if err != nil {
+			return fmt.Errorf("converting tg val to array at prefix %s: %w", prefix, err)
+		}
+		arrg, errg := vg.Array()
+		if errg != nil {
+			return fmt.Errorf("converting g val to array at prefix %s: %w", prefix, errg)
+		}
+		if len(arr) != len(arrg) {
+			return fmt.Errorf("arrays have different length at prefix %s: %d / %d", prefix, len(arr), len(arrg))
+		}
+		for i, item := range arr {
+			itemg := arrg[i]
+			if e := compareJsonValues(fmt.Sprintf("%s[%d]", prefix, i), item, itemg); e != nil {
+				return e
+			}
+		}
+	case fastjson.TypeString:
+		if v.String() != vg.String() {
+			return fmt.Errorf("different string values at prefix %s: %s / %s", prefix, v.String(), vg.String())
+		}
+	case fastjson.TypeNumber:
+		i, err := v.Int()
+		if err != nil {
+			return fmt.Errorf("converting tg val to int at prefix %s: %w", prefix, err)
+		}
+		ig, errg := vg.Int()
+		if errg != nil {
+			return fmt.Errorf("converting g val to int at prefix %s: %w", prefix, errg)
+		}
+		if i != ig {
+			return fmt.Errorf("different int values at prefix %s: %d / %d", prefix, i, ig)
+		}
+	}
+	return nil
+}
+
+func wrongReceipts() error {
+	dirname := "/Users/alexeysharp/Downloads/txtraces"
+	dir, err := os.Open(dirname)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	var names []string
+	if names, err = dir.Readdirnames(0); err != nil {
+		return err
+	}
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+	url := "http://192.168.1.126:8545"
+	fmt.Printf("Read %d names\n", len(names))
+	for i, name := range names {
+		txhash := common.FromHex(name[len("txtrace_") : len(name)-len(".txt")])
+		fmt.Printf("%x\n", txhash)
+		request := fmt.Sprintf(`{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x%x"],"id":%d}`, txhash, i)
+		response, v1, err1 := post2(client, url, request)
+		if err1 != nil {
+			return err
+		}
+		fmt.Printf("Response len = %d\n", len(response))
+		r := v1.Get("result").Get("structLogs")
+		file, err2 := ioutil.ReadFile(path.Join(dirname, name))
+		if err2 != nil {
+			return err2
+		}
+		v2, err3 := fastjson.ParseBytes(file)
+		if err3 != nil {
+			return err3
+		}
+		err = compareJsonValues("", r, v2)
+		if err != nil {
+			fmt.Printf("%v\n", err)
+		}
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1961,6 +2123,8 @@ func main() {
 	case "dumpAddresses":
 		err = dumpAddresses(*chaindata)
 
+	case "wrongReceipts":
+		err = wrongReceipts()
 	}
 
 	if err != nil {
