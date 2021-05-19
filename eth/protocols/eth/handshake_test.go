@@ -36,8 +36,7 @@ func testHandshake(t *testing.T, protocol uint) {
 	t.Parallel()
 
 	// Create a test backend only to have some valid genesis chain
-	backend := newTestBackend(3)
-	defer backend.close()
+	backend := newTestBackend(t, 3)
 
 	db := backend.chain.ChainDb()
 	var (

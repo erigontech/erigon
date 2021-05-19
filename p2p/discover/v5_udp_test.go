@@ -74,7 +74,11 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	cfg.PrivateKey = newkey()
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB(t.TempDir())
+	if err != nil {
+		panic(err)
+	}
+	t.Cleanup(db.Close)
 	ln := enode.NewLocalNode(db, cfg.PrivateKey)
 
 	// Prefix logs with node ID.
@@ -105,7 +109,6 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 func TestUDPv5_pingHandling(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	test.packetIn(&v5wire.Ping{ReqID: []byte("foo")})
 	test.waitPacketOut(func(p *v5wire.Pong, addr *net.UDPAddr, _ v5wire.Nonce) {
@@ -122,7 +125,6 @@ func TestUDPv5_pingHandling(t *testing.T) {
 func TestUDPv5_unknownPacket(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	nonce := v5wire.Nonce{1, 2, 3}
 	check := func(p *v5wire.Whoareyou, wantSeq uint64) {
@@ -158,7 +160,6 @@ func TestUDPv5_unknownPacket(t *testing.T) {
 func TestUDPv5_findnodeHandling(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	// Create test nodes and insert them into the table.
 	nodes253 := nodesAtDistance(test.table.self().ID(), 253, 10)
@@ -239,7 +240,6 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 func TestUDPv5_pingCall(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -285,7 +285,6 @@ func TestUDPv5_pingCall(t *testing.T) {
 func TestUDPv5_findnodeCall(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	// Launch the request:
 	var (
@@ -334,7 +333,6 @@ func TestUDPv5_findnodeCall(t *testing.T) {
 func TestUDPv5_callResend(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 2)
@@ -371,7 +369,6 @@ func TestUDPv5_callResend(t *testing.T) {
 func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -397,7 +394,6 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 func TestUDPv5_callTimeoutReset(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	// Launch the request:
 	var (
@@ -436,7 +432,6 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 func TestUDPv5_talkHandling(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	var recvMessage []byte
 	test.udp.RegisterTalkHandler("test", func(id enode.ID, addr *net.UDPAddr, message []byte) []byte {
@@ -486,7 +481,6 @@ func TestUDPv5_talkHandling(t *testing.T) {
 func TestUDPv5_talkRequest(t *testing.T) {
 	t.Parallel()
 	test := newUDPV5Test(t)
-	defer test.close()
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -676,7 +670,13 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 		nodesByID:  make(map[enode.ID]*enode.LocalNode),
 		nodesByIP:  make(map[string]*enode.LocalNode),
 	}
-	test.db, _ = enode.OpenDB("")
+	t.Cleanup(test.close)
+	var err error
+	test.db, err = enode.OpenDB(test.t.TempDir())
+	if err != nil {
+		panic(err)
+	}
+
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
@@ -719,7 +719,12 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr) *enode.
 	id := encodePubkey(&key.PublicKey).id()
 	ln := test.nodesByID[id]
 	if ln == nil {
-		db, _ := enode.OpenDB("")
+		db, err := enode.OpenDB(test.t.TempDir())
+		if err != nil {
+			panic(err)
+		}
+		test.t.Cleanup(db.Close)
+
 		ln = enode.NewLocalNode(db, key)
 		ln.SetStaticIP(addr.IP)
 		ln.Set(enr.UDP(addr.Port))

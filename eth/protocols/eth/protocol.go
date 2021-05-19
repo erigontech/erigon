@@ -345,10 +345,19 @@ type GetBlockBodiesPacket66 struct {
 // BlockBodiesPacket is the network packet for block content distribution.
 type BlockBodiesPacket []*BlockBody
 
+// BlockRawBodiesPacket is the network packet for block content distribution.
+type BlockRawBodiesPacket []*BlockRawBody
+
 // BlockBodiesPacket is the network packet for block content distribution over eth/66.
 type BlockBodiesPacket66 struct {
 	RequestId uint64
 	BlockBodiesPacket
+}
+
+// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+type BlockRawBodiesPacket66 struct {
+	RequestId uint64
+	BlockRawBodiesPacket
 }
 
 // BlockBodiesRLPPacket is used for replying to block body requests, in cases
@@ -366,6 +375,12 @@ type BlockBodiesRLPPacket66 struct {
 type BlockBody struct {
 	Transactions []types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header     // Uncles contained within a block
+}
+
+// BlockRawBody represents the data content of a single block.
+type BlockRawBody struct {
+	Transactions [][]byte        // Transactions contained within a block
+	Uncles       []*types.Header // Uncles contained within a block
 }
 
 func (bb BlockBody) EncodeRLP(w io.Writer) error {
@@ -491,6 +506,121 @@ func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
 func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
 	var (
 		txset    = make([][]types.Transaction, len(*p))
+		uncleset = make([][]*types.Header, len(*p))
+	)
+	for i, body := range *p {
+		txset[i], uncleset[i] = body.Transactions, body.Uncles
+	}
+	return txset, uncleset
+}
+
+func (rb BlockRawBody) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range rb.Transactions {
+		txsLen++
+		var txLen int = len(tx)
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range rb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	encodingSize += unclesLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range rb.Transactions {
+		if _, err := w.Write(tx); err != nil {
+			return err
+		}
+	}
+	// encode Uncles
+	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range rb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rb *BlockRawBody) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx []byte
+	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
+		if tx == nil {
+			fmt.Printf("BlockRawBody.DecodeRLP tx nil\n")
+		}
+		rb.Transactions = append(rb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle types.Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		rb.Uncles = append(rb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
+}
+
+// Unpack retrieves the transactions and uncles from the range packet and returns
+// them in a split flat format that's more consistent with the internal data structures.
+func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header) {
+	var (
+		txset    = make([][][]byte, len(*p))
 		uncleset = make([][]*types.Header, len(*p))
 	)
 	for i, body := range *p {

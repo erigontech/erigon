@@ -22,18 +22,16 @@ import (
 )
 
 type TrieCfg struct {
-	db                ethdb.RwKV
-	checkRoot         bool
-	saveNewHashesToDB bool
-	tmpDir            string
+	db        ethdb.RwKV
+	checkRoot bool
+	tmpDir    string
 }
 
 func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
-		db:                db,
-		checkRoot:         checkRoot,
-		saveNewHashesToDB: saveNewHashesToDB,
-		tmpDir:            tmpDir,
+		db:        db,
+		checkRoot: checkRoot,
+		tmpDir:    tmpDir,
 	}
 }
 
@@ -90,7 +88,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 		}
 	} else if to > s.BlockNumber {
 		log.Warn("Unwinding due to error", "to", s.BlockNumber, "err", err)
-		if err1 := u.UnwindTo(s.BlockNumber, tx, tx); err1 != nil {
+		if err1 := u.UnwindTo(s.BlockNumber, tx); err1 != nil {
 			return trie.EmptyRoot, err1
 		}
 	} else {

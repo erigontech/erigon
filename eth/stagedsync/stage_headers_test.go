@@ -75,7 +75,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 		expectedTdBlock4.Add(expectedTdBlock4, h.Difficulty)
 	}
 
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)

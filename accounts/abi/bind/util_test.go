@@ -60,13 +60,12 @@ func TestWaitDeployed(t *testing.T) {
 		test := test
 
 		t.Run(name, func(t *testing.T) {
-			backend := backends.NewSimulatedBackend(
+			backend := backends.NewSimulatedBackend(t,
 				core.GenesisAlloc{
 					crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 				},
 				10000000,
 			)
-			defer backend.Close()
 
 			// Create the transaction.
 			// Create the transaction.
@@ -108,13 +107,12 @@ func TestWaitDeployed(t *testing.T) {
 }
 
 func TestWaitDeployedCornerCases(t *testing.T) {
-	backend := backends.NewSimulatedBackend(
+	backend := backends.NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 		},
 		10000000,
 	)
-	defer backend.Close()
 
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"

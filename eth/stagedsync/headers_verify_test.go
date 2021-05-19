@@ -58,8 +58,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		DatasetsLockMmap: false,
 	}, nil, false)
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 
 	config, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
@@ -79,11 +78,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 	headerRecs := decodeHeaders(verifyHardCodedHeadersClique)
 	headers := toHeaders(headerRecs)
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
-	cliqueDB := ethdb.NewMemDatabase()
-	defer cliqueDB.Close()
+	db, cliqueDB := ethdb.NewTestDB(t), ethdb.NewTestDB(t)
 
 	engine := clique.New(params.RinkebyChainConfig, params.CliqueSnapshot, cliqueDB)
 

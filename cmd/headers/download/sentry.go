@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
 	"sort"
 	"sync"
 	"syscall"
@@ -115,10 +116,11 @@ func (pi *PeerInfo) Removed() bool {
 
 func makeP2PServer(
 	ctx context.Context,
+	datadir string,
 	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	natSetting string,
-	port int,
+	p2pListenAddr string,
 	peers *sync.Map,
 	genesisHash common.Hash,
 	statusFn func() *proto_sentry.StatusData,
@@ -128,10 +130,14 @@ func makeP2PServer(
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
+	var dialCandidates enode.Iterator
+	var err error
 	dns := params.KnownDNSNetwork(genesisHash, "all")
-	dialCandidates, err := client.NewIterator(dns)
-	if err != nil {
-		return nil, fmt.Errorf("create discovery candidates: %v", err)
+	if dns != "" {
+		dialCandidates, err = client.NewIterator(dns)
+		if err != nil {
+			return nil, fmt.Errorf("create discovery candidates: %v", err)
+		}
 	}
 
 	serverKey := nodeKey()
@@ -147,8 +153,8 @@ func makeP2PServer(
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = fmt.Sprintf("nodes_%x", genesisHash)
-	p2pConfig.ListenAddr = fmt.Sprintf(":%d", port)
+	p2pConfig.NodeDatabase = path.Join(datadir, "tg", fmt.Sprintf("nodes_%x", genesisHash))
+	p2pConfig.ListenAddr = p2pListenAddr
 	var urls []string
 	switch genesisHash {
 	case params.MainnetGenesisHash:
@@ -157,6 +163,10 @@ func makeP2PServer(
 		urls = params.RopstenBootnodes
 	case params.GoerliGenesisHash:
 		urls = params.GoerliBootnodes
+	case params.RinkebyGenesisHash:
+		urls = params.RinkebyBootnodes
+	case params.BaikalGenesisHash:
+		urls = params.BaikalBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
@@ -329,7 +339,20 @@ func runPeer(
 	receiveUploadCh chan<- StreamMsg,
 	receiveTxCh chan<- StreamMsg,
 ) error {
+	printTime := time.Now().Add(time.Minute)
+	peerPrinted := false
+	defer func() {
+		if peerPrinted {
+			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()))
+		}
+	}()
 	for {
+		if !peerPrinted {
+			if time.Now().After(printTime) {
+				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()))
+				peerPrinted = true
+			}
+		}
 		var err error
 		if err = common.Stopped(ctx.Done()); err != nil {
 			return err
@@ -472,7 +495,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl, error) {
+func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2pListenAddr string) (*SentryServerImpl, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -514,7 +537,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 	}
 	grpcServer = grpc.NewServer(opts...)
 
-	sentryServer := NewSentryServer(ctx)
+	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -527,31 +550,35 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 	return sentryServer, nil
 }
 
-func NewSentryServer(ctx context.Context) *SentryServerImpl {
+func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) *SentryServerImpl {
 	return &SentryServerImpl{
 		ctx:             ctx,
+		datadir:         datadir,
 		ReceiveCh:       make(chan StreamMsg, 1024),
 		ReceiveUploadCh: make(chan StreamMsg, 1024),
 		ReceiveTxCh:     make(chan StreamMsg, 1024),
 		stopCh:          make(chan struct{}),
 		uploadStopCh:    make(chan struct{}),
 		txStopCh:        make(chan struct{}),
+		p2pListenAddr:   p2pListenAddr,
 	}
 }
 
 func p2pServer(ctx context.Context,
+	datadir string,
 	nodeName string,
 	readNodeInfo func() *eth.NodeInfo,
 	sentryServer *SentryServerImpl,
-	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
+	natSetting string, p2pListenAddr string, staticPeers []string, discovery bool, netRestrict string,
 	genesisHash common.Hash,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
+		datadir,
 		nodeName,
 		readNodeInfo,
 		natSetting,
-		port,
+		p2pListenAddr,
 		&sentryServer.Peers,
 		genesisHash,
 		sentryServer.GetStatus,
@@ -579,15 +606,15 @@ func p2pServer(ctx context.Context,
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string) error {
+func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string) error {
 	ctx := rootContext()
 
-	sentryServer, err := grpcSentryServer(ctx, sentryAddr)
+	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err
 	}
 	sentryServer.natSetting = natSetting
-	sentryServer.port = port
+	sentryServer.p2pListenAddr = fmt.Sprintf(":%d", port)
 	sentryServer.staticPeers = staticPeers
 	sentryServer.discovery = discovery
 	sentryServer.netRestrict = netRestrict
@@ -606,8 +633,9 @@ type StreamMsg struct {
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx             context.Context
+	datadir         string
 	natSetting      string
-	port            int
+	p2pListenAddr   string
 	staticPeers     []string
 	discovery       bool
 	netRestrict     string
@@ -839,7 +867,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.datadir, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}
@@ -893,7 +921,7 @@ func trySend(ch chan<- StreamMsg, msg *StreamMsg) {
 	select {
 	case ch <- *msg:
 	default:
-		log.Warn("Dropped stream message", "type", msg.msgName)
+		//log.Warn("Dropped stream message", "type", msg.msgName)
 	}
 }
 

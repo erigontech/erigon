@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 1 --tags 'mdbx'
+GOTEST = go test ./... -p 2 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -157,7 +157,7 @@ lintci: mdbx
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.38.0
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.40.0
 
 clean:
 	env GO111MODULE=on go clean -cache
@@ -191,7 +191,7 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.17.0/protoc-3.17.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
@@ -206,7 +206,7 @@ grpc:
 		snapshot_downloader/external_downloader.proto \
 		consensus_engine/consensus.proto \
 		testing/testing.proto \
-		txpool/txpool.proto
+		txpool/txpool.proto txpool/mining.proto
 
 prometheus:
 	docker-compose up prometheus grafana

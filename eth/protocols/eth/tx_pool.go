@@ -1,4 +1,4 @@
-package download
+package eth
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -20,13 +19,15 @@ import (
 )
 
 type TxPoolServer struct {
+	ctx       context.Context
 	sentries  []proto_sentry.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
+		ctx:      ctx,
 		sentries: sentries,
 		txPool:   txPool,
 	}
@@ -34,8 +35,12 @@ func NewTxPoolServer(sentries []proto_sentry.SentryClient, txPool *core.TxPool) 
 	return cs, nil
 }
 
+func (tp *TxPoolServer) Start() {
+	go RecvTxMessage(tp.ctx, tp.sentries[0], tp.HandleInboundMessage)
+}
+
 func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.NewPooledTransactionHashesPacket
+	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding NewPooledTransactionHashesPacket: %v, data: %x", err, inreq.Data)
 	}
@@ -43,7 +48,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *p
 }
 
 func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query eth.PooledTransactionsPacket66
+	var query PooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding PooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
 	}
@@ -55,7 +60,7 @@ func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.In
 	if tp.txPool == nil {
 		return nil
 	}
-	var query eth.TransactionsPacket
+	var query TransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding TransactionsPacket: %v, data: %x", err, inreq.Data)
 	}
@@ -66,12 +71,12 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 	if tp.txPool == nil {
 		return nil
 	}
-	var query eth.GetPooledTransactionsPacket66
+	var query GetPooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
 	}
-	_, txs := eth.AnswerGetPooledTransactions(tp.txPool, query.GetPooledTransactionsPacket)
-	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
+	_, txs := AnswerGetPooledTransactions(tp.txPool, query.GetPooledTransactionsPacket)
+	b, err := rlp.EncodeToBytes(&PooledTransactionsRLPPacket66{
 		RequestId:                   query.RequestId,
 		PooledTransactionsRLPPacket: txs,
 	})
@@ -91,7 +96,7 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 }
 
 func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	bytes, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
+	bytes, err := rlp.EncodeToBytes(&GetPooledTransactionsPacket66{
 		RequestId:                   rand.Uint64(), //nolint:gosec
 		GetPooledTransactionsPacket: hashes,
 	})

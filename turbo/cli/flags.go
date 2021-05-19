@@ -230,7 +230,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 			}
 		}
 	}
-
+	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
 }
 
 // setPrivateApi populates configuration fields related to the remote

@@ -53,6 +53,8 @@ type ChainReader interface {
 
 	// GetBlock retrieves a block from the database by hash and number.
 	GetBlock(hash common.Hash, number uint64) *types.Block
+
+	HasBlock(hash common.Hash, number uint64) bool
 }
 
 // Engine is an algorithm agnostic consensus engine.
@@ -75,7 +77,7 @@ type Engine interface {
 
 	// VerifyUncles verifies that the given block's uncles conform to the consensus
 	// rules of a given engine.
-	VerifyUncles(chain ChainReader, block *types.Block) error
+	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
 
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.

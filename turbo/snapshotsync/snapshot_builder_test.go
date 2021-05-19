@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"io/ioutil"
 	"math"
 	"os"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -18,15 +19,17 @@ import (
 )
 
 func TestSnapshotMigratorStage(t *testing.T) {
-	t.Skip("Cannot fix this")
+	t.Skip("flaky test")
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	dir, err := ioutil.TempDir(os.TempDir(), "tst")
-	if err != nil {
-		t.Fatal(err)
-	}
+	var err error
+	dir := t.TempDir()
 
 	defer func() {
-		if err = os.RemoveAll(dir); err != nil {
+		if err != nil {
+			t.Log(err, dir)
+		}
+		err = os.RemoveAll(dir)
+		if err != nil {
 			t.Log(err)
 		}
 
@@ -42,73 +45,83 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.MustOpen(path.Join(dir, "chaindata"))
-	db.SetRwKV(ethdb.NewSnapshotKV().DB(db.RwKV()).Open())
+	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	defer db.Close()
 
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 	}
-	generateChan := make(chan int)
 	currentSnapshotBlock := uint64(10)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
+		panic(err)
 	}
 	defer tx.Rollback()
 	err = GenerateHeaderData(tx, 0, 11)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
+		panic(err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
+		panic(err)
 	}
-
-	for !sb.Finished(10) {
-		tx, err := db.Begin(context.Background(), ethdb.RW)
+	generateChan := make(chan int)
+	StageSyncStep := func() {
+		tx, err := db.BeginRw(context.Background())
 		if err != nil {
-			tx.Rollback()
 			t.Error(err)
 		}
-		var dbtx ethdb.RwTx
-		if hasTx, ok := tx.(ethdb.HasTx); ok {
-			dbtx = hasTx.Tx().(ethdb.RwTx)
-		}
+		defer tx.Rollback()
 
 		select {
 		case newHeight := <-generateChan:
 			err = GenerateHeaderData(tx, int(currentSnapshotBlock), newHeight)
 			if err != nil {
-				tx.Rollback()
-				t.Fatal(err)
+				t.Error(err)
 			}
 			currentSnapshotBlock = CalculateEpoch(uint64(newHeight), 10)
 		default:
 
 		}
 
-		err = sb.Migrate(db, dbtx, currentSnapshotBlock, btCli)
+		err = sb.Migrate(db, tx, currentSnapshotBlock, btCli)
 		if err != nil {
-			tx.Rollback()
-			t.Fatal(err)
+			t.Error(err)
+			panic(err)
 		}
+
 		err = tx.Commit()
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			panic(err)
 		}
-		tx.Rollback()
+		time.Sleep(time.Second)
+	}
+	go func() {
+		//this gorutine emulates staged sync.
+		for {
+			StageSyncStep()
+		}
+	}()
+
+	for !(sb.Finished(10)) {
+		time.Sleep(time.Second)
 	}
 
-	sa := db.RwKV().(ethdb.SnapshotUpdater)
-	wodb := ethdb.NewObjectDatabase(sa.WriteDB())
-
+	rotx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer rotx.Rollback()
+	roc, err := rotx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
-	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
-			t.Errorf("wrong header key: %x, expected %x", k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)}))
-		}
+
+	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+		require.Equal(t, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)}), k)
 		headerNumber++
 		return true, nil
 	})
@@ -116,10 +129,10 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if headerNumber != 12 {
-		t.Fatalf("wrong number of headers: %d, expected %d", headerNumber, 12)
+		t.Fatal(headerNumber)
 	}
 
-	snodb := ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
+	snodb := ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
 	headerNumber = 0
 	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
@@ -137,13 +150,20 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
-			t.Fatal(k)
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		headersC, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
 		}
-		headerNumber++
+		defer headersC.Close()
 
-		return true, nil
+		return ethdb.ForEach(headersC, func(k, v []byte) (bool, error) {
+			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+				t.Fatal(k)
+			}
+			headerNumber++
+			return true, nil
+		})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -157,28 +177,36 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if len(trnts) != 1 {
 		t.Fatal("incorrect len", trnts)
 	}
-	v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(v, trnts[0].Bytes()) {
+			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
+		}
+
+		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binary.BigEndian.Uint64(v) != 10 {
+			t.Fatal("incorrect snapshot")
+		}
+
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(v, trnts[0].Bytes()) {
-		t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
-	}
 
-	v, err = db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binary.BigEndian.Uint64(v) != 10 {
-		t.Fatal("incorrect snapshot")
-	}
-
-	roTX, err := db.Begin(context.Background(), ethdb.RO)
+	roTX, err := db.BeginRo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	//just start snapshot transaction
-	roTX.Get(dbutils.HeadersBucket, []byte{})
+	roTX.GetOne(dbutils.HeadersBucket, []byte{})
 	defer roTX.Rollback()
 
 	generateChan <- 20
@@ -199,7 +227,13 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal("it's not possible to close db without rollback. something went wrong")
 	}
 
-	err = wodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	rotx, err = db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer rotx.Rollback()
+	roc, err = rotx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+
+	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
 		t.Fatal("main db must be empty here")
 		return true, nil
 	})
@@ -208,7 +242,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = ethdb.NewObjectDatabase(sa.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -224,13 +258,20 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 	headerNumber = 0
-	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
-			t.Fatal(k)
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
 		}
-		headerNumber++
+		defer c.Close()
+		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+				t.Fatal(k)
+			}
+			headerNumber++
 
-		return true, nil
+			return true, nil
+		})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,29 +284,37 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if len(trnts) != 1 {
 		t.Fatal("incorrect len", trnts)
 	}
-	v, err = db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(v, trnts[0].Bytes()) {
+			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
+		}
+
+		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binary.BigEndian.Uint64(v) != 20 {
+			t.Fatal("incorrect snapshot")
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(v, trnts[0].Bytes()) {
-		t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
-	}
-
-	v, err = db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binary.BigEndian.Uint64(v) != 20 {
-		t.Fatal("incorrect snapshot")
-	}
-
 	if _, err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exsists")
+	} else {
+		//just not to confuse defer
+		err = nil
 	}
 
 }
 
-func GenerateHeaderData(tx ethdb.DbWithPendingMutations, from, to int) error {
+func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
 	var err error
 	if to > math.MaxInt8 {
 		return errors.New("greater than uint8")

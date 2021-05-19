@@ -49,22 +49,22 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 				return &stagedsync.Stage{
 					ID:          stages.SyncStage("ch.torquem.demo.tgcustom.CUSTOM_STAGE"),
 					Description: "Custom Stage",
-					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder) error {
+					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder, tx ethdb.RwTx) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
-						val, err := world.TX.Get(customBucketName, []byte("test"))
+						val, err := tx.GetOne(customBucketName, []byte("test"))
 						fmt.Println("val", string(val), "err", err)
-						if err := world.TX.Put(customBucketName, []byte("test"), []byte(ctx.String(flag.Name))); err != nil {
+						if err := tx.Put(customBucketName, []byte("test"), []byte(ctx.String(flag.Name))); err != nil {
 							return err
 						}
 						s.Done()
 						return nil
 					},
-					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
+					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState, tx ethdb.RwTx) error {
 						fmt.Println("hello from the custom stage unwind", ctx.String(flag.Name))
-						if err := world.TX.Delete(customBucketName, []byte("test"), nil); err != nil {
+						if err := tx.Delete(customBucketName, []byte("test"), nil); err != nil {
 							return err
 						}
-						return u.Done(world.TX)
+						return u.Done(tx)
 					},
 				}
 			},

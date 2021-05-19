@@ -193,16 +193,6 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	return nil
 }
 
-func (hd *HeaderDownload) Ready() (bool, uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	return hd.stageReady, hd.stageHeight
-}
-
-func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
-	return hd.stageReadyCh
-}
-
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
@@ -410,14 +400,14 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitPreverifiedHashes(chain *big.Int) (map[common.Hash]struct{}, uint64) {
+func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
 	switch chain {
-	case params.MainnetChainConfig.ChainID:
+	case params.MainnetChainName:
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
-	case params.RopstenChainConfig.ChainID:
+	case params.RopstenChainName:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
@@ -445,6 +435,11 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
+	// Drain persistedLinksQueue and remove links
+	for hd.persistedLinkQueue.Len() > 0 {
+		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		delete(hd.links, link.hash)
+	}
 	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.HeadersBucket)
 		if err != nil {
@@ -467,6 +462,19 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 		return err
 	}
 	hd.highestInDb, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReadProgressFromDb updates highestInDb field according to the information
+// in the database. It is useful in the situations when transaction was
+// aborted and highestInDb became out-of-sync
+func (hd *HeaderDownload) ReadProgressFromDb(tx ethdb.RwTx) (err error) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}
@@ -499,7 +507,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 			} else {
 				// Ancestors of this anchor seem to be unavailable, invalidate and move on
 				hd.invalidateAnchor(anchor)
-				penalties = append(penalties, PenaltyItem{Reason: AbandonedAnchorPenalty, PeerID: anchor.peerID})
+				penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 			}
 		}
 		// Anchor disappeared or unavailable, pop from the queue and move on
@@ -597,6 +605,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	}
 	if len(linksInFuture) > 0 {
 		hd.insertList = append(hd.insertList, linksInFuture...)
+		linksInFuture = nil //nolint
 	}
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
@@ -731,6 +740,8 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
 		}
+		// This makes sure we end up chosing the chain with the max total difficulty
+		hi.localTd.Set(td)
 	}
 	data, err2 := rlp.EncodeToBytes(header)
 	if err2 != nil {
@@ -787,7 +798,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	if newBlock || hd.topSeenHeight > 0 {
+	hash := segment.Headers[len(segment.Headers)-1].Hash()
+	if newBlock || hd.seenAnnounces.Seen(hash) {
 		if height > hd.topSeenHeight {
 			hd.topSeenHeight = height
 		}
@@ -868,7 +880,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	default:
 	}
 
-	return requestMore
+	return hd.requestChaining && requestMore
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
@@ -877,16 +889,16 @@ func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	return hd.topSeenHeight
 }
 
-func (hd *HeaderDownload) InSync() bool {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight
-}
-
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headerReader = headerReader
+}
+
+func (hd *HeaderDownload) EnableRequestChaining() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.requestChaining = true
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {

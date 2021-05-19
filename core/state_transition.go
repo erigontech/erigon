@@ -315,10 +315,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	if refunds {
 		if london {
-			// After EIP-2539: refunds are capped to gasUsed / 5
+			// After EIP-3529: refunds are capped to gasUsed / 5
 			st.refundGas(params.RefundQuotientEIP3529)
 		} else {
-			// Before EIP-2539: refunds were capped to gasUsed / 2
+			// Before EIP-3529: refunds were capped to gasUsed / 2
 			st.refundGas(params.RefundQuotient)
 		}
 	}

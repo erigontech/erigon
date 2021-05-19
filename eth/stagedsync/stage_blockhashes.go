@@ -21,11 +21,23 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 }
 
-func SpawnBlockHashStage(s *StageState, db ethdb.RwKV, tx ethdb.RwTx, tmpdir string, quit <-chan struct{}) error {
+type BlockHashesCfg struct {
+	db     ethdb.RwKV
+	tmpDir string
+}
+
+func StageBlockHashesCfg(db ethdb.RwKV, tmpDir string) BlockHashesCfg {
+	return BlockHashesCfg{
+		db:     db,
+		tmpDir: tmpDir,
+	}
+}
+
+func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit <-chan struct{}) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -52,7 +64,7 @@ func SpawnBlockHashStage(s *StageState, db ethdb.RwKV, tx ethdb.RwTx, tmpdir str
 		tx,
 		dbutils.HeadersBucket,
 		dbutils.HeaderNumberBucket,
-		tmpdir,
+		cfg.tmpDir,
 		extractHeaders,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -69,6 +81,31 @@ func SpawnBlockHashStage(s *StageState, db ethdb.RwKV, tx ethdb.RwTx, tmpdir str
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func UnwindBlockHashStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	err := u.Done(tx)
+	logPrefix := s.state.LogPrefix()
+	if err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 		}
 	}
 	return nil

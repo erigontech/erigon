@@ -57,7 +57,7 @@ func (stagedSync *StagedSync) Prepare(
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	db ethdb.Database,
-	tx ethdb.Database,
+	tx ethdb.Tx,
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
@@ -89,7 +89,6 @@ func (stagedSync *StagedSync) Prepare(
 			Engine:                engine,
 			vmConfig:              vmConfig,
 			DB:                    db,
-			TX:                    tx,
 			pid:                   pid,
 			storageMode:           storageMode,
 			TmpDir:                tmpdir,
@@ -117,11 +116,14 @@ func (stagedSync *StagedSync) Prepare(
 		state.unwindOrder[i] = stages[stageIndex]
 	}
 
-	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		db = tx
-	}
-	if err := state.LoadUnwindInfo(db); err != nil {
-		return nil, err
+	if tx != nil {
+		if err := state.LoadUnwindInfo(tx); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := state.LoadUnwindInfo(db); err != nil {
+			return nil, err
+		}
 	}
 	return state, nil
 }

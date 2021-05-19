@@ -10,12 +10,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
 var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
@@ -24,10 +27,11 @@ type BodiesCfg struct {
 	db              ethdb.RwKV
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
-	penalise        func(context.Context, []byte)
+	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	updateHead      func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
+	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
 }
 
@@ -35,13 +39,14 @@ func StageBodiesCfg(
 	db ethdb.RwKV,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
-	penalise func(context.Context, []byte),
+	penalise func(context.Context, []headerdownload.PenaltyItem),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
+	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -76,16 +81,12 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
-	penalties := true
 	if headerProgress-bodyProgress <= 16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
 		timeout = 1
-		penalties = false
 	}
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
-	batch := ethdb.NewBatch(tx)
-	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var prevDeliveredCount float64 = 0
@@ -98,14 +99,7 @@ func BodiesForward(
 	var headHash common.Hash
 	var headSet bool
 	for !stopped {
-		/*
-			if penalties {
-				penaltyPeers := bd.GetPenaltyPeers()
-				for _, penaltyPeer := range penaltyPeers {
-					penalise(ctx, penaltyPeer)
-				}
-			}
-		*/
+		// TODO: this is incorrect use
 		if req == nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
@@ -123,9 +117,6 @@ func BodiesForward(
 		}
 		if req != nil && peer != nil {
 			start := time.Now()
-			if !penalties {
-				log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
-			}
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
@@ -146,49 +137,46 @@ func BodiesForward(
 			}
 			if req != nil && peer != nil {
 				start = time.Now()
-				if !penalties {
-					log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
-				}
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 			}
 		}
 		start := time.Now()
-		d := cfg.bd.GetDeliveries()
+		// can't use same transaction from another goroutine
+		var verifyUncles = func(peerID string, header *types.Header, uncles []*types.Header) error {
+			/* TODO: it always fail now, because parent block is not in db yet
+			cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
+			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
+			if err != nil {
+				if penalty != headerdownload.NoPenalty {
+					log.Debug("penalize", "peer", peerID, "reason", err)
+					cfg.penalise(ctx, []headerdownload.PenaltyItem{{PeerID: peerID, Penalty: penalty}})
+				}
+				return err
+			}
+			*/
+			return nil
+		}
+		headers, rawBodies, err := cfg.bd.GetDeliveries(verifyUncles)
+		if err != nil {
+			return err
+		}
 		d4 += time.Since(start)
 		start = time.Now()
-		for _, block := range d {
-			if err = rawdb.WriteBodyDeprecated(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+		for i, header := range headers {
+			rawBody := rawBodies[i]
+			blockHeight := header.Number.Uint64()
+			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
-			blockHeight := block.NumberU64()
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
-				if err = stages.SaveStageProgress(batch, stages.Bodies, blockHeight); err != nil {
+				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
 					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
 				}
-				headHash = block.Header().Hash()
-				rawdb.WriteHeadBlockHash(batch, headHash)
+				headHash = header.Hash()
+				rawdb.WriteHeadBlockHash(tx, headHash)
 				headSet = true
-			}
-
-			if batch.BatchSize() >= int(cfg.batchSize) {
-				if err = batch.Commit(); err != nil {
-					return err
-				}
-				if !useExternalTx {
-					if err := s.Update(tx, bodyProgress); err != nil {
-						return err
-					}
-					if err = tx.Commit(); err != nil {
-						return err
-					}
-					tx, err = cfg.db.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-				}
-				batch = ethdb.NewBatch(tx)
 			}
 		}
 		d5 += time.Since(start)
@@ -203,7 +191,7 @@ func BodiesForward(
 			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := cfg.bd.DeliveryCounts()
-			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
+			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
@@ -214,9 +202,6 @@ func BodiesForward(
 		}
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
-	}
-	if err := batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if headSet {
 		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
@@ -239,7 +224,7 @@ func BodiesForward(
 	return nil
 }
 
-func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, batch ethdb.DbWithPendingMutations) {
+func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
@@ -248,8 +233,32 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"number committed", committed,
 		"delivery /second", common.StorageSize(speed),
 		"wasted /second", common.StorageSize(wastedSpeed),
-		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
+}
+
+func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	err := u.Done(tx)
+	logPrefix := s.state.LogPrefix()
+	if err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
 }

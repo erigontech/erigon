@@ -176,7 +176,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb, _ := tests.MakePreState2(ctx, ethdb.NewMemoryDatabase(), alloc, context.BlockNumber)
+	statedb, _ := tests.MakePreState(ctx, ethdb.NewTestDB(t), alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer", txContext)
@@ -254,7 +254,7 @@ func TestCallTracer(t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 			}
-			statedb, _ := tests.MakePreState2(ctx, ethdb.NewMemoryDatabase(), test.Genesis.Alloc, uint64(test.Context.Number))
+			statedb, _ := tests.MakePreState(ctx, ethdb.NewTestDB(t), test.Genesis.Alloc, uint64(test.Context.Number))
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer", txContext)

@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -107,6 +106,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
+	defer traceCursor.Close()
 
 	var k, v []byte
 	prev := startBlock
@@ -131,7 +131,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			m, ok := tos[mapKey]
 			if !ok {
 				m = roaring64.New()
-				froms[mapKey] = m
+				tos[mapKey] = m
 			}
 			m.Add(blockNum)
 		}
@@ -177,37 +177,38 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		return err
 	}
 
-	if err := finaliseCallTraces(froms, tos, collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
+	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	return nil
 }
 
-func finaliseCallTraces(froms, tos map[string]*roaring64.Bitmap, collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
-	var currentBitmap = roaring.New()
+func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
+	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
+	lastChunkKey := make([]byte, 128)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		lastChunkKey := make([]byte, len(k)+4)
+		if _, err := currentBitmap.ReadFrom(bytes.NewReader(v)); err != nil {
+			return err
+		}
+		lastChunkKey = lastChunkKey[:len(k)+8]
 		copy(lastChunkKey, k)
-		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
+		binary.BigEndian.PutUint64(lastChunkKey[len(k):], ^uint64(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil {
 			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 
-		lastChunk := roaring.New()
+		lastChunk := roaring64.New()
 		if len(lastChunkBytes) > 0 {
-			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 		}
 
-		if _, err := currentBitmap.FromBuffer(v); err != nil {
-			return err
-		}
 		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
-		if err := bitmapdb.WalkChunkWithKeys(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+		if err := bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err

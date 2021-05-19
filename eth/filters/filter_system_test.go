@@ -173,8 +173,7 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 func TestBlockSubscription(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, deadline)
@@ -226,9 +225,7 @@ func TestBlockSubscription(t *testing.T) {
 func TestPendingTxFilter(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -283,8 +280,7 @@ func TestPendingTxFilter(t *testing.T) {
 // TestLogFilterCreation test whether a given filter criteria makes sense.
 // If not it must return an error.
 func TestLogFilterCreation(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -327,8 +323,7 @@ func TestLogFilterCreation(t *testing.T) {
 // when the filter is created.
 func TestInvalidLogFilterCreation(t *testing.T) {
 	t.Parallel()
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -350,8 +345,7 @@ func TestInvalidLogFilterCreation(t *testing.T) {
 }
 
 func TestInvalidGetLogsRequest(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend   = &testBackend{db: db}
 		api       = NewPublicFilterAPI(backend, deadline)
@@ -377,8 +371,7 @@ func TestLogFilter(t *testing.T) {
 	t.Skip("TG doesn't have public API, move this test to RPCDaemon")
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -492,8 +485,7 @@ func TestLogFilter(t *testing.T) {
 func TestPendingLogsSubscription(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -630,7 +622,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	timeout := 100 * time.Millisecond
 
 	var (
-		db      = ethdb.NewMemoryDatabase()
+		db      = ethdb.NewTestDB(t)
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, timeout)
 		done    = make(chan struct{})

@@ -103,8 +103,7 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	state := state.New(state.NewDbStateReader(db))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
@@ -331,7 +330,9 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	cfg.State = state.New(state.NewDbStateReader(ethdb.NewMemDatabase()))
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	cfg.State = state.New(state.NewDbStateReader(db))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

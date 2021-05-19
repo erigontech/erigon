@@ -154,8 +154,8 @@ type HeaderRequest struct {
 }
 
 type PenaltyItem struct {
-	Reason Penalty
-	PeerID string
+	Penalty Penalty
+	PeerID  string
 }
 type Announce struct {
 	Hash   common.Hash
@@ -178,9 +178,6 @@ type HeaderDownload struct {
 	engine             consensus.Engine
 	headerReader       consensus.ChainHeaderReader
 	highestInDb        uint64 // Height of the highest block header in the database
-	stageReady         bool
-	stageReadyCh       chan struct{}
-	stageHeight        uint64
 	topSeenHeight      uint64
 	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -189,6 +186,7 @@ type HeaderDownload struct {
 	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
+	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -211,7 +209,6 @@ func NewHeaderDownload(
 		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
-		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
 		persistedLinkQueue: &LinkQueue{},
 		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
@@ -293,6 +290,11 @@ func (s *SeenAnnounces) Pop(hash common.Hash) bool {
 	if ok {
 		s.hashes.Remove(hash)
 	}
+	return ok
+}
+
+func (s SeenAnnounces) Seen(hash common.Hash) bool {
+	_, ok := s.hashes.Get(hash)
 	return ok
 }
 

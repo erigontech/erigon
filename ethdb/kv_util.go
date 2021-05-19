@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -127,6 +129,14 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 		bucketStart = bucketEnd
 	}
 	return nil
+}
+
+func testKVPath() string {
+	dir, err := ioutil.TempDir(os.TempDir(), "tg-test-db")
+	if err != nil {
+		panic(err)
+	}
+	return dir
 }
 
 func GetCheckTEVMStatus(db KVGetter) func(codeHash common.Hash) (bool, error) {

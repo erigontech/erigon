@@ -155,9 +155,9 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
+		return nil, nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
@@ -166,26 +166,26 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		if cfg.Database == "mdbx" {
 			rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 		} else {
 			rwKv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 		}
 		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
-			return nil, nil, nil, compatErr
+			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv
 		if cfg.SnapshotMode != "" {
 			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
 			if innerErr != nil {
-				return nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
 			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
 			if innerErr != nil {
-				return nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}
 			kv = snapKv
 		}
@@ -196,15 +196,16 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			remotedbserver.KvServiceAPIVersion.Minor,
 			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 		eth = core.NewRemoteBackend(remoteKv.GrpcConn())
+		mining = txpool.NewMiningClient(remoteKv.GrpcConn())
 		txPool = txpool.NewTxpoolClient(remoteKv.GrpcConn())
 		if kv == nil {
 			kv = remoteKv
 		}
 	}
-	return kv, eth, txPool, err
+	return kv, eth, txPool, mining, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

@@ -1,9 +1,10 @@
 
-# Turbo-Geth
+# Erigon
 
-Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
+Erigon was originally called Turbo-Geth, a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
+Now it a very different product.
 
-![Build status](https://github.com/ledgerwatch/turbo-geth/actions/workflows/ci.yml/badge.svg)
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
 <!--ts-->
 - [System Requirements](#system-requirements)
@@ -12,7 +13,7 @@ Turbo-Geth is a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) w
     + [Testnets](#testnets)
     + [Mining](#mining)
     + [Windows](#windows)
-    + [GoDoc](https://godoc.org/github.com/ledgerwatch/turbo-geth)
+    + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
     + [Faster Initial Sync](#faster-initial-sync)
@@ -292,5 +293,5 @@ If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 
-Please read https://github.com/ledgerwatch/turbo-geth/issues/1516#issuecomment-811958891
+Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.

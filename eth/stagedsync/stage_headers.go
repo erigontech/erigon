@@ -31,13 +31,13 @@ func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, heade
 
 // Implements consensus.ChainReader
 type ChainReader struct {
-	Cfg *params.ChainConfig
+	Cfg params.ChainConfig
 	Db  ethdb.Getter
 }
 
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *params.ChainConfig {
-	return cr.Cfg
+	return &cr.Cfg
 }
 
 // CurrentHeader retrieves the current header from the local chain.
@@ -73,6 +73,11 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlockDeprecated(cr.Db, hash, number)
 }
 
+// HasBlock retrieves a block from the database by hash and number.
+func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
+	return rawdb.HasBlock(cr.Db, hash, number)
+}
+
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
@@ -89,7 +94,7 @@ func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.Chai
 		seals[len(seals)-1] = true
 	}
 
-	return engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	return engine.VerifyHeaders(ChainReader{*config, db}, headers, seals)
 }
 
 func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, verifyDuration time.Duration) (bool, bool, uint64, error) {

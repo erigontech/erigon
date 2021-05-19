@@ -30,6 +30,9 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	}
 
 	block := rawdb.ReadBlock(tx, hash, number)
+	if block == nil {
+		return nil, nil
+	}
 
 	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -47,8 +50,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
-		header := rawdb.ReadHeader(tx, hash, number)
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), header, txn, usedGas, vm.Config{}, checkTEVM)
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, checkTEVM)
 		if err != nil {
 			return nil, err
 		}

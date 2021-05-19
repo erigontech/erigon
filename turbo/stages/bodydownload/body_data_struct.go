@@ -1,10 +1,9 @@
 package bodydownload
 
 import (
-	"sync"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
@@ -13,11 +12,19 @@ type DoubleHash [2 * common.HashLength]byte
 
 const MaxBodiesInRequest = 1024
 
+type Delivery struct {
+	txs             [][][]byte
+	uncles          [][]*types.Header
+	lenOfP2PMessage uint64
+	peerID          string
+}
+
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	lock             sync.RWMutex
+	deliveryCh       chan Delivery
 	delivered        *roaring64.Bitmap
-	deliveries       []*types.Block
+	deliveriesH      []*types.Header
+	deliveriesB      []*types.RawBody
 	deliveredCount   float64
 	wastedCount      float64
 	requests         []*BodyRequest
@@ -30,6 +37,7 @@ type BodyDownload struct {
 	peerMap          map[string]int
 	prefetchedBlocks *PrefetchedBlocks
 	DeliveryNotify   chan struct{}
+	Engine           consensus.Engine
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -41,16 +49,26 @@ type BodyRequest struct {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(outstandingLimit int) *BodyDownload {
+func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[DoubleHash]uint64),
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
-		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
+		deliveriesH:      make([]*types.Header, outstandingLimit+MaxBodiesInRequest),
+		deliveriesB:      make([]*types.RawBody, outstandingLimit+MaxBodiesInRequest),
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
-		DeliveryNotify:   make(chan struct{}, 1),
+		// DeliveryNotify has capacity 1, and it is also used so that senders never block
+		// This makes this channel a mailbox with no more than one letter in it, meaning
+		// that there is something to collect
+		DeliveryNotify: make(chan struct{}, 1),
+		// delivery channel needs to have enough capacity not to create contention
+		// between delivery and collections. since we assume that there will be
+		// no more than `outstandingLimit+MaxBodiesInRequest` requested
+		// deliveris, this is a good number for the channel capacity
+		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
+		Engine:     engine,
 	}
 	return bd
 }

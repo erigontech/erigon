@@ -381,6 +381,26 @@ func WriteTransactions(db ethdb.RwTx, txs []types.Transaction, baseTxId uint64) 
 	return nil
 }
 
+func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
+	txId := baseTxId
+	c, err := db.RwCursor(dbutils.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for _, tx := range txs {
+		txIdKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(txIdKey, txId)
+		txId++
+		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+		if err := c.Append(txIdKey, tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(db ethdb.Putter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
@@ -410,6 +430,18 @@ func ReadBodyDeprecated(db ethdb.Getter, hash common.Hash, number uint64) *types
 		return nil
 	}
 	return body
+}
+
+func ReadBodyByNumber(db ethdb.Tx, number uint64) (*types.Body, uint64, uint32, error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, 0, 0, nil
+	}
+	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	return body, baseTxId, txAmount, nil
 }
 
 func ReadBody(db ethdb.Tx, hash common.Hash, number uint64) *types.Body {
@@ -474,6 +506,27 @@ func WriteBodyDeprecated(db ethdb.Database, hash common.Hash, number uint64, bod
 	err = WriteTransactionsDeprecated(db, body.Transactions, baseTxId)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
+	}
+	return nil
+}
+
+func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
+	if err != nil {
+		return err
+	}
+	data, err := rlp.EncodeToBytes(types.BodyForStorage{
+		BaseTxId: baseTxId,
+		TxAmount: uint32(len(body.Transactions)),
+		Uncles:   body.Uncles,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to RLP encode body: %w", err)
+	}
+	WriteBodyRLP(db, hash, number, data)
+	err = WriteRawTransactions(db, body.Transactions, baseTxId)
+	if err != nil {
+		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
 }
@@ -886,16 +939,16 @@ func ReadBlock(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-func ReadBlockWithoutTransactions(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
-	header := ReadHeader(db, hash, number)
-	if header == nil {
-		return nil
-	}
-	body := ReadBody(db, hash, number)
-	if body == nil {
-		return nil
-	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+func HasBlockDeprecated(db ethdb.Getter, hash common.Hash, number uint64) bool {
+	body := ReadStorageBodyRLP(db, hash, number)
+	return len(body) > 0
+}
+
+// HasBlock - is more efficient than ReadBlock because doesn't read transactions.
+// It's is not equivalent of HasHeader because headers and bodies written by different stages
+func HasBlock(db ethdb.KVGetter, hash common.Hash, number uint64) bool {
+	body := ReadStorageBodyRLP(db, hash, number)
+	return len(body) > 0
 }
 
 func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {

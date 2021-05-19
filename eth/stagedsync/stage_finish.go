@@ -1,8 +1,10 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -10,10 +12,32 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier, tx ethdb.RwTx, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+type FinishCfg struct {
+	db     ethdb.RwKV
+	tmpDir string
+}
+
+func StageFinishCfg(db ethdb.RwKV, tmpDir string) FinishCfg {
+	return FinishCfg{
+		db:     db,
+		tmpDir: tmpDir,
+	}
+}
+
+func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	var executionAt uint64
 	var err error
-	if executionAt, err = s.ExecutionAt(db); err != nil {
+	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
 	if executionAt <= s.BlockNumber {
@@ -21,29 +45,54 @@ func FinishForward(s *StageState, db ethdb.Database, notifier ChainEventNotifier
 		return nil
 	}
 
-	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
-
-	err = NotifyNewHeaders(s.BlockNumber+1, executionAt, notifier, db)
+	err = MigrateSnapshot(executionAt, tx, cfg.db, btClient, snBuilder)
 	if err != nil {
 		return err
 	}
-
-	err = MigrateSnapshot(executionAt, tx, db, btClient, snBuilder)
+	err = s.DoneAndUpdate(tx, executionAt)
 	if err != nil {
 		return err
 	}
-	if tx == nil {
-		return s.DoneAndUpdate(db, executionAt)
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
-	return s.DoneAndUpdate(tx, executionAt)
+	return nil
 }
 
-func UnwindFinish(u *UnwindState, s *StageState, db ethdb.Database, tx ethdb.RwTx) error {
-	if tx == nil {
-		return u.Done(db)
+func UnwindFinish(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 	}
-	return u.Done(tx)
+	err := u.Done(tx)
+	if err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func NotifyNewHeaders2(finishStageBeforeSync, unwindTo uint64, notifier ChainEventNotifier, db ethdb.Database) error {
+	finishAt, err := stages.GetStageProgress(db, stages.Finish) // because later stages can be disabled
+	if err != nil {
+		return err
+	}
+	notifyFrom := finishStageBeforeSync + 1
+	if unwindTo < finishStageBeforeSync {
+		notifyFrom = unwindTo + 1
+	}
+	return NotifyNewHeaders(notifyFrom, finishAt, notifier, db)
 }
 
 func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
@@ -51,6 +100,7 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
 	}
+	log.Info("Update current block for the RPC API", "from", from, "to", to)
 	for i := from; i <= to; i++ {
 		header := rawdb.ReadHeaderByNumber(db, i)
 		if header == nil {
@@ -62,7 +112,7 @@ func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Dat
 	return nil
 }
 
-func MigrateSnapshot(to uint64, tx ethdb.RwTx, db ethdb.Database, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
+func MigrateSnapshot(to uint64, tx ethdb.RwTx, db ethdb.RwKV, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
 	if mg == nil {
 		return nil
 	}

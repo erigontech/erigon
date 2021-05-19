@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -101,7 +102,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	}
 	var (
 		db          = ethdb.NewMemDatabase()
-		ibs, tds    = MakePreState(db, pre.Pre)
+		ibs         = MakePreState(context.Background(), db, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -135,8 +136,6 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		chainConfig.DAOForkBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-
-	tds.StartNewBuffer()
 
 	for i, tx := range txs {
 		msg, err := tx.AsMessage(*signer, pre.Env.BaseFee)
@@ -172,10 +171,6 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 		// Receipt:
 		{
-			if chainConfig.IsByzantium(vmContext.BlockNumber) {
-				tds.StartNewBuffer()
-			}
-
 			// Create a new receipt for the transaction, storing the intermediate root and
 			// gas used by the tx.
 			receipt := &types.Receipt{Type: tx.Type(), CumulativeGasUsed: gasUsed}
@@ -229,16 +224,15 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		ibs.AddBalance(pre.Env.Coinbase, minerReward)
 	}
 
-	err := ibs.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	err := ibs.FinalizeTx(context.Background(), state.NewDbStateWriter(db, 1))
 	if err != nil {
 		return nil, nil, err
 	}
 	// Commit block
-	roots, err := tds.ComputeTrieRoots()
-	if err != nil {
-		return nil, nil, err
+	root, trieErr := trie.CalcRoot("", db)
+	if trieErr != nil {
+		return nil, nil, trieErr
 	}
-	root := roots[len(roots)-1]
 	execRs := &ExecutionResult{
 		StateRoot:   root,
 		TxRoot:      types.DeriveSha(includedTxs),
@@ -251,31 +245,33 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db.RwKV(), execRs, nil
 }
 
-func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) (*state.IntraBlockState, *state.TrieDbState) {
-	tds := state.NewTrieDbState(common.Hash{}, db, 0)
-	statedb := state.New(tds)
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc) *state.IntraBlockState {
+	var blockNr uint64 = 0
+	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		b, o := uint256.FromBig(a.Balance)
-		if o {
-			panic(fmt.Errorf("unexpected overflow in MakePreState"))
-		}
-		statedb.SetBalance(addr, b)
+		balance, _ := uint256.FromBig(a.Balance)
+		statedb.SetBalance(addr, balance)
 		for k, v := range a.Storage {
-			statedb.SetState(addr, &k, *uint256.NewInt().SetBytes(v.Bytes())) //nolint:scopelint
+			key := k
+			val := uint256.NewInt().SetBytes(v.Bytes())
+			statedb.SetState(addr, &key, *val)
+		}
+
+		if len(a.Code) > 0 || len(a.Storage) > 0 {
+			statedb.SetIncarnation(addr, 1)
 		}
 	}
-	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
-	if err != nil {
+	// Commit and re-open to start with a clean state.
+	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
-	_, err = tds.ComputeTrieRoots()
-	if err != nil {
+	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
-
-	return statedb, tds
+	return statedb
 }
 
 func rlpHash(x interface{}) (h common.Hash) {

@@ -27,6 +27,6 @@ var sentryCmd = &cobra.Command{
 	Use:   "sentry",
 	Short: "Run p2p sentry for the downloader",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return download.Sentry(natSetting, port, sentryAddr, staticPeers, discovery, netRestrict)
+		return download.Sentry("" /* datadir */, natSetting, port, sentryAddr, staticPeers, discovery, netRestrict)
 	},
 }

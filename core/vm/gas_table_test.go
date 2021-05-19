@@ -24,8 +24,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -90,11 +88,7 @@ func TestEIP2200(t *testing.T) {
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			address := common.BytesToAddress([]byte("contract"))
-			db := ethdb.NewMemKV()
-			defer db.Close()
-			tx, err := db.BeginRw(context.Background())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			_, tx := ethdb.NewTestTx(t)
 
 			s := state.New(state.NewPlainStateReader(tx))
 			s.CreateAccount(address, true)

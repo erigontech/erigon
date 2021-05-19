@@ -44,7 +44,7 @@ func StageTranspileCfg(
 	}
 }
 
-func transpileWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params TranspileCfg, quitCh <-chan struct{}) error {
+func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}) error {
 	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func transpileWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, pa
 		}
 
 		// load the contract code
-		contractCode, err := tx.GetOne(dbutils.CodeBucket, codeHash)
+		contractCode, err := batch.GetOne(dbutils.CodeBucket, codeHash)
 		if err != nil {
 			return false, err
 		}
@@ -65,12 +65,12 @@ func transpileWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, pa
 		// transpile
 		transpiledCode := transpile(contractCode)
 
-		err = tx.Put(dbutils.ContractTEVMCodeBucket, codeHash, transpiledCode)
+		err = batch.Put(dbutils.ContractTEVMCodeBucket, codeHash, transpiledCode)
 		if err != nil {
 			return false, err
 		}
 
-		err = tx.Delete(dbutils.ContractTEVMCodeStatusBucket, codeHash, nil)
+		err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, codeHash, nil)
 		if err != nil {
 			return false, err
 		}
@@ -138,7 +138,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 			break
 		}
 
-		if err = transpileWithGo(block, tx, batch, cfg, quit); err != nil {
+		if err = transpileWithGo(tx, batch, quit); err != nil {
 			return err
 		}
 

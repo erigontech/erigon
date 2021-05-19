@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -17,11 +16,7 @@ import (
 )
 
 func TestSenders(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, tx := ethdb.NewTestTx(t)
 	require := require.New(t)
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -111,7 +106,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	cfg := StageSendersCfg(db, params.TestChainConfig)
-	err = SpawnRecoverSendersStage(cfg, &StageState{Stage: stages.Senders}, tx, 3, "", nil)
+	err := SpawnRecoverSendersStage(cfg, &StageState{Stage: stages.Senders}, tx, 3, "", nil)
 	assert.NoError(t, err)
 
 	{

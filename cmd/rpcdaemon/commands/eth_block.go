@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -18,27 +17,21 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	blockNum, err := getBlockNumber(number, tx)
+	b, err := api.getBlockByNumber(number, tx)
 	if err != nil {
 		return nil, err
+	}
+	if b == nil {
+		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
 
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
-	}
-
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
 	}
 	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -102,20 +95,29 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 	defer tx.Rollback()
-
+	if blockNr == rpc.PendingBlockNumber {
+		b, err := api.getBlockByNumber(blockNr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, nil
+		}
+		n := hexutil.Uint(len(b.Transactions()))
+		return &n, nil
+	}
 	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
-
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	body, _, txAmount, err := rawdb.ReadBodyByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+	if body == nil {
+		return nil, nil
 	}
-	n := hexutil.Uint(len(block.Transactions()))
+	n := hexutil.Uint(txAmount)
 	return &n, nil
 }
 
@@ -127,13 +129,14 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
-	if err != nil {
-		return nil, err
+	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	if num == nil {
+		return nil, nil
 	}
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %x", blockHash)
+	body, _, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, *num)
+	if body == nil {
+		return nil, nil
 	}
-	n := hexutil.Uint(len(block.Transactions()))
+	n := hexutil.Uint(txAmount)
 	return &n, nil
 }

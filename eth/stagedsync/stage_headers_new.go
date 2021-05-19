@@ -69,10 +69,10 @@ func HeadersForward(
 		}
 		defer tx.Rollback()
 	}
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
+	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
+	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
 	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
@@ -80,6 +80,7 @@ func HeadersForward(
 		return err
 	}
 	if hash == (common.Hash{}) {
+		fmt.Printf("fixCaninicalChain will be called\n")
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
@@ -219,7 +220,7 @@ func HeadersForward(
 		}
 	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch, batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
@@ -261,6 +262,8 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
 			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
+		} else {
+			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--

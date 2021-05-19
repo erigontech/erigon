@@ -52,8 +52,7 @@ func TestCreate2Revive(t *testing.T) {
 	t.Skip("switch to TG state readers/writers")
 
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -225,8 +224,7 @@ func TestCreate2Revive(t *testing.T) {
 func TestCreate2Polymorth(t *testing.T) {
 
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -587,7 +585,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 func TestReorgOverStateChange(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
+		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -726,8 +724,7 @@ func (b BucketsStats) Size() uint64 {
 
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -826,7 +823,7 @@ func TestReproduceCrash(t *testing.T) {
 	value1 := uint256.NewInt().SetUint64(0x016345785d8a0000)
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt().SetUint64(0x58c00a51)
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 	tsw := state.NewDbStateWriter(db, 0)
 	intraBlockState := state.New(state.NewDbStateReader(db))
 	ctx := context.Background()
@@ -857,7 +854,7 @@ func TestReproduceCrash(t *testing.T) {
 func TestEip2200Gas(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
+		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -947,7 +944,7 @@ func TestEip2200Gas(t *testing.T) {
 func TestWrongIncarnation(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
+		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -1063,7 +1060,7 @@ func TestWrongIncarnation(t *testing.T) {
 func TestWrongIncarnation2(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
+		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -1128,7 +1125,6 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -1205,8 +1201,7 @@ func TestWrongIncarnation2(t *testing.T) {
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	r, tsw := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1246,8 +1241,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1281,8 +1275,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1323,7 +1316,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 func TestRecreateAndRewind(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
+		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)

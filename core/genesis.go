@@ -362,14 +362,8 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
-	if dbErr != nil {
-		return nil, nil, dbErr
-	}
-	defer tx.Rollback()
-
-	block, statedb, err2 := g.WriteGenesisState(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := g.WriteGenesisState(tx, history)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -383,7 +377,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteBlockDeprecated(context.Background(), tx, block); err != nil {
+	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
@@ -401,7 +395,19 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
+	return block, statedb, nil
+}
 
+func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
+	if dbErr != nil {
+		return nil, nil, dbErr
+	}
+	defer tx.Rollback()
+	block, statedb, err2 := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+	if err2 != nil {
+		return block, statedb, err2
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}

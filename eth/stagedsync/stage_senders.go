@@ -138,7 +138,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 			select {
 			default:
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", j.index)
+				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", s.BlockNumber+uint64(j.index))
 			}
 
 			k := make([]byte, 4)

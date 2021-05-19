@@ -187,6 +187,8 @@ type JsonStreamLogger struct {
 
 	storage map[common.Address]vm.Storage
 	logs    []vm.StructLog
+	output  []byte //nolint
+	err     error  //nolint
 }
 
 // NewStructLogger returns a new logger
