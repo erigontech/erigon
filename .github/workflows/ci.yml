@@ -69,8 +69,7 @@ jobs:
         run: |
           go mod download
           ls . C:/WINDOWS/SYSTEM32/
-          go build ./cmd/tg
-          go build ./cmd/...
+          go build -tags mdbx ./cmd/...
       - name: Test
         run: |
           make test-mdbx
