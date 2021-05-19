@@ -343,6 +343,13 @@ Currently, libmdbx is only available in a
 Packages support for common Linux distributions is planned in the future,
 since release the version 1.0.
 
+## Never use tarballs nor zips automatically provided by Github !
+
+Please don't use tarballs nor zips which are automatically provided by Github.
+These archives do not contain version information and thus are unfit to build _libmdbx_.
+Instead of ones just clone the git repository, either download a tarball or zip with the properly amalgamated source core.
+Moreover, please vote for [ability of disabling auto-creation such unsuitable archives](https://github.community/t/disable-tarball).
+
 ## Source code embedding
 
 _libmdbx_ provides two official ways for integration in source code form:

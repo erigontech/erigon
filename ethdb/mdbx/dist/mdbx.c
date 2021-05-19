@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 4cd104d866e6e237b90b2ba78aca6f4bf346e47f05dc08b41c1c0d9c9fdf2df8_v0_10_0_19_gc5268f1d
+#define MDBX_BUILD_SOURCERY 139a81d0ce4275f490cb069e57f6796f069131ce7cdd88aa075f7677f3943322_v0_10_0_23_g7addfc83
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -18517,8 +18517,8 @@ new_sub:;
        * make sure the cursor is marked valid. */
       mc->mc_flags |= C_INITIALIZED;
     }
-    if (flags & MDBX_MULTIPLE) {
-      if (!rc) {
+    if (unlikely(flags & MDBX_MULTIPLE)) {
+      if (likely(rc == MDBX_SUCCESS)) {
       continue_multiple:
         mcount++;
         /* let caller know how many succeeded, if any */
@@ -22668,20 +22668,19 @@ __cold int mdbx_env_info_ex(const MDBX_env *env, const MDBX_txn *txn,
   if (likely(bytes > size_before_bootid)) {
     arg->mi_unsync_volume = pgno2bytes(env, unsynced_pages);
     const uint64_t monotime_now = mdbx_osal_monotime();
-    arg->mi_since_sync_seconds16dot16 = mdbx_osal_monotime_to_16dot16(
-        monotime_now - atomic_load64(&lck->mti_sync_timestamp, mo_Relaxed));
+    uint64_t ts = atomic_load64(&lck->mti_sync_timestamp, mo_Relaxed);
+    arg->mi_since_sync_seconds16dot16 =
+        ts ? mdbx_osal_monotime_to_16dot16(monotime_now - ts) : 0;
+    ts = atomic_load64(&lck->mti_reader_check_timestamp, mo_Relaxed);
     arg->mi_since_reader_check_seconds16dot16 =
-        lck ? mdbx_osal_monotime_to_16dot16(
-                  monotime_now -
-                  atomic_load64(&lck->mti_reader_check_timestamp, mo_Relaxed))
-            : 0;
+        ts ? mdbx_osal_monotime_to_16dot16(monotime_now - ts) : 0;
     arg->mi_autosync_threshold = pgno2bytes(
         env, atomic_load32(&lck->mti_autosync_threshold, mo_Relaxed));
     arg->mi_autosync_period_seconds16dot16 = mdbx_osal_monotime_to_16dot16(
         atomic_load64(&lck->mti_autosync_period, mo_Relaxed));
     arg->mi_bootid.current.x = bootid.x;
     arg->mi_bootid.current.y = bootid.y;
-    arg->mi_mode = lck ? lck->mti_envmode.weak : env->me_flags;
+    arg->mi_mode = env->me_lck_mmap.lck ? lck->mti_envmode.weak : env->me_flags;
   }
 
   if (likely(bytes > size_before_pgop_stat)) {
@@ -27552,7 +27551,8 @@ mdbx_osal_16dot16_to_monotime(uint32_t seconds_16dot16) {
 #else
   const uint64_t ratio = UINT64_C(1000000000);
 #endif
-  return (ratio * seconds_16dot16 + 32768) >> 16;
+  const uint64_t ret = (ratio * seconds_16dot16 + 32768) >> 16;
+  return likely(ret || seconds_16dot16 == 0) ? ret : /* fix underflow */ 1;
 }
 
 MDBX_INTERNAL_FUNC uint32_t mdbx_osal_monotime_to_16dot16(uint64_t monotime) {
@@ -27564,13 +27564,15 @@ MDBX_INTERNAL_FUNC uint32_t mdbx_osal_monotime_to_16dot16(uint64_t monotime) {
     if (monotime > limit)
       return UINT32_MAX;
   }
+  const uint32_t ret =
 #if defined(_WIN32) || defined(_WIN64)
-  return (uint32_t)((monotime << 16) / performance_frequency.QuadPart);
+      (uint32_t)((monotime << 16) / performance_frequency.QuadPart);
 #elif defined(__APPLE__) || defined(__MACH__)
-  return (uint32_t)((monotime << 16) / ratio_16dot16_to_monotine);
+      (uint32_t)((monotime << 16) / ratio_16dot16_to_monotine);
 #else
-  return (uint32_t)(monotime * 128 / 1953125);
+      (uint32_t)(monotime * 128 / 1953125);
 #endif
+  return likely(ret || monotime == 0) ? ret : /* fix underflow */ 1;
 }
 
 MDBX_INTERNAL_FUNC uint64_t mdbx_osal_monotime(void) {
@@ -28189,9 +28191,9 @@ __dll_export
         0,
         10,
         0,
-        19,
-        {"2021-05-12T14:41:09+03:00", "d45476a9152289911ca9eb32f1d7dccdbf86e93e", "c5268f1da7ed20f9cacb0b3717f63e5bfa2c1c02",
-         "v0.10.0-19-gc5268f1d"},
+        23,
+        {"2021-05-13T12:19:18+03:00", "14f00c5be668a7e3706b5edf16ebecf56a61fe09", "7addfc835888dac36a28dbfea6175b24c91ba126",
+         "v0.10.0-23-g7addfc83"},
         sourcery};
 
 __dll_export
