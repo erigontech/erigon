@@ -429,7 +429,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	}
 
 	_ = clearUnwindStack(tx, context.Background())
-	sync.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
+	sync.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Translation, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
 	if err = sync.Run(db, ethdb.WrapIntoTxDB(tx)); err != nil {
 		return err
 	}

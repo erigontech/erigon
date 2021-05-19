@@ -58,7 +58,7 @@ func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
 	})
 	assert.NoError(t, err)
 
-	assert.Equal(t, bucket1 /*expected*/, bucket2 /*actual*/)
+	assert.Equalf(t, bucket1 /*expected*/, bucket2 /*actual*/, "bucket %q", bucketName)
 }
 
 type stateWriterGen func(uint64) state.WriterWithChangeSets

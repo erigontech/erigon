@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -214,7 +215,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		defer tx.Rollback()
 	}
 
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Translation)
 	if errStart != nil {
 		return errStart
 	}
@@ -281,8 +282,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			checkTEVM := ethdb.GetCheckTEVMStatus(tx)
 
 			readerWriterWrapper := func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter {
-				stateReaderWriter = NewTouchCreateWatcher(r, w, checkTEVM)
-				return stateReaderWriter
+				return NewTouchCreateWatcher(r, w, checkTEVM)
 			}
 
 			checkTEVMCode := ethdb.GetCheckTEVM(tx)
@@ -291,11 +291,9 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				return err
 			}
 
-			// TEVM sub-stage
-			// todo: move to a separate stage before(?) Execute
+			// TEVM marking new contracts sub-stage
 			codeHashes := stateReaderWriter.AllTouches()
 			for codeHash := range codeHashes {
-				// mark the contract as TEVM
 				err = tx.Put(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes(), []byte{dbutils.TEVMScheduled})
 				if err != nil {
 					return err
@@ -443,6 +441,18 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 					return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
 				}
 
+				status, err := tx.GetOne(dbutils.ContractTEVMCodeStatusBucket, k)
+				if err != nil {
+					return fmt.Errorf("%s: TEVM status for %x: %w", logPrefix, address, err)
+				}
+
+				if bytes.Equal(status, []byte{dbutils.TEVMScheduled}) {
+					err := tx.Delete(dbutils.ContractTEVMCodeStatusBucket, k, nil)
+					if err != nil {
+						return fmt.Errorf("%s: TEVM marked for %x: %w", logPrefix, address, err)
+					}
+				}
+
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if err := next(k, k, newV); err != nil {
@@ -518,7 +528,6 @@ func cleanupContractCodeBucket(
 	if got {
 		// clean up all the code incarnations original incarnation and the new one
 		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-			// todo: remove TEVM flags
 			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation), nil)
 			if err != nil {
 				return err

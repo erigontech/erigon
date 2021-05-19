@@ -327,6 +327,13 @@ func NewStagedSync(
 			batchSize,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
+		stagedsync.StageTranspileCfg(
+			db,
+			batchSize,
+			nil,
+			nil,
+			controlServer.chainConfig,
+		),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,

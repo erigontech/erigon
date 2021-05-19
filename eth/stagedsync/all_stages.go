@@ -442,6 +442,12 @@ func UpdateMetrics(db ethdb.Getter) error {
 	}
 	stageBodiesGauge.Update(int64(progress))
 
+	progress, err = stages.GetStageProgress(db, stages.Translation)
+	if err != nil {
+		return err
+	}
+	stageTranspileGauge.Update(int64(progress))
+
 	progress, err = stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		return err

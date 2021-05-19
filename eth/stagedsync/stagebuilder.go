@@ -197,6 +197,36 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
+			ID: stages.Translation,
+			Build: func(world StageParameters) *Stage {
+				transCfg := StageTranspileCfg(
+					world.DB.RwKV(),
+					world.BatchSize,
+					world.stateReaderBuilder,
+					world.stateWriterBuilder,
+					world.ChainConfig,
+				)
+				return &Stage{
+					ID:          stages.Translation,
+					Description: "Transpile marked EVM contracts to TEVM",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTranspileStage(u, s, tx, world.QuitCh, transCfg)
+					},
+				}
+			},
+		},
+		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
 				execCfg := StageExecuteBlocksCfg(

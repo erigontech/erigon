@@ -105,7 +105,6 @@ const (
 
 const (
 	TEVMScheduled = 0
-	TEVMDone      = 1
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket

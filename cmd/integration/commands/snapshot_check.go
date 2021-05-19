@@ -190,6 +190,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,
 		stages.Bodies,
+		stages.Translation,
 		stages.Senders,
 		stages.AccountHistoryIndex,
 		stages.StorageHistoryIndex,

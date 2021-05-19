@@ -12,6 +12,7 @@ func ReplacementStages(ctx context.Context,
 	headers HeadersCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
+	trans TranspileCfg,
 	exec ExecuteBlockCfg,
 	hashState HashStateCfg,
 	trieCfg TrieCfg,
@@ -102,6 +103,29 @@ func ReplacementStages(ctx context.Context,
 							tx = hasTx.Tx().(ethdb.RwTx)
 						}
 						return UnwindSendersStage(u, s, tx, senders)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.Translation,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.Translation,
+					Description: "Transpile marked EVM contracts to TEVM",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return SpawnTranspileStage(s, tx, 0, ctx.Done(), trans)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						var tx ethdb.RwTx
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok {
+							tx = hasTx.Tx().(ethdb.RwTx)
+						}
+						return UnwindTranspileStage(u, s, tx, ctx.Done(), trans)
 					},
 				}
 			},
