@@ -19,6 +19,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -96,14 +97,16 @@ type btHeaderMarshaling struct {
 	Timestamp  math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run(tx ethdb.RwTx, _ bool) error {
+func (t *BlockTest) Run(_ bool) error {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
 	}
 
 	// import pre accounts & construct test genesis block & state root
-	gblock, _, err := t.genesis(config).Write(tx, false /* history */)
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
 	if err != nil {
 		return err
 	}
@@ -127,11 +130,16 @@ func (t *BlockTest) Run(tx ethdb.RwTx, _ bool) error {
 			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
 		}
 	*/
-	validBlocks, err := t.insertBlocks(ethdb.WrapIntoTxDB(tx), config, engine)
+	validBlocks, err := t.insertBlocks(db, config, engine)
 	if err != nil {
 		return err
 	}
 
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	if err1 != nil {
+		return fmt.Errorf("blockTest create tx: %v", err1)
+	}
+	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(t.json.BestBlock) != cmlast {
 		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
@@ -141,7 +149,7 @@ func (t *BlockTest) Run(tx ethdb.RwTx, _ bool) error {
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}
-	return t.validateImportedHeaders(ethdb.WrapIntoTxDB(tx), validBlocks)
+	return t.validateImportedHeaders(tx, validBlocks)
 }
 
 func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {

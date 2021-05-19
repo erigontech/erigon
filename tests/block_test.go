@@ -17,14 +17,10 @@
 package tests
 
 import (
-	"context"
 	"testing"
-
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func TestBlockchain(t *testing.T) {
-	t.Parallel()
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
@@ -59,15 +55,9 @@ func TestBlockchain(t *testing.T) {
 
 	// FIXME: failing tests after Berlin rebase
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp.json.*`, "Needs to be fixed for TG (Berlin)")
-	db := ethdb.NewTestKV(t)
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(tx, false)); err != nil {
+		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)
 		}
 	})
