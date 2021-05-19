@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -249,11 +250,9 @@ func TestHeaderStep(t *testing.T) {
 		Block: blocks[len(blocks)-1],
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
-
+	require.NoError(t, err)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 	// Send all the headers
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
@@ -263,10 +262,9 @@ func TestHeaderStep(t *testing.T) {
 		RequestId:          1,
 		BlockHeadersPacket: headers,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
@@ -294,7 +292,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	// Send all the headers
 	headers := make([]*types.Header, len(blocks))
@@ -308,7 +307,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
@@ -346,7 +346,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	// Send headers of the short branch
 	headers = make([]*types.Header, len(short))
@@ -360,7 +361,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
 	initialCycle = false
@@ -376,7 +378,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	// Send headers of the long2 branch
 	headers = make([]*types.Header, len(long2))
@@ -390,7 +393,8 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	// Send headers of the long1 branch
 	headers = make([]*types.Header, len(long1))
@@ -401,10 +405,9 @@ func TestReorg(t *testing.T) {
 		RequestId:          4,
 		BlockHeadersPacket: headers,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	// This is unwind step
@@ -427,10 +430,9 @@ func TestReorg(t *testing.T) {
 		Block: short2[len(short2)-1],
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	// Send headers of the short branch
 	headers = make([]*types.Header, len(short2))
@@ -441,10 +443,9 @@ func TestReorg(t *testing.T) {
 		RequestId:          5,
 		BlockHeadersPacket: headers,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
 
 	highestSeenHeader = uint64(short2[len(short2)-1].NumberU64())
 	initialCycle = false
