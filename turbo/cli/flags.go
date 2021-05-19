@@ -50,7 +50,7 @@ var (
 		Value: 500,
 	}
 
-	DownloadV2Flag = cli.BoolFlag{
+	DownloadV2Flag = cli.BoolTFlag{
 		Name:  "download.v2",
 		Usage: "enable experimental downloader v2",
 	}
