@@ -63,8 +63,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = ethdb.NewMemoryDatabase()
-		dbProFork = ethdb.NewMemoryDatabase()
+		dbNoFork  = ethdb.NewTestDB(t)
+		dbProFork = ethdb.NewTestDB(t)
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
@@ -72,8 +72,6 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 	)
-	defer dbNoFork.Close()
-	defer dbProFork.Close()
 
 	s1, s2 := testSentryServer(dbNoFork, gspecNoFork, genesisNoFork.Hash()), testSentryServer(dbProFork, gspecProFork, genesisProFork.Hash())
 

@@ -42,8 +42,8 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		db       = ethdb.NewMemDatabase()
-		cliqueDB = ethdb.NewMemDatabase()
+		db       = ethdb.NewTestDB(t)
+		cliqueDB = ethdb.NewTestDB(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
 		engine   = New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
@@ -57,8 +57,6 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	copy(genspec.ExtraData[ExtraVanity:], addr[:])
 	genesis := genspec.MustCommit(db)
-
-	defer cliqueDB.Close()
 
 	// Generate a batch of blocks, each properly signed
 	txCacher := core.NewTxSenderCacher(1)
@@ -96,7 +94,7 @@ func TestReimportMirroredState(t *testing.T) {
 		blocks[i] = block.WithSeal(header)
 	}
 	// Insert the first two blocks and make sure the chain is valid
-	db = ethdb.NewMemDatabase()
+	db = ethdb.NewTestDB(t)
 	genspec.MustCommit(db)
 
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {

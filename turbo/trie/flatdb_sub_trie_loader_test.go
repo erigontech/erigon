@@ -18,7 +18,7 @@ import (
 func TestResolve1(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -39,7 +39,7 @@ func TestResolve1(t *testing.T) {
 func TestResolve2(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -63,7 +63,7 @@ func TestResolve2(t *testing.T) {
 func TestResolve2Keep(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -87,7 +87,7 @@ func TestResolve2Keep(t *testing.T) {
 func TestResolve3Keep(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -112,7 +112,7 @@ func TestResolve3Keep(t *testing.T) {
 func TestTrieSubTrieLoader(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, _, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, _, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
@@ -138,7 +138,7 @@ func TestTrieSubTrieLoader(t *testing.T) {
 func TestTwoStorageItems(t *testing.T) {
 	t.Skip("weird case of abandoned storage, will handle it later")
 
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 
 	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5f5")
 	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7f5")
@@ -195,7 +195,7 @@ func TestTwoStorageItems(t *testing.T) {
 
 func TestTwoAccounts(t *testing.T) {
 	t.Skip("to restore with new loader")
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	key1 := common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b")
 	acc := accounts.NewAccount()
 	acc.Initialised = true
@@ -231,7 +231,7 @@ func TestTwoAccounts(t *testing.T) {
 }
 
 func TestReturnErrOnWrongRootHash(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	putAccount := func(k string) {
 		a := accounts.Account{}
 		err := writeAccount(db, common.BytesToHash(common.Hex2Bytes(k)), a)

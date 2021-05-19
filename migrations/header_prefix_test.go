@@ -16,7 +16,7 @@ import (
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 
 	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)

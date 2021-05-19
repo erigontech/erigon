@@ -1,32 +1,21 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/stretchr/testify/require"
 )
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	_, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), staticCodeStaticIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), staticCodeStaticIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
+	err := stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -41,22 +30,13 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	_, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
+	err := stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -72,22 +52,13 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	_, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeIndepenentlyOfIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeIndepenentlyOfIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
+	err := stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}

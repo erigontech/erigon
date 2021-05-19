@@ -67,10 +67,8 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
+	kv := ethdb.NewTestKV(t)
+	cfg := StageHistoryCfg(kv, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
 

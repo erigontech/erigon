@@ -354,8 +354,7 @@ func TestAccessList(t *testing.T) {
 		return common.HexToHash(a)
 	}
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	state := New(NewPlainStateReader(db))
 	state.accessList = newAccessList()
 

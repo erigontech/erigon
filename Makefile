@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 1 --tags 'mdbx'
+GOTEST = go test ./... -p 2 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)

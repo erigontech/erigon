@@ -29,7 +29,10 @@ func TestBucketCRUD(t *testing.T) {
 
 	// check thad buckets have unique DBI's
 	uniquness := map[dbutils.DBI]bool{}
-	castedKv := kv.(*MdbxKV)
+	castedKv, ok := kv.(*MdbxKV)
+	if !ok {
+		t.Skip()
+	}
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
 			continue
@@ -93,6 +96,7 @@ func TestReadOnlyMode(t *testing.T) {
 
 	tx, err := db2.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)

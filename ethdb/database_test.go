@@ -36,17 +36,8 @@ import (
 var testBucket = dbutils.HashedAccountsBucket
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
-func TestMemoryDB_PutGet(t *testing.T) {
-	db := NewMemKV()
-	defer db.Close()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
-
-func testPutGet(db RwKV, t *testing.T) {
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+func TestPutGet(t *testing.T) {
+	_, tx := NewTestTx(t)
 
 	//for _, k := range testValues {
 	//	err := db.Put(testBucket, []byte(k), []byte{})
@@ -65,7 +56,7 @@ func testPutGet(db RwKV, t *testing.T) {
 	//	}
 	//}
 
-	_, err = tx.GetOne(testBucket, []byte("non-exist-key"))
+	_, err := tx.GetOne(testBucket, []byte("non-exist-key"))
 	require.NoError(t, err)
 
 	for _, v := range testValues {
@@ -105,11 +96,14 @@ func testPutGet(db RwKV, t *testing.T) {
 	}
 }
 
-func testNoPanicAfterDbClosed(db RwKV, t *testing.T) {
+func TestNoPanicAfterDbClosed(t *testing.T) {
+	db := NewTestKV(t)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	writeTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer writeTx.Rollback()
 
 	closeCh := make(chan struct{}, 1)
 	go func() {
@@ -139,13 +133,9 @@ func testNoPanicAfterDbClosed(db RwKV, t *testing.T) {
 	//})
 }
 
-func TestMemoryDB_ParallelPutGet(t *testing.T) {
-	db := NewMemKV()
-	defer db.Close()
-	testParallelPutGet(db)
-}
+func TestParallelPutGet(t *testing.T) {
+	db := NewTestKV(t)
 
-func testParallelPutGet(db RwKV) {
 	const n = 8
 	var pending sync.WaitGroup
 
@@ -216,12 +206,6 @@ func testParallelPutGet(db RwKV) {
 	pending.Wait()
 }
 
-func TestMemoryDB_Walk(t *testing.T) {
-	db := NewMemKV()
-	defer db.Close()
-	testWalk(db, t)
-}
-
 var hexEntries = map[string]string{
 	"6b": "89c6",
 	"91": "c476",
@@ -236,31 +220,27 @@ var fixedBits = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 
-func testWalk(db RwKV, t *testing.T) {
-	_ = db.Update(context.Background(), func(tx RwTx) error {
-		for k, v := range hexEntries {
-			err := tx.Put(testBucket, common.FromHex(k), common.FromHex(v))
-			if err != nil {
-				t.Fatalf("put failed: %v", err)
-			}
+func TestWalk(t *testing.T) {
+	_, tx := NewTestTx(t)
+
+	for k, v := range hexEntries {
+		err := tx.Put(testBucket, common.FromHex(k), common.FromHex(v))
+		if err != nil {
+			t.Fatalf("put failed: %v", err)
 		}
-		return nil
-	})
+	}
 
 	var gotKeys [][]byte
-	_ = db.Update(context.Background(), func(tx RwTx) error {
-		c, err := tx.Cursor(testBucket)
-		if err != nil {
-			panic(err)
-		}
-		defer c.Close()
-		err = Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
-			gotKeys = append(gotKeys, common.CopyBytes(key))
-			return true, nil
-		})
-		assert.NoError(t, err)
-		return nil
+	c, err := tx.Cursor(testBucket)
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	err = Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
+		gotKeys = append(gotKeys, common.CopyBytes(key))
+		return true, nil
 	})
+	assert.NoError(t, err)
 
 	assert.Equal(t, keysInRange, gotKeys)
 }

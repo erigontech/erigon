@@ -31,8 +31,7 @@ import (
 )
 
 func TestIHCursor(t *testing.T) {
-	db, require := ethdb.NewMemDatabase(), require.New(t)
-	defer db.Close()
+	db, require := ethdb.NewTestDB(t), require.New(t)
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
 	newV := make([]byte, 0, 1024)

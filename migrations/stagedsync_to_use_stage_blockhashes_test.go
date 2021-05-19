@@ -11,7 +11,8 @@ import (
 
 func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
 
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require := require.New(t)
+	db := ethdb.NewTestDB(t)
 	var expected uint64 = 12
 
 	err := stages.SaveStageProgress(db, stages.Headers, expected)
@@ -29,7 +30,7 @@ func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
 
 func TestUnwindStagedsyncToUseStageBlockhashes(t *testing.T) {
 
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	var expected uint64 = 12
 
 	err := stages.SaveStageUnwind(db, stages.Headers, expected)

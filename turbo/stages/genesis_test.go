@@ -33,15 +33,11 @@ import (
 )
 
 func TestDefaultGenesisBlock(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
 	block, _, _ := core.DefaultGenesisBlock().ToBlock()
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 	var err error
-	db1 := ethdb.NewMemDatabase()
-	defer db1.Close()
 	block, _, err = core.DefaultRopstenGenesisBlock().ToBlock()
 	if err != nil {
 		t.Errorf("error: %w", err)
@@ -153,8 +149,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			db := ethdb.NewMemDatabase()
-			defer db.Close()
+			db := ethdb.NewTestDB(t)
 			config, hash, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

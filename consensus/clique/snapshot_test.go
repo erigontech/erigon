@@ -412,8 +412,7 @@ func TestClique(t *testing.T) {
 			}
 
 			// Create a pristine blockchain with the genesis injected
-			db := ethdb.NewMemDatabase()
-			defer db.Close()
+			db := ethdb.NewTestDB(t)
 
 			genesis.MustCommit(db)
 
@@ -424,8 +423,7 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := ethdb.NewMemDatabase()
-			defer cliqueDB.Close()
+			cliqueDB := ethdb.NewTestDB(t)
 
 			engine := New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.fakeDiff = true
