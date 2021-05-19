@@ -72,6 +72,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					world.DB.RwKV(),
 					world.storageMode.Receipts,
 					world.storageMode.CallTraces,
+					0,
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,

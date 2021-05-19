@@ -145,6 +145,11 @@ func NewStagedSync(
 	txPool *core.TxPool,
 	txPoolServer *eth.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
+	var pruningDistance uint64
+	if sm.Pruning {
+		pruningDistance = params.FullImmutabilityThreshold
+	}
+
 	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
 			db,
@@ -172,6 +177,7 @@ func NewStagedSync(
 			db,
 			sm.Receipts,
 			sm.CallTraces,
+			pruningDistance,
 			batchSize,
 			nil,
 			nil,

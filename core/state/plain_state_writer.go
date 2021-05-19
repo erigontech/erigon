@@ -27,9 +27,18 @@ func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber
 	}
 }
 
+func NewPlainStateWriterNoHistory(db ethdb.Database, blockNumber uint64) *PlainStateWriter {
+	return &PlainStateWriter{
+		db:          db,
+		blockNumber: blockNumber,
+	}
+}
+
 func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
-		return err
+	if w.csw != nil {
+		if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
+			return err
+		}
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
@@ -37,8 +46,10 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
-		return err
+	if w.csw != nil {
+		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
+			return err
+		}
 	}
 	if err := w.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
@@ -47,8 +58,10 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 }
 
 func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
-		return err
+	if w.csw != nil {
+		if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
+			return err
+		}
 	}
 	if err := w.db.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
 		return err
@@ -64,8 +77,10 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if err := w.csw.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
-		return err
+	if w.csw != nil {
+		if err := w.csw.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
+			return err
+		}
 	}
 	if *original == *value {
 		return nil
@@ -80,18 +95,28 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
-	if err := w.csw.CreateContract(address); err != nil {
-		return err
+	if w.csw != nil {
+		if err := w.csw.CreateContract(address); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (w *PlainStateWriter) WriteChangeSets() error {
-	return w.csw.WriteChangeSets()
+	if w.csw != nil {
+		return w.csw.WriteChangeSets()
+	}
+
+	return nil
 }
 
 func (w *PlainStateWriter) WriteHistory() error {
-	return w.csw.WriteHistory()
+	if w.csw != nil {
+		return w.csw.WriteHistory()
+	}
+
+	return nil
 }
 
 func (w *PlainStateWriter) ChangeSetWriter() *ChangeSetWriter {

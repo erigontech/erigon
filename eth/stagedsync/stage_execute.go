@@ -50,6 +50,7 @@ type ExecuteBlockCfg struct {
 	db                    ethdb.RwKV
 	writeReceipts         bool
 	writeCallTraces       bool
+	pruningDistance       uint64
 	batchSize             datasize.ByteSize
 	changeSetHook         ChangeSetHook
 	readerBuilder         StateReaderBuilder
@@ -65,6 +66,7 @@ func StageExecuteBlocksCfg(
 	kv ethdb.RwKV,
 	WriteReceipts bool,
 	WriteCallTraces bool,
+	pruningDistance uint64,
 	BatchSize datasize.ByteSize,
 	ReaderBuilder StateReaderBuilder,
 	WriterBuilder StateWriterBuilder,
@@ -79,6 +81,7 @@ func StageExecuteBlocksCfg(
 		db:                    kv,
 		writeReceipts:         WriteReceipts,
 		writeCallTraces:       WriteCallTraces,
+		pruningDistance:       pruningDistance,
 		batchSize:             BatchSize,
 		changeSetHook:         ChangeSetHook,
 		readerBuilder:         ReaderBuilder,
@@ -100,7 +103,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg, traceCursor ethdb.RwCursorDupSort) error {
+func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg, writeChangesets bool, traceCursor ethdb.RwCursorDupSort) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -114,7 +117,11 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 	if params.writerBuilder != nil {
 		stateWriter = params.writerBuilder(batch, tx, blockNum)
 	} else {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+		if writeChangesets {
+			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+		} else {
+			stateWriter = state.NewPlainStateWriterNoHistory(batch, blockNum)
+		}
 	}
 
 	// where the magic happens
@@ -263,7 +270,11 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg, traceCursor); err != nil {
+			writeChangesets := true
+			if cfg.pruningDistance > 0 && to-blockNum > cfg.pruningDistance {
+				writeChangesets = false
+			}
+			if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor); err != nil {
 				return err
 			}
 		}
