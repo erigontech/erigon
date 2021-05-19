@@ -25,7 +25,6 @@ type HeadersCfg struct {
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
-	increment         uint64
 }
 
 func StageHeadersCfg(
@@ -36,7 +35,6 @@ func StageHeadersCfg(
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
-	increment uint64,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -46,7 +44,6 @@ func StageHeadersCfg(
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
 		batchSize:         batchSize,
-		increment:         increment,
 	}
 }
 
@@ -93,12 +90,7 @@ func HeadersForward(
 		return nil
 	}
 
-	incrementalTarget := headerProgress + cfg.increment
-	if cfg.increment > 0 {
-		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress, "target", incrementalTarget)
-	} else {
-		log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
-	}
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
@@ -115,22 +107,7 @@ func HeadersForward(
 	stopped := false
 	prevProgress := headerProgress
 
-	// FIXME: remove this hack
-	if cfg.increment > 0 {
-		if cfg.hd.TopSeenHeight() > incrementalTarget {
-			initialCycle = true
-		}
-	}
-
 	for !stopped {
-		if cfg.increment > 0 {
-			progress := cfg.hd.Progress()
-			if progress > incrementalTarget {
-				log.Info(fmt.Sprintf("[%s] Target reached, exiting cycle", logPrefix), "progress", progress, "target", incrementalTarget)
-				break
-			}
-		}
-
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {

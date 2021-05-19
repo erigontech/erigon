@@ -145,11 +145,6 @@ func NewStagedSync(
 	txPool *core.TxPool,
 	txPoolServer *eth.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
-	var increment uint64
-	if sm.Pruning {
-		increment = params.FullImmutabilityThreshold
-	}
-
 	return stages.NewStagedSync(ctx, sm,
 		stagedsync.StageHeadersCfg(
 			db,
@@ -159,7 +154,6 @@ func NewStagedSync(
 			controlServer.PropagateNewBlockHashes,
 			controlServer.penalize,
 			batchSize,
-			increment,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
 		stagedsync.StageBodiesCfg(

@@ -128,7 +128,6 @@ func mock(t *testing.T) *MockSentry {
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {
 	}
 	batchSize := 1 * datasize.MB
-	increment := uint64(0)
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte {
 		return nil
 	}
@@ -183,7 +182,6 @@ func mock(t *testing.T) *MockSentry {
 			propagateNewBlockHashes,
 			penalize,
 			batchSize,
-			increment,
 		),
 		stagedsync.StageBlockHashesCfg(db, mock.tmpdir),
 		stagedsync.StageBodiesCfg(
