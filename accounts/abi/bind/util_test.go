@@ -57,7 +57,7 @@ var waitDeployedTests = map[string]struct {
 
 func TestWaitDeployed(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me - i'm timeout on win")
+		t.Skip("fix me on win please")
 	}
 	for name, test := range waitDeployedTests {
 		name := name
@@ -111,6 +111,9 @@ func TestWaitDeployed(t *testing.T) {
 }
 
 func TestWaitDeployedCornerCases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	backend := backends.NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},

@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -39,8 +40,10 @@ import (
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
 func TestUDPv5_lookupE2E(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
-
 	const N = 5
 	var nodes []*UDPv5
 	for i := 0; i < N; i++ {
@@ -107,6 +110,9 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 
 // This test checks that incoming PING calls are handled correctly.
 func TestUDPv5_pingHandling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -158,6 +164,9 @@ func TestUDPv5_unknownPacket(t *testing.T) {
 
 // This test checks that incoming FINDNODE calls are handled correctly.
 func TestUDPv5_findnodeHandling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -241,6 +250,9 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 
 // This test checks that outgoing PING calls work.
 func TestUDPv5_pingCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -286,6 +298,9 @@ func TestUDPv5_pingCall(t *testing.T) {
 // This test checks that outgoing FINDNODE calls work and multiple NODES
 // replies are aggregated.
 func TestUDPv5_findnodeCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -334,6 +349,9 @@ func TestUDPv5_findnodeCall(t *testing.T) {
 
 // This test checks that pending calls are re-sent when a handshake happens.
 func TestUDPv5_callResend(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -370,6 +388,9 @@ func TestUDPv5_callResend(t *testing.T) {
 
 // This test ensures we don't allow multiple rounds of WHOAREYOU for a single call.
 func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -395,6 +416,9 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 
 // This test checks that calls with n replies may take up to n * respTimeout.
 func TestUDPv5_callTimeoutReset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -433,6 +457,9 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 
 // This test checks that TALKREQ calls the registered handler function.
 func TestUDPv5_talkHandling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -482,6 +509,9 @@ func TestUDPv5_talkHandling(t *testing.T) {
 
 // This test checks that outgoing TALKREQ calls work.
 func TestUDPv5_talkRequest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -522,6 +552,9 @@ func TestUDPv5_talkRequest(t *testing.T) {
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 
@@ -578,6 +611,9 @@ func TestUDPv5_lookup(t *testing.T) {
 
 // This test checks the local node can be utilised to set key-values.
 func TestUDPv5_LocalNode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	var cfg Config
 	node := startLocalhostV5(t, cfg)
