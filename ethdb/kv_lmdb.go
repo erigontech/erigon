@@ -816,8 +816,7 @@ func (tx *lmdbTx) RwCursor(bucket string) (RwCursor, error) {
 }
 
 func (tx *lmdbTx) Cursor(bucket string) (Cursor, error) {
-	c, _ := tx.RwCursor(bucket)
-	return c, nil
+	return tx.RwCursor(bucket)
 }
 
 func (tx *lmdbTx) stdCursor(bucket string) (RwCursor, error) {

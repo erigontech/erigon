@@ -870,8 +870,7 @@ func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
 }
 
 func (tx *MdbxTx) Cursor(bucket string) (Cursor, error) {
-	c, _ := tx.RwCursor(bucket)
-	return c, nil
+	return tx.RwCursor(bucket)
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
