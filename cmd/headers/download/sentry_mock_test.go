@@ -185,6 +185,7 @@ func mock(t *testing.T) *MockSentry {
 			batchSize,
 			increment,
 		),
+		stagedsync.StageBlockHashesCfg(db, mock.tmpdir),
 		stagedsync.StageBodiesCfg(
 			db,
 			mock.downloader.bd,
@@ -196,7 +197,7 @@ func mock(t *testing.T) *MockSentry {
 			*mock.chainConfig,
 			batchSize,
 		),
-		stagedsync.StageSendersCfg(db, mock.chainConfig),
+		stagedsync.StageSendersCfg(db, mock.chainConfig, mock.tmpdir),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,
