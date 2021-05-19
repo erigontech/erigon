@@ -81,14 +81,14 @@ func TestBucketCRUD(t *testing.T) {
 
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
-	db1 := NewMDBX().InMem().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	db1 := NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
-	db2 := NewMDBX().InMem().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	db2 := NewMDBX().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
