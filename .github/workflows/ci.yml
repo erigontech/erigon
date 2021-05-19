@@ -67,6 +67,8 @@ jobs:
           cp libmdbx.dll C:/WINDOWS/SYSTEM32/
       - name: Build Go
         run: |
+          ls . C:/WINDOWS/SYSTEM32/
+          go build ./cmd/tg
           go build ./cmd/...
       - name: Test
         run: |
