@@ -67,6 +67,7 @@ jobs:
           cp libmdbx.dll C:/WINDOWS/SYSTEM32/
       - name: Build Go
         run: |
+          go mod download
           ls . C:/WINDOWS/SYSTEM32/
           go build ./cmd/tg
           go build ./cmd/...
