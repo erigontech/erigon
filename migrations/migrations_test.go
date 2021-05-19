@@ -13,7 +13,7 @@ import (
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	migrations = []Migration{
 		{
 			"one",
@@ -52,7 +52,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	migrations = []Migration{
 		{
 			"one",
@@ -95,7 +95,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	migrations = []Migration{
 		{
 			"one",
@@ -138,7 +138,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 
 	err := stages.SaveStageProgress(db, stages.Execution, 42)
 	require.NoError(err)
@@ -156,7 +156,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	migrations = []Migration{
 		{
 			Name: "repeated_name",
@@ -182,7 +182,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 	migrations = []Migration{
 		{
 			Name: "one",

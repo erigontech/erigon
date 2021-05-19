@@ -18,9 +18,7 @@ package filters
 
 import (
 	"context"
-	"io/ioutil"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -43,13 +41,7 @@ func makeReceipt(addr common.Address) *types.Receipt {
 }
 
 func BenchmarkFilters(b *testing.B) {
-	dir, err := ioutil.TempDir("", "filtertest")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	db := ethdb.MustOpen(dir)
+	db := ethdb.MustOpen(b.TempDir())
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}

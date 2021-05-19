@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"errors"
-	"io/ioutil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,31 +12,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func getTmpDir() string {
-	name, err := ioutil.TempDir("", "geth-tests-staged-sync")
-	if err != nil {
-		panic(err)
-	}
-	return name
-}
-
 func TestPromoteHashedStateClearState(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	db2, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, getTmpDir()), nil)
+	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -46,23 +28,14 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	db2, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	cfg := StageHashStateCfg(db2, getTmpDir())
-	err = PromoteHashedStateCleanly("logPrefix", tx2, cfg, nil)
+	cfg := StageHashStateCfg(db2, t.TempDir())
+	err := PromoteHashedStateCleanly("logPrefix", tx2, cfg, nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -79,23 +52,14 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	db2, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 100, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, StageHashStateCfg(db2, getTmpDir()), nil)
+	err := promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, StageHashStateCfg(db2, t.TempDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -103,28 +67,19 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 }
 
 func TestUnwindHashed(t *testing.T) {
-	db1 := ethdb.NewMemKV()
-	defer db1.Close()
-	tx1, err := db1.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx1.Rollback()
-
-	db2 := ethdb.NewMemKV()
-	defer db2.Close()
-	tx2, err := db2.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx2.Rollback()
+	_, tx1 := ethdb.NewTestTx(t)
+	db2, tx2 := ethdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, getTmpDir()), nil)
+	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, getTmpDir()), nil)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, t.TempDir()), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}
@@ -146,20 +101,14 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 	for _, tc := range tt {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if tc.cancelFuncExec {
 				cancel()
 			}
-			db := ethdb.NewMemKV()
-			defer db.Close()
-			tx, err := db.BeginRw(context.Background())
-			require.NoError(t, err)
-			defer tx.Rollback()
-
+			db, tx := ethdb.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, getTmpDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, t.TempDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
 			}
 		})
@@ -189,15 +138,11 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db := ethdb.NewMemKV()
-			defer db.Close()
-			tx, err := db.BeginRw(context.Background())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			db, tx := ethdb.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 
-			if err := PromoteHashedStateCleanly("logPrefix", tx, StageHashStateCfg(db, getTmpDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := PromoteHashedStateCleanly("logPrefix", tx, StageHashStateCfg(db, t.TempDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateCleanly , got: %v, expected: %v", err, tc.errExp)
 			}
 
@@ -227,15 +172,11 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db := ethdb.NewMemKV()
-			defer db.Close()
-			tx, err := db.BeginRw(context.Background())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			db, tx := ethdb.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			cfg := StageHashStateCfg(db, getTmpDir())
-			err = PromoteHashedStateCleanly("logPrefix", tx, cfg, nil)
+			cfg := StageHashStateCfg(db, t.TempDir())
+			err := PromoteHashedStateCleanly("logPrefix", tx, cfg, nil)
 			require.NoError(t, err)
 
 			u := &UnwindState{UnwindPoint: 5}

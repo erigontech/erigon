@@ -26,11 +26,7 @@ import (
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
@@ -52,7 +48,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err = changeset.Walk(tx, dbutils.AccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, dbutils.AccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -91,11 +87,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 }
 
 func TestMutationCommitThinHistory(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	numOfAccounts := 5
 	numOfStateKeys := 5
@@ -306,11 +298,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 */
 
 func TestWalkAsOfStatePlain(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt()
 	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
@@ -394,8 +382,8 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -410,8 +398,8 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,8 +429,8 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -470,11 +458,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt()
 	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
@@ -576,8 +560,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	startKey := make([]byte, 60)
 	copy(startKey[:common.AddressLength], addr1.Bytes())
 
-	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -590,8 +574,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -618,8 +602,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	block4.Changes = block4.Changes[:0]
 	for _, addr := range []common.Address{addr1, addr2} {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -638,8 +622,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-		err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -662,8 +646,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	block6.Changes = block6.Changes[:0]
 	for _, addr := range []common.Address{addr1, addr2} {
-		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
-			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -680,11 +664,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -832,11 +812,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -987,11 +963,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 }
 
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)

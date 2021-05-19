@@ -13,7 +13,6 @@ import (
 
 func TestCursor_Txn(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -48,7 +47,6 @@ func TestCursor_Txn(t *testing.T) {
 
 func TestCursor_DBI(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	err := env.Update(func(txn *Txn) (err error) {
 		db, err := txn.OpenDBI("db", Create, nil, nil)
@@ -81,7 +79,6 @@ func TestCursor_DBI(t *testing.T) {
 
 func TestCursor_Close(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -111,7 +108,6 @@ func TestCursor_Close(t *testing.T) {
 
 func TestCursor_bytesBuffer(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	db, err := openRoot(env, 0)
 	if err != nil {
@@ -164,7 +160,6 @@ func TestCursor_bytesBuffer(t *testing.T) {
 
 func TestCursor_PutReserve(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	key := "reservekey"
@@ -210,7 +205,6 @@ func TestCursor_PutReserve(t *testing.T) {
 
 func TestCursor_Get_KV(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var dbi DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -279,7 +273,6 @@ func FromHex(in string) []byte {
 func TestDupCmpExcludeSuffix32(t *testing.T) {
 	hash32Bytes := FromHex("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	env := setup(t)
-	defer clean(env, t)
 
 	var dbi DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -416,7 +409,6 @@ func TestDupCmpExcludeSuffix32(t *testing.T) {
 
 func TestCursor_Get_op_Set_bytesBuffer(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var dbi DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -492,7 +484,6 @@ func TestCursor_Get_op_Set_bytesBuffer(t *testing.T) {
 
 func TestCursor_Get_DupFixed(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	const datasize = 16
 	pagesize := os.Getpagesize()
@@ -576,7 +567,6 @@ func TestCursor_Get_DupFixed(t *testing.T) {
 
 func TestCursor_Get_reverse(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var dbi DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -634,7 +624,7 @@ func TestCursor_Get_reverse(t *testing.T) {
 
 //func TestCursor_PutMulti(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	key := []byte("k")
 //	items := [][]byte{
@@ -701,7 +691,6 @@ func TestCursor_Get_reverse(t *testing.T) {
 
 func TestCursor_Del(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	type Item struct{ k, v string }
@@ -803,7 +792,6 @@ func TestCursor_Del(t *testing.T) {
 // This test verifies the behavior of Cursor.Count when DupSort is provided.
 func TestCursor_Count_DupSort(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -858,7 +846,6 @@ func TestCursor_Count_DupSort(t *testing.T) {
 // on the database.
 func TestCursor_Count_noDupSort(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -900,7 +887,6 @@ func TestCursor_Count_noDupSort(t *testing.T) {
 
 func TestCursor_Renew(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	var db DBI
 	err := env.Update(func(txn *Txn) (err error) {
@@ -975,7 +961,6 @@ func TestCursor_Renew(t *testing.T) {
 
 func BenchmarkCursor(b *testing.B) {
 	env := setup(b)
-	defer clean(env, b)
 
 	var db DBI
 	err := env.View(func(txn *Txn) (err error) {
@@ -1011,7 +996,6 @@ func BenchmarkCursor(b *testing.B) {
 
 func BenchmarkCursor_Renew(b *testing.B) {
 	env := setup(b)
-	defer clean(env, b)
 
 	var cur *Cursor
 	err := env.View(func(txn *Txn) (err error) {

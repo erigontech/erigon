@@ -30,12 +30,12 @@ type stagedSyncTester struct {
 	lock       sync.RWMutex
 }
 
-func newStagedSyncTester() (*stagedSyncTester, func()) {
+func newStagedSyncTester(t *testing.T) *stagedSyncTester {
 	tester := &stagedSyncTester{
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
 	}
-	tester.db = ethdb.NewMemDatabase()
+	tester.db = ethdb.NewTestDB(t)
 	// This needs to match the genesis in the file testchain_test.go
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	if err := rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty()); err != nil {
@@ -53,10 +53,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 			stagedsync.OptionalParameters{},
 		),
 	)
-	clear := func() {
-		tester.db.Close()
-	}
-	return tester, clear
+	return tester
 }
 
 // newPeer registers a new block download source into the downloader.
@@ -264,8 +261,7 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 func TestStagedBase(t *testing.T) {
 	// Same as testChainForkLightA but much shorter
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	tester, clear := newStagedSyncTester()
-	defer clear()
+	tester := newStagedSyncTester(t)
 	if err := tester.newPeer("peer", 65, getTestChainBase()); err != nil {
 		t.Fatal(err)
 	}
@@ -284,8 +280,7 @@ func TestStagedBase(t *testing.T) {
 
 func TestUnwind(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	tester, clear := newStagedSyncTester()
-	defer clear()
+	tester := newStagedSyncTester(t)
 	if err := tester.newPeer("peer", 65, getTestChainForkLightA()); err != nil {
 		t.Fatal(err)
 	}

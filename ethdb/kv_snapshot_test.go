@@ -18,6 +18,7 @@ func TestSnapshot2Get(t *testing.T) {
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
+	defer sn1.Close()
 	err := sn1.Update(context.Background(), func(tx RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 		if err != nil {
@@ -43,6 +44,7 @@ func TestSnapshot2Get(t *testing.T) {
 			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
+	defer sn2.Close()
 	err = sn2.Update(context.Background(), func(tx RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
 		require.NoError(t, err)
@@ -61,7 +63,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	err = mainDB.Update(context.Background(), func(tx RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 		if err != nil {
@@ -103,6 +105,7 @@ func TestSnapshot2Get(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	v, err := tx.GetOne(dbutils.HeadersBucket, dbutils.HeaderKey(1, common.Hash{1}))
 	if err != nil {
@@ -193,6 +196,8 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
+	defer sn1.Close()
+
 	{
 		err := sn1.Update(context.Background(), func(tx RwTx) error {
 			bucket, err := tx.RwCursor(dbutils.HeadersBucket)
@@ -218,6 +223,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
+	defer sn2.Close()
 	{
 		err := sn2.Update(context.Background(), func(tx RwTx) error {
 			bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
@@ -236,13 +242,14 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.HeadersBucket}, sn1).
 		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).Open()
 	{
 		tx, err := kv.BeginRw(context.Background())
 		require.NoError(t, err)
+		defer tx.Rollback()
 
 		v, err := tx.GetOne(dbutils.HeadersBucket, dbutils.HeaderKey(1, common.Hash{1}))
 		require.NoError(t, err)
@@ -265,6 +272,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	}
 	tx, err := kv.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	c, err := tx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
 	k, v, err := c.First()
@@ -342,15 +350,17 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
+	defer kv.Close()
 
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.RwCursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -412,7 +422,7 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -420,6 +430,7 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -487,7 +498,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -495,6 +506,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -601,6 +613,7 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -685,6 +698,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -773,7 +787,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -781,6 +795,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
@@ -810,12 +825,13 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
 
@@ -872,12 +888,13 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	require.NoError(t, err)
 	deleteCursor, err := tx.RwCursor(dbutils.PlainStateBucket)
@@ -971,7 +988,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := NewMemKV()
+	mainDB := NewTestKV(t)
 	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		Open()
 
@@ -979,6 +996,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	if err != nil {
 		t.Fatal(err)
@@ -997,6 +1015,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx2.Rollback()
 
 	c2, err := tx2.Cursor(dbutils.PlainStateBucket)
 	if err != nil {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestDupSortHashState(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 
 	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HashedStorageBucket)
@@ -60,7 +60,7 @@ func TestDupSortHashState(t *testing.T) {
 }
 
 func TestDupSortPlainState(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 
 	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.PlainStateBucketOld1)

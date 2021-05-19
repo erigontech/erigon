@@ -435,6 +435,11 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
+	// Drain persistedLinksQueue and remove links
+	for hd.persistedLinkQueue.Len() > 0 {
+		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		delete(hd.links, link.hash)
+	}
 	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.HeadersBucket)
 		if err != nil {
@@ -735,6 +740,8 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
 		}
+		// This makes sure we end up chosing the chain with the max total difficulty
+		hi.localTd.Set(td)
 	}
 	data, err2 := rlp.EncodeToBytes(header)
 	if err2 != nil {

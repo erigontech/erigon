@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -131,8 +132,12 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	return NewSimulatedBackendWithDatabase(ethdb.NewMemDatabase(), alloc, gasLimit)
+func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+	b := NewSimulatedBackendWithDatabase(ethdb.NewObjectDatabase(ethdb.NewTestKV(t)), alloc, gasLimit)
+	t.Cleanup(func() {
+		b.Close()
+	})
+	return b
 }
 
 func (b *SimulatedBackend) DB() ethdb.Database {

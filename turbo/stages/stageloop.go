@@ -64,6 +64,9 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
 			log.Error("Stage loop failure", "error", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				log.Error("Failed to recover header downoader", "error", recoveryErr)
+			}
 			continue
 		}
 
@@ -120,15 +123,6 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
-	var tx ethdb.RwTx // on this variable will run sync cycle.
-	if canRunCycleInOneTransaction {
-		tx, err = db.RwKV().BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
 	if err != nil {
 		return err
@@ -140,6 +134,16 @@ func StageLoopStep(
 			notifyFrom = n
 		}
 	}
+
+	var tx ethdb.RwTx // on this variable will run sync cycle.
+	if canRunCycleInOneTransaction {
+		tx, err = db.RwKV().BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	err = st.Run(db, tx)
 	if err != nil {
 		return err

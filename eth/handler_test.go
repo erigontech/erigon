@@ -18,6 +18,7 @@ package eth
 
 import (
 	"math/big"
+	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -54,15 +55,15 @@ type testHandler struct {
 }
 
 // newTestHandler creates a new handler for testing purposes with no blocks.
-func newTestHandler() *testHandler {
-	return newTestHandlerWithBlocks(0)
+func newTestHandler(t *testing.T) *testHandler {
+	return newTestHandlerWithBlocks(t, 0)
 }
 
 // newTestHandlerWithBlocks creates a new handler for testing purposes, with a
 // given number of initial blocks.
-func newTestHandlerWithBlocks(blocks int) *testHandler {
+func newTestHandlerWithBlocks(t *testing.T, blocks int) *testHandler {
 	// Create a database pre-initialize with a genesis block
-	db := ethdb.NewMemoryDatabase()
+	db := ethdb.NewTestDB(t)
 	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
@@ -90,7 +91,7 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	})
 	handler.Start(1000)
 
-	return &testHandler{
+	b := &testHandler{
 		db:          db,
 		ChainConfig: params.TestChainConfig,
 		genesis:     genesis,
@@ -100,10 +101,8 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 		handler:     handler,
 		headBlock:   headBlock,
 	}
-}
-
-// close tears down the handler and all its internal constructs.
-func (b *testHandler) close() {
-	b.handler.Stop()
-	b.db.Close()
+	t.Cleanup(func() {
+		b.handler.Stop()
+	})
+	return b
 }

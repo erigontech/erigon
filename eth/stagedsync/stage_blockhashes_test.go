@@ -1,24 +1,17 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBlockHashStage(t *testing.T) {
 	origin, headers := generateFakeBlocks(1, 4)
-
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	db, tx := ethdb.NewTestTx(t)
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(tx, origin.Hash(), 0)
@@ -43,7 +36,7 @@ func TestBlockHashStage(t *testing.T) {
 		t.Fatalf("setting headers progress: %v", err)
 	}
 	blockHashCfg := StageBlockHashesCfg(db, "")
-	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, tx, blockHashCfg, nil)
+	err := SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, tx, blockHashCfg, nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(tx, h.Hash())

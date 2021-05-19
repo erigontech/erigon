@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -115,10 +114,7 @@ func (opts LmdbOpts) Open() (kv *LmdbKV, err error) {
 	var logger log.Logger
 	if opts.inMem {
 		logger = log.New("lmdb", "inMem")
-		opts.path, err = ioutil.TempDir(os.TempDir(), "lmdb")
-		if err != nil {
-			return nil, err
-		}
+		opts.path = testKVPath()
 	} else {
 		logger = log.New("lmdb", path.Base(opts.path))
 	}
@@ -325,7 +321,10 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) CollectMetrics() {
-	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	fileInfo, err := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	if err != nil {
+		return // ignore error
+	}
 	dbSize.Update(fileInfo.Size())
 }
 
@@ -424,7 +423,10 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
+	for k, _, err := c.Get(nil, nil, lmdb.First); k != nil; k, _, err = c.Get(nil, nil, lmdb.Next) {
+		if err != nil {
+			return nil, err
+		}
 		res = append(res, string(k))
 	}
 	c.Close()
@@ -751,7 +753,10 @@ func (tx *lmdbTx) Has(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c, _ := tx.RwCursor(dbutils.Sequence)
+	c, err := tx.RwCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -773,7 +778,10 @@ func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *lmdbTx) ReadSequence(bucket string) (uint64, error) {
-	c, _ := tx.Cursor(dbutils.Sequence)
+	c, err := tx.Cursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -820,8 +828,7 @@ func (tx *lmdbTx) RwCursor(bucket string) (RwCursor, error) {
 }
 
 func (tx *lmdbTx) Cursor(bucket string) (Cursor, error) {
-	c, _ := tx.RwCursor(bucket)
-	return c, nil
+	return tx.RwCursor(bucket)
 }
 
 func (tx *lmdbTx) stdCursor(bucket string) (RwCursor, error) {

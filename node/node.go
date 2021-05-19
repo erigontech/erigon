@@ -95,8 +95,10 @@ func New(conf *Config) (*Node, error) {
 		inprocHandler: rpc.NewServer(),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
-		server:        &p2p.Server{Config: conf.P2P},
 		databases:     make([]ethdb.Closer, 0),
+	}
+	if !conf.EnableDownloadV2 {
+		node.server = &p2p.Server{Config: conf.P2P}
 	}
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
@@ -108,33 +110,35 @@ func New(conf *Config) (*Node, error) {
 
 	var err error
 	// Initialize the p2p server. This creates the node key and discovery databases.
-	node.server.Config.PrivateKey, err = node.config.NodeKey()
-	if err != nil {
-		return nil, err
-	}
-	node.server.Config.Name = node.Config().NodeName()
-	node.server.Config.Logger = node.log
-	if node.server.Config.StaticNodes == nil {
-		node.server.Config.StaticNodes, err = node.config.StaticNodes()
+	if !conf.EnableDownloadV2 {
+		node.server.Config.PrivateKey, err = node.config.NodeKey()
 		if err != nil {
 			return nil, err
 		}
-	}
-	if node.server.Config.TrustedNodes == nil {
-		node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
-		if err != nil {
-			return nil, err
+		node.server.Config.Name = node.Config().NodeName()
+		node.server.Config.Logger = node.log
+		if node.server.Config.StaticNodes == nil {
+			node.server.Config.StaticNodes, err = node.config.StaticNodes()
+			if err != nil {
+				return nil, err
+			}
 		}
-	}
-	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase = node.config.NodeDB()
+		if node.server.Config.TrustedNodes == nil {
+			node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if node.server.Config.NodeDatabase == "" {
+			node.server.Config.NodeDatabase = node.config.NodeDB()
+		}
 	}
 
 	// Check HTTP/WS prefixes are valid.
-	if err := validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
+	if err = validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
 		return nil, err
 	}
-	if err := validatePrefix("WebSocket", conf.WSPathPrefix); err != nil {
+	if err = validatePrefix("WebSocket", conf.WSPathPrefix); err != nil {
 		return nil, err
 	}
 
@@ -147,7 +151,9 @@ func New(conf *Config) (*Node, error) {
 }
 
 func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	n.server.SetP2PListenFunc(listenFunc)
+	if !n.config.EnableDownloadV2 {
+		n.server.SetP2PListenFunc(listenFunc)
+	}
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
@@ -252,8 +258,8 @@ func (n *Node) doClose(errs []error) error {
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
 	// start networking endpoints
-	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-	if len(n.config.P2P.SentryAddr) == 0 {
+	if !n.config.EnableDownloadV2 {
+		n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
 		if err := n.server.Start(); err != nil {
 			return convertFileLockError(err)
 		}
@@ -263,7 +269,7 @@ func (n *Node) openEndpoints() error {
 	err := n.startRPC()
 	if err != nil {
 		n.stopRPC()
-		if len(n.config.P2P.SentryAddr) == 0 {
+		if !n.config.EnableDownloadV2 {
 			n.server.Stop()
 		}
 	}
@@ -293,7 +299,7 @@ func (n *Node) stopServices(running []Lifecycle) error {
 		}
 	}
 
-	if len(n.config.P2P.SentryAddr) == 0 {
+	if !n.config.EnableDownloadV2 {
 		// Stop p2p networking.
 		n.server.Stop()
 	}
@@ -447,7 +453,9 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	if n.state != initializingState {
 		panic("can't register protocols on running/stopped node")
 	}
-	n.server.Protocols = append(n.server.Protocols, protocols...)
+	if !n.config.EnableDownloadV2 {
+		n.server.Protocols = append(n.server.Protocols, protocols...)
+	}
 }
 
 // RegisterAPIs registers the APIs a service provides on the node.

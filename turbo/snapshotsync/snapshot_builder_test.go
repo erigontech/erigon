@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"io/ioutil"
 	"math"
 	"os"
 	"path"
@@ -22,10 +21,8 @@ import (
 func TestSnapshotMigratorStage(t *testing.T) {
 	t.Skip("flaky test")
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	dir, err := ioutil.TempDir(os.TempDir(), "tst")
-	if err != nil {
-		t.Fatal(err)
-	}
+	var err error
+	dir := t.TempDir()
 
 	defer func() {
 		if err != nil {

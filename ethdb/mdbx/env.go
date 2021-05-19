@@ -137,8 +137,6 @@ func NewEnv() (*Env, error) {
 	}
 	env.ckey = (*C.MDBX_val)(C.malloc(C.size_t(unsafe.Sizeof(C.MDBX_val{}))))
 	env.cval = (*C.MDBX_val)(C.malloc(C.size_t(unsafe.Sizeof(C.MDBX_val{}))))
-
-	runtime.SetFinalizer(env, (*Env).Close)
 	return env, nil
 }
 
@@ -216,9 +214,13 @@ func (env *Env) ReaderCheck() (int, error) {
 	return int(_dead), operrno("mdbx_reader_check", ret)
 }
 
-func (env *Env) close() bool {
+// Close shuts down the environment, releases the memory map, and clears the
+// finalizer on env.
+//
+// See mdbx_env_close.
+func (env *Env) Close() {
 	if env._env == nil {
-		return false
+		return
 	}
 
 	env.closeLock.Lock()
@@ -230,19 +232,6 @@ func (env *Env) close() bool {
 	C.free(unsafe.Pointer(env.cval))
 	env.ckey = nil
 	env.cval = nil
-	return true
-}
-
-// Close shuts down the environment, releases the memory map, and clears the
-// finalizer on env.
-//
-// See mdbx_env_close.
-func (env *Env) Close() error {
-	if env.close() {
-		runtime.SetFinalizer(env, nil)
-		return nil
-	}
-	return errors.New("environment is already closed")
 }
 
 // CopyFD copies env to the the file descriptor fd.

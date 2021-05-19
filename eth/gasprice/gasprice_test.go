@@ -70,7 +70,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		signer = types.LatestSigner(gspec.Config)
 	)
 	engine := ethash.NewFaker()
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 	genesis, _, err := gspec.Commit(db, false)
 	if err != nil {
 		t.Fatal(err)

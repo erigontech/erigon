@@ -42,8 +42,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
@@ -89,8 +88,7 @@ func TestStateDisabledStages(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
@@ -139,8 +137,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
@@ -187,8 +184,7 @@ func TestStateErroredStage(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
@@ -202,8 +198,7 @@ func TestStateErroredStage(t *testing.T) {
 }
 
 func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -308,8 +303,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 }
 
 func TestStateUnwind(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -414,8 +408,7 @@ func TestStateUnwind(t *testing.T) {
 }
 
 func TestStateUnwindEmptyUnwinder(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -500,8 +493,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 
 func TestStateSyncDoTwice(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 
 	s := []*Stage{
 		{
@@ -592,8 +584,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 			},
 		},
 	}
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 
 	state := NewState(s)
 	tx, err := db.RwKV().BeginRw(context.Background())
@@ -617,8 +608,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	// interrupt a stage that is too big to fit in one batch,
 	// so the db is in inconsitent state, so we have to restart with that
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	interrupted := false
