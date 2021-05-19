@@ -69,7 +69,6 @@ jobs:
         run: |
           go mod download
           go mod vendor
-          ls C:/WINDOWS/SYSTEM32/
           go build -tags mdbx ./cmd/...
       - name: Test
         run: |
