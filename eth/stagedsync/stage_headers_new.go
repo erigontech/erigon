@@ -80,7 +80,6 @@ func HeadersForward(
 		return err
 	}
 	if hash == (common.Hash{}) {
-		fmt.Printf("fixCaninicalChain will be called\n")
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err

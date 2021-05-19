@@ -381,7 +381,7 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	ch := make(chan struct{})
 	defer close(ch)
 
-	cfg := stagedsync.StageSendersCfg(kv, params.MainnetChainConfig)
+	cfg := stagedsync.StageSendersCfg(kv, params.MainnetChainConfig, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
 		err = stagedsync.UnwindSendersStage(u, stage3, tx, cfg)
@@ -389,7 +389,7 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, tx, block, tmpdir, ch)
+		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, tx, block, ch)
 		if err != nil {
 			return err
 		}

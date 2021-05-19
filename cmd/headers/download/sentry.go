@@ -47,8 +47,8 @@ const (
 	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
 )
 
-func nodeKey() *ecdsa.PrivateKey {
-	keyfile := "nodekey"
+func nodeKey(datadir string) *ecdsa.PrivateKey {
+	keyfile := path.Join(datadir, "tg", "nodekey")
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key
 	}
@@ -140,7 +140,7 @@ func makeP2PServer(
 		}
 	}
 
-	serverKey := nodeKey()
+	serverKey := nodeKey(datadir)
 	p2pConfig := p2p.Config{}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
@@ -153,7 +153,7 @@ func makeP2PServer(
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = path.Join(datadir, "tg", fmt.Sprintf("nodes_%x", genesisHash))
+	p2pConfig.NodeDatabase = path.Join(datadir, "tg", "nodes")
 	p2pConfig.ListenAddr = p2pListenAddr
 	var urls []string
 	switch genesisHash {

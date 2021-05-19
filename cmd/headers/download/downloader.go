@@ -157,6 +157,7 @@ func NewStagedSync(
 			batchSize,
 			increment,
 		),
+		stagedsync.StageBlockHashesCfg(db, tmpdir),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.bd,
@@ -168,7 +169,7 @@ func NewStagedSync(
 			*controlServer.chainConfig,
 			batchSize,
 		),
-		stagedsync.StageSendersCfg(db, controlServer.chainConfig),
+		stagedsync.StageSendersCfg(db, controlServer.chainConfig, tmpdir),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,

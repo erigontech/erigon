@@ -23,6 +23,7 @@ func NewStagedSync(
 	ctx context.Context,
 	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
+	blockHashes stagedsync.BlockHashesCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
@@ -36,7 +37,7 @@ func NewStagedSync(
 	finish stagedsync.FinishCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)

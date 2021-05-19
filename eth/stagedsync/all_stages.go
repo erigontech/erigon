@@ -52,12 +52,12 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 		{
 			ID: stages.Senders,
 			Build: func(world StageParameters) *Stage {
-				sendersCfg := StageSendersCfg(world.DB.RwKV(), world.ChainConfig)
+				sendersCfg := StageSendersCfg(world.DB.RwKV(), world.ChainConfig, world.TmpDir)
 				return &Stage{
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnRecoverSendersStage(sendersCfg, s, tx, 0, world.TmpDir, world.QuitCh)
+						return SpawnRecoverSendersStage(sendersCfg, s, tx, 0, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindSendersStage(u, s, tx, sendersCfg)
