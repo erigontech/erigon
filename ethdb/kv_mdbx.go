@@ -449,7 +449,10 @@ func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, _, _ := c.Get(nil, nil, mdbx.First); k != nil; k, _, _ = c.Get(nil, nil, mdbx.Next) {
+	for k, _, err := c.Get(nil, nil, mdbx.First); k != nil; k, _, err = c.Get(nil, nil, mdbx.Next) {
+		if err != nil {
+			return nil, err
+		}
 		res = append(res, string(k))
 	}
 	return res, nil
