@@ -11,7 +11,7 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx/internal/lmdbarch"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx/mdbxarch"
 )
 
 // Just for docs:
@@ -32,7 +32,7 @@ import (
 // On 64-bit systems, luckily, the value 2^32-1 coincides with the maximum data
 // size for LMDB (MAXDATASIZE).
 const (
-	valSizeBits = lmdbarch.Width64*32 + (1-lmdbarch.Width64)*31
+	valSizeBits = mdbxarch.Width64*32 + (1-mdbxarch.Width64)*31
 	valMaxSize  = 1<<valSizeBits - 1
 )
 
