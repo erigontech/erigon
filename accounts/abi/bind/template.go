@@ -91,7 +91,7 @@ import (
 	"math/big"
 	"strings"
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
