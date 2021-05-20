@@ -110,7 +110,7 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 }
 
 //Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier) {
+func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, waitForDone chan struct{}) {
 	stages.StageLoop(
 		ctx,
 		db,
@@ -118,6 +118,7 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 		controlServer.hd,
 		controlServer.chainConfig,
 		notifier,
+		waitForDone,
 	)
 }
 
