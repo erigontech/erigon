@@ -156,7 +156,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			}
 		}
 
-		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
+		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir, stack.Config().MDBX)
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +245,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err != nil {
 			return nil, err
 		}
-		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash, stack.Config().MDBX)
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)

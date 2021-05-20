@@ -87,7 +87,10 @@ var nodeDBInt64Tests = []struct {
 }
 
 func TestDBInt64(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	tests := nodeDBInt64Tests
@@ -119,7 +122,10 @@ func TestDBFetchStore(t *testing.T) {
 	inst := time.Now()
 	num := 314
 
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Check fetch/store operations on a node ping object
