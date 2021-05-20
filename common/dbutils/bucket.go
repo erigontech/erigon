@@ -283,6 +283,7 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	ContractTEVMCodeBucket,
+	ContractTEVMCodeStatusBucket,
 	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,

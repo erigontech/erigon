@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -83,6 +85,7 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 
 	c.vmType = EVMType
 	if isTEVM {
+		fmt.Println("!!!!!-SET-TEVM")
 		c.vmType = TEVMType
 	}
 

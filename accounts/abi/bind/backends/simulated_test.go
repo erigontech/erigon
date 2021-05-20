@@ -363,8 +363,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			testAddr: {Balance: big.NewInt(10000000000)},
-		}, 10000000,
-	)
+		}, 10000000)
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
