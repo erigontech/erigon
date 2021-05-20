@@ -17,8 +17,8 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/core/vm/stack"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 type (

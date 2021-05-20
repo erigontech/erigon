@@ -17,8 +17,8 @@
 package core
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // NewTxsEvent is posted when a batch of transactions enter the transaction pool.

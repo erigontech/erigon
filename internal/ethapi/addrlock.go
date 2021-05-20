@@ -19,7 +19,7 @@ package ethapi
 import (
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 type AddrLocker struct {

@@ -3,8 +3,8 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"net/http"
 	"time"
 )

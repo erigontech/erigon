@@ -1,8 +1,8 @@
 package trie
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var emptyHash [32]byte

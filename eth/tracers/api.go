@@ -1,6 +1,6 @@
 package tracers
 
-import "github.com/ledgerwatch/turbo-geth/core/vm"
+import "github.com/ledgerwatch/erigon/core/vm"
 
 // TraceConfig holds extra parameters to trace functions.
 type TraceConfig struct {

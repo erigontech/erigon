@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/evm/internal/compiler"
+	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 
 	"github.com/urfave/cli"
 )

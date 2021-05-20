@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	"github.com/cloudflare/cloudflare-go"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/urfave/cli"
 )
 

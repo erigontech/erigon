@@ -2,8 +2,8 @@ package ethdb
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 	"testing"

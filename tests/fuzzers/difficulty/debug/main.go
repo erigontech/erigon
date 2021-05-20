@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/tests/fuzzers/difficulty"
+	"github.com/ledgerwatch/erigon/tests/fuzzers/difficulty"
 )
 
 func main() {

@@ -2,7 +2,7 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
 )

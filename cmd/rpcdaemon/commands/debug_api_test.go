@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/eth/tracers"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 )
 
 var debugTraceTransactionTests = []struct {

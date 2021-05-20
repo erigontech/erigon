@@ -19,7 +19,7 @@ package vm
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // ContractRef is a reference to the contract's backing object

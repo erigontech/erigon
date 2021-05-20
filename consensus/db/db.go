@@ -1,7 +1,7 @@
 package db
 
 import (
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func OpenDatabase(path string, inmem bool, mdbx bool) *ethdb.ObjectDatabase {

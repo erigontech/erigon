@@ -4,12 +4,12 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 )
 

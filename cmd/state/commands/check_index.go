@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/state/verify"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/state/verify"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/spf13/cobra"
 )
 

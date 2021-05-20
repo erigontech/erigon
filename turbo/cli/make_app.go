@@ -2,8 +2,8 @@
 package cli
 
 import (
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/internal/flags"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/flags"
 
 	"github.com/urfave/cli"
 )

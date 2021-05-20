@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 const (

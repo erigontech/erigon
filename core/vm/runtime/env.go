@@ -17,8 +17,8 @@
 package runtime
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 func NewEnv(cfg *Config) *vm.EVM {

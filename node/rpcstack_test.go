@@ -27,9 +27,9 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/turbo-geth/internal/testlog"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/internal/testlog"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rpc"
 
 	"github.com/stretchr/testify/assert"
 )

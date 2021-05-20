@@ -29,9 +29,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/node"
 )
 
 // Fatalf formats a message to standard error and exits the program.

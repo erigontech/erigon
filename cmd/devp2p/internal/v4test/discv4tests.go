@@ -24,9 +24,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/internal/utesting"
-	"github.com/ledgerwatch/turbo-geth/p2p/discover/v4wire"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/internal/utesting"
+	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 )
 
 const (

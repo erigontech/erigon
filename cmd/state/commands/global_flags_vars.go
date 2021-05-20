@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/spf13/cobra"
 )
 

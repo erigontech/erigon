@@ -3,7 +3,7 @@ package dbutils
 import (
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/assert"
 )
 

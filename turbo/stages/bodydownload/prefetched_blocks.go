@@ -1,8 +1,8 @@
 package bodydownload
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 
 	lru "github.com/hashicorp/golang-lru"
 )

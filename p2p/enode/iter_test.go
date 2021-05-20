@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 )
 
 func TestReadNodes(t *testing.T) {

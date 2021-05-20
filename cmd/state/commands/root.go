@@ -9,10 +9,10 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 

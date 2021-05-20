@@ -19,7 +19,7 @@ package event_test
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/erigon/event"
 )
 
 func ExampleFeed_acknowledgedEvents() {

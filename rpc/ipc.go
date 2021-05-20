@@ -20,8 +20,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/netutil"
 )
 
 // ServeListener accepts connections on l, serving JSON-RPC on them.

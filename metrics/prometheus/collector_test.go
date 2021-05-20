@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 func TestMain(m *testing.M) {

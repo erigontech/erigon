@@ -199,8 +199,8 @@ grpc:
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
 		types/types.proto
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \

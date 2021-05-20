@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 
 	"github.com/urfave/cli"
 )
