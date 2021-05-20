@@ -71,7 +71,7 @@ func newTestHandlerWithBlocks(t *testing.T, blocks int) *testHandler {
 
 	headBlock := genesis
 	if blocks > 0 {
-		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, nil, false)
+		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, nil, false)
 		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
 			panic(err)
 		}

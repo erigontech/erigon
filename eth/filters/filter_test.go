@@ -53,7 +53,7 @@ func BenchmarkFilters(b *testing.B) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
-	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
+	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 100010, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 2403:
 			receipt := makeReceipt(addr1)

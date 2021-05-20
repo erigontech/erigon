@@ -65,7 +65,7 @@ func ExampleGenerateChain() {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 5, func(i int, gen *core.BlockGen) {
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.

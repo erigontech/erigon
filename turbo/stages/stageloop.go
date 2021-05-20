@@ -73,7 +73,7 @@ func StageLoop(
 			}
 
 			log.Error("Stage loop failure", "error", err)
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+			if recoveryErr := hd.RecoverFromDb(db.RwKV()); recoveryErr != nil {
 				log.Error("Failed to recover header downoader", "error", recoveryErr)
 			}
 			continue

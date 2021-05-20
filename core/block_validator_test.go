@@ -39,7 +39,7 @@ func TestHeaderVerification(t *testing.T) {
 		engine  = ethash.NewFaker()
 	)
 
-	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 8, nil, false /* intemediateHashes */)
+	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
