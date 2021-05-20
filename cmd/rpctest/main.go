@@ -231,19 +231,21 @@ func main() {
 	with(replayCmd, withTGUrl, withRecord)
 
 	var tmpDataDir, tmpDataDirOrig string
+	var database string
 	var notRegenerateGethData bool
 	var compareAccountRange = &cobra.Command{
 		Use:   "compareAccountRange",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData)
+			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData, database)
 		},
 	}
 	with(compareAccountRange, withTGUrl, withGethUrl, withBlockNum)
 	compareAccountRange.Flags().BoolVar(&notRegenerateGethData, "regenGethData", false, "")
 	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
+	compareAccountRange.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 
 	var rootCmd = &cobra.Command{Use: "test"}
 	rootCmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545", "turbogeth rpcdaemon url")

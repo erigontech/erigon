@@ -785,7 +785,7 @@ type KvData struct {
 }
 
 func GenStateData(data []KvData) (RwKV, error) {
-	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snapshot := NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
 		}

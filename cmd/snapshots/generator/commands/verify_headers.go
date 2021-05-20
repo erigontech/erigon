@@ -49,7 +49,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 			time.Sleep(time.Second * 10)
 		}
 	}()
-	snKV, err := snapshotsync.OpenHeadersSnapshot(snapshotPath)
+	snKV, err := snapshotsync.OpenHeadersSnapshot(snapshotPath, database == "mdbx")
 	if err != nil {
 		return err
 	}

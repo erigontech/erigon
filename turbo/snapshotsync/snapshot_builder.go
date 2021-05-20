@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -53,29 +52,46 @@ func GetSnapshotInfo(db ethdb.Database) (uint64, []byte, error) {
 	return snapshotBlock, infohash, nil
 }
 
-func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
-	return ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-		}
-	}).Flags(func(u uint) uint {
-		return u | lmdb.Readonly
-	}).Path(dbPath).Open()
-
+func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
+	if useMdbx {
+		return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+			}
+		}).Readonly().Path(dbPath).Open()
+	} else {
+		return ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+			}
+		}).Readonly().Path(dbPath).Open()
+	}
 }
-func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.RwKV, toBlock uint64, snapshotPath string) error {
+func CreateHeadersSnapshot(ctx context.Context, chainDB ethdb.RwKV, toBlock uint64, snapshotPath string, useMdbx bool) error {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
 	err := os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
-	snKV, err := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+	var snKV ethdb.RwKV
+	if useMdbx {
+		snKV, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+			}
+		}).Path(snapshotPath).Open()
+		if err != nil {
+			return err
 		}
-	}).Path(snapshotPath).Open()
-	if err != nil {
-		return err
+	} else {
+		snKV, err = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+			}
+		}).Path(snapshotPath).Open()
+		if err != nil {
+			return err
+		}
 	}
 
 	sntx, err := snKV.BeginRw(context.Background())
@@ -138,11 +154,12 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 	return nil
 }
 
-func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
+func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
 	return &SnapshotMigrator{
 		snapshotsDir:               snapshotDir,
 		HeadersCurrentSnapshot:     currentSnapshotBlock,
 		HeadersNewSnapshotInfohash: currentSnapshotInfohash,
+		useMdbx:                    useMdbx,
 	}
 }
 
@@ -151,6 +168,7 @@ type SnapshotMigrator struct {
 	HeadersCurrentSnapshot     uint64
 	HeadersNewSnapshot         uint64
 	HeadersNewSnapshotInfohash []byte
+	useMdbx                    bool
 
 	Stage uint64
 	mtx   sync.RWMutex
@@ -256,7 +274,7 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.RwKV, tx ethdb.RwTx, toBlock uint64
 			snapshotPath := SnapshotName(sm.snapshotsDir, "headers", toBlock)
 			tt := time.Now()
 			log.Info("Create snapshot", "type", "headers")
-			err = CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath)
+			err = CreateHeadersSnapshot(ctx, db, toBlock, snapshotPath, sm.useMdbx)
 			if err != nil {
 				log.Error("Create snapshot", "err", err, "block", toBlock)
 				return
@@ -402,7 +420,7 @@ func (sm *SnapshotMigrator) ReplaceHeadersSnapshot(chainDB ethdb.RwKV, snapshotP
 	if _, ok := chainDB.(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
+	snapshotKV, err := OpenHeadersSnapshot(snapshotPath, sm.useMdbx)
 	if err != nil {
 		return err
 	}
