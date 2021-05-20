@@ -190,7 +190,7 @@ func DefaultStages() StageBuilders {
 						}
 						return nil
 					},
-					Disabled:            world.snapshotsDir != "",
+					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 				}
 			},
@@ -216,7 +216,7 @@ func DefaultStages() StageBuilders {
 				return &Stage{
 					ID:                  stages.CreateBodiesSnapshot,
 					Description:         "Create bodies snapshot",
-					Disabled:            world.snapshotsDir != "",
+					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
@@ -297,7 +297,7 @@ func DefaultStages() StageBuilders {
 				return &Stage{
 					ID:                  stages.CreateStateSnapshot,
 					Description:         "Create state snapshot",
-					Disabled:            world.snapshotsDir != "",
+					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
