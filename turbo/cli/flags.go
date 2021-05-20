@@ -231,6 +231,8 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		}
 	}
 	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
+	cfg.P2P.MDBX = cfg.MDBX
+	cfg.P2P.LMDB = cfg.LMDB
 }
 
 // setPrivateApi populates configuration fields related to the remote

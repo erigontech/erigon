@@ -509,7 +509,10 @@ func (t *handshakeTest) close() {
 }
 
 func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock) {
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	n.ln = enode.NewLocalNode(db, key)
 	n.ln.SetStaticIP(ip)
 	if n.ln.Node().Seq() != 1 {

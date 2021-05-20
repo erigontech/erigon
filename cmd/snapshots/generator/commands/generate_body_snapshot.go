@@ -105,7 +105,11 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 		return err
 	}
 	snDB.Close()
-	err = os.Remove(snapshotPath + "/lock.mdb")
+	if database == "lmdb" {
+		err = os.Remove(snapshotPath + "/lock.mdb")
+	} else {
+		err = os.Remove(snapshotPath + "/mdbx.lck")
+	}
 	if err != nil {
 		log.Warn("Remove lock", "err", err)
 		return err

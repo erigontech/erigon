@@ -172,5 +172,5 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	fmt.Println("took", time.Since(t))
 
-	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block)
+	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block, database)
 }
