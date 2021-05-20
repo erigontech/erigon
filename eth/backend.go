@@ -766,6 +766,8 @@ func (s *Ethereum) Stop() error {
 		s.txPool.Stop()
 	}
 	<-s.waitForStageLoopStop
-	<-s.waitForMiningStop
+	if s.config.Miner.Enabled {
+		<-s.waitForMiningStop
+	}
 	return nil
 }
