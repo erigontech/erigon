@@ -120,7 +120,10 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	ln := enode.NewLocalNode(db, nodeKey)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,

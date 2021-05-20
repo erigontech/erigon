@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -29,6 +30,9 @@ import (
 )
 
 func TestState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
+	}
 	t.Parallel()
 
 	st := new(testMatcher)

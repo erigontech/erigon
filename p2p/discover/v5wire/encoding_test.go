@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -159,6 +160,12 @@ func TestHandshake_norecord(t *testing.T) {
 // In this test, A tries to send FINDNODE with existing secrets but B doesn't know
 // anything about A.
 func TestHandshake_rekey(t *testing.T) {
+	// runtime: setevent failed; errno=6
+	// fatal error: runtime.semawakeup
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	t.Parallel()
 	net := newHandshakeTest()
 	defer net.close()

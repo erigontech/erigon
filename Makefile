@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 2 --tags 'mdbx'
+GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -145,8 +145,8 @@ test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 
-test-mdbx: mdbx
-	TEST_DB=mdbx $(GOTEST)
+test-mdbx:
+	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
 	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml

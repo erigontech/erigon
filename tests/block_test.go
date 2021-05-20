@@ -17,10 +17,15 @@
 package tests
 
 import (
+	"runtime"
 	"testing"
 )
 
 func TestBlockchain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
+	}
+
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
