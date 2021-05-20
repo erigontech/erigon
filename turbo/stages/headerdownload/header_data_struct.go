@@ -200,11 +200,12 @@ func NewHeaderDownload(
 	linkLimit int,
 	engine consensus.Engine,
 ) *HeaderDownload {
+	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
 		badHeaders:         make(map[common.Hash]struct{}),
 		anchors:            make(map[common.Hash]*Anchor),
-		persistedLinkLimit: linkLimit / 2,
-		linkLimit:          linkLimit / 2,
+		persistedLinkLimit: persistentLinkLimit,
+		linkLimit:          linkLimit - persistentLinkLimit,
 		anchorLimit:        anchorLimit,
 		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
