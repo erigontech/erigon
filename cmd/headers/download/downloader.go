@@ -474,7 +474,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -508,7 +508,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
