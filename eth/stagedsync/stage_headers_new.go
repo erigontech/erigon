@@ -240,7 +240,7 @@ func HeadersForward(
 	}
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
-		return fmt.Errorf("interrupted")
+		return common.ErrStopped
 	}
 	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
 	return nil
