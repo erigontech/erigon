@@ -434,7 +434,7 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 	hd.preverifiedHeight = preverifiedHeight
 }
 
-func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
+func (hd *HeaderDownload) RecoverFromDb(db ethdb.RoKV) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	// Drain persistedLinksQueue and remove links
@@ -442,7 +442,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 		link := heap.Pop(hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
 	}
-	err := db.(ethdb.HasRwKV).RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.HeadersBucket)
 		if err != nil {
 			return err
@@ -458,12 +458,12 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 			}
 			hd.addHeaderAsLink(&h, true /* persisted */)
 		}
+		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	hd.highestInDb, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return err
 	}

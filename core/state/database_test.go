@@ -95,7 +95,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -267,7 +267,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -480,7 +480,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -515,7 +515,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -618,7 +618,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -646,7 +646,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -766,7 +766,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -890,7 +890,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -974,7 +974,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var changer *contracts.Changer
 	var err error
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1092,7 +1092,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	var contractAddress common.Address
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1127,7 +1127,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1215,7 +1215,10 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
-	_, err := trie.CalcRoot("test", db)
+	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		_, err := trie.CalcRoot("test", tx)
+		return err
+	})
 	require.NoError(t, err)
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
@@ -1293,9 +1296,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := trie.CalcRoot("test", db)
+	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		r2, err := trie.CalcRoot("test", tx)
+		require.NoError(t, err)
+		require.Equal(t, root, r2)
+		return nil
+	})
 	require.NoError(t, err)
-	require.Equal(t, root, r2)
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
@@ -1308,9 +1315,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = trie.CalcRoot("test", db)
+	err = db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		r2, err := trie.CalcRoot("test", tx)
+		require.NoError(t, err)
+		require.Equal(t, root, r2)
+		return nil
+	})
 	require.NoError(t, err)
-	require.Equal(t, root, r2)
 }
 
 func TestRecreateAndRewind(t *testing.T) {
@@ -1341,7 +1352,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var phoenixAddress common.Address
 	var err error
 
-	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1403,7 +1414,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {

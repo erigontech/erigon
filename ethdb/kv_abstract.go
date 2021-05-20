@@ -139,6 +139,9 @@ type StatelessReadTx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	ReadSequence(bucket string) (uint64, error)
+
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 }
 
 type StatelessWriteTx interface {
@@ -174,6 +177,7 @@ type Tx interface {
 type RwTx interface {
 	Tx
 	StatelessWriteTx
+	BucketMigrator
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)

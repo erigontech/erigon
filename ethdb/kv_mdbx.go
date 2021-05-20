@@ -409,6 +409,45 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
 }
 
+func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (tx *MdbxTx) CollectMetrics() {
 	if !metrics.Enabled {
 		return

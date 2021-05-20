@@ -359,7 +359,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			backend.sentries = []proto_sentry.SentryClient{sentry}
 		}
 		blockDownloaderWindow := 65536
-		backend.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
+		backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesisHash, backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}

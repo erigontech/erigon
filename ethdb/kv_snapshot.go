@@ -391,6 +391,45 @@ func (s *snTX) Has(bucket string, key []byte) (bool, error) {
 	return v, nil
 }
 
+func (s *snTX) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *snTX) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *snTX) Commit() error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()

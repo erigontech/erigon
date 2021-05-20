@@ -2,7 +2,6 @@ package trie
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -1855,41 +1854,16 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 
 // CalcRoot is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
-func CalcRoot(logPrefix string, db ethdb.Database) (common.Hash, error) {
+func CalcRoot(logPrefix string, tx ethdb.Tx) (common.Hash, error) {
 	loader := NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
 		return EmptyRoot, err
 	}
 
-	var tx ethdb.Tx
-	var txDB ethdb.DbWithPendingMutations
-	var useExternalTx bool
-
-	// If method executed within transaction - use it, or open new read transaction
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		txDB = hasTx.(ethdb.DbWithPendingMutations)
-		tx = hasTx.Tx()
-		useExternalTx = true
-	} else {
-		var err error
-		txDB, err = db.Begin(context.Background(), ethdb.RO)
-		if err != nil {
-			return EmptyRoot, err
-		}
-
-		defer txDB.Rollback()
-		tx = txDB.(ethdb.HasTx).Tx()
-	}
 	h, err := loader.CalcTrieRoot(tx, nil, nil)
 	if err != nil {
 		return EmptyRoot, err
 	}
 
-	if !useExternalTx {
-		err := txDB.Commit()
-		if err != nil {
-			return EmptyRoot, err
-		}
-	}
 	return h, nil
 }
