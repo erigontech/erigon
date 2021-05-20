@@ -1984,6 +1984,34 @@ func wrongReceipts() error {
 	return nil
 }
 
+func advance5(chaindata string) error {
+	db := ethdb.MustOpenKV(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stage5, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage 5", "progress", stage5)
+	if err = stages.SaveStageProgress(tx, stages.Execution, stage5+1); err != nil {
+		return err
+	}
+	stage5, err = stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage 5", "changed to", stage5)
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2125,6 +2153,9 @@ func main() {
 
 	case "wrongReceipts":
 		err = wrongReceipts()
+
+	case "advance5":
+		err = advance5(*chaindata)
 	}
 
 	if err != nil {
