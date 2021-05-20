@@ -170,7 +170,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	signer := types.MakeSigner(params.TestChainConfig, 1)
 
 	testGenesisNonce := int64(-1)
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, totalLen, func(i int, block *core.BlockGen) {
+	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db.RwKV(), totalLen, func(i int, block *core.BlockGen) {
 		if i < existingLen || existingLen == 0 {
 			block.SetCoinbase(zeroAddress)
 

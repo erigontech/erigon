@@ -119,7 +119,7 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
 			} else {
-				root, err = trie.CalcRoot("", ethdb.NewRwTxDb(tx))
+				root, err = trie.CalcRoot("", tx)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}

@@ -125,7 +125,7 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
-				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
+				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, nil, false /* intermediateHashes */)
 				if err != nil {
 					return nil, common.Hash{}, err
 				}
