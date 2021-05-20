@@ -229,9 +229,13 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		return nil, nil, err
 	}
 	// Commit block
-	root, trieErr := trie.CalcRoot("", db)
-	if trieErr != nil {
-		return nil, nil, trieErr
+	var root common.Hash
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		root, err = trie.CalcRoot("", tx)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	execRs := &ExecutionResult{
 		StateRoot:   root,

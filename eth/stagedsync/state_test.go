@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -715,21 +713,4 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
 	return stages.SyncStage(append([]byte(s), 0xF0))
-}
-
-func TestSnapshotUnwindOrderEqualDefault(t *testing.T) {
-	stagesWithSnapshots := WithSnapshotsStages()
-	defaultStages := DefaultStages()
-	snUnwindOrder := UnwindOrderWithSnapshots()
-	unwindOrder := DefaultUnwindOrder()
-	snUnwindIDs := make([]stages.SyncStage, 0)
-	unwindIDs := make([]stages.SyncStage, 0)
-	for _, i := range snUnwindOrder {
-		snUnwindIDs = append(snUnwindIDs, stagesWithSnapshots[len(stagesWithSnapshots)-i-2].ID)
-	}
-	for _, i := range unwindOrder[:len(unwindOrder)-1] {
-		unwindIDs = append(unwindIDs, defaultStages[len(defaultStages)-i-2].ID)
-	}
-
-	require.Equal(t, snUnwindIDs, unwindIDs)
 }

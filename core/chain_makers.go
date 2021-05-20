@@ -205,7 +205,7 @@ var GenerateTrace bool
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen),
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.RwKV, n int, gen func(int, *BlockGen),
 	intermediateHashes bool,
 ) ([]*types.Block, []types.Receipts, error) {
 	if config == nil {
@@ -213,7 +213,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
-	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
+	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
 		return nil, nil, errBegin
 	}
@@ -250,17 +250,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
-			if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
-				return true, tx.Delete(dbutils.HashedAccountsBucket, k, v)
-			}); err != nil {
+			if err := tx.ClearBucket(dbutils.HashedAccountsBucket); err != nil {
 				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
-			if err := tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-				return true, tx.Delete(dbutils.HashedStorageBucket, k, v)
-			}); err != nil {
+			if err := tx.ClearBucket(dbutils.HashedStorageBucket); err != nil {
 				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
-			c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			c, err := tx.Cursor(dbutils.PlainStateBucket)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -301,9 +297,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
-				if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+				if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
-					return true, nil
+					return nil
 				}); err != nil {
 					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
@@ -324,7 +320,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {

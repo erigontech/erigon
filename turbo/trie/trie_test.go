@@ -26,15 +26,12 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -735,26 +732,3 @@ func TestNextSubtreeHex(t *testing.T) {
 //		t.Fatal(err)
 //	}
 //}
-
-func TestCollectRanges(t *testing.T) {
-	sc := shards.NewStateCache(32, 64*1024)
-	sc.SetAccountHashesRead(common.FromHex("00"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	sc.SetAccountHashesRead(common.FromHex("02"), 0b10011, 0b10011, 0b10011, []common.Hash{{}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0200"), 0b1111, 0b1111, 0b1111, []common.Hash{{}, {}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0201"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	sc.SetAccountHashesRead(common.FromHex("03"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	ranges, err := collectMissedAccTrie(func(prefix []byte) (bool, []byte) {
-		if bytes.Equal(prefix, common.FromHex("02")) {
-			return false, nil
-		}
-		if bytes.Equal(prefix, common.FromHex("0200")) {
-			return false, nil
-		}
-		if bytes.Equal(prefix, common.FromHex("020000")) {
-			return false, nil
-		}
-		return true, nil
-	}, []byte{}, sc, nil)
-	require.NoError(t, err)
-	require.Equal(t, fmt.Sprintf("%x", ranges[0]), "020000")
-}

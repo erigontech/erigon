@@ -170,7 +170,7 @@ func mock(t *testing.T) *MockSentry {
 	mock.sentryClient = &SentryClientDirect{}
 	mock.sentryClient.SetServer(mock)
 	sentries := []sentry.SentryClient{mock.sentryClient}
-	mock.downloader, err = NewControlServer(mock.memDb, "mock", mock.chainConfig, mock.genesis.Hash(), mock.engine, networkID, sentries, blockDownloaderWindow)
+	mock.downloader, err = NewControlServer(db, "mock", mock.chainConfig, mock.genesis.Hash(), mock.engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestHeaderStep(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 100, func(i int, b *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb.RwKV(), 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestReorg(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb.RwKV(), 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -326,20 +326,20 @@ func TestReorg(t *testing.T) {
 	}
 
 	// Now generate three competing branches, one short and two longer ones
-	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb, 2, func(i int, b *core.BlockGen) {
+	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
-	long1, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb, 10, func(i int, b *core.BlockGen) {
+	long1, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
-	long2, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb, 9, func(i int, b *core.BlockGen) {
+	long2, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 9, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -426,7 +426,7 @@ func TestReorg(t *testing.T) {
 
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
-	short2, _, err := core.GenerateChain(m.chainConfig, long1[len(long1)-1], m.engine, m.memDb, 2, func(i int, b *core.BlockGen) {
+	short2, _, err := core.GenerateChain(m.chainConfig, long1[len(long1)-1], m.engine, m.memDb.RwKV(), 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {

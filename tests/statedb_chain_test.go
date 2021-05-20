@@ -62,8 +62,6 @@ func TestSelfDestructReceive(t *testing.T) {
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
-	genesisDB := db.MemCopy()
-	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
 
@@ -80,7 +78,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDB, 2, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {

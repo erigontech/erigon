@@ -299,8 +299,6 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	genesisDb := db.MemCopy()
-	defer genesisDb.Close()
 
 	engine := ethash.NewFaker()
 
@@ -312,7 +310,7 @@ func initialState1() error {
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 8, func(i int, block *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 8, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction

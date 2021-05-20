@@ -226,19 +226,12 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
-		c, err := p.db.Cursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		cDel, err := p.db.RwCursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer cDel.Close()
 		for _, k := range deletedAccounts {
-			if err := ethdb.Walk(c, k, 8*len(k), func(k, v []byte) (bool, error) {
-				return true, cDel.Delete(k, v)
+			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
+				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -319,19 +312,12 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
-		c, err := p.db.Cursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		cDel, err := p.db.RwCursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer cDel.Close()
 		for _, k := range deletedAccounts {
-			if err := ethdb.Walk(c, k, 8*len(k), func(k, _ []byte) (bool, error) {
-				return true, cDel.Delete(k, nil)
+			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
+				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}

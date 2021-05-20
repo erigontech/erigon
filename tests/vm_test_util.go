@@ -117,7 +117,7 @@ func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	root, err := trie.CalcRoot("test", ethdb.WrapIntoTxDB(tx))
+	root, err := trie.CalcRoot("test", tx)
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}

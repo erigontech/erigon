@@ -220,11 +220,11 @@ type ControlServerImpl struct {
 	genesisHash     common.Hash
 	protocolVersion uint32
 	networkId       uint64
-	db              ethdb.Database
+	db              ethdb.RwKV
 	engine          consensus.Engine
 }
 
-func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -252,7 +252,7 @@ func NewControlServer(db ethdb.Database, nodeName string, chainConfig *params.Ch
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = networkID
 	var err error
-	err = db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
 		return err
 	})
@@ -445,7 +445,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
 
-	tx, err := cs.db.Begin(ctx, ethdb.RO)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -481,7 +481,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -515,7 +515,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.(ethdb.HasRwKV).RwKV().BeginRo(ctx)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}

@@ -411,7 +411,46 @@ func (tx *lmdbTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator(tx.tx, lmdb.DBI(b.DBI), b)
 }
 
-// All buckets stored as keys of un-named bucket
+func (tx *lmdbTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *lmdbTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// All buckets stored as keys of un-named bucketw
 func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
 	rawTx := tx.tx

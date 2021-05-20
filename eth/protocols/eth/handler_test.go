@@ -72,7 +72,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 
 	headBlock := genesis
 	if blocks > 0 {
-		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
+		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, generator, true)
 		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
 			panic(err)
 		}

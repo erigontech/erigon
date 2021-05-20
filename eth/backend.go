@@ -253,11 +253,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		if config.SnapshotLayout {
-			stagedSync = stagedsync.New(stagedsync.WithSnapshotsStages(), stagedsync.UnwindOrderWithSnapshots(), stagedsync.OptionalParameters{Notifier: backend.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
-		} else {
-			stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: backend.events})
-		}
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: backend.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
@@ -359,7 +355,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			backend.sentries = []proto_sentry.SentryClient{sentry}
 		}
 		blockDownloaderWindow := 65536
-		backend.downloadServer, err = download.NewControlServer(chainDb, stack.Config().NodeName(), chainConfig, genesisHash, backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
+		backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesisHash, backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
@@ -394,6 +390,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, err
 		}
 
+		if config.SnapshotLayout {
+			backend.stagedSync2.SetTorrentParams(torrentClient, snapshotsDir, mg)
+			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
+		}
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, 0)
 		if genesisBlock == nil {

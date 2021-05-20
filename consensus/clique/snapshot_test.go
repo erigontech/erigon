@@ -437,7 +437,7 @@ func TestClique(t *testing.T) {
 			}
 
 			genesisBlock, _, _ := genesis.ToBlock()
-			blocks, _, err := core.GenerateChain(&config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+			blocks, _, err := core.GenerateChain(&config, genesisBlock, engine, db.RwKV(), len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {

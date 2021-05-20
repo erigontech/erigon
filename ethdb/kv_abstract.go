@@ -165,6 +165,9 @@ type Tx interface {
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+
 	Comparator(bucket string) dbutils.CmpFunc
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
@@ -174,6 +177,7 @@ type Tx interface {
 type RwTx interface {
 	Tx
 	StatelessWriteTx
+	BucketMigrator
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
