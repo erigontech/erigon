@@ -75,7 +75,7 @@ func newConn(dest *enode.Node, log logger) *conn {
 	if err != nil {
 		panic(err)
 	}
-	db, err := enode.OpenDB("", true)
+	db, err := enode.OpenDB("")
 	if err != nil {
 		panic(err)
 	}
