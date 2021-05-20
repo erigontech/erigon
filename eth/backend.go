@@ -390,6 +390,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, err
 		}
 
+		if config.SnapshotLayout {
+			backend.stagedSync2.SetTorrentParams(torrentClient, snapshotsDir, mg)
+			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
+		}
 	} else {
 		genesisBlock, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, 0)
 		if genesisBlock == nil {
