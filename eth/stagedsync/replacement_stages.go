@@ -10,6 +10,7 @@ import (
 func ReplacementStages(ctx context.Context,
 	sm ethdb.StorageMode,
 	headers HeadersCfg,
+	blockHashCfg BlockHashesCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	trans TranspileCfg,
@@ -46,11 +47,9 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						blockHashCfg := StageBlockHashesCfg(world.DB.RwKV(), world.TmpDir)
 						return SpawnBlockHashStage(s, tx, blockHashCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						blockHashCfg := StageBlockHashesCfg(world.DB.RwKV(), world.TmpDir)
 						return UnwindBlockHashStage(u, s, tx, blockHashCfg)
 					},
 				}
@@ -78,7 +77,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnRecoverSendersStage(senders, s, tx, 0, world.TmpDir, ctx.Done())
+						return SpawnRecoverSendersStage(senders, s, tx, 0, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindSendersStage(u, s, tx, senders)

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -53,14 +52,24 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		stateSnapshot := ethdb.NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-			}
-		}).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).MustOpen()
-
+		var stateSnapshot ethdb.RwKV
+		if database == "lmdb" {
+			stateSnapshot = ethdb.NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+				return dbutils.BucketsCfg{
+					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+				}
+			}).Readonly().MustOpen()
+		} else {
+			stateSnapshot = ethdb.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+				return dbutils.BucketsCfg{
+					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+				}
+			}).Readonly().MustOpen()
+		}
 		isNew := true
 		var path string
 		if len(tmpDBPath) > 0 {
@@ -80,8 +89,12 @@ var cmdSnapshotCheck = &cobra.Command{
 				log.Info("Temp database", "path", path)
 			}
 		}()
-		tmpDb := ethdb.NewLMDB().Path(path).MustOpen()
-
+		var tmpDb ethdb.RwKV
+		if database == "lmdb" {
+			tmpDb = ethdb.NewLMDB().Path(path).MustOpen()
+		} else {
+			tmpDb = ethdb.NewMDBX().Path(path).MustOpen()
+		}
 		kv := ethdb.NewSnapshotKV().
 			DB(tmpDb).
 			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).

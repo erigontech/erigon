@@ -27,11 +27,12 @@ type SendersCfg struct {
 	bufferSize      int
 	numOfGoroutines int
 	readChLen       int
+	tmpdir          string
 
 	chainConfig *params.ChainConfig
 }
 
-func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig) SendersCfg {
+func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -42,12 +43,12 @@ func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig) SendersCfg {
 		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
 		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
 		readChLen:       4,
-
-		chainConfig: chainCfg,
+		tmpdir:          tmpdir,
+		chainConfig:     chainCfg,
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBlock uint64, quitCh <-chan struct{}) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -121,7 +122,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 		}(i)
 	}
 
-	collectorSenders := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorSenders := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	errCh := make(chan error)
 	go func() {

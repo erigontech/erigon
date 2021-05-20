@@ -63,14 +63,14 @@ func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*Sn
 	return snKV.Open(), nil
 }
 
-func WrapSnapshots(chainDb ethdb.Database, snapshotsDir string) error {
+func WrapSnapshots(chainDb ethdb.Database, snapshotsDir string, useMdbx bool) error {
 	snapshotBlock, err := chainDb.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 	snKVOpts := ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV())
 	if len(snapshotBlock) == 8 {
-		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", binary.BigEndian.Uint64(snapshotBlock)))
+		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", binary.BigEndian.Uint64(snapshotBlock)), useMdbx)
 		if innerErr != nil {
 			return innerErr
 		}

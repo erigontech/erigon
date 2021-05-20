@@ -27,7 +27,10 @@ import (
 )
 
 func newLocalNodeForTesting() (*LocalNode, *DB) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	key, _ := crypto.GenerateKey()
 	return NewLocalNode(db, key), db
 }

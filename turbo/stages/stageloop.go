@@ -3,12 +3,14 @@ package stages
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -23,6 +25,7 @@ func NewStagedSync(
 	ctx context.Context,
 	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
+	blockHashes stagedsync.BlockHashesCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	trans stagedsync.TranspileCfg,
@@ -37,7 +40,7 @@ func NewStagedSync(
 	finish stagedsync.FinishCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, bodies, senders, trans, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, trans, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -51,7 +54,9 @@ func StageLoop(
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
+	waitForDone chan struct{},
 ) {
+	defer close(waitForDone)
 	initialCycle := true
 
 	for {
@@ -64,6 +69,10 @@ func StageLoop(
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
+			if errors.Is(err, common.ErrStopped) {
+				return
+			}
+
 			log.Error("Stage loop failure", "error", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header downoader", "error", recoveryErr)

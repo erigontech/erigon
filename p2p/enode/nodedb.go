@@ -62,6 +62,8 @@ const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 9
+
+	useMDBX = false
 )
 
 var (
@@ -95,19 +97,37 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
-	if err != nil {
-		return nil, err
+	db := &DB{quit: make(chan struct{})}
+	var err error
+	if useMDBX {
+		db.kv, err = ethdb.NewMDBX().InMem().WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		db.kv, err = ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return &DB{kv: db, quit: make(chan struct{})}, nil
+	return db, nil
 }
 
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-	if err != nil {
-		return nil, err
+	var kv ethdb.RwKV
+	var err error
+	if useMDBX {
+		kv, err = ethdb.NewMDBX().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		kv, err = ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
 	}
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
