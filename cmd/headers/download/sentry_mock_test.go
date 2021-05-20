@@ -198,13 +198,6 @@ func mock(t *testing.T) *MockSentry {
 			batchSize,
 		),
 		stagedsync.StageSendersCfg(db, mock.chainConfig, mock.tmpdir),
-		stagedsync.StageTranspileCfg(
-			db,
-			batchSize,
-			nil,
-			nil,
-			mock.chainConfig,
-		),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,
@@ -218,6 +211,13 @@ func mock(t *testing.T) *MockSentry {
 			mock.engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
 			mock.tmpdir,
+		),
+		stagedsync.StageTranspileCfg(
+			db,
+			batchSize,
+			nil,
+			nil,
+			mock.chainConfig,
 		),
 		stagedsync.StageHashStateCfg(db, mock.tmpdir),
 		stagedsync.StageTrieCfg(db, true, true, mock.tmpdir),

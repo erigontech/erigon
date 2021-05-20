@@ -18,7 +18,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -87,10 +86,8 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	case EVMType:
 		evm.interpreter = evm.interpreters[EVMType]
 	case TEVMType:
-		fmt.Println("!!!!!-2-INTERPRENT-TEVM")
 		evm.interpreter = evm.interpreters[TEVMType]
 	default:
-		fmt.Println("!!!!!-2-INTERPRENT-UNDEFINED")
 		return nil, errors.New("no compatible interpreter")
 	}
 
@@ -330,18 +327,16 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
+		var isTEVM bool
+
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+
 		if err == nil {
-			var isTEVM bool
-
-			codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-			isTEVM, err = evm.Context.CheckTEVM(codeHash)
-
-			if err == nil {
-				contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
-				contract.SetCallCode(&addrCopy, codeHash, evm.IntraBlockState.GetCode(addrCopy))
-				ret, err = run(evm, contract, input, false)
-				gas = contract.Gas
-			}
+			contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
+			contract.SetCallCode(&addrCopy, codeHash, evm.IntraBlockState.GetCode(addrCopy))
+			ret, err = run(evm, contract, input, false)
+			gas = contract.Gas
 		}
 	}
 	if err != nil {
@@ -382,17 +377,15 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	} else {
 		addrCopy := addr
 		// Initialise a new contract and make initialise the delegate values
-		if err == nil {
-			var isTEVM bool
-			codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-			isTEVM, err = evm.Context.CheckTEVM(codeHash)
+		var isTEVM bool
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
 
-			if err == nil {
-				contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis, isTEVM).AsDelegate()
-				contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
-				ret, err = run(evm, contract, input, false)
-				gas = contract.Gas
-			}
+		if err == nil {
+			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis, isTEVM).AsDelegate()
+			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			ret, err = run(evm, contract, input, false)
+			gas = contract.Gas
 		}
 	}
 	if err != nil {
@@ -446,20 +439,18 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		if err == nil {
-			var isTEVM bool
-			codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-			isTEVM, err = evm.Context.CheckTEVM(codeHash)
+		var isTEVM bool
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
 
-			if err == nil {
-				contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.vmConfig.SkipAnalysis, isTEVM)
-				contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
-				// When an error was returned by the EVM or when setting the creation code
-				// above we revert to the snapshot and consume any gas remaining. Additionally
-				// when we're in Homestead this also counts for code storage gas errors.
-				ret, err = run(evm, contract, input, true)
-				gas = contract.Gas
-			}
+		if err == nil {
+			contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.vmConfig.SkipAnalysis, isTEVM)
+			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			// When an error was returned by the EVM or when setting the creation code
+			// above we revert to the snapshot and consume any gas remaining. Additionally
+			// when we're in Homestead this also counts for code storage gas errors.
+			ret, err = run(evm, contract, input, true)
+			gas = contract.Gas
 		}
 	}
 	if err != nil {

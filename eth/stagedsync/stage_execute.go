@@ -215,7 +215,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		defer tx.Rollback()
 	}
 
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Translation)
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
@@ -282,7 +282,8 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			checkTEVM := ethdb.GetCheckTEVMStatus(tx)
 
 			readerWriterWrapper := func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter {
-				return NewTouchCreateWatcher(r, w, checkTEVM)
+				stateReaderWriter = NewTouchCreateWatcher(r, w, checkTEVM)
+				return stateReaderWriter
 			}
 
 			checkTEVMCode := ethdb.GetCheckTEVM(tx)

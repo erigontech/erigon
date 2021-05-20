@@ -100,7 +100,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 		defer tx.Rollback()
 	}
 
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Execution)
 	if errStart != nil {
 		return errStart
 	}

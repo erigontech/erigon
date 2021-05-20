@@ -28,8 +28,8 @@ func NewStagedSync(
 	blockHashes stagedsync.BlockHashesCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
-	trans stagedsync.TranspileCfg,
 	exec stagedsync.ExecuteBlockCfg,
+	trans stagedsync.TranspileCfg,
 	hashState stagedsync.HashStateCfg,
 	trieCfg stagedsync.TrieCfg,
 	history stagedsync.HistoryCfg,
@@ -40,7 +40,7 @@ func NewStagedSync(
 	finish stagedsync.FinishCfg,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, trans, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)

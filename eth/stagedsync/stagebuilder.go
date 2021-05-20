@@ -191,28 +191,6 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
-			ID: stages.Translation,
-			Build: func(world StageParameters) *Stage {
-				transCfg := StageTranspileCfg(
-					world.DB.RwKV(),
-					world.BatchSize,
-					world.stateReaderBuilder,
-					world.stateWriterBuilder,
-					world.ChainConfig,
-				)
-				return &Stage{
-					ID:          stages.Translation,
-					Description: "Transpile marked EVM contracts to TEVM",
-					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindTranspileStage(u, s, tx, world.QuitCh, transCfg)
-					},
-				}
-			},
-		},
-		{
 			ID: stages.Execution,
 			Build: func(world StageParameters) *Stage {
 				execCfg := StageExecuteBlocksCfg(
@@ -237,6 +215,28 @@ func DefaultStages() StageBuilders {
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.Translation,
+			Build: func(world StageParameters) *Stage {
+				transCfg := StageTranspileCfg(
+					world.DB.RwKV(),
+					world.BatchSize,
+					world.stateReaderBuilder,
+					world.stateWriterBuilder,
+					world.ChainConfig,
+				)
+				return &Stage{
+					ID:          stages.Translation,
+					Description: "Transpile marked EVM contracts to TEVM",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						return UnwindTranspileStage(u, s, tx, world.QuitCh, transCfg)
 					},
 				}
 			},

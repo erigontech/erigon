@@ -171,13 +171,6 @@ func NewStagedSync(
 			batchSize,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.chainConfig, tmpdir),
-		stagedsync.StageTranspileCfg(
-			db,
-			batchSize,
-			nil,
-			nil,
-			controlServer.chainConfig,
-		),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			sm.Receipts,
@@ -191,6 +184,13 @@ func NewStagedSync(
 			controlServer.engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
 			tmpdir,
+		),
+		stagedsync.StageTranspileCfg(
+			db,
+			batchSize,
+			nil,
+			nil,
+			controlServer.chainConfig,
 		),
 		stagedsync.StageHashStateCfg(db, tmpdir),
 		stagedsync.StageTrieCfg(db, true, true, tmpdir),
