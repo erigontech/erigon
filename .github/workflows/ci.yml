@@ -61,7 +61,7 @@ jobs:
           cd ethdb/mdbx/dist
           cmake -G "MinGW Makefiles" . -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D CMAKE_C_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function" -D CMAKE_CXX_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function"
           cmake --build .
-          cp libmdbx.dll C:/WINDOWS/SYSTEM32/
+          cp libmdbx.dll (Join-Path $env:SystemRoot system32)
           go mod download
           go mod vendor
       - name: Test
