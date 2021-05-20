@@ -5,8 +5,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestEmptyAccount(t *testing.T) {

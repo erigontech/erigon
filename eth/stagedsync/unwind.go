@@ -1,8 +1,8 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // Unwinder allows the stage to cause an unwind.

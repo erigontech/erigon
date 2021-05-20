@@ -3,8 +3,8 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
 
 func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid string, pb *bodydownload.PrefetchedBlocks) error {

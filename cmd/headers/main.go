@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/headers/commands"
+	"github.com/ledgerwatch/erigon/cmd/headers/commands"
 )
 
 // generate the messages

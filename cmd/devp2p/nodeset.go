@@ -25,8 +25,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 const jsonIndent = "    "

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 const (

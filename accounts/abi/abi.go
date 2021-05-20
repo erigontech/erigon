@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // The ABI holds information about a contract's context and available

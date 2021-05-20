@@ -3,8 +3,8 @@ package trie
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func FullNode1() {

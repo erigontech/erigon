@@ -21,8 +21,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/mclock"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/common/mclock"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 // This is the number of consecutive leaf requests that may fail before

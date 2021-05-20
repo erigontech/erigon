@@ -2,9 +2,9 @@ package ethapi
 
 // This file stores proxy-objects for `internal` package
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 )
 
 // This package provides copy-paste and proxy objects to "internal/ethapi" package

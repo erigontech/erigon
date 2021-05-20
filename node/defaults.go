@@ -17,10 +17,10 @@
 package node
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/nat"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 const (

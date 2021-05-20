@@ -27,8 +27,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 
 	cli "github.com/urfave/cli"
 )

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 func TestMocker(t *testing.T) {

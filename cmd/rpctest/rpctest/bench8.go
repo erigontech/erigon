@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {

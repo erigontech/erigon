@@ -1,9 +1,9 @@
 package txpropagate
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func (tp *TxPropagate) DeliverTransactions(peerID string, txs []types.Transaction, direct bool) {

@@ -11,9 +11,9 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/log"
+	trnt "github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func Seed(ctx context.Context, datadir string) error {

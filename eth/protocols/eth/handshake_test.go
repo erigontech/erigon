@@ -22,11 +22,11 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 // Tests that handshake failures are detected and reported correctly.

@@ -3,7 +3,7 @@ package clique
 import (
 	"encoding/binary"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash

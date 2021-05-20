@@ -29,11 +29,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/simulations/adapters"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
+	"github.com/ledgerwatch/erigon/rpc"
 
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"

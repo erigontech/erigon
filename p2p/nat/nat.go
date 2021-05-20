@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 
 	natpmp "github.com/jackpal/go-nat-pmp"
 )

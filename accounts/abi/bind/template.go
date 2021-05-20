@@ -16,7 +16,7 @@
 
 package bind
 
-import "github.com/ledgerwatch/turbo-geth/accounts/abi"
+import "github.com/ledgerwatch/erigon/accounts/abi"
 
 // tmplData is the data structure required to fill the binding template.
 type tmplData struct {

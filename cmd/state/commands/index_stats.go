@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/state/stats"
+	"github.com/ledgerwatch/erigon/cmd/state/stats"
 	"github.com/spf13/cobra"
 )
 

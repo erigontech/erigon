@@ -3,7 +3,7 @@ package debugprint
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 //nolint

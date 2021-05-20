@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var bindTests = []struct {

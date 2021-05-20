@@ -11,7 +11,7 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx/mdbxarch"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx/mdbxarch"
 )
 
 // Just for docs:

@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 func NewMemDatabase() *ObjectDatabase {

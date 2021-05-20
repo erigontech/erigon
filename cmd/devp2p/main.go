@@ -22,9 +22,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli"
 )
 

@@ -13,8 +13,8 @@ import (
 	"math/big"
 
 	gurvy "github.com/consensys/gurvy/bn256"
-	cloudflare "github.com/ledgerwatch/turbo-geth/crypto/bn256/cloudflare"
-	google "github.com/ledgerwatch/turbo-geth/crypto/bn256/google"
+	cloudflare "github.com/ledgerwatch/erigon/crypto/bn256/cloudflare"
+	google "github.com/ledgerwatch/erigon/crypto/bn256/google"
 )
 
 func getG1Points(input io.Reader) (*cloudflare.G1, *google.G1, *gurvy.G1Affine) {

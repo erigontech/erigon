@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 

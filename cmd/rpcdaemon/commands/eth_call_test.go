@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 )
 
 func TestEstimateGas(t *testing.T) {

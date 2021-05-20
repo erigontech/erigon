@@ -14,7 +14,7 @@
 package secp256k1
 
 import (
-	_ "github.com/ledgerwatch/turbo-geth/crypto/secp256k1/libsecp256k1/include"
-	_ "github.com/ledgerwatch/turbo-geth/crypto/secp256k1/libsecp256k1/src"
-	_ "github.com/ledgerwatch/turbo-geth/crypto/secp256k1/libsecp256k1/src/modules/recovery"
+	_ "github.com/ledgerwatch/erigon/crypto/secp256k1/libsecp256k1/include"
+	_ "github.com/ledgerwatch/erigon/crypto/secp256k1/libsecp256k1/src"
+	_ "github.com/ledgerwatch/erigon/crypto/secp256k1/libsecp256k1/src/modules/recovery"
 )

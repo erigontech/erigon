@@ -19,7 +19,7 @@ package downloader
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // peerDropFn is a callback type for dropping a peer detected as malicious.

@@ -30,12 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/internal/testlog"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/discover/v5wire"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/internal/testlog"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.

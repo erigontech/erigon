@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )

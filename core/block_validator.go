@@ -17,7 +17,7 @@
 package core
 
 import (
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

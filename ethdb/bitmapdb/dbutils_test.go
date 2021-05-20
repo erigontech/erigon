@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/stretchr/testify/require"
 )
 

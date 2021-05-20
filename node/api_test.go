@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/assert"
 )
 

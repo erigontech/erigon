@@ -31,11 +31,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/internal/testlog"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/discover/v4wire"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
+	"github.com/ledgerwatch/erigon/internal/testlog"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 )
 
 // shared test variables

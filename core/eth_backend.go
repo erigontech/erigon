@@ -5,10 +5,10 @@ import (
 	"errors"
 	"io"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )

@@ -16,7 +16,7 @@
 
 package downloader
 
-import "github.com/ledgerwatch/turbo-geth/core/types"
+import "github.com/ledgerwatch/erigon/core/types"
 
 type DoneEvent struct {
 	Latest *types.Header

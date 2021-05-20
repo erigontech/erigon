@@ -21,8 +21,8 @@ import (
 	"context"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 const (

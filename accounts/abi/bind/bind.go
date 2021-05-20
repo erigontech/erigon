@@ -30,8 +30,8 @@ import (
 	"text/template"
 	"unicode"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/abi"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 // Lang is a target programming language selector to generate bindings for.

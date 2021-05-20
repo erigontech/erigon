@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // GetCompilers implements eth_getCompilers. Returns a list of available compilers in the client.

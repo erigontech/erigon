@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
-	"github.com/ledgerwatch/turbo-geth/log"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/log"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"

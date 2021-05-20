@@ -20,7 +20,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (
