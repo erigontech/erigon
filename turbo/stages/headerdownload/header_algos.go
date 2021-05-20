@@ -643,6 +643,8 @@ func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
 }
 
 func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	if link, ok := hd.links[linkHash]; ok {
 		return link, true
 	}

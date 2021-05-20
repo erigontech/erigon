@@ -261,6 +261,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
 			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
+			return err
 		} else {
 			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
 		}
