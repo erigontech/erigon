@@ -74,22 +74,26 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	var root common.Hash
 	if s.BlockNumber == 0 {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
-			log.Error("Regeneration failed", "error", err)
+			return trie.EmptyRoot, err
 		}
 	} else {
 		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, quit); err != nil {
-			log.Error("Increment  failed", "error", err)
+			return trie.EmptyRoot, err
 		}
 	}
 
 	if err == nil {
-		if err1 := s.DoneAndUpdate(tx, to); err1 != nil {
-			return trie.EmptyRoot, err1
+		if cfg.checkRoot && root != expectedRootHash {
+			if to > s.BlockNumber {
+				log.Warn("Unwinding due to incorrect root hash", "to", s.BlockNumber)
+				if err = u.UnwindTo(s.BlockNumber, tx); err != nil {
+					return trie.EmptyRoot, err
+				}
+			}
+			return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, root, expectedRootHash)
 		}
-	} else if to > s.BlockNumber {
-		log.Warn("Unwinding due to error", "to", s.BlockNumber, "err", err)
-		if err1 := u.UnwindTo(s.BlockNumber, tx); err1 != nil {
-			return trie.EmptyRoot, err1
+		if err = s.DoneAndUpdate(tx, to); err != nil {
+			return trie.EmptyRoot, err
 		}
 	} else {
 		return trie.EmptyRoot, err
@@ -122,7 +126,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	}
 
 	if cfg.checkRoot && hash != expectedRootHash {
-		return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(),
 		"in", time.Since(calcStart))
@@ -366,7 +370,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	}
 
 	if cfg.checkRoot && hash != expectedRootHash {
-		return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
 		" hash", hash.Hex(),
