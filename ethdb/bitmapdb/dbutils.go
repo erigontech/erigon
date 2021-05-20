@@ -124,7 +124,6 @@ func Get(db ethdb.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitm
 	fromKey := make([]byte, len(key)+4)
 	copy(fromKey, key)
 	binary.BigEndian.PutUint32(fromKey[len(fromKey)-4:], from)
-
 	c, err := db.Cursor(bucket)
 	if err != nil {
 		return nil, err
