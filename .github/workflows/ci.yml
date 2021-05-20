@@ -56,7 +56,7 @@ jobs:
         with:
           go-version: 1.16.x
       - run: choco upgrade mingw cmake -y --no-progress
-      - name: Build C
+      - name: Build
         run: |
           cd ethdb/mdbx/dist
           cmake -G "MinGW Makefiles" . -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D CMAKE_C_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function" -D CMAKE_CXX_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function"
