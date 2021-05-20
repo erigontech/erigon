@@ -1,5 +1,3 @@
-//+build mdbx
-
 package ethdb
 
 import (

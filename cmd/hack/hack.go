@@ -1,5 +1,3 @@
-//+build mdbx
-
 package main
 
 import (
