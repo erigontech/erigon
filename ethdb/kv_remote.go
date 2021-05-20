@@ -290,6 +290,7 @@ func (tx *remoteTx) statelessCursor(bucket string) (Cursor, error) {
 	return c, nil
 }
 
+// TODO: this must be optimized - and implemented as single command on server, with server-side buffered streaming
 func (tx *remoteTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	c, err := tx.Cursor(bucket)
 	if err != nil {
@@ -308,6 +309,7 @@ func (tx *remoteTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v [
 	return nil
 }
 
+// TODO: this must be optimized - and implemented as single command on server, with server-side buffered streaming
 func (tx *remoteTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
 	c, err := tx.Cursor(bucket)
 	if err != nil {
