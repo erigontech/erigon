@@ -105,13 +105,15 @@ type Ethereum struct {
 	minedBlocks   chan *types.Block
 
 	// downloader v2 fields
-	downloadV2Ctx    context.Context
-	downloadV2Cancel context.CancelFunc
-	downloadServer   *download.ControlServerImpl
-	sentryServer     *download.SentryServerImpl
-	txPoolP2PServer  *eth.TxPoolServer
-	sentries         []proto_sentry.SentryClient
-	stagedSync2      *stagedsync.StagedSync
+	downloadV2Ctx        context.Context
+	downloadV2Cancel     context.CancelFunc
+	downloadServer       *download.ControlServerImpl
+	sentryServer         *download.SentryServerImpl
+	txPoolP2PServer      *eth.TxPoolServer
+	sentries             []proto_sentry.SentryClient
+	stagedSync2          *stagedsync.StagedSync
+	waitForStageLoopStop chan struct{}
+	waitForMiningStop    chan struct{}
 }
 
 // New creates a new Ethereum object (including the
@@ -171,15 +173,17 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	backend := &Ethereum{
-		config:        config,
-		chainDB:       chainDb,
-		chainKV:       chainDb.(ethdb.HasRwKV).RwKV(),
-		networkID:     config.NetworkID,
-		etherbase:     config.Miner.Etherbase,
-		p2pServer:     stack.Server(),
-		torrentClient: torrentClient,
-		chainConfig:   chainConfig,
-		genesisHash:   genesisHash,
+		config:               config,
+		chainDB:              chainDb,
+		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
+		networkID:            config.NetworkID,
+		etherbase:            config.Miner.Etherbase,
+		p2pServer:            stack.Server(),
+		torrentClient:        torrentClient,
+		chainConfig:          chainConfig,
+		genesisHash:          genesisHash,
+		waitForStageLoopStop: make(chan struct{}),
+		waitForMiningStop:    make(chan struct{}),
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -603,6 +607,7 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 	}
 
 	go func() {
+		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
 		defer sub.Unsubscribe()
@@ -716,7 +721,7 @@ func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events)
+		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events, s.waitForStageLoopStop)
 	} else {
 		eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())
 		// Start the networking layer and the light server if requested
@@ -759,6 +764,12 @@ func (s *Ethereum) Stop() error {
 	s.engine.Close()
 	if s.txPool != nil {
 		s.txPool.Stop()
+	}
+	if s.config.EnableDownloadV2 {
+		<-s.waitForStageLoopStop
+	}
+	if s.config.Miner.Enabled {
+		<-s.waitForMiningStop
 	}
 	return nil
 }

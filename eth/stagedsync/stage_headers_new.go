@@ -240,7 +240,7 @@ func HeadersForward(
 	}
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
-		return fmt.Errorf("interrupted")
+		return common.ErrStopped
 	}
 	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
 	return nil
@@ -260,7 +260,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
-			log.Error("ancestor nil", "height", ancestorHeight, "hash", ancestorHash)
+			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		} else {
 			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
 		}
