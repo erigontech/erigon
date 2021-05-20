@@ -24,7 +24,6 @@ type TranspileCfg struct {
 	readerBuilder StateReaderBuilder
 	writerBuilder StateWriterBuilder
 	chainConfig   *params.ChainConfig
-	on            bool
 }
 
 func StageTranspileCfg(
@@ -40,7 +39,6 @@ func StageTranspileCfg(
 		readerBuilder: ReaderBuilder,
 		writerBuilder: WriterBuilder,
 		chainConfig:   chainConfig,
-		on:            false,
 	}
 }
 
@@ -86,10 +84,6 @@ func transpile(code []byte) []byte {
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
-	if !cfg.on {
-		return nil
-	}
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -104,14 +98,17 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	if errStart != nil {
 		return errStart
 	}
+
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
+
 	if to <= s.BlockNumber {
 		s.Done()
 		return nil
 	}
+
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Blocks translation", logPrefix), "from", s.BlockNumber, "to", to)
 
@@ -196,6 +193,26 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 }
 
 func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg TranspileCfg) error {
-	s.Done()
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	err := u.Done(tx)
+	logPrefix := s.state.LogPrefix()
+	if err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
 	return nil
 }
