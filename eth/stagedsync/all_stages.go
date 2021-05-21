@@ -105,8 +105,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					world.ChainConfig,
 				)
 				return &Stage{
-					ID:          stages.Translation,
-					Description: "Transpile marked EVM contracts to TEVM",
+					ID:                  stages.Translation,
+					Description:         "Transpile marked EVM contracts to TEVM",
+					Disabled:            !world.storageMode.TEVM,
+					DisabledDescription: "Enable by adding `e` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
 					},

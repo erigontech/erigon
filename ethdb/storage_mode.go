@@ -13,9 +13,18 @@ type StorageMode struct {
 	Receipts    bool
 	TxIndex     bool
 	CallTraces  bool
+	TEVM        bool
 }
 
-var DefaultStorageMode = StorageMode{Initialised: true, Pruning: false, History: true, Receipts: true, TxIndex: true, CallTraces: false}
+var DefaultStorageMode = StorageMode{
+	Initialised: true,
+	Pruning:     false,
+	History:     true,
+	Receipts:    true,
+	TxIndex:     true,
+	CallTraces:  false,
+	TEVM:        false,
+}
 
 func (m StorageMode) ToString() string {
 	if !m.Initialised {
@@ -36,6 +45,9 @@ func (m StorageMode) ToString() string {
 	}
 	if m.CallTraces {
 		modeString += "c"
+	}
+	if m.TEVM {
+		modeString += "e"
 	}
 	return modeString
 }
@@ -58,6 +70,8 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.TxIndex = true
 		case 'c':
 			mode.CallTraces = true
+		case 'e':
+			mode.TEVM = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
