@@ -3,6 +3,8 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -43,6 +45,11 @@ func StageTranspileCfg(
 	}
 }
 
+type contract struct {
+	hash []byte
+	code []byte
+}
+
 func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}) error {
 	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
 	if err != nil {
@@ -50,9 +57,82 @@ func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}
 	}
 	defer c.Close()
 
-	ethdb.ForEach(c, func(codeHash, v []byte) (bool, error) {
+	numWorkers := runtime.NumCPU()
+	wg := sync.WaitGroup{}
+
+	done := make(chan struct{})
+	inContracts := make(chan contract, 32768)
+	outContracts := make(chan contract, 32768)
+	errs := make(chan error, numWorkers+1)
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for {
+				select {
+				case c := <-inContracts:
+					transpiledCode, err := transpile(c.code)
+					if err != nil {
+						errs <- fmt.Errorf("contract %q cannot be transalated: %w",
+							common.BytesToHash(c.hash).String(), err)
+
+						common.SafeClose(done)
+					}
+
+					outContracts <- contract{c.hash, transpiledCode}
+				case <-done:
+					return
+				}
+			}
+		}()
+	}
+
+	n := uint64(0)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case c := <-outContracts:
+				err = batch.Put(dbutils.ContractTEVMCodeBucket, c.hash, c.code)
+				if err != nil {
+					errs <- fmt.Errorf("cannot store %q: %w", common.BytesToHash(c.hash), err)
+
+					common.SafeClose(done)
+
+					return
+				}
+
+				err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, c.hash, nil)
+				if err != nil {
+					errs <- fmt.Errorf("cannot reset translation status %q: %w",
+						common.BytesToHash(c.hash), err)
+
+					common.SafeClose(done)
+
+					return
+				}
+
+				n++
+
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	if err := ethdb.ForEach(c, func(codeHash, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
+		}
+		if err := common.Stopped(done); err != nil {
+			// return nil error to not overwrite error from errs channel
+			return false, nil
 		}
 
 		// load the contract code
@@ -61,27 +141,32 @@ func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}
 			return false, err
 		}
 
-		// transpile
-		transpiledCode := transpile(contractCode)
-
-		err = batch.Put(dbutils.ContractTEVMCodeBucket, codeHash, transpiledCode)
-		if err != nil {
-			return false, err
-		}
-
-		err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, codeHash, nil)
-		if err != nil {
-			return false, err
-		}
+		inContracts <- contract{codeHash, contractCode}
 
 		return true, nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	select {
+	case <-done:
+	// Channel was already closed
+	case err := <-errs:
+		common.SafeClose(done)
+		wg.Wait()
+
+		return err
+	default:
+		common.SafeClose(done)
+	}
+
+	wg.Wait()
 
 	return nil
 }
 
-func transpile(code []byte) []byte {
-	return append(make([]byte, 0, len(code)), code...)
+func transpile(code []byte) ([]byte, error) {
+	return append(make([]byte, 0, len(code)), code...), nil
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {

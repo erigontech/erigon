@@ -116,6 +116,12 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 		return StorageMode{}, err
 	}
 	sm.CallTraces = len(v) == 1 && v[0] == 1
+
+	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTEVM)
+	if err != nil {
+		return StorageMode{}, err
+	}
+	sm.TEVM = len(v) == 1 && v[0] == 1
 	return sm, nil
 }
 
@@ -144,6 +150,11 @@ func OverrideStorageMode(db Database, sm StorageMode) error {
 	}
 
 	err = setMode(db, dbutils.StorageModeCallTraces, sm.CallTraces)
+	if err != nil {
+		return err
+	}
+
+	err = setMode(db, dbutils.StorageModeTEVM, sm.TEVM)
 	if err != nil {
 		return err
 	}
@@ -179,6 +190,11 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 	}
 
 	err = setModeOnEmpty(db, dbutils.StorageModeCallTraces, sm.CallTraces)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeTEVM, sm.TEVM)
 	if err != nil {
 		return err
 	}

@@ -248,6 +248,8 @@ var (
 	StorageModeTxIndex = []byte("smTxIndex")
 	//StorageModeCallTraces - does not build index of call traces
 	StorageModeCallTraces = []byte("smCallTraces")
+	//StorageModeTEVM - does not translate EVM to TEVM
+	StorageModeTEVM = []byte("smTEVM")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
