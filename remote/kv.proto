@@ -63,8 +63,7 @@ enum Action {
 
 message StorageChange {
   types.H256 location = 1;
-  Action action = 2;
-  bytes data = 3; // nil if there is no UPSERT in action
+  bytes data = 2;
 }
 
 message AccountChange {
