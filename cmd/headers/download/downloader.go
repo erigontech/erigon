@@ -444,6 +444,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	}
 	defer tx.Rollback()
 	headers, err := eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
+	tx.Rollback()
 	if err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
