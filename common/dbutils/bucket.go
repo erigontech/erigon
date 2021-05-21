@@ -42,7 +42,6 @@ Physical layout:
 						...
 */
 const PlainStateBucket = "PLAIN-CST2"
-const PlainStateBucketOld1 = "PLAIN-CST"
 
 const (
 	//PlainContractCodeBucket -
@@ -69,7 +68,6 @@ const (
 	HashedAccountsBucket   = "hashed_accounts"
 	HashedStorageBucket    = "hashed_storage"
 	CurrentStateBucketOld2 = "CST2"
-	CurrentStateBucketOld1 = "CST"
 
 	//key - address + shard_id_u64
 	//value - roaring bitmap  - list of block where it changed
@@ -135,7 +133,6 @@ Invariants:
 */
 const TrieOfAccountsBucket = "trie_account"
 const TrieOfStorageBucket = "trie_storage"
-const IntermediateTrieHashBucketOld1 = "iTh"
 const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
@@ -190,11 +187,9 @@ const (
 	BloomBitsIndexPrefix = "iB" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	// Progress of sync stages: stageName -> stageData
-	SyncStageProgress     = "SSP2"
-	SyncStageProgressOld1 = "SSP"
+	SyncStageProgress = "SSP2"
 	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind     = "SSU2"
-	SyncStageUnwindOld1 = "SSU"
+	SyncStageUnwind = "SSU2"
 
 	CliqueBucket             = "clique-"
 	CliqueSeparateBucket     = "clique-snapshots-"
@@ -306,11 +301,6 @@ var Buckets = []string{
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
-	SyncStageProgressOld1,
-	SyncStageUnwindOld1,
-	CurrentStateBucketOld1,
-	PlainStateBucketOld1,
-	IntermediateTrieHashBucketOld1,
 	HeaderPrefixOld,
 	CliqueBucket,
 }
