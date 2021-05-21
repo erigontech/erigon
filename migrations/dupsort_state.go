@@ -14,40 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-var clearIndices = Migration{
-	Name: "clear_log_indices7",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogAddressIndex, dbutils.LogTopicIndex); err != nil {
-			return err
-		}
-
-		if err := stages.SaveStageProgress(db, stages.LogIndex, 0); err != nil {
-			return err
-		}
-		if err := stages.SaveStageUnwind(db, stages.LogIndex, 0); err != nil {
-			return err
-		}
-
-		return OnLoadCommit(db, nil, true)
-	},
-}
-
-var resetIHBucketToRecoverDB = Migration{
-	Name: "reset_in_bucket_to_recover_db",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucketOld2); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0); err != nil {
-			return err
-		}
-		if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0); err != nil {
-			return err
-		}
-		return OnLoadCommit(db, nil, true)
-	},
-}
-
 var splitHashStateBucket = Migration{
 	Name: "split_hash_state_bucket",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {

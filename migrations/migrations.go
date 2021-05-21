@@ -55,8 +55,6 @@ import (
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
 var migrations = []Migration{
-	clearIndices,
-	resetIHBucketToRecoverDB,
 	receiptsCborEncode,
 	receiptsOnePerTx,
 	accChangeSetDupSort,
