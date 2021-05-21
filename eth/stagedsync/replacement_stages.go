@@ -359,12 +359,13 @@ func ReplacementUnwindOrder() UnwindOrder {
 		0, 1, 2, 3, 4, // download headers/bodies + haders&body snapshots
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		15,
-		5, 6, 7, 8, // senders, exec, state snapshot, tevm
+		16,
+		5, 6, 7, 8, // senders, exec, state snapshot
 		10, 9, // Unwinding of IHashes needs to happen after unwinding HashState
 		11, 12, // history
 		13, // log index
 		14, // call traces
 		15, // tx lookup
+		17,
 	}
 }

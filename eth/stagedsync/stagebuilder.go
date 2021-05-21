@@ -599,20 +599,21 @@ func DefaultUnwindOrder() UnwindOrder {
 		2,  //headers snapshot
 		3,  //bodies
 		4,  //bodies snapshot
-		15, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		16, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
 		5, //senders
 		6, //execution
-		7, //state snapshot
+		7, //tevm
+		8, //state snapshot
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		9,  //intermediate hashes
-		8,  //hash state
-		10, //acc history
-		11, //st history
-		12, //log index
-		13, //call traces
-		14, //tx lookup
-		16,
+		10,  //intermediate hashes
+		9,  //hash state
+		11, //acc history
+		12, //st history
+		13, //log index
+		14, //call traces
+		15, //tx lookup
+		17,
 	}
 }
 

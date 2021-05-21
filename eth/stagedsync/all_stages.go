@@ -323,7 +323,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
+	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12}, OptionalParameters{})
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,
