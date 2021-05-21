@@ -1510,7 +1510,6 @@ func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 }
 
 func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
-	fmt.Printf("%s, %x,%x\n", c.bucketName, k, v)
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
 		return fmt.Errorf("in Append: bucket=%s, %w", c.bucketName, err)
 	}
@@ -1518,7 +1517,6 @@ func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
-	fmt.Printf("%s, %x,%x\n", c.bucketName, k, v)
 	if err := c.appendDup(k, v); err != nil {
 		return fmt.Errorf("in AppendDup: bucket=%s, %w", c.bucketName, err)
 	}
