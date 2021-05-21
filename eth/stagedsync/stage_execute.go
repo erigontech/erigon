@@ -243,11 +243,12 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	logBlock := stageProgress
 	logTime := time.Now()
 
+	var stoppedErr error
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		err := common.Stopped(quit)
-		if err != nil {
-			return err
+		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
+			break
 		}
+		var err error
 		if useSilkworm {
 			// Silkworm executes many blocks simultaneously
 			if blockNum, err = silkworm.ExecuteBlocks(cfg.silkwormExecutionFunc, tx, cfg.chainConfig.ChainID, blockNum, to, int(cfg.batchSize), cfg.writeReceipts); err != nil {
@@ -290,6 +291,8 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				if err != nil {
 					return err
 				}
+				// TODO: This creates stacked up deferrals
+				defer tx.Rollback()
 				if cfg.writeCallTraces {
 					if traceCursor, err = tx.RwCursorDupSort(dbutils.CallTraceSet); err != nil {
 						return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
@@ -297,6 +300,8 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				}
 			}
 			batch = ethdb.NewBatch(tx)
+			// TODO: This creates stacked up deferrals
+			defer batch.Rollback()
 		}
 
 		select {
@@ -329,7 +334,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
-	return nil
+	return stoppedErr
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {

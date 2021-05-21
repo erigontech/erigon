@@ -709,7 +709,8 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 			s.sentryServer.GetStatus,
 			s.sentryServer.ReceiveCh,
 			s.sentryServer.ReceiveUploadCh,
-			s.sentryServer.ReceiveTxCh)
+			s.sentryServer.ReceiveTxCh,
+			&s.sentryServer.TxSubscribed)
 	} else {
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}

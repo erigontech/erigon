@@ -350,6 +350,6 @@ func ReplacementUnwindOrder() UnwindOrder {
 		12, // log index
 		13, // call traces
 		14, // tx lookup
-		13,
+		16, // finish
 	}
 }
