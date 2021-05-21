@@ -146,7 +146,7 @@ func NewStagedSync(
 	txPoolServer *eth.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
 	var pruningDistance uint64
-	if sm.Pruning {
+	if !sm.History {
 		pruningDistance = params.FullImmutabilityThreshold
 	}
 
