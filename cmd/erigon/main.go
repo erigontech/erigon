@@ -52,13 +52,13 @@ func runTurboGeth(cliCtx *cli.Context) {
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", gitBranch, "git_commit", gitCommit)
-	tg := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
-	tg.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
+	erigon := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+	erigon.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
 		var lc net.ListenConfig
 		return lc.Listen(ctx, network, addr)
 	})
 	// running the node
-	err := tg.Serve()
+	err := erigon.Serve()
 
 	if err != nil {
 		log.Error("error while serving a turbo-geth node", "err", err)

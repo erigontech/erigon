@@ -25,7 +25,7 @@ var flag = cli.StringFlag{
 
 // defining a custom bucket name
 const (
-	customBucketName = "ch.torquem.demo.tgcustom.CUSTOM_BUCKET"
+	customBucketName = "ch.torquem.demo.erigoncustom.CUSTOM_BUCKET"
 )
 
 // the regular main function
@@ -44,10 +44,10 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	return append(
 		stagedsync.DefaultStages(), // adding all default stages
 		stagedsync.StageBuilder{ // adding our custom stage
-			ID: stages.SyncStage("ch.torquem.demo.tgcustom.CUSTOM_STAGE"),
+			ID: stages.SyncStage("ch.torquem.demo.erigoncustom.CUSTOM_STAGE"),
 			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
 				return &stagedsync.Stage{
-					ID:          stages.SyncStage("ch.torquem.demo.tgcustom.CUSTOM_STAGE"),
+					ID:          stages.SyncStage("ch.torquem.demo.erigoncustom.CUSTOM_STAGE"),
 					Description: "Custom Stage",
 					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder, tx ethdb.RwTx) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
@@ -91,13 +91,13 @@ func runTurboGeth(ctx *cli.Context) {
 	)
 
 	// running a node and initializing a custom bucket with all default settings
-	tg := node.New(ctx, sync, node.Params{
+	erigon := node.New(ctx, sync, node.Params{
 		CustomBuckets: map[string]dbutils.BucketConfigItem{
 			customBucketName: {},
 		},
 	})
 
-	err := tg.Serve()
+	err := erigon.Serve()
 
 	if err != nil {
 		log.Error("error while serving a turbo-geth node", "err", err)

@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack rpctest state pics rpcdaemon integration db-tools
+all: erigon hack rpctest state pics rpcdaemon integration db-tools
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -38,15 +38,15 @@ dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 geth: mdbx
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
-tg: go-version mdbx
-	@echo "Building tg"
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
+erigon: go-version mdbx
+	@echo "Building erigon"
+	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack

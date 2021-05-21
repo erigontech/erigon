@@ -54,20 +54,20 @@ Usage
 ### Getting Started
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
-> cd turbo-geth
-> make tg
-> ./build/bin/tg
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+> cd erigon
+> make erigon
+> ./build/bin/erigon
 ```
 
 ### Testnets
 
 If you would like to give turbo-geth a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
-> cd turbo-geth
-> make tg
-> ./build/bin/tg --datadir goerli --chain goerli
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+> cd erigon
+> make erigon
+> ./build/bin/erigon --datadir goerli --chain goerli
 ```
 
 Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
@@ -94,7 +94,7 @@ Support only remote-miners.
 
 Windows users may run turbo-geth in 3 possible ways:
 
-* Build tg binaries natively for Windows : while this method is possible we still lack a fully automated build process thus, at the moment, is not to be preferred. Besides there's also a caveat which might cause your experience with TG as native on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the option `--lmdb.mapSize`
+* Build Erigon binaries natively for Windows : while this method is possible we still lack a fully automated build process thus, at the moment, is not to be preferred. Besides there's also a caveat which might cause your experience with TG as native on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the option `--lmdb.mapSize`
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
@@ -104,12 +104,12 @@ Windows users may run turbo-geth in 3 possible ways:
 > sudo apt install build-essential git golang golang-go
 ```
 
-Once this last step is completed you can run tg as if you were on Linux as described the [Usage](#usage) section.
+Once this last step is completed you can run erigon as if you were on Linux as described the [Usage](#usage) section.
 
-**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have TG store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as 
+**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have Erigon store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as 
 
 ```sh
-> ./tg --datadir /mnt/d/[<optional-subfolder>/]
+> ./erigon --datadir /mnt/d/[<optional-subfolder>/]
 ```
 
 
@@ -189,7 +189,7 @@ In this mode, some RPC API methods do not work. Please see "For dual mode" secti
 This works regardless of whether RPC daemon is on the same computer with turbo-geth, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run turbo-geth in one terminal window
 
 ```
-> ./build/bin/tg --private.api.addr=localhost:9090
+> ./build/bin/erigon --private.api.addr=localhost:9090
 ```
 
 Run RPC daemon
@@ -197,7 +197,7 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
 
-**gRPC ports**: `9090` TG, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+**gRPC ports**: `9090` Erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
 **For dual mode**
 
@@ -227,7 +227,7 @@ Getting in touch
 
 The main discussions are happening on our Discord server. 
 To get an invite, send an email to `tg [at] torquem.ch` with your name, occupation, 
-a brief explanation of why you want to join the Discord, and how you heard about Turbo-Geth.
+a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 
@@ -285,11 +285,11 @@ Without `grep` you can see details - `section MALLOC ZONE column Resident Size` 
 
 TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
 
-**Warning:** Multiple instances of TG on same machine will touch Disk concurrently, 
-it impacts performance - one of main TG optimisations: "reduce Disk random access". 
+**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, 
+it impacts performance - one of main Erigon optimisations: "reduce Disk random access". 
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk. 
-If genesis sync passed, then it's fine to run multiple TG on same Disk.
+If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 
