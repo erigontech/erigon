@@ -41,7 +41,7 @@ func NewMemKV() RwKV {
 		// mdbx is too slow for our tests currently, so we keep
 		// lmdb as our in-mem db
 		// with mdbx tests time out, especially ./tests package
-		return NewLMDB().InMem().MustOpen()
+		return NewMDBX().InMem().MustOpen()
 	}
 }
 
