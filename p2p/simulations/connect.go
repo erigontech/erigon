@@ -20,7 +20,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 var (

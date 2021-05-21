@@ -19,7 +19,7 @@ package eth
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 )
 
 // ethPeerInfo represents a short summary of the `eth` sub-protocol metadata known

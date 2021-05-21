@@ -17,7 +17,7 @@
 package core
 
 import (
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps

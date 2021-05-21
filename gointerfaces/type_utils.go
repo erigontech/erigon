@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
 )
 
 func ConvertH256ToHash(h256 *types.H256) common.Hash {

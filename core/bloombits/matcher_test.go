@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const testSectionSize = 4096

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ledgerwatch/turbo-geth/eth/tracers/internal/tracers"
+	"github.com/ledgerwatch/erigon/eth/tracers/internal/tracers"
 )
 
 // all contains all the built in JavaScript tracers by name.

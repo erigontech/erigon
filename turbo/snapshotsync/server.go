@@ -7,8 +7,8 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var (

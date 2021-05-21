@@ -19,9 +19,9 @@ package simulations
 import (
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/simulations/adapters"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
 )
 
 func newTestNetwork(t *testing.T, nodeCount int) (*Network, []enode.ID) {

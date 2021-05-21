@@ -3,8 +3,8 @@ package bodydownload
 import (
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestCreateBodyDownload(t *testing.T) {

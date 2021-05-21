@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.

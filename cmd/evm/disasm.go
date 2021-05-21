@@ -22,7 +22,7 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/core/asm"
+	"github.com/ledgerwatch/erigon/core/asm"
 	"github.com/urfave/cli"
 )
 

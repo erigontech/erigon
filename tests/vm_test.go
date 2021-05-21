@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestVM(t *testing.T) {

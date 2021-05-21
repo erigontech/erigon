@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // Compares response of TurboGeth with OpenEthereum

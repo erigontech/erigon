@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/forkid"
 )
 
 // Forks is a data type to record a list of forks passed by this node

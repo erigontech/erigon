@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.

@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
+	"github.com/ledgerwatch/erigon/cmd/headers/download"
 	"github.com/spf13/cobra"
 )
 

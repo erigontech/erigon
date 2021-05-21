@@ -22,16 +22,23 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
 // This test uses the admin_startRPC and admin_startWS APIs,
 // checking whether the HTTP server is started correctly.
 func TestStartRPC(t *testing.T) {
+	os.TempDir()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	type test struct {
 		name string
 		cfg  Config

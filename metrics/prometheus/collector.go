@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var (

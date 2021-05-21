@@ -24,9 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/simulations/adapters"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
 )
 
 //a map of mocker names to its function

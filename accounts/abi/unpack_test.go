@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 

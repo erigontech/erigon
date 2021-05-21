@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/erigon/node"
 )
 
 // SampleLifecycle is a trivial network service that can be attached to a node for

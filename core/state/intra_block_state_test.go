@@ -32,9 +32,9 @@ import (
 	"github.com/holiman/uint256"
 	"gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestSnapshotRandom(t *testing.T) {

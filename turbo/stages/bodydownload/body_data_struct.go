@@ -2,9 +2,9 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header

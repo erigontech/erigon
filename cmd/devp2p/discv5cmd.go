@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v5test"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/p2p/discover"
+	"github.com/ledgerwatch/erigon/cmd/devp2p/internal/v5test"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/urfave/cli"
 )
 

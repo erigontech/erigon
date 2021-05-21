@@ -16,7 +16,7 @@
 
 package vm
 
-import "github.com/ledgerwatch/turbo-geth/core/vm/stack"
+import "github.com/ledgerwatch/erigon/core/vm/stack"
 
 func memorySha3(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))

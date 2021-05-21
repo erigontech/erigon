@@ -20,9 +20,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
-	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p"
 )
 
 var (

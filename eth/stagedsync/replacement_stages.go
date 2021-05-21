@@ -3,8 +3,8 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func ReplacementStages(ctx context.Context,

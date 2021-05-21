@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 4cd104d866e6e237b90b2ba78aca6f4bf346e47f05dc08b41c1c0d9c9fdf2df8_v0_10_0_19_gc5268f1d
+#define MDBX_BUILD_SOURCERY dfe0671435fed2948a861ec25f1adbf99a470c88be69bcc27b32ca9a7ffc6787_v0_10_0_27_g2b161db6
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -6945,6 +6945,13 @@ mdbx_dpl_append(MDBX_txn *txn, pgno_t pgno, MDBX_page *page, unsigned npages) {
   return MDBX_SUCCESS;
 }
 
+static __inline uint32_t mdbx_dpl_age(const MDBX_txn *txn, unsigned i) {
+  const MDBX_dpl *dl = txn->tw.dirtylist;
+  assert((int)i > 0 && i <= dl->length);
+  /* overflow could be here */
+  return (txn->tw.dirtylru - dl->items[i].lru) & UINT32_C(0x7fffFFFF);
+}
+
 /*----------------------------------------------------------------------------*/
 
 uint8_t mdbx_runtime_flags = MDBX_RUNTIME_FLAGS_INIT;
@@ -7617,8 +7624,9 @@ MDBX_MAYBE_UNUSED __cold static bool mdbx_dirtylist_check(MDBX_txn *txn) {
     if (unlikely(dp->mp_pgno != dl->items[i].pgno))
       return false;
 
-    mdbx_tassert(txn, txn->tw.dirtylru >= dl->items[i].lru);
-    if (unlikely(txn->tw.dirtylru < dl->items[i].lru))
+    const uint32_t age = mdbx_dpl_age(txn, i);
+    mdbx_tassert(txn, age < UINT32_MAX / 3);
+    if (unlikely(age > UINT32_MAX / 3))
       return false;
 
     mdbx_tassert(txn, dp->mp_flags == P_LOOSE || IS_MODIFIABLE(txn, dp));
@@ -8386,58 +8394,33 @@ static int spill_page(MDBX_txn *txn, struct mdbx_iov_ctx *ctx, MDBX_page *dp,
  * Returns the number of pages marked as unspillable. */
 static unsigned mdbx_cursor_keep(MDBX_txn *txn, MDBX_cursor *mc) {
   unsigned keep = 0;
-  if (!(mc->mc_flags & C_INITIALIZED))
-    return keep;
-
-loop:;
-  const MDBX_page *mp = NULL;
-  for (unsigned i = 0; i < mc->mc_snum; i++) {
-    mp = mc->mc_pg[i];
-    if (IS_MODIFIABLE(txn, mp)) {
-      unsigned const n = mdbx_dpl_search(txn, mp->mp_pgno);
-      if (txn->tw.dirtylist->items[n].pgno == mp->mp_pgno &&
-          txn->tw.dirtylist->items[n].lru != txn->tw.dirtylru) {
-        txn->tw.dirtylist->items[n].lru = txn->tw.dirtylru;
-        keep++;
+  while (mc->mc_flags & C_INITIALIZED) {
+    for (unsigned i = 0; i < mc->mc_snum; ++i) {
+      const MDBX_page *mp = mc->mc_pg[i];
+      if (IS_MODIFIABLE(txn, mp) && !IS_SUBP(mp)) {
+        unsigned const n = mdbx_dpl_search(txn, mp->mp_pgno);
+        if (txn->tw.dirtylist->items[n].pgno == mp->mp_pgno &&
+            mdbx_dpl_age(txn, n)) {
+          txn->tw.dirtylist->items[n].lru = txn->tw.dirtylru;
+          ++keep;
+        }
       }
     }
-  }
-  if (!(mp && IS_LEAF(mp)))
-    return keep;
-
-  /* Proceed to mx if it is at a sub-database */
-  MDBX_xcursor *mx = mc->mc_xcursor;
-  if (!(mx && (mx->mx_cursor.mc_flags & C_INITIALIZED)))
-    return keep;
-
-  const unsigned nkeys = page_numkeys(mp);
-  unsigned ki = mc->mc_ki[mc->mc_top];
-  mdbx_cassert(mc, nkeys > 0 &&
-                       (ki < nkeys ||
-                        (ki == nkeys && (mx->mx_cursor.mc_flags & C_EOF))));
-  ki -= ki >= nkeys;
-  if ((node_flags(page_node(mp, ki)) & F_SUBDATA)) {
-    mc = &mx->mx_cursor;
-    goto loop;
+    if (!mc->mc_xcursor)
+      break;
+    mc = &mc->mc_xcursor->mx_cursor;
   }
   return keep;
 }
 
 static unsigned mdbx_txn_keep(MDBX_txn *txn, MDBX_cursor *m0) {
   unsigned keep = m0 ? mdbx_cursor_keep(txn, m0) : 0;
-
-  for (unsigned i = FREE_DBI; i < txn->mt_numdbs; ++i) {
-    const pgno_t pgno = txn->mt_dbs[i].md_root;
-    if ((txn->mt_dbistate[i] & DBI_DIRTY) && pgno != P_INVALID) {
-      unsigned const n = mdbx_dpl_search(txn, pgno);
-      if (likely(txn->tw.dirtylist->items[n].pgno == pgno)) {
-        txn->tw.dirtylist->items[n].lru = txn->tw.dirtylru;
-        for (MDBX_cursor *mc = txn->tw.cursors[i]; mc; mc = mc->mc_next)
-          if (mc != m0)
-            keep += mdbx_cursor_keep(txn, mc);
-      }
-    }
-  }
+  for (unsigned i = FREE_DBI; i < txn->mt_numdbs; ++i)
+    if (F_ISSET(txn->mt_dbistate[i], DBI_DIRTY | DBI_VALID) &&
+        txn->mt_dbs[i].md_root != P_INVALID)
+      for (MDBX_cursor *mc = txn->tw.cursors[i]; mc; mc = mc->mc_next)
+        if (mc != m0)
+          keep += mdbx_cursor_keep(txn, mc);
   return keep;
 }
 
@@ -8446,12 +8429,12 @@ static unsigned mdbx_txn_keep(MDBX_txn *txn, MDBX_cursor *m0) {
  *    ...
  *  > 255 = must not be spilled. */
 static unsigned spill_prio(const MDBX_txn *txn, const unsigned i,
-                           const unsigned lru_min, const unsigned reciprocal) {
+                           const uint32_t reciprocal) {
   MDBX_dpl *const dl = txn->tw.dirtylist;
-  const unsigned lru = dl->items[i].lru;
+  const uint32_t age = mdbx_dpl_age(txn, i);
   const unsigned npages = dpl_npages(dl, i);
   const pgno_t pgno = dl->items[i].pgno;
-  if (lru == txn->tw.dirtylru) {
+  if (age == 0) {
     mdbx_debug("skip %s %u page %" PRIaPGNO, "keep", npages, pgno);
     return 256;
   }
@@ -8480,21 +8463,22 @@ static unsigned spill_prio(const MDBX_txn *txn, const unsigned i,
     while ((parent = parent->mt_parent) != nullptr);
   }
 
-  unsigned prio = 1 + ((lru - lru_min) * reciprocal >> 8);
-  mdbx_tassert(txn, prio > 0 && prio < 256);
+  mdbx_tassert(txn, age * (uint64_t)reciprocal < UINT32_MAX);
+  unsigned prio = age * reciprocal >> 24;
+  mdbx_tassert(txn, prio < 256);
   if (likely(npages == 1))
-    return prio;
+    return prio = 256 - prio;
 
   /* make a large/overflow pages be likely to spill */
-  uint32_t x = npages | npages >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x = (255 - prio) * log2n_powerof2(x + 1) + /* golden ratio factor */ 157;
-  x = (x < 256) ? 255 - x : 0;
-  mdbx_tassert(txn, x < 256 && x < prio);
-  return prio = x;
+  uint32_t factor = npages | npages >> 1;
+  factor |= factor >> 2;
+  factor |= factor >> 4;
+  factor |= factor >> 8;
+  factor |= factor >> 16;
+  factor = prio * log2n_powerof2(factor + 1) + /* golden ratio */ 157;
+  factor = (factor < 256) ? 255 - factor : 0;
+  mdbx_tassert(txn, factor < 256 && factor < (256 - prio));
+  return prio = factor;
 }
 
 /* Spill pages from the dirty list back to disk.
@@ -8651,21 +8635,20 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
    *    тем самым повышая их шансы на выталкивание. */
 
   /* get min/max of LRU-labels */
-  unsigned lru_min = dl->items[1].lru, lru_max = lru_min;
-  for (unsigned i = 2; i <= dl->length; ++i) {
-    lru_min = (lru_min < dl->items[i].lru) ? lru_min : dl->items[i].lru;
-    lru_max = (lru_max > dl->items[i].lru) ? lru_max : dl->items[i].lru;
+  uint32_t age_max = 0;
+  for (unsigned i = 1; i <= dl->length; ++i) {
+    const uint32_t age = mdbx_dpl_age(txn, i);
+    age_max = (age_max >= age) ? age_max : age;
   }
 
-  mdbx_verbose("lru-head %u, lru-min %u, lru-max %u", txn->tw.dirtylru, lru_min,
-               lru_max);
+  mdbx_verbose("lru-head %u, age-max %u", txn->tw.dirtylru, age_max);
 
   /* half of 8-bit radix-sort */
   unsigned radix_counters[256], spillable = 0, spilled = 0;
   memset(&radix_counters, 0, sizeof(radix_counters));
-  unsigned const reciprocal = 255 * 256 / (lru_max - lru_min + 1);
+  const uint32_t reciprocal = (UINT32_C(255) << 24) / (age_max + 1);
   for (unsigned i = 1; i <= dl->length; ++i) {
-    unsigned prio = spill_prio(txn, i, lru_min, reciprocal);
+    unsigned prio = spill_prio(txn, i, reciprocal);
     if (prio < 256) {
       radix_counters[prio] += 1;
       spillable += 1;
@@ -8696,7 +8679,7 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
     unsigned r, w, prio;
     for (w = 0, r = 1; r <= dl->length && spilled < wanna_spill;
          prev_prio = prio, ++r) {
-      prio = spill_prio(txn, r, lru_min, reciprocal);
+      prio = spill_prio(txn, r, reciprocal);
       MDBX_page *const dp = dl->items[r].ptr;
       if (prio < prio2adjacent) {
         const pgno_t pgno = dl->items[r].pgno;
@@ -8705,9 +8688,9 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
           if (prev_prio < prio2adjacent && prev_prio > prio2spill &&
               dpl_endpgno(dl, r - 1) == pgno) {
             mdbx_debug("co-spill %u prev-adjacent page %" PRIaPGNO
-                       " (lru-dist %d, prio %u)",
+                       " (age %d, prio %u)",
                        dpl_npages(dl, w), dl->items[r - 1].pgno,
-                       txn->tw.dirtylru - dl->items[r - 1].lru, prev_prio);
+                       mdbx_dpl_age(txn, r - 1), prev_prio);
             --w;
             rc = spill_page(txn, &ctx, dl->items[r - 1].ptr,
                             dpl_npages(dl, r - 1));
@@ -8716,9 +8699,8 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
             ++spilled;
           }
 
-          mdbx_debug("spill %u page %" PRIaPGNO " (lru-dist %d, prio %u)",
-                     npages, dp->mp_pgno, txn->tw.dirtylru - dl->items[r].lru,
-                     prio);
+          mdbx_debug("spill %u page %" PRIaPGNO " (age %d, prio %u)", npages,
+                     dp->mp_pgno, mdbx_dpl_age(txn, r), prio);
           rc = spill_page(txn, &ctx, dp, npages);
           if (unlikely(rc != MDBX_SUCCESS))
             break;
@@ -8728,9 +8710,8 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
 
         if (prev_prio <= prio2spill && dpl_endpgno(dl, r - 1) == pgno) {
           mdbx_debug("co-spill %u next-adjacent page %" PRIaPGNO
-                     " (lru-dist %d, prio %u)",
-                     npages, dp->mp_pgno, txn->tw.dirtylru - dl->items[r].lru,
-                     prio);
+                     " (age %d, prio %u)",
+                     npages, dp->mp_pgno, mdbx_dpl_age(txn, r), prio);
           rc = spill_page(txn, &ctx, dp, npages);
           if (unlikely(rc != MDBX_SUCCESS))
             break;
@@ -8768,10 +8749,9 @@ static int mdbx_txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0,
     for (unsigned i = 1; i <= dl->length; ++i) {
       MDBX_page *dp = dl->items[i].ptr;
       mdbx_notice(
-          "dirtylist[%u]: pgno %u, npages %u, flags 0x%04X, lru %u, prio %u", i,
-          dp->mp_pgno, dpl_npages(dl, i), dp->mp_flags,
-          txn->tw.dirtylru - dl->items[i].lru,
-          spill_prio(txn, i, lru_min, reciprocal));
+          "dirtylist[%u]: pgno %u, npages %u, flags 0x%04X, age %u, prio %u", i,
+          dp->mp_pgno, dpl_npages(dl, i), dp->mp_flags, mdbx_dpl_age(txn, i),
+          spill_prio(txn, i, reciprocal));
     }
   }
 
@@ -11021,7 +11001,7 @@ static int mdbx_txn_renew0(MDBX_txn *txn, const unsigned flags) {
     if (unlikely(rc != MDBX_SUCCESS))
       goto bailout;
     txn->tw.dirtyroom = txn->mt_env->me_options.dp_limit;
-    txn->tw.dirtylru = 0;
+    txn->tw.dirtylru = MDBX_DEBUG ? ~42u : 0;
   }
 
   /* Setup db info */
@@ -11787,7 +11767,6 @@ static int mdbx_txn_end(MDBX_txn *txn, const unsigned mode) {
 
       parent->mt_child = nullptr;
       parent->mt_flags &= ~MDBX_TXN_HAS_CHILD;
-      mdbx_tassert(parent, parent->tw.dirtylru <= txn->tw.dirtylru);
       parent->tw.dirtylru = txn->tw.dirtylru;
       mdbx_tassert(parent, mdbx_dirtylist_check(parent));
       mdbx_tassert(parent, mdbx_audit_ex(parent, 0, false) == 0);
@@ -13183,7 +13162,6 @@ static __inline void mdbx_txn_merge(MDBX_txn *const parent, MDBX_txn *const txn,
   parent->tw.dirtyroom -= dst->sorted - dst->length;
   assert(parent->tw.dirtyroom <= parent->mt_env->me_options.dp_limit);
   dpl_setlen(dst, dst->sorted);
-  mdbx_tassert(parent, parent->tw.dirtylru <= txn->tw.dirtylru);
   parent->tw.dirtylru = txn->tw.dirtylru;
   mdbx_tassert(parent, mdbx_dirtylist_check(parent));
   mdbx_dpl_free(txn);
@@ -18517,8 +18495,8 @@ new_sub:;
        * make sure the cursor is marked valid. */
       mc->mc_flags |= C_INITIALIZED;
     }
-    if (flags & MDBX_MULTIPLE) {
-      if (!rc) {
+    if (unlikely(flags & MDBX_MULTIPLE)) {
+      if (likely(rc == MDBX_SUCCESS)) {
       continue_multiple:
         mcount++;
         /* let caller know how many succeeded, if any */
@@ -22668,20 +22646,19 @@ __cold int mdbx_env_info_ex(const MDBX_env *env, const MDBX_txn *txn,
   if (likely(bytes > size_before_bootid)) {
     arg->mi_unsync_volume = pgno2bytes(env, unsynced_pages);
     const uint64_t monotime_now = mdbx_osal_monotime();
-    arg->mi_since_sync_seconds16dot16 = mdbx_osal_monotime_to_16dot16(
-        monotime_now - atomic_load64(&lck->mti_sync_timestamp, mo_Relaxed));
+    uint64_t ts = atomic_load64(&lck->mti_sync_timestamp, mo_Relaxed);
+    arg->mi_since_sync_seconds16dot16 =
+        ts ? mdbx_osal_monotime_to_16dot16(monotime_now - ts) : 0;
+    ts = atomic_load64(&lck->mti_reader_check_timestamp, mo_Relaxed);
     arg->mi_since_reader_check_seconds16dot16 =
-        lck ? mdbx_osal_monotime_to_16dot16(
-                  monotime_now -
-                  atomic_load64(&lck->mti_reader_check_timestamp, mo_Relaxed))
-            : 0;
+        ts ? mdbx_osal_monotime_to_16dot16(monotime_now - ts) : 0;
     arg->mi_autosync_threshold = pgno2bytes(
         env, atomic_load32(&lck->mti_autosync_threshold, mo_Relaxed));
     arg->mi_autosync_period_seconds16dot16 = mdbx_osal_monotime_to_16dot16(
         atomic_load64(&lck->mti_autosync_period, mo_Relaxed));
     arg->mi_bootid.current.x = bootid.x;
     arg->mi_bootid.current.y = bootid.y;
-    arg->mi_mode = lck ? lck->mti_envmode.weak : env->me_flags;
+    arg->mi_mode = env->me_lck_mmap.lck ? lck->mti_envmode.weak : env->me_flags;
   }
 
   if (likely(bytes > size_before_pgop_stat)) {
@@ -25576,7 +25553,7 @@ __dll_export
 #else
   #ifdef __INTEL_COMPILER
     "Intel C/C++ " STRINGIFY(__INTEL_COMPILER)
-  #elsif defined(__apple_build_version__)
+  #elif defined(__apple_build_version__)
     "Apple clang " STRINGIFY(__apple_build_version__)
   #elif defined(__ibmxl__)
     "IBM clang C " STRINGIFY(__ibmxl_version__) "." STRINGIFY(__ibmxl_release__)
@@ -27552,7 +27529,8 @@ mdbx_osal_16dot16_to_monotime(uint32_t seconds_16dot16) {
 #else
   const uint64_t ratio = UINT64_C(1000000000);
 #endif
-  return (ratio * seconds_16dot16 + 32768) >> 16;
+  const uint64_t ret = (ratio * seconds_16dot16 + 32768) >> 16;
+  return likely(ret || seconds_16dot16 == 0) ? ret : /* fix underflow */ 1;
 }
 
 MDBX_INTERNAL_FUNC uint32_t mdbx_osal_monotime_to_16dot16(uint64_t monotime) {
@@ -27564,13 +27542,15 @@ MDBX_INTERNAL_FUNC uint32_t mdbx_osal_monotime_to_16dot16(uint64_t monotime) {
     if (monotime > limit)
       return UINT32_MAX;
   }
+  const uint32_t ret =
 #if defined(_WIN32) || defined(_WIN64)
-  return (uint32_t)((monotime << 16) / performance_frequency.QuadPart);
+      (uint32_t)((monotime << 16) / performance_frequency.QuadPart);
 #elif defined(__APPLE__) || defined(__MACH__)
-  return (uint32_t)((monotime << 16) / ratio_16dot16_to_monotine);
+      (uint32_t)((monotime << 16) / ratio_16dot16_to_monotine);
 #else
-  return (uint32_t)(monotime * 128 / 1953125);
+      (uint32_t)(monotime * 128 / 1953125);
 #endif
+  return likely(ret || monotime == 0) ? ret : /* fix underflow */ 1;
 }
 
 MDBX_INTERNAL_FUNC uint64_t mdbx_osal_monotime(void) {
@@ -28189,9 +28169,9 @@ __dll_export
         0,
         10,
         0,
-        19,
-        {"2021-05-12T14:41:09+03:00", "d45476a9152289911ca9eb32f1d7dccdbf86e93e", "c5268f1da7ed20f9cacb0b3717f63e5bfa2c1c02",
-         "v0.10.0-19-gc5268f1d"},
+        27,
+        {"2021-05-21T00:12:55+03:00", "41721da296c828dd3f7116a97f2ead5ccc38a107", "2b161db6d8acf3fd5112972b09d5a1988a59ad8c",
+         "v0.10.0-27-g2b161db6"},
         sourcery};
 
 __dll_export

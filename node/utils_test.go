@@ -20,8 +20,8 @@
 package node
 
 import (
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // NoopLifecycle is a trivial implementation of the Service interface.

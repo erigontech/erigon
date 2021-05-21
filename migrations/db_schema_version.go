@@ -1,8 +1,8 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var dbSchemaVersion = Migration{

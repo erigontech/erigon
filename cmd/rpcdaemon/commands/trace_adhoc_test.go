@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 func TestEmptyQuery(t *testing.T) {

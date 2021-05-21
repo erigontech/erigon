@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func TestClientRequest(t *testing.T) {

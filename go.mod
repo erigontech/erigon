@@ -1,4 +1,4 @@
-module github.com/ledgerwatch/turbo-geth
+module github.com/ledgerwatch/erigon
 
 go 1.16
 

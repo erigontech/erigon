@@ -20,9 +20,9 @@ import (
 	"crypto/rand"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // largeNumber returns a very large big.Int.

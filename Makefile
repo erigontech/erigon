@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 2 --tags 'mdbx'
+GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -145,8 +145,8 @@ test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 
-test-mdbx: mdbx
-	TEST_DB=mdbx $(GOTEST)
+test-mdbx:
+	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
 	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
@@ -199,8 +199,8 @@ grpc:
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
 		types/types.proto
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \

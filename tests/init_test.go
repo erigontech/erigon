@@ -30,7 +30,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 var (

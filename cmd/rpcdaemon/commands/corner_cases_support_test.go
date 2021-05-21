@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/require"
 )
 

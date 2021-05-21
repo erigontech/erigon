@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
 )
 
 // DBSchemaVersion

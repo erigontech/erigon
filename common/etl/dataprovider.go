@@ -8,8 +8,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 type dataProvider interface {

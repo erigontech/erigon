@@ -19,9 +19,9 @@ package main
 import (
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v4test"
-	"github.com/ledgerwatch/turbo-geth/internal/utesting"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/cmd/devp2p/internal/v4test"
+	"github.com/ledgerwatch/erigon/internal/utesting"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/urfave/cli"
 )
 

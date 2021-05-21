@@ -5,14 +5,14 @@ import (
 	"math/rand"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 )
 

@@ -22,9 +22,9 @@ import (
 	"math/big"
 	"path"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 const (

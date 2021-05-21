@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -160,14 +159,14 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		t.Error(err)
 	}
 
-	maxreaders := 246
-	err = env.SetMaxReaders(maxreaders)
+	maxreaders := uint64(246)
+	err = env.SetOption(OptMaxReaders, maxreaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	_maxreaders, err := env.MaxReaders()
+	_maxreaders, err := env.GetOption(OptMaxReaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if _maxreaders < maxreaders {
 		t.Errorf("unexpected MaxReaders: %v (< %v)", _maxreaders, maxreaders)
@@ -179,18 +178,18 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		env.Close()
 		t.Error(err)
 	}
-
-	err = env.SetMaxReaders(126)
-	if !IsErrnoSys(err, syscall.EPERM) {
-		t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
-	}
-	_maxreaders, err = env.MaxReaders()
-	if err != nil {
-		t.Error(err)
-	}
-	if _maxreaders < maxreaders {
-		t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
-	}
+	//
+	//err = env.SetOption(OptMaxReaders, uint64(126))
+	//if !IsErrnoSys(err, syscall.EPERM) {
+	//	t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
+	//}
+	//_maxreaders, err = env.GetOption(OptMaxReaders)
+	//if err != nil {
+	//	t.Error(err)
+	//}
+	//if _maxreaders < maxreaders {
+	//	t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
+	//}
 }
 
 func TestEnv_SetDebug(t *testing.T) {
@@ -499,15 +498,15 @@ func setupFlags(t testing.TB, flags uint) *Env {
 		t.Fatalf("env: %s", err)
 	}
 	path := t.TempDir()
-	err = env.SetMaxDBs(1024)
+	err = env.SetOption(OptMaxDB, 1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	err = env.SetGeometry(-1, -1, 10*1024*1024, -1, -1, 4096)
+	const pageSize = 4096
+	err = env.SetGeometry(-1, -1, 64*1024*pageSize, -1, -1, pageSize)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= UtterlyNoSync | NoMetaSync
 	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)

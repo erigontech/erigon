@@ -21,7 +21,7 @@ package metrics
 import (
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
