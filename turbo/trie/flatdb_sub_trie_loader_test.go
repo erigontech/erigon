@@ -20,7 +20,7 @@ func TestResolve1(t *testing.T) {
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.HashedAccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -41,7 +41,7 @@ func TestResolve2(t *testing.T) {
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.HashedAccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -65,7 +65,7 @@ func TestResolve2Keep(t *testing.T) {
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.HashedAccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -89,7 +89,7 @@ func TestResolve3Keep(t *testing.T) {
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.HashedAccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -114,7 +114,7 @@ func TestTrieSubTrieLoader(t *testing.T) {
 
 	require, _, db := require.New(t), assert.New(t), ethdb.NewTestDB(t)
 	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.CurrentStateBucketOld2, common.Hex2Bytes(k), common.Hex2Bytes(v))
+		err := db.Put(dbutils.HashedAccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
 		require.NoError(err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
@@ -145,8 +145,8 @@ func TestTwoStorageItems(t *testing.T) {
 	val1 := common.Hex2Bytes("02")
 	val2 := common.Hex2Bytes("03")
 
-	require.NoError(db.Put(dbutils.CurrentStateBucketOld2, key1, val1))
-	require.NoError(db.Put(dbutils.CurrentStateBucketOld2, key2, val2))
+	require.NoError(db.Put(dbutils.HashedAccountsBucket, key1, val1))
+	require.NoError(db.Put(dbutils.HashedAccountsBucket, key2, val2))
 	var branch fullNode
 	branch.Children[0x7] = NewShortNode(keybytesToHex(key1[1:]), valueNode(val1))
 	branch.Children[0xf] = NewShortNode(keybytesToHex(key2[1:]), valueNode(val2))
@@ -352,7 +352,7 @@ func TestIsSequence(t *testing.T) {
 func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
 	value := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.CurrentStateBucketOld2, addrHash[:], value); err != nil {
+	if err := db.Put(dbutils.HashedAccountsBucket, addrHash[:], value); err != nil {
 		return err
 	}
 	return nil
