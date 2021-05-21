@@ -90,8 +90,6 @@ func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}
 		}()
 	}
 
-	n := uint64(0)
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -117,8 +115,6 @@ func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}
 
 					return
 				}
-
-				n++
 
 			case <-done:
 				return
