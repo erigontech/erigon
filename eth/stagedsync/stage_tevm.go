@@ -29,16 +29,16 @@ type TranspileCfg struct {
 
 func StageTranspileCfg(
 	kv ethdb.RwKV,
-	BatchSize datasize.ByteSize,
-	ReaderBuilder StateReaderBuilder,
-	WriterBuilder StateWriterBuilder,
+	batchSize datasize.ByteSize,
+	readerBuilder StateReaderBuilder,
+	writerBuilder StateWriterBuilder,
 	chainConfig *params.ChainConfig,
 ) TranspileCfg {
 	return TranspileCfg{
 		db:            kv,
-		batchSize:     BatchSize,
-		readerBuilder: ReaderBuilder,
-		writerBuilder: WriterBuilder,
+		batchSize:     batchSize,
+		readerBuilder: readerBuilder,
+		writerBuilder: writerBuilder,
 		chainConfig:   chainConfig,
 	}
 }
