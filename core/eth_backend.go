@@ -7,7 +7,6 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
@@ -55,12 +54,12 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 		log.Error("getting Version info from remove KV", "error", err)
 		return false
 	}
-	if !ethdb.EnsureVersion(db.opts.version, versionReply) {
-		log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", db.opts.version.minor, db.opts.version.minor, db.opts.version.patch),
+	if !gointerfaces.EnsureVersion(back.version, versionReply) {
+		log.Error("incompatible KV interface versions", "client", back.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false
 	}
-	log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", db.opts.version.major, db.opts.version.minor, db.opts.version.patch),
+	log.Info("KV interfaces compatible", "client", back.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
 }

@@ -192,7 +192,7 @@ func (db *RemoteKV) EnsureVersionCompatibility() bool {
 		log.Error("getting Version info from remove KV", "error", err)
 		return false
 	}
-	if !EnsureVersion(db.opts.version, versionReply) {
+	if !gointerfaces.EnsureVersion(db.opts.version, versionReply) {
 		log.Error("incompatible KV interface versions", "client", db.opts.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false

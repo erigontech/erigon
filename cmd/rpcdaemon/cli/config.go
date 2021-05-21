@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -155,7 +154,7 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool *core.TxPoolService, mining *core.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
@@ -198,17 +197,18 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		eth = core.NewRemoteBackend(remoteKv.GrpcConn())
-		mining = txpool.NewMiningClient(remoteKv.GrpcConn())
-		txPool = txpool.NewTxpoolClient(remoteKv.GrpcConn())
+		remoteEth := core.NewRemoteBackend(remoteKv.GrpcConn())
+		mining = core.NewMiningService(remoteKv.GrpcConn())
+		txPool = core.NewTxPoolService(remoteKv.GrpcConn())
 		if kv == nil {
 			kv = remoteKv
 		}
+		eth = remoteEth
 		go func() {
 			if !remoteKv.EnsureVersionCompatibility() {
 				rootCancel()
 			}
-			if !eth.EnsureVersionCompatibility() {
+			if !remoteEth.EnsureVersionCompatibility() {
 				rootCancel()
 			}
 			if !mining.EnsureVersionCompatibility() {
