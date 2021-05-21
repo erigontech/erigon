@@ -69,7 +69,6 @@ const (
 	HashedAccountsBucket   = "hashed_accounts"
 	HashedStorageBucket    = "hashed_storage"
 	CurrentStateBucketOld2 = "CST2"
-	CurrentStateBucketOld1 = "CST"
 
 	//key - address + shard_id_u64
 	//value - roaring bitmap  - list of block where it changed
@@ -135,7 +134,6 @@ Invariants:
 */
 const TrieOfAccountsBucket = "trie_account"
 const TrieOfStorageBucket = "trie_storage"
-const IntermediateTrieHashBucketOld1 = "iTh"
 const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
@@ -360,9 +358,7 @@ var DeprecatedBuckets = []string{
 	CurrentStateBucketOld2,
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,
-	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
-	IntermediateTrieHashBucketOld1,
 	HeaderPrefixOld,
 	CliqueBucket,
 }
