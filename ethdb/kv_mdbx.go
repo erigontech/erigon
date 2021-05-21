@@ -596,7 +596,11 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(rename, nativeFlags, nil, dcmp)
+	if rename != "" {
+		dbi, err = tx.tx.OpenDBI(rename, nativeFlags, nil, dcmp)
+	} else {
+		dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	}
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -1367,7 +1371,6 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 		}
 		return nil
 	}
-
 	if err := c.append(k, v); err != nil {
 		return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
 	}
@@ -1507,6 +1510,7 @@ func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 }
 
 func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
+	fmt.Printf("%s, %x,%x\n", c.bucketName, k, v)
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
 		return fmt.Errorf("in Append: bucket=%s, %w", c.bucketName, err)
 	}
@@ -1514,6 +1518,7 @@ func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
+	fmt.Printf("%s, %x,%x\n", c.bucketName, k, v)
 	if err := c.appendDup(k, v); err != nil {
 		return fmt.Errorf("in AppendDup: bucket=%s, %w", c.bucketName, err)
 	}

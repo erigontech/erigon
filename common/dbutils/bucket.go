@@ -218,8 +218,8 @@ const (
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
 
-	Sequence = "sequence" // tbl_name -> seq_u64
-
+	Sequence      = "sequence" // tbl_name -> seq_u64
+	HeadHeaderKey = "LastHeader"
 )
 
 var Rename = map[string]string{
@@ -273,6 +273,7 @@ var Rename = map[string]string{
 	UncleanShutdown:           "UncleanShutdown",
 	Migrations:                "Migration",
 	Sequence:                  "Sequence",
+	HeadHeaderKey:             "LastHeader",
 }
 
 // Keys
@@ -290,8 +291,6 @@ var (
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
-	HeadHeaderKey = "LastHeader"
-
 	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
@@ -306,7 +305,6 @@ var (
 // This list will be sorted in `init` method.
 // BucketsConfigs - can be used to find index in sorted version of Buckets list by name
 var Buckets = []string{
-	CurrentStateBucketOld2,
 	AccountsHistoryBucket,
 	StorageHistoryBucket,
 	CodeBucket,
@@ -350,7 +348,6 @@ var Buckets = []string{
 	TrieOfStorageBucket,
 	HashedAccountsBucket,
 	HashedStorageBucket,
-	IntermediateTrieHashBucketOld2,
 	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
@@ -359,6 +356,8 @@ var Buckets = []string{
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
+	IntermediateTrieHashBucketOld2,
+	CurrentStateBucketOld2,
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
