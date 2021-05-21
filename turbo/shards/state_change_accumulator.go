@@ -116,5 +116,6 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 		si[location] = j
 	}
 	storageChange := accountChange.StorageChanges[j]
+	storageChange.Location = gointerfaces.ConvertHashToH256(location)
 	storageChange.Data = data
 }
