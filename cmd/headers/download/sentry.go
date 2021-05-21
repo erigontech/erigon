@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -127,6 +128,7 @@ func makeP2PServer(
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
 	receiveTxCh chan<- StreamMsg,
+	txSubscribed *uint32,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -180,7 +182,7 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, statusFn, receiveCh, receiveUploadCh, receiveTxCh)
+	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, statusFn, receiveCh, receiveUploadCh, receiveTxCh, txSubscribed)
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
@@ -192,6 +194,7 @@ func MakeProtocols(ctx context.Context,
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
 	receiveTxCh chan<- StreamMsg,
+	txSubscribed *uint32,
 ) []p2p.Protocol {
 	return []p2p.Protocol{
 		{
@@ -223,6 +226,7 @@ func MakeProtocols(ctx context.Context,
 					receiveCh,
 					receiveUploadCh,
 					receiveTxCh,
+					txSubscribed,
 				); err != nil {
 					log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
@@ -338,6 +342,7 @@ func runPeer(
 	receiveCh chan<- StreamMsg,
 	receiveUploadCh chan<- StreamMsg,
 	receiveTxCh chan<- StreamMsg,
+	txSubscribed *uint32,
 ) error {
 	printTime := time.Now().Add(time.Minute)
 	peerPrinted := false
@@ -419,56 +424,41 @@ func runPeer(
 			}
 			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
 		case eth.NewPooledTransactionHashesMsg:
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			// Drop message if not ready
+			if atomic.LoadUint32(txSubscribed) > 0 {
+				b := make([]byte, msg.Size)
+				if _, err := io.ReadFull(msg.Payload, b); err != nil {
+					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				}
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NewPooledTransactionHashes})
 			}
-			trySend(receiveTxCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NewPooledTransactionHashes})
-			//var hashes []common.Hash
-			//if err := msg.Decode(&hashes); err != nil {
-			//	return fmt.Errorf("decode NewPooledTransactionHashesMsg %v: %v", msg, err)
-			//}
-			//var hashesStr strings.Builder
-			//for _, hash := range hashes {
-			//	if hashesStr.Len() > 0 {
-			//		hashesStr.WriteString(",")
-			//	}
-			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			//}
-			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peerID, hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			// Drop message if not ready
+			if atomic.LoadUint32(txSubscribed) > 0 {
+				b := make([]byte, msg.Size)
+				if _, err := io.ReadFull(msg.Payload, b); err != nil {
+					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				}
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GetPooledTransactions})
 			}
-			trySend(receiveTxCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GetPooledTransactions})
-			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
 		case eth.TransactionsMsg:
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			// Drop message if not ready
+			if atomic.LoadUint32(txSubscribed) > 0 {
+				b := make([]byte, msg.Size)
+				if _, err := io.ReadFull(msg.Payload, b); err != nil {
+					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				}
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_Transactions})
 			}
-			trySend(receiveTxCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_Transactions})
-			//var txs eth.TransactionsPacket
-			//if err := msg.Decode(&txs); err != nil {
-			//	return fmt.Errorf("decode TransactionMsg %v: %v", msg, err)
-			//}
-			//var hashesStr strings.Builder
-			//for _, tx := range txs {
-			//	if hashesStr.Len() > 0 {
-			//		hashesStr.WriteString(",")
-			//	}
-			//	hash := tx.Hash()
-			//	hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
-			//}
-			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peerID, hashesStr.String()))
 		case eth.PooledTransactionsMsg:
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			// Drop message if not ready
+			if atomic.LoadUint32(txSubscribed) > 0 {
+				b := make([]byte, msg.Size)
+				if _, err := io.ReadFull(msg.Payload, b); err != nil {
+					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				}
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_PooledTransactions})
 			}
-			trySend(receiveTxCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_PooledTransactions})
-			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peerID)
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
 		}
@@ -585,6 +575,7 @@ func p2pServer(ctx context.Context,
 		sentryServer.ReceiveCh,
 		sentryServer.ReceiveUploadCh,
 		sentryServer.ReceiveTxCh,
+		&sentryServer.TxSubscribed,
 	)
 	if err != nil {
 		return nil, err
@@ -649,6 +640,7 @@ type SentryServerImpl struct {
 	uploadStopCh    chan struct{} // Channel used to signal (by closing) to the receiver on `receiveUploadCh` to stop reading
 	ReceiveTxCh     chan StreamMsg
 	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
+	TxSubscribed    uint32        // Set to non-zero if downloader is subscribed to transaction messages
 	lock            sync.RWMutex
 }
 
@@ -966,6 +958,10 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveTxMessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartTxs()
+	if atomic.LoadUint32(&ss.TxSubscribed) == 0 {
+		log.Info("First ReceiveTxMessages received, enabling tx messages")
+	}
+	atomic.StoreUint32(&ss.TxSubscribed, 1)
 	for {
 		select {
 		case <-ss.txStopCh:

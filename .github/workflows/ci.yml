@@ -64,9 +64,6 @@ jobs:
           cp libmdbx.dll (Join-Path $env:SystemRoot system32)
           go mod download
           go mod vendor
-      - name: Test
-        run: |
-          make test-mdbx
 
   docker:
     runs-on: ubuntu-18.04
