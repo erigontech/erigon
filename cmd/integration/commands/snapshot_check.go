@@ -119,6 +119,8 @@ var cmdSnapshotCheck = &cobra.Command{
 
 func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir string) (err error) {
 	kv := db.RwKV()
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync3(db)
+
 	var snapshotBlock uint64 = 11_000_000
 	blockNum, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
@@ -209,7 +211,6 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	defer tx.Rollback()
 
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
 	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
 	if err != nil {
 		return nil

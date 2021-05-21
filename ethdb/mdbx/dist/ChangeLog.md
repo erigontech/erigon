@@ -1,9 +1,7 @@
 ChangeLog
 ---------
 
-## v0.10.1 (in development)
-
-TODO:
+### TODO
 
  - [Get rid of dirty-pages list in MDBX_WRITEMAP mode](https://github.com/erthink/libmdbx/issues/193).
  - [Large/Overflow pages accounting for dirty-room](https://github.com/erthink/libmdbx/issues/192).
@@ -14,6 +12,24 @@ TODO:
  - [Support MessagePack for Keys & Values](https://github.com/erthink/libmdbx/issues/115).
  - [Engage new terminology](https://github.com/erthink/libmdbx/issues/137).
  - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), Fedora/RHEL, Debian/Ubuntu.
+
+## v0.10.1 (in development)
+
+Acknowledgements:
+
+ - [Alexey Akhunov](https://github.com/AlexeyAkhunov) and [Alex Sharov](https://github.com/AskAlexSharov) for bug reporting and testing.
+
+New features:
+
+ - Added `-p` option to `mdbx_stat` utility for printing page operations statistic.
+ - Added explicit checking for and warning about using unfit github's archives.
+
+Fixes:
+
+ - Fixed minor "foo not used" warnings from modern C++ compilers when building the C++ part of the library.
+ - Fixed confusing/messy errors when build library from unfit github's archives (https://github.com/erthink/libmdbx/issues/197).
+ - Fixed `#​e​l​s​i​f` typo.
+ - Fixed rare unexpected `MDBX_PROBLEM` error during altering data in huge transactions due to wrong spilling/oust of dirty pages (https://github.com/erthink/libmdbx/issues/195).
 
 
 ## v0.10.0 at 2021-05-09
