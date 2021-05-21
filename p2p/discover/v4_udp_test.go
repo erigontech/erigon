@@ -556,7 +556,7 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
-	db, err := enode.OpenDB("", true)
+	db, err := enode.OpenDB("")
 	if err != nil {
 		panic(err)
 	}

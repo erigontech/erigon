@@ -120,7 +120,7 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	db, err := enode.OpenDB("", true)
+	db, err := enode.OpenDB("")
 	if err != nil {
 		panic(err)
 	}

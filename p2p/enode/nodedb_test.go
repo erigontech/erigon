@@ -314,7 +314,7 @@ func TestDBPersistency(t *testing.T) {
 	)
 
 	// Create a persistent database and store some values
-	db, err := OpenDB(filepath.Join(root, "database"), true)
+	db, err := OpenDB(filepath.Join(root, "database"))
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 
 	// Reopen the database and check the value
-	db, err = OpenDB(filepath.Join(root, "database"), true)
+	db, err = OpenDB(filepath.Join(root, "database"))
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
@@ -425,7 +425,7 @@ var nodeDBExpirationNodes = []struct {
 }
 
 func TestDBExpiration(t *testing.T) {
-	db, err := OpenDB("", true)
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -471,7 +471,7 @@ func TestDBExpiration(t *testing.T) {
 // This test checks that expiration works when discovery v5 data is present
 // in the database.
 func TestDBExpireV5(t *testing.T) {
-	db, err := OpenDB("", true)
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
