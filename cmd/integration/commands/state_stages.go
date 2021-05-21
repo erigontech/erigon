@@ -139,6 +139,8 @@ func init() {
 func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx context.Context) error {
 	kv := db.RwKV()
 
+	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync3(db)
+
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -170,12 +172,16 @@ func syncBySmallSteps(db ethdb.Database, miningConfig params.MiningConfig, ctx c
 		}
 	}
 
-	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync2(db, tx)
 	stateStages, err2 := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, false, nil)
 	if err2 != nil {
 		panic(err2)
 	}
-	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Finish)
+	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders,
+		stages.CreateHeadersSnapshot,
+		stages.CreateBodiesSnapshot,
+		stages.CreateStateSnapshot,
+		stages.TxPool, // TODO: enable TxPool stage
+		stages.Finish)
 
 	execCfg := stagedsync.StageExecuteBlocksCfg(kv, sm.Receipts, sm.CallTraces, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
 
@@ -415,6 +421,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
 	kv := db.RwKV()
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync3(db)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -422,7 +429,6 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	}
 	defer tx.Rollback()
 
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
 	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
 	if err != nil {
 		return nil
@@ -491,13 +497,13 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	ch := ctx.Done()
+	sm, engine, chainConfig, vmConfig, _, st, _ := newSync3(db)
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync2(db, tx)
 	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, db, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
 	if err != nil {
 		return nil
