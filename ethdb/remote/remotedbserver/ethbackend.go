@@ -16,6 +16,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// EthBackendAPIVersion
+// 2.0.0 - move all mining-related methods to 'txpool/mining' server
+var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}
+
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
@@ -28,10 +32,8 @@ func NewEthBackendServer(eth core.EthBackend, events *Events, gitCommit string) 
 	return &EthBackendServer{eth: eth, events: events, gitCommit: gitCommit}
 }
 
-// Version
-// 2.0.0 - move all mining-related methods to 'txpool/mining' server
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
-	return &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}, nil
+	return EthBackendAPIVersion, nil
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {

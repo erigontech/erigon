@@ -3,15 +3,20 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+var EthBackendVersion = gointerfaces.Version{Major: 1, Minor: 0, Patch: 0}
 
 // ApiBackend - interface which must be used by API layer
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
@@ -33,13 +38,31 @@ type EthBackend interface {
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger
+	version          gointerfaces.Version
 }
 
 func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
+		version:          EthBackendVersion,
 		log:              log.New("remote_db"),
 	}
+}
+
+func (back *RemoteBackend) EnsureVersionCompatibility() bool {
+	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		log.Error("getting Version info from remove KV", "error", err)
+		return false
+	}
+	if !ethdb.EnsureVersion(db.opts.version, versionReply) {
+		log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", db.opts.version.minor, db.opts.version.minor, db.opts.version.patch),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", db.opts.version.major, db.opts.version.minor, db.opts.version.patch),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }
 
 func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {

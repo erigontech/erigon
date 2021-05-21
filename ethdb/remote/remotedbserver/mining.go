@@ -18,6 +18,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// EthBackendServiceAPIVersion
+// 2.0.0 - move all mining-related methods to 'txpool/mining' server
+var MiningAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
+
 type MiningServer struct {
 	proto_txpool.UnimplementedMiningServer
 	ctx                 context.Context
@@ -33,7 +37,7 @@ func NewMiningServer(ctx context.Context, eth core.EthBackend, ethashApi *ethash
 }
 
 func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
-	return &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}, nil
+	return MiningAPIVersion, nil
 }
 
 func (s *MiningServer) GetWork(context.Context, *proto_txpool.GetWorkRequest) (*proto_txpool.GetWorkReply, error) {

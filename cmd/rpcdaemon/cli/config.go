@@ -194,7 +194,7 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		remoteKv, err := ethdb.NewRemote(
 			remotedbserver.KvServiceAPIVersion.Major,
 			remotedbserver.KvServiceAPIVersion.Minor,
-			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
+			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
@@ -204,6 +204,20 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		if kv == nil {
 			kv = remoteKv
 		}
+		go func() {
+			if !remoteKv.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !eth.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !mining.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !txPool.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+		}()
 	}
 	return kv, eth, txPool, mining, err
 }

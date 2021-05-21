@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -134,4 +135,15 @@ func testKVPath() string {
 		panic(err)
 	}
 	return dir
+}
+
+// EnsureVersion - Default policy: allow only patch difference
+func EnsureVersion(local version, remote *types.VersionReply) bool {
+	if remote.Major != local.major {
+		return false
+	}
+	if remote.Minor != local.minor {
+		return false
+	}
+	return true
 }
