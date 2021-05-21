@@ -15,8 +15,13 @@ NOTE: You are free to ignore provided wrappers and use the .proto files directly
 git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/interfaces master
 ```
 
-When you need to update the subtree to a specific commit or tag, you can use this command:
+When you need to update the subtree to a specific commit or tag, you can use these commands:
 
 ```
-git subtree pull --prefix interfaces --squash https://github.com/ledgerwatch/interfaces <tag_or_commit>
+git rm -rf interfaces
+git commit -m"Remove interfaces for replacement"
+git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/interfaces <tag_or_commit>
 ```
+
+Unfortunately `git subtree pull` does not work if we use Squash-Merge for pull requests in this repository
+and also automatically delete merged branches.
