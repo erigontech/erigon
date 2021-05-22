@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -119,7 +120,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RoKV) error {
+func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
@@ -138,19 +139,25 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	if major != dbutils.DBSchemaVersion.Major {
+	var dbSchemaVersion types.VersionReply
+	if mdbx {
+		dbSchemaVersion = dbutils.DBSchemaVersionMDBX
+	} else {
+		dbSchemaVersion = dbutils.DBSchemaVersionLMDB
+	}
+	if major != dbSchemaVersion.Major {
 		compatible = false
-	} else if minor != dbutils.DBSchemaVersion.Minor {
+	} else if minor != dbSchemaVersion.Minor {
 		compatible = false
 	} else {
 		compatible = true
 	}
 	if !compatible {
 		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
-			dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch,
+			dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
 			major, minor, patch)
 	}
-	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch),
+	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
 		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	return nil
 }
@@ -163,18 +170,21 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv ethdb.RwKV
+		var mdbx bool
 		if cfg.Database == "mdbx" {
 			rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
+			mdbx = true
 		} else {
 			rwKv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
+			mdbx = false
 		}
-		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
+		if compatErr := checkDbCompatibility(rwKv, mdbx); compatErr != nil {
 			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv
