@@ -9,8 +9,7 @@ import (
 )
 
 // DBSchemaVersion
-// 2.0.0 - renamed all buckets for mdbx - to more readable names and CamelCase format. See: https://github.com/ledgerwatch/erigon/pull/1982
-var DBSchemaVersion = types.VersionReply{Major: 2, Minor: 0, Patch: 0}
+var DBSchemaVersion = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 // Buckets
 
