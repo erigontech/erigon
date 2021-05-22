@@ -89,8 +89,11 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 
 func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error) {
 	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.MaxDelay = 30 * time.Second
 	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
