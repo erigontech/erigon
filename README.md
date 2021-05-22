@@ -1,8 +1,7 @@
 
 # Erigon
 
-Erigon was originally called Turbo-Geth, a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
-Now it a very different product.
+Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
