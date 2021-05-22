@@ -55,11 +55,6 @@ var (
 		Usage: "enable experimental downloader v2",
 	}
 
-	PruningFlag = cli.BoolFlag{
-		Name:  "prune",
-		Usage: "Enable pruning ancient data",
-	}
-
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -136,10 +131,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
-	if ctx.GlobalBool(PruningFlag.Name) {
-		cfg.StorageMode.Pruning = true
-		cfg.StorageMode.Initialised = true
-	}
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
