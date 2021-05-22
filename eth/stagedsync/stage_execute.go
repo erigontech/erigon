@@ -104,7 +104,15 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg, writeChangesets bool, traceCursor ethdb.RwCursorDupSort) error {
+func executeBlockWithGo(
+	block *types.Block,
+	tx ethdb.RwTx,
+	batch ethdb.Database,
+	params ExecuteBlockCfg,
+	writeChangesets bool,
+	traceCursor ethdb.RwCursorDupSort,
+	accumulator *shards.Accumulator,
+) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -275,7 +283,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			if cfg.pruningDistance > 0 && to-blockNum > cfg.pruningDistance {
 				writeChangesets = false
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor, accumulator); err != nil {
 				return err
 			}
 		}
