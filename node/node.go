@@ -619,7 +619,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, datadir); err != nil {
+			if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
 				return nil, err
 			}
 			db.Close()

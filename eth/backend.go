@@ -272,7 +272,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
+	kvRPC := remotedbserver.NewKvServer(backend.chainKV, stack.Config().MDBX)
 	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, gitCommit)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
