@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"runtime"
 	"time"
@@ -176,6 +177,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		return err
 	}
 	// Clean up before loading call traces to reclaim space
+	var prunedMin uint64 = math.MaxUint64
+	var prunedMax uint64 = 0
 	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if endBlock-blockNum <= params.FullImmutabilityThreshold {
@@ -184,9 +187,18 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if err = traceCursor.DeleteCurrent(); err != nil {
 			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
 		}
+		if blockNum < prunedMin {
+			prunedMin = blockNum
+		}
+		if blockNum > prunedMax {
+			prunedMax = blockNum
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cleanup cursor: %w", logPrefix, err)
+	}
+	if prunedMax != 0 {
+		log.Info(fmt.Sprintf("[%s] Pruned trace call index", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
