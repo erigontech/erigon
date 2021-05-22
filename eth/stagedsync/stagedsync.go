@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
@@ -67,6 +68,7 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
+	accumulator *shards.Accumulator,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -106,6 +108,7 @@ func (stagedSync *StagedSync) Prepare(
 			snapshotsDir:          stagedSync.params.SnapshotDir,
 			btClient:              stagedSync.params.TorrnetClient,
 			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
+			Accumulator:           accumulator,
 		},
 	)
 	state := NewState(stages)

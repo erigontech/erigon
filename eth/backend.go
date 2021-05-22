@@ -661,6 +661,7 @@ func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, m
 		s.txPool,
 		false,
 		stagedsync.StageMiningCfg(cfg, true, pendingBlockCh, minedBlockCh, sealCancel),
+		nil,
 	)
 	if err != nil {
 		return err
