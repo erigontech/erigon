@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied, err := AppliedMigrations(db, false)
@@ -43,7 +44,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied2, err := AppliedMigrations(db, false)
@@ -73,7 +74,7 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied, err := AppliedMigrations(db, false)
@@ -86,7 +87,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied2, err := AppliedMigrations(db, false)
@@ -116,7 +117,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied, err := AppliedMigrations(db, false)
@@ -129,7 +130,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	applied2, err := AppliedMigrations(db, false)
@@ -173,7 +174,7 @@ func TestValidation(t *testing.T) {
 	}
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	applied, err := AppliedMigrations(db, false)
@@ -193,7 +194,7 @@ func TestCommitCallRequired(t *testing.T) {
 	}
 	migrator := NewMigrator()
 	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	applied, err := AppliedMigrations(db, false)
