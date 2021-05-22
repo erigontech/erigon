@@ -139,11 +139,11 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	var dbSchemaVersion types.VersionReply
+	var dbSchemaVersion *types.VersionReply
 	if mdbx {
-		dbSchemaVersion = dbutils.DBSchemaVersionMDBX
+		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
 	} else {
-		dbSchemaVersion = dbutils.DBSchemaVersionLMDB
+		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
 	}
 	if major != dbSchemaVersion.Major {
 		compatible = false

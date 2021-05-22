@@ -103,28 +103,28 @@ func NewKvServer(kv ethdb.RwKV, mdbx bool) *KvServer {
 
 // Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
-	var dbSchemaVersion types.VersionReply
+	var dbSchemaVersion *types.VersionReply
 	if s.mdbx {
-		dbSchemaVersion = dbutils.DBSchemaVersionMDBX
+		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
 	} else {
-		dbSchemaVersion = dbutils.DBSchemaVersionLMDB
+		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
 	}
 	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
 		return &KvServiceAPIVersion, nil
 	}
 	if dbSchemaVersion.Major > KvServiceAPIVersion.Major {
-		return &dbSchemaVersion, nil
+		return dbSchemaVersion, nil
 	}
 	if KvServiceAPIVersion.Minor > dbSchemaVersion.Minor {
 		return &KvServiceAPIVersion, nil
 	}
 	if dbSchemaVersion.Minor > KvServiceAPIVersion.Minor {
-		return &dbSchemaVersion, nil
+		return dbSchemaVersion, nil
 	}
 	if KvServiceAPIVersion.Minor > dbSchemaVersion.Minor {
 		return &KvServiceAPIVersion, nil
 	}
-	return &dbSchemaVersion, nil
+	return dbSchemaVersion, nil
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
