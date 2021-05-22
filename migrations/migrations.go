@@ -55,16 +55,6 @@ import (
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
 var migrations = []Migration{
-	receiptsCborEncode,
-	receiptsOnePerTx,
-	accChangeSetDupSort,
-	storageChangeSetDupSort,
-	transactionsTable,
-	historyAccBitmap,
-	historyStorageBitmap,
-	splitHashStateBucket,
-	splitIHBucket,
-	deleteExtensionHashesFromTrieBucket,
 	headerPrefixToSeparateBuckets,
 	removeCliqueBucket,
 	dbSchemaVersion,
