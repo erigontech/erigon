@@ -1,17 +1,16 @@
-package core
+package services
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
-
-var MiningAPIVersion = gointerfaces.Version{Major: 1, Minor: 0, Patch: 0}
 
 type MiningService struct {
 	txpool.MiningClient
@@ -22,7 +21,7 @@ type MiningService struct {
 func NewMiningService(cc grpc.ClientConnInterface) *MiningService {
 	return &MiningService{
 		MiningClient: txpool.NewMiningClient(cc),
-		version:      MiningAPIVersion,
+		version:      gointerfaces.Version{Major: remotedbserver.MiningAPIVersion.Major, Minor: remotedbserver.MiningAPIVersion.Minor, Patch: remotedbserver.MiningAPIVersion.Patch},
 		log:          log.New("remote_service", "mining"),
 	}
 }

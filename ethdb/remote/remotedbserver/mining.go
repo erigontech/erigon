@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	proto_txpool "github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon/gointerfaces/types"
@@ -29,11 +28,15 @@ type MiningServer struct {
 	pendingBlockStreams PendingBlockStreams
 	minedBlockStreams   MinedBlockStreams
 	ethash              *ethash.API
-	eth                 core.EthBackend
+	isMining            IsMining
 }
 
-func NewMiningServer(ctx context.Context, eth core.EthBackend, ethashApi *ethash.API) *MiningServer {
-	return &MiningServer{ctx: ctx, eth: eth, ethash: ethashApi}
+type IsMining interface {
+	IsMining() bool
+}
+
+func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API) *MiningServer {
+	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi}
 }
 
 func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -80,7 +83,7 @@ func (s *MiningServer) Mining(_ context.Context, req *proto_txpool.MiningRequest
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	return &proto_txpool.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+	return &proto_txpool.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
 }
 
 func (s *MiningServer) OnPendingLogs(req *proto_txpool.OnPendingLogsRequest, reply proto_txpool.Mining_OnPendingLogsServer) error {

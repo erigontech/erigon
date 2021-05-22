@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core"
 )
 
 // NetAPI the interface for the net_ RPC commands
@@ -18,11 +18,11 @@ type NetAPI interface {
 
 // NetAPIImpl data structure to store things needed for net_ commands
 type NetAPIImpl struct {
-	ethBackend core.ApiBackend
+	ethBackend services.ApiBackend
 }
 
 // NewNetAPIImpl returns NetAPIImplImpl instance
-func NewNetAPIImpl(eth core.ApiBackend) *NetAPIImpl {
+func NewNetAPIImpl(eth services.ApiBackend) *NetAPIImpl {
 	return &NetAPIImpl{
 		ethBackend: eth,
 	}

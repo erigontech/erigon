@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
@@ -23,12 +22,17 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth       core.EthBackend
+	eth       EthBackend
 	events    *Events
 	gitCommit string
 }
 
-func NewEthBackendServer(eth core.EthBackend, events *Events, gitCommit string) *EthBackendServer {
+type EthBackend interface {
+	Etherbase() (common.Address, error)
+	NetVersion() (uint64, error)
+}
+
+func NewEthBackendServer(eth EthBackend, events *Events, gitCommit string) *EthBackendServer {
 	return &EthBackendServer{eth: eth, events: events, gitCommit: gitCommit}
 }
 

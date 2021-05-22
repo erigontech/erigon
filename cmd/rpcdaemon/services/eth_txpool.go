@@ -1,17 +1,16 @@
-package core
+package services
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
-
-var TxPoolAPIVersion = gointerfaces.Version{Major: 1, Minor: 0, Patch: 0}
 
 type TxPoolService struct {
 	txpool.TxpoolClient
@@ -22,7 +21,7 @@ type TxPoolService struct {
 func NewTxPoolService(cc grpc.ClientConnInterface) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: txpool.NewTxpoolClient(cc),
-		version:      TxPoolAPIVersion,
+		version:      gointerfaces.Version{Major: remotedbserver.MiningAPIVersion.Major, Minor: remotedbserver.MiningAPIVersion.Minor, Patch: remotedbserver.MiningAPIVersion.Patch},
 		log:          log.New("remote_service", "tx_pool"),
 	}
 }

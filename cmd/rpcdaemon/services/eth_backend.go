@@ -1,4 +1,4 @@
-package core
+package services
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
@@ -14,8 +15,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
-
-var EthBackendVersion = gointerfaces.Version{Major: 1, Minor: 0, Patch: 0}
 
 // ApiBackend - interface which must be used by API layer
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
@@ -28,12 +27,6 @@ type ApiBackend interface {
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 }
 
-type EthBackend interface {
-	Etherbase() (common.Address, error)
-	NetVersion() (uint64, error)
-	IsMining() bool
-}
-
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger
@@ -43,7 +36,7 @@ type RemoteBackend struct {
 func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
-		version:          EthBackendVersion,
+		version:          gointerfaces.Version{Major: remotedbserver.EthBackendAPIVersion.Major, Minor: remotedbserver.EthBackendAPIVersion.Minor, Patch: remotedbserver.EthBackendAPIVersion.Patch},
 		log:              log.New("remote_service", "eth_backend"),
 	}
 }
