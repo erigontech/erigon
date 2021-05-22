@@ -10,7 +10,7 @@ import (
 
 // DBSchemaVersion
 var DBSchemaVersionLMDB = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
-var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 0, Patch: 0}
+var DBSchemaVersionMDBX = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 // Buckets
 
