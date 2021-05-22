@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 )
@@ -241,17 +240,6 @@ func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
 		return false, err
 	}
 	return v != nil, nil
-}
-
-func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	if m.db == nil {
-		return 0, nil
-	}
-	sz, err := m.db.(HasStats).DiskSize(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return common.StorageSize(sz), nil
 }
 
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {

@@ -1,16 +1,19 @@
-package core
+package services
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // ApiBackend - interface which must be used by API layer
@@ -24,22 +27,35 @@ type ApiBackend interface {
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 }
 
-type EthBackend interface {
-	Etherbase() (common.Address, error)
-	NetVersion() (uint64, error)
-	IsMining() bool
-}
-
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger
+	version          gointerfaces.Version
 }
 
 func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
-		log:              log.New("remote_db"),
+		version:          gointerfaces.VersionFromProto(remotedbserver.EthBackendAPIVersion),
+		log:              log.New("remote_service", "eth_backend"),
 	}
+}
+
+func (back *RemoteBackend) EnsureVersionCompatibility() bool {
+	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+
+		back.log.Error("getting Version", "error", err)
+		return false
+	}
+	if !gointerfaces.EnsureVersion(back.version, versionReply) {
+		back.log.Error("incompatible interface versions", "client", back.version.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	back.log.Info("interfaces compatible", "client", back.version.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
 }
 
 func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {

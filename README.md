@@ -1,8 +1,7 @@
 
 # Erigon
 
-Erigon was originally called Turbo-Geth, a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
-Now it a very different product.
+Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -235,13 +234,17 @@ Send an email to `security [at] torquem.ch`.
 
 ### Team
 
-Core contributors:
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+Core contributors (in alpabetical order of first names):
 
 * Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
+* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+
+* Andrea Lanfranchi
+
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
+
+* Artem Vorotnikov
 
 * Boris Petrov ([b00ris](https://github.com/b00ris))
 

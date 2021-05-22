@@ -49,7 +49,7 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = ethdb.NewObjectDatabase(openKV(path, true))
-			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+			if err := migrations.NewMigrator().Apply(db, datadir, database != "lmdb"); err != nil {
 				panic(err)
 			}
 			db.Close()
@@ -69,8 +69,8 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 }
 
 func openKV(path string, exclusive bool) ethdb.RwKV {
-	if database == "mdbx" {
-		opts := ethdb.NewMDBX().Path(path)
+	if database == "lmdb" {
+		opts := ethdb.NewLMDB().Path(path)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
@@ -82,10 +82,12 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 		if databaseVerbosity != -1 {
 			opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
 		}
-		return opts.MustOpen()
+		kv := opts.MustOpen()
+		metrics.AddCallback(kv.CollectMetrics)
+		return kv
 	}
 
-	opts := ethdb.NewLMDB().Path(path)
+	opts := ethdb.NewMDBX().Path(path)
 	if exclusive {
 		opts = opts.Exclusive()
 	}

@@ -18,6 +18,9 @@ import (
 // The functions in this API this behavior and its use is not required.
 const success = C.MDBX_SUCCESS
 
+const Major = C.MDBX_VERSION_MAJOR
+const Minor = C.MDBX_VERSION_MINOR
+
 const (
 	// Flags for Env.Open.
 	//

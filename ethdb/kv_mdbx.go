@@ -1,5 +1,3 @@
-//+build mdbx
-
 package ethdb
 
 import (
@@ -24,6 +22,9 @@ import (
 
 var _ DbCopier = &MdbxKV{}
 
+const expectMdbxVersionMajor = 0
+const expectMdbxVersionMinor = 10
+
 type MdbxOpts struct {
 	inMem      bool
 	exclusive  bool
@@ -37,7 +38,7 @@ type MdbxOpts struct {
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 	}
 }
 
@@ -86,6 +87,9 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (RwKV, error) {
+	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
+		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
+	}
 	var logger log.Logger
 	var err error
 	if opts.inMem {
@@ -302,14 +306,6 @@ func (db *MdbxKV) Close() {
 		}
 	}
 	db.log.Info("database closed (MDBX)")
-}
-
-func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
-	fileInfo, err := os.Stat(path.Join(db.opts.path, "mdbx.dat"))
-	if err != nil {
-		return 0, err
-	}
-	return uint64(fileInfo.Size()), nil
 }
 
 func (db *MdbxKV) CollectMetrics() {
@@ -539,7 +535,6 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 
 func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
-
 	var dcmp mdbx.CmpFunc
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
@@ -547,6 +542,26 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	}
 
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	if err != nil && !mdbx.IsNotFound(err) {
+		return fmt.Errorf("create bucket: %s, %w", name, err)
+	}
+	if err == nil {
+		cnfCopy.DBI = dbutils.DBI(dbi)
+		var flags uint
+		flags, err = tx.tx.Flags(dbi)
+		if err != nil {
+			return err
+		}
+		cnfCopy.Flags = dbutils.BucketFlags(flags)
+
+		tx.db.buckets[name] = cnfCopy
+		return nil
+	}
+
+	// if bucket with this name not found - check renamed one
+	rename := dbutils.Rename[name]
+
+	dbi, err = tx.tx.OpenDBI(rename, mdbx.DBAccede, nil, dcmp)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -579,7 +594,11 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	if rename != "" {
+		dbi, err = tx.tx.OpenDBI(rename, nativeFlags, nil, dcmp)
+	} else {
+		dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	}
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -761,7 +780,7 @@ func (tx *MdbxTx) PrintDebugInfo() {
 		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
 		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
 	if doPrint {
-		log.Info("Tx info",
+		tx.db.log.Info("Tx info",
 			"id", txInfo.Id,
 			"read_lag", txInfo.ReadLag,
 			"ro", tx.readOnly,
@@ -1350,7 +1369,6 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 		}
 		return nil
 	}
-
 	if err := c.append(k, v); err != nil {
 		return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
 	}

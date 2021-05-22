@@ -149,14 +149,6 @@ func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
-	casted, ok := db.kv.(HasStats)
-	if !ok {
-		return 0, nil
-	}
-	return casted.DiskSize(ctx)
-}
-
 func (db *ObjectDatabase) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	err = db.kv.Update(context.Background(), func(tx RwTx) error {
 		res, err = tx.IncrementSequence(bucket, amount)

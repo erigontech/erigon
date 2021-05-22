@@ -118,8 +118,6 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	Pruning bool
-
 	EnableDownloadV2 bool
 	P2PEnabled       bool
 

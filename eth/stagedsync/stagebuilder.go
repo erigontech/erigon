@@ -269,6 +269,7 @@ func DefaultStages() StageBuilders {
 					world.DB.RwKV(),
 					world.storageMode.Receipts,
 					world.storageMode.CallTraces,
+					0,
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,

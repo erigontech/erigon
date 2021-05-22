@@ -596,6 +596,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			hd.highestInDb = link.blockHeight
 		}
 		link.persisted = true
+		link.header = nil // Drop header reference to free memory, as we won't need it anymore
 		heap.Push(hd.persistedLinkQueue, link)
 		if len(link.next) > 0 {
 			hd.insertList = append(hd.insertList, link.next...)
