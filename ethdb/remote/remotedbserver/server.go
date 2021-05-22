@@ -29,7 +29,7 @@ const MaxTxTTL = 30 * time.Second
 // KvServiceAPIVersion - use it to track changes in API
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
 // 1.2.0 - Added separated services for mining and txpool methods
-var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 2, Patch: 0}
+var KvServiceAPIVersion = &types.VersionReply{Major: 1, Minor: 2, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -103,19 +103,19 @@ func NewKvServer(kv ethdb.RwKV) *KvServer {
 // Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
 	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
-		return &KvServiceAPIVersion, nil
+		return KvServiceAPIVersion, nil
 	}
 	if dbutils.DBSchemaVersion.Major > KvServiceAPIVersion.Major {
 		return &dbutils.DBSchemaVersion, nil
 	}
 	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
-		return &KvServiceAPIVersion, nil
+		return KvServiceAPIVersion, nil
 	}
 	if dbutils.DBSchemaVersion.Minor > KvServiceAPIVersion.Minor {
 		return &dbutils.DBSchemaVersion, nil
 	}
 	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
-		return &KvServiceAPIVersion, nil
+		return KvServiceAPIVersion, nil
 	}
 	return &dbutils.DBSchemaVersion, nil
 }

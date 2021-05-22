@@ -36,7 +36,7 @@ type RemoteBackend struct {
 func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
-		version:          gointerfaces.Version{Major: remotedbserver.EthBackendAPIVersion.Major, Minor: remotedbserver.EthBackendAPIVersion.Minor, Patch: remotedbserver.EthBackendAPIVersion.Patch},
+		version:          gointerfaces.VersionFromProto(remotedbserver.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
 	}
 }

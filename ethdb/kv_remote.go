@@ -172,10 +172,8 @@ func (opts remoteOpts) MustOpen() RwKV {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(versionMajor, versionMinor, versionPatch uint32) remoteOpts {
-	return remoteOpts{bucketsCfg: DefaultBucketConfigs, version: gointerfaces.Version{
-		Major: versionMajor, Minor: versionMinor, Patch: versionPatch,
-	}}
+func NewRemote(v gointerfaces.Version) remoteOpts {
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs, version: v}
 }
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {

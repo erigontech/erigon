@@ -21,7 +21,7 @@ type MiningService struct {
 func NewMiningService(cc grpc.ClientConnInterface) *MiningService {
 	return &MiningService{
 		MiningClient: txpool.NewMiningClient(cc),
-		version:      gointerfaces.Version{Major: remotedbserver.MiningAPIVersion.Major, Minor: remotedbserver.MiningAPIVersion.Minor, Patch: remotedbserver.MiningAPIVersion.Patch},
+		version:      gointerfaces.VersionFromProto(remotedbserver.MiningAPIVersion),
 		log:          log.New("remote_service", "mining"),
 	}
 }

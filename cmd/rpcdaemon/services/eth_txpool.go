@@ -21,7 +21,7 @@ type TxPoolService struct {
 func NewTxPoolService(cc grpc.ClientConnInterface) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: txpool.NewTxpoolClient(cc),
-		version:      gointerfaces.Version{Major: remotedbserver.MiningAPIVersion.Major, Minor: remotedbserver.MiningAPIVersion.Minor, Patch: remotedbserver.MiningAPIVersion.Patch},
+		version:      gointerfaces.VersionFromProto(remotedbserver.TxPoolAPIVersion),
 		log:          log.New("remote_service", "tx_pool"),
 	}
 }

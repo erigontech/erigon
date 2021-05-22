@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
@@ -148,20 +149,27 @@ func TestRemoteKvVersion(t *testing.T) {
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
+	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	// Different Major versions
-	a, err := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major+1, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "")
+	v1 := v
+	v1.Major++
+	a, err := ethdb.NewRemote(v1).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 	// Different Minor versions
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor+1, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "")
+	v2 := v
+	v2.Minor++
+	_, err = ethdb.NewRemote(v2).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 	// Different Patch versions
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch+1).InMem(conn).Open("", "", "")
+	v3 := v
+	v3.Patch++
+	_, err = ethdb.NewRemote(v3).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -184,8 +192,8 @@ func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.R
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
-
-	rdb := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).MustOpen()
+	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
+	rdb := ethdb.NewRemote(v).InMem(conn).MustOpen()
 	readDBs = []ethdb.RwKV{
 		writeDBs[0],
 		writeDBs[1],
