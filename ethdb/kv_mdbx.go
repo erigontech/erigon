@@ -788,7 +788,7 @@ func (tx *MdbxTx) PrintDebugInfo() {
 		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
 		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
 	if doPrint {
-		log.Info("Tx info",
+		tx.db.log.Info("Tx info",
 			"id", txInfo.Id,
 			"read_lag", txInfo.ReadLag,
 			"ro", tx.readOnly,
