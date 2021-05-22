@@ -1,5 +1,6 @@
 syntax = "proto3";
 
+import "google/protobuf/empty.proto";
 import "types/types.proto";
 
 package remote;
@@ -10,6 +11,9 @@ service ETHBACKEND {
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
 
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
 
   // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
   rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);

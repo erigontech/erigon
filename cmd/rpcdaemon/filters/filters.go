@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
@@ -39,7 +39,7 @@ type Filters struct {
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
-func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
+func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
 	log.Info("rpc filters: subscribing to tg events")
 
 	ff := &Filters{

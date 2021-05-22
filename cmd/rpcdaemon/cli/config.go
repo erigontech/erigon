@@ -8,13 +8,13 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
@@ -162,7 +162,7 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
@@ -201,19 +201,31 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		}
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := ethdb.NewRemote(
-			remotedbserver.KvServiceAPIVersion.Major,
-			remotedbserver.KvServiceAPIVersion.Minor,
-			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
+		remoteKv, err := ethdb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		eth = core.NewRemoteBackend(remoteKv.GrpcConn())
-		mining = txpool.NewMiningClient(remoteKv.GrpcConn())
-		txPool = txpool.NewTxpoolClient(remoteKv.GrpcConn())
+		remoteEth := services.NewRemoteBackend(remoteKv.GrpcConn())
+		mining = services.NewMiningService(remoteKv.GrpcConn())
+		txPool = services.NewTxPoolService(remoteKv.GrpcConn())
 		if kv == nil {
 			kv = remoteKv
 		}
+		eth = remoteEth
+		go func() {
+			if !remoteKv.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !remoteEth.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !mining.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !txPool.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+		}()
 	}
 	return kv, eth, txPool, mining, err
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	proto_txpool "github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon/gointerfaces/types"
@@ -18,6 +17,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// EthBackendServiceAPIVersion
+// 2.0.0 - move all mining-related methods to 'txpool/mining' server
+var MiningAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
+
 type MiningServer struct {
 	proto_txpool.UnimplementedMiningServer
 	ctx                 context.Context
@@ -25,15 +28,19 @@ type MiningServer struct {
 	pendingBlockStreams PendingBlockStreams
 	minedBlockStreams   MinedBlockStreams
 	ethash              *ethash.API
-	eth                 core.EthBackend
+	isMining            IsMining
 }
 
-func NewMiningServer(ctx context.Context, eth core.EthBackend, ethashApi *ethash.API) *MiningServer {
-	return &MiningServer{ctx: ctx, eth: eth, ethash: ethashApi}
+type IsMining interface {
+	IsMining() bool
+}
+
+func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API) *MiningServer {
+	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi}
 }
 
 func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
-	return &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}, nil
+	return MiningAPIVersion, nil
 }
 
 func (s *MiningServer) GetWork(context.Context, *proto_txpool.GetWorkRequest) (*proto_txpool.GetWorkReply, error) {
@@ -76,7 +83,7 @@ func (s *MiningServer) Mining(_ context.Context, req *proto_txpool.MiningRequest
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	return &proto_txpool.MiningReply{Enabled: s.eth.IsMining(), Running: true}, nil
+	return &proto_txpool.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
 }
 
 func (s *MiningServer) OnPendingLogs(req *proto_txpool.OnPendingLogsRequest, reply proto_txpool.Mining_OnPendingLogsServer) error {

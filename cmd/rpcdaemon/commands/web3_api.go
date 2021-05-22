@@ -3,8 +3,8 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -16,11 +16,11 @@ type Web3API interface {
 
 type Web3APIImpl struct {
 	*BaseAPI
-	ethBackend core.ApiBackend
+	ethBackend services.ApiBackend
 }
 
 // NewWeb3APIImpl returns Web3APIImpl instance
-func NewWeb3APIImpl(ethBackend core.ApiBackend) *Web3APIImpl {
+func NewWeb3APIImpl(ethBackend services.ApiBackend) *Web3APIImpl {
 	return &Web3APIImpl{
 		BaseAPI:    &BaseAPI{},
 		ethBackend: ethBackend,

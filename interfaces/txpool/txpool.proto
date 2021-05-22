@@ -1,5 +1,6 @@
 syntax = "proto3";
 
+import "google/protobuf/empty.proto";
 import "types/types.proto";
 
 package txpool;
@@ -30,6 +31,8 @@ message OnAddReply {
 }
 
 service Txpool {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
   // preserves incoming order, changes amount, unknown hashes will be omitted
   rpc FindUnknown(TxHashes) returns (TxHashes);
   // Expecting signed transactions. Preserves incoming order and amount
