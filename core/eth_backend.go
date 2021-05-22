@@ -44,22 +44,23 @@ func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          EthBackendVersion,
-		log:              log.New("remote_db"),
+		log:              log.New("remote_service", "eth_backend"),
 	}
 }
 
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		log.Error("getting Version info from remove KV", "error", err)
+
+		back.log.Error("getting Version", "error", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(back.version, versionReply) {
-		log.Error("incompatible KV interface versions", "client", back.version.String(),
+		back.log.Error("incompatible interface versions", "client", back.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false
 	}
-	log.Info("KV interfaces compatible", "client", back.version.String(),
+	back.log.Info("interfaces compatible", "client", back.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
 }

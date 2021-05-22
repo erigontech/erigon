@@ -23,14 +23,14 @@ func NewMiningService(cc grpc.ClientConnInterface) *MiningService {
 	return &MiningService{
 		MiningClient: txpool.NewMiningClient(cc),
 		version:      MiningAPIVersion,
-		log:          log.New("mining_service"),
+		log:          log.New("remote_service", "mining"),
 	}
 }
 
 func (s *MiningService) EnsureVersionCompatibility() bool {
 	versionReply, err := s.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		s.log.Error("getting Version info from remove KV", "error", err)
+		s.log.Error("getting Version", "error", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(s.version, versionReply) {

@@ -23,7 +23,7 @@ func NewTxPoolService(cc grpc.ClientConnInterface) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: txpool.NewTxpoolClient(cc),
 		version:      TxPoolAPIVersion,
-		log:          log.New("mining_service"),
+		log:          log.New("remote_service", "tx_pool"),
 	}
 }
 

@@ -189,15 +189,15 @@ func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
 func (db *RemoteKV) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		log.Error("getting Version info from remove KV", "error", err)
+		db.log.Error("getting Version", "error", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(db.opts.version, versionReply) {
-		log.Error("incompatible KV interface versions", "client", db.opts.version.String(),
+		db.log.Error("incompatible interface versions", "client", db.opts.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false
 	}
-	log.Info("KV interfaces compatible", "client", db.opts.version.String(),
+	db.log.Info("interfaces compatible", "client", db.opts.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
 }
