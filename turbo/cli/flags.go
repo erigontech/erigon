@@ -20,7 +20,7 @@ var (
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
-		Value: "lmdb",
+		Value: "mdbx",
 	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",

@@ -1,5 +1,3 @@
-//+build mdbx
-
 package ethdb
 
 import (
@@ -539,7 +537,6 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error)
 
 func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
-
 	var dcmp mdbx.CmpFunc
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
@@ -547,6 +544,26 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	}
 
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	if err != nil && !mdbx.IsNotFound(err) {
+		return fmt.Errorf("create bucket: %s, %w", name, err)
+	}
+	if err == nil {
+		cnfCopy.DBI = dbutils.DBI(dbi)
+		var flags uint
+		flags, err = tx.tx.Flags(dbi)
+		if err != nil {
+			return err
+		}
+		cnfCopy.Flags = dbutils.BucketFlags(flags)
+
+		tx.db.buckets[name] = cnfCopy
+		return nil
+	}
+
+	// if bucket with this name not found - check renamed one
+	rename := dbutils.Rename[name]
+
+	dbi, err = tx.tx.OpenDBI(rename, mdbx.DBAccede, nil, dcmp)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -579,7 +596,11 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	if rename != "" {
+		dbi, err = tx.tx.OpenDBI(rename, nativeFlags, nil, dcmp)
+	} else {
+		dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	}
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -1350,7 +1371,6 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 		}
 		return nil
 	}
-
 	if err := c.append(k, v); err != nil {
 		return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
 	}

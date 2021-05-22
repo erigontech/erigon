@@ -69,7 +69,6 @@ const (
 	HashedAccountsBucket   = "hashed_accounts"
 	HashedStorageBucket    = "hashed_storage"
 	CurrentStateBucketOld2 = "CST2"
-	CurrentStateBucketOld1 = "CST"
 
 	//key - address + shard_id_u64
 	//value - roaring bitmap  - list of block where it changed
@@ -135,7 +134,6 @@ Invariants:
 */
 const TrieOfAccountsBucket = "trie_account"
 const TrieOfStorageBucket = "trie_storage"
-const IntermediateTrieHashBucketOld1 = "iTh"
 const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
@@ -218,9 +216,63 @@ const (
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
 
-	Sequence = "sequence" // tbl_name -> seq_u64
-
+	Sequence      = "sequence" // tbl_name -> seq_u64
+	HeadHeaderKey = "LastHeader"
 )
+
+var Rename = map[string]string{
+	PlainStateBucket:          "PlainState",
+	PlainContractCodeBucket:   "PlainCodeHash",
+	AccountChangeSetBucket:    "AccountChangeSet",
+	StorageChangeSetBucket:    "StorageChangeSet",
+	HashedAccountsBucket:      "HashedAccount",
+	HashedStorageBucket:       "HashedStorage",
+	AccountsHistoryBucket:     "AccountHistory",
+	StorageHistoryBucket:      "StorageHistory",
+	CodeBucket:                "Code",
+	ContractCodeBucket:        "HashedCodeHash",
+	IncarnationMapBucket:      "IncarnationMap",
+	TrieOfAccountsBucket:      "TrieAccount",
+	TrieOfStorageBucket:       "TrieStorage",
+	DatabaseInfoBucket:        "DbInfo",
+	SnapshotInfoBucket:        "SnapshotInfo",
+	BittorrentInfoBucket:      "BittorrentInfo",
+	HeadersSnapshotInfoBucket: "HeadersSnapshotInfo",
+	BodiesSnapshotInfoBucket:  "BodiesSnapshotInfo",
+	StateSnapshotInfoBucket:   "StateSnapshotInfo",
+	HeaderNumberBucket:        "HeaderNumber",
+	HeaderCanonicalBucket:     "CanonicalHeader",
+	HeadersBucket:             "Header",
+	HeaderTDBucket:            "HeadersTotalDifficulty",
+	BlockBodyPrefix:           "BlockBody",
+	EthTx:                     "BlockTransaction",
+	BlockReceiptsPrefix:       "Receipt",
+	Log:                       "TransactionLog",
+	LogTopicIndex:             "LogTopicIndex",
+	LogAddressIndex:           "LogAddressIndex",
+	CallTraceSet:              "CallTraceSet",
+	CallFromIndex:             "CallFromIndex",
+	CallToIndex:               "CallToIndex",
+	TxLookupPrefix:            "BlockTransactionLookup",
+	BloomBitsPrefix:           "BloomBits",
+	PreimagePrefix:            "Preimage",
+	ConfigPrefix:              "Config",
+	BloomBitsIndexPrefix:      "BloomBitsIndex",
+	SyncStageProgress:         "SyncStage",
+	SyncStageUnwind:           "SyncStageUnwind",
+	CliqueBucket:              "Clique",
+	CliqueSeparateBucket:      "CliqueSeparate",
+	CliqueSnapshotBucket:      "CliqueSnapshot",
+	CliqueLastSnapshotBucket:  "CliqueLastSnapshot",
+	InodesBucket:              "Inode",
+	Senders:                   "TxSender",
+	HeadBlockKey:              "LastBlock",
+	InvalidBlock:              "InvalidBlock",
+	UncleanShutdown:           "UncleanShutdown",
+	Migrations:                "Migration",
+	Sequence:                  "Sequence",
+	HeadHeaderKey:             "LastHeader",
+}
 
 // Keys
 var (
@@ -237,8 +289,6 @@ var (
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
-	HeadHeaderKey = "LastHeader"
-
 	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
 	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
 	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
@@ -253,7 +303,6 @@ var (
 // This list will be sorted in `init` method.
 // BucketsConfigs - can be used to find index in sorted version of Buckets list by name
 var Buckets = []string{
-	CurrentStateBucketOld2,
 	AccountsHistoryBucket,
 	StorageHistoryBucket,
 	CodeBucket,
@@ -297,7 +346,6 @@ var Buckets = []string{
 	TrieOfStorageBucket,
 	HashedAccountsBucket,
 	HashedStorageBucket,
-	IntermediateTrieHashBucketOld2,
 	BittorrentInfoBucket,
 	HeaderCanonicalBucket,
 	HeadersBucket,
@@ -306,11 +354,11 @@ var Buckets = []string{
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
+	IntermediateTrieHashBucketOld2,
+	CurrentStateBucketOld2,
 	SyncStageProgressOld1,
 	SyncStageUnwindOld1,
-	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
-	IntermediateTrieHashBucketOld1,
 	HeaderPrefixOld,
 	CliqueBucket,
 }

@@ -55,15 +55,6 @@ import (
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
 var migrations = []Migration{
-	stagesToUseNamedKeys,
-	unwindStagesToUseNamedKeys,
-	stagedsyncToUseStageBlockhashes,
-	unwindStagedsyncToUseStageBlockhashes,
-	dupSortHashState,
-	dupSortPlainState,
-	dupSortIH,
-	clearIndices,
-	resetIHBucketToRecoverDB,
 	receiptsCborEncode,
 	receiptsOnePerTx,
 	accChangeSetDupSort,
