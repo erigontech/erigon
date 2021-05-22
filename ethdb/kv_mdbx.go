@@ -308,14 +308,6 @@ func (db *MdbxKV) Close() {
 	db.log.Info("database closed (MDBX)")
 }
 
-func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
-	fileInfo, err := os.Stat(path.Join(db.opts.path, "mdbx.dat"))
-	if err != nil {
-		return 0, err
-	}
-	return uint64(fileInfo.Size()), nil
-}
-
 func (db *MdbxKV) CollectMetrics() {
 	if !metrics.Enabled {
 		return
