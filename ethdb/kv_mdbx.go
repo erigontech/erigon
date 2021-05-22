@@ -22,6 +22,9 @@ import (
 
 var _ DbCopier = &MdbxKV{}
 
+const expectMdbxVersionMajor = 0
+const expectMdbxVersionMinor = 10
+
 type MdbxOpts struct {
 	inMem      bool
 	exclusive  bool
@@ -84,6 +87,9 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (RwKV, error) {
+	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
+		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
+	}
 	var logger log.Logger
 	var err error
 	if opts.inMem {
