@@ -232,7 +232,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
 		return fmt.Errorf("committing DB version update: %w", err)
 	}
 	if mdbx {
-		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionLMDB.Major, dbutils.DBSchemaVersionLMDB.Minor, dbutils.DBSchemaVersionLMDB.Patch))
+		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionMDBX.Major, dbutils.DBSchemaVersionMDBX.Minor, dbutils.DBSchemaVersionMDBX.Patch))
 	} else {
 		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionLMDB.Major, dbutils.DBSchemaVersionLMDB.Minor, dbutils.DBSchemaVersionLMDB.Patch))
 	}
