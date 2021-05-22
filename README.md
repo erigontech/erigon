@@ -235,13 +235,17 @@ Send an email to `security [at] torquem.ch`.
 
 ### Team
 
-Core contributors:
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+Core contributors (in alpabetical order of first names):
 
 * Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
+* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+
+* Andrea Lanfranchi
+
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
+
+* Artem Vorotnikov
 
 * Boris Petrov ([b00ris](https://github.com/b00ris))
 
