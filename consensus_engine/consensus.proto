@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package consensus;
+
+option go_package = "./consensus;consensus";
+
+message ChainSpecMessage {
+    string mechanism = 1;       // Name of consensus mechanism, e.g. ethash, clique, aura
+    bytes mechanism_config = 2; // Configuration of specific consensus mechanism - format is specific to the mechanism
+    Genesis genesis = 3;        // Description of genesis block
+    repeated Fork forks = 4;    // Description of forks (upgrades)
+}
+
+message Genesis {
+    types.H256 chain_id = 1; // Chain id starting from genesis block and until the first fork
+    Template template = 2;   // Genesis header without values like "uncle hash", "tx hash" and "state root" calculated
+}
+
+message Fork {
+    string name = 1;         // Code name of the fork
+    uint64 number = 2;       // First block number at which rules of the fork activate
+    types.H256 chain_id = 3; // Chain id starting from this fork until the next fork
+}
+
+message Error {
+    uint32 code = 1;
+    string description = 2;
+}
+
+message Result {
+    bool ok = 1;
+    optional Error error = 2;
+}
+
+message Template {
+    types.H256 parent_hash = 1;
+    types.H160 coinbase = 2;
+    types.H256 difficulty = 3;
+    uint64 number = 4;
+    uint64 gas_limit = 5;
+    uint64 time = 6;
+    bytes extra = 7;
+    uint64 nonce = 8;    
+}
+
+message BlockHeader {
+    Template template = 1;
+    types.H256 uncle_hash = 2;
+    types.H256 root_hash = 3;
+    types.H256 tx_hash = 4;
+    types.H256 receipt_hash = 5;
+    bytes bloom = 6;
+    uint64 gas_used = 7;
+    types.H256 mix_digest = 8;
+}
+
+message Transaction {
+}
+
+message Block {
+    BlockHeader header = 1;
+    repeated BlockHeader uncles = 2;
+    repeated Transaction transactions = 3;
+    bytes total_difficulty = 4;
+}
+
+message GetAuthorRequest {
+    BlockHeader header = 1;
+}
+
+message GetAuthorResponse {
+    Result result = 1;
+    types.H160 address = 2;
+}
+
+message VerifyHeaderRequest {
+    BlockHeader header = 1;
+    bool seal = 2;
+}
+
+message VerifyHeaderResponse {
+    types.H256 hash = 1;
+    Result result = 2;
+    bytes finaliseCode = 3; // Code (in TEVM to execute at the end of the block to finalise it according to the consensus engine rules)
+}
+
+message HeadersRequest {
+    types.H256 hash = 1; // Hash of the highest header requested
+    uint32 amount = 2;   // Number of headers requested
+}
+
+message HeadersResponse {
+    BlockHeader header = 1;
+}
+
+message VerifyUnclesRequest {
+    Block block = 1;
+}
+
+message VerifyUnclesResponse {
+    Result result = 1;
+}
+
+message SealBlockRequest {
+    Result result = 1;
+    Block block = 2;
+}
+
+message SealBlockResponse {
+    Result result = 1;
+    Block block = 2;
+}
+
+message PrepareRequest {
+    BlockHeader header = 1;
+}
+
+message PrepareResponse {
+    Result result = 1;
+}
+
+message FinalizeRequest {
+    BlockHeader header = 1;
+    repeated BlockHeader uncles = 2;
+}
+
+message FinalizeResponse {
+    Result result = 1;
+    types.H256 miner_reward = 2;
+    repeated types.H256 uncle_rewards = 3;
+}
+
+service ConsensusEngine {
+    rpc GetAuthor(GetAuthorRequest) returns(GetAuthorResponse);
+
+    rpc ChainSpec(google.protobuf.Empty) returns(ChainSpecMessage);
+
+    // Core requests verifications from the Consensus Engine via this function
+    rpc VerifyHeaders(stream VerifyHeaderRequest) returns(stream VerifyHeaderResponse);
+
+    // Consensis Engine may ask for extra informaton (more headers) from the core, and these requests are coming through the stream
+    // returned by the ProvideHeaders function
+    rpc ProvideHeaders(stream HeadersResponse) returns(stream HeadersRequest);
+
+    rpc VerifyUncles(stream VerifyUnclesRequest) returns(stream VerifyUnclesResponse);
+    rpc Prepare(stream PrepareRequest) returns(stream PrepareResponse);
+    rpc Finalize(stream FinalizeRequest) returns(stream FinalizeResponse);
+    rpc Seal(SealBlockRequest) returns(stream SealBlockResponse);
+}
+
+message StartTestCaseMessage {
+    string mechanism = 1; // Consensus mechanism used in the test case
+    bytes config = 2;      // Configuration specific to the consensus engine tested
+}
+
+// Test is only run by consensus engine in the testing mode, and allows the test driver to inject the Configuration
+// (which includes chain spec) into the Consensus Engine and reset it's state
+service Test {
+    rpc StartTestCase(StartTestCaseMessage) returns(google.protobuf.Empty);
+}
