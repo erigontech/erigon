@@ -49,7 +49,7 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = ethdb.NewObjectDatabase(openKV(path, true))
-			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+			if err := migrations.NewMigrator().Apply(db, datadir, database != "lmdb"); err != nil {
 				panic(err)
 			}
 			db.Close()

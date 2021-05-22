@@ -144,7 +144,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDb))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDb, false))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -187,7 +187,7 @@ func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.R
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1], true))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

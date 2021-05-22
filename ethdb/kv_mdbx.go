@@ -22,6 +22,9 @@ import (
 
 var _ DbCopier = &MdbxKV{}
 
+const expectMdbxVersionMajor = 0
+const expectMdbxVersionMinor = 10
+
 type MdbxOpts struct {
 	inMem      bool
 	exclusive  bool
@@ -35,7 +38,7 @@ type MdbxOpts struct {
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 	}
 }
 
@@ -84,6 +87,9 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (RwKV, error) {
+	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
+		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
+	}
 	var logger log.Logger
 	var err error
 	if opts.inMem {
@@ -300,14 +306,6 @@ func (db *MdbxKV) Close() {
 		}
 	}
 	db.log.Info("database closed (MDBX)")
-}
-
-func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
-	fileInfo, err := os.Stat(path.Join(db.opts.path, "mdbx.dat"))
-	if err != nil {
-		return 0, err
-	}
-	return uint64(fileInfo.Size()), nil
 }
 
 func (db *MdbxKV) CollectMetrics() {
@@ -782,7 +780,7 @@ func (tx *MdbxTx) PrintDebugInfo() {
 		tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
 		(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
 	if doPrint {
-		log.Info("Tx info",
+		tx.db.log.Info("Tx info",
 			"id", txInfo.Id,
 			"read_lag", txInfo.ReadLag,
 			"ro", tx.readOnly,
