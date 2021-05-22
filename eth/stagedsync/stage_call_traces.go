@@ -102,7 +102,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
-	traceCursor, err := tx.CursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
@@ -169,14 +169,25 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
 	}
-
 	if err = flushBitmaps64(collectorFrom, froms); err != nil {
 		return err
 	}
 	if err = flushBitmaps64(collectorTo, tos); err != nil {
 		return err
 	}
-
+	// Clean up before loading call traces to reclaim space
+	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if endBlock-blockNum <= params.FullImmutabilityThreshold {
+			break
+		}
+		if err = traceCursor.DeleteCurrent(); err != nil {
+			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("%s: failed to move cleanup cursor: %w", logPrefix, err)
+	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
