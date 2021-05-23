@@ -95,7 +95,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -143,7 +143,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,7 +153,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.ReviveDeployEventIterator
@@ -180,7 +180,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -189,7 +189,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
@@ -267,7 +267,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -349,7 +349,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -359,7 +359,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.PolyDeployEventIterator
@@ -385,7 +385,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -394,7 +394,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -419,7 +419,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[4], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -480,7 +480,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -515,7 +515,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -541,7 +541,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[0:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[0:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -556,7 +556,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -566,7 +566,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:4], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -618,7 +618,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -646,7 +646,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -672,7 +672,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -687,12 +687,12 @@ func TestReorgOverStateChange(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -766,7 +766,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -792,7 +792,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -890,7 +890,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -924,7 +924,7 @@ func TestEip2200Gas(t *testing.T) {
 	balanceBefore := st.GetBalance(address)
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -974,7 +974,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var changer *contracts.Changer
 	var err error
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1006,7 +1006,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1030,7 +1030,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1092,7 +1092,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	var contractAddress common.Address
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1127,7 +1127,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1154,12 +1154,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1181,7 +1181,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation")
 	}
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1352,7 +1352,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var phoenixAddress common.Address
 	var err error
 
-	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1414,7 +1414,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
+	longerChain, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1469,7 +1469,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// BLOCKS 1 and 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1486,7 +1486,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// Block 3 and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1501,7 +1501,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// Reorg
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
