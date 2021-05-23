@@ -61,7 +61,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
 
-	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(diffInTurn)
@@ -79,24 +79,24 @@ func TestReimportMirroredState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
-	for i, block := range blocks {
+	for i, block := range chain.Blocks {
 		header := block.Header()
 		if i > 0 {
-			header.ParentHash = blocks[i-1].Hash()
+			header.ParentHash = chain.Blocks[i-1].Hash()
 		}
 		header.Extra = make([]byte, ExtraVanity+ExtraSeal)
 		header.Difficulty = diffInTurn
 
 		sig, _ := crypto.Sign(SealHash(header).Bytes(), key)
 		copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
-		blocks[i] = block.WithSeal(header)
+		chain.Blocks[i] = block.WithSeal(header)
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
 	db = ethdb.NewTestDB(t)
 	genspec.MustCommit(db)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
@@ -108,7 +108,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
