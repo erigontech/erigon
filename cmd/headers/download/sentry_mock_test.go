@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -51,22 +50,15 @@ type MockSentry struct {
 	genesis      *types.Block
 	sentryClient *SentryClientDirect
 	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
-	streamLock   sync.Mutex
+	streamWg     sync.WaitGroup
 	peerId       *ptypes.H512
 	receiveWg    sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
-	for {
-		ms.streamLock.Lock()
-		if ms.stream != nil {
-			ms.streamLock.Unlock()
-			return ms.stream
-		}
-		ms.streamLock.Unlock()
-		time.Sleep(time.Millisecond)
-	}
+	ms.streamWg.Wait()
+	return ms.stream
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
@@ -91,9 +83,8 @@ func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*emptypb.E
 	return nil, nil
 }
 func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveMessagesServer) error {
-	ms.streamLock.Lock()
 	ms.stream = stream
-	ms.streamLock.Unlock()
+	ms.streamWg.Done()
 	<-ms.ctx.Done()
 	return nil
 }
@@ -226,6 +217,7 @@ func mock(t *testing.T) *MockSentry {
 		t.Fatal(err)
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
+	mock.streamWg.Add(1)
 	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage, &mock.receiveWg)
 	t.Cleanup(func() {
 		mock.cancel()
