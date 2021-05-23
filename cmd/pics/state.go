@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -289,11 +288,7 @@ func initialState1() error {
 		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
-	if err != nil {
-		return err
-	}
-	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
+	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
 	if err != nil {
 		return err
 	}
@@ -416,7 +411,7 @@ func initialState1() error {
 	kv := db.RwKV()
 	snapshotDB := db.MemCopy()
 
-	_, _, err = core.SetupGenesisBlock(db, gspec, true, false)
+	_, _, err = core.SetupGenesisBlock(db, gspec, true)
 	if err != nil {
 		return err
 	}
