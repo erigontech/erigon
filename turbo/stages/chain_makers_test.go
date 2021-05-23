@@ -65,7 +65,7 @@ func ExampleGenerateChain() {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 5, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -97,7 +97,7 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}

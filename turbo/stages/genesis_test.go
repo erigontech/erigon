@@ -126,11 +126,11 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
-				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, nil, false /* intermediateHashes */)
+				chain, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, nil, false /* intermediateHashes */)
 				if err != nil {
 					return nil, nil, err
 				}
-				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), blocks, true /* checkRoot */); err != nil {
+				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), chain.Blocks, true /* checkRoot */); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
