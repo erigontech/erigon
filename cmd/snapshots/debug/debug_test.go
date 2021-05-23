@@ -57,7 +57,7 @@ func TestMatreshkaStream(t *testing.T) {
 	}
 
 	tmpDb := ethdb.NewObjectDatabase(kv)
-	chainConfig, _, genesisErr := core.SetupGenesisBlock(tmpDb, core.DefaultGenesisBlock(), true, false /* overwrite */)
+	chainConfig, _, genesisErr := core.SetupGenesisBlock(tmpDb, core.DefaultGenesisBlock(), true)
 	if genesisErr != nil {
 		t.Fatal(err)
 	}

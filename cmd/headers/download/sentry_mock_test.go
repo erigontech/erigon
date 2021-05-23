@@ -156,7 +156,12 @@ func mock(t *testing.T) *MockSentry {
 		},
 	}
 	// Committed genesis will be shared between download and mock sentry
-	mock.genesis = gspec.MustCommit(ethdb.NewObjectDatabase(mock.db))
+	_, mock.genesis, err = core.SetupGenesisBlock(ethdb.NewObjectDatabase(mock.db), gspec, sm.History)
+	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
+		t.Fatal(err)
+	}
+
+	//mock.genesis = gspec.MustCommit()
 	blockDownloaderWindow := 128
 	networkID := uint64(1)
 	mock.sentryClient = &SentryClientDirect{}
