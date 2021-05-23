@@ -157,20 +157,16 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, history, overwrite)
-}
-
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideLondon *big.Int, history bool, overwrite bool) (*params.ChainConfig, common.Hash, error) {
+func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
-		return params.AllEthashProtocolChanges, common.Hash{}, ErrGenesisNoConfig
+		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
 	if storedErr != nil {
-		return nil, common.Hash{}, storedErr
+		return nil, nil, storedErr
 	}
-	if overwrite || (stored == common.Hash{}) {
+	if (stored == common.Hash{}) {
 		custom := true
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
@@ -179,49 +175,51 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		}
 		block, _, err1 := genesis.Commit(db, history)
 		if err1 != nil {
-			return genesis.Config, common.Hash{}, err1
+			return genesis.Config, nil, err1
 		}
 		if custom {
 			log.Info("Writing custom genesis block", "hash", block.Hash().String())
 		}
-		return genesis.Config, block.Hash(), nil
+		return genesis.Config, block, nil
 	}
+
 	// Check whether the genesis block is already written.
 	if genesis != nil {
 		block, _, err1 := genesis.ToBlock()
 		if err1 != nil {
-			return genesis.Config, common.Hash{}, err1
+			return genesis.Config, nil, err1
 		}
 		hash := block.Hash()
 		if hash != stored {
-			return genesis.Config, block.Hash(), &GenesisMismatchError{stored, hash}
+			return genesis.Config, block, &GenesisMismatchError{stored, hash}
 		}
+	}
+	storedBlock, err := rawdb.ReadBlockByHashDeprecated(db, stored)
+	if err != nil {
+		return nil, nil, err
 	}
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
-	if overrideLondon != nil {
-		newcfg.LondonBlock = overrideLondon
-	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
-		return newcfg, common.Hash{}, err
+		return newcfg, nil, err
 	}
 	storedcfg, storedErr := rawdb.ReadChainConfig(db, stored)
 	if storedErr != nil {
-		return newcfg, common.Hash{}, storedErr
+		return newcfg, nil, storedErr
 	}
-	if overwrite || storedcfg == nil {
+	if storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
 		if err1 != nil {
-			return newcfg, common.Hash{}, err1
+			return newcfg, nil, err1
 		}
-		return newcfg, stored, nil
+		return newcfg, storedBlock, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
 	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
 	// if we just continued here.
 	if genesis == nil && stored != params.MainnetGenesisHash {
-		return storedcfg, stored, nil
+		return storedcfg, storedBlock, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -231,13 +229,13 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	} else {
 		compatErr := storedcfg.CheckCompatible(newcfg, *height)
 		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
-			return newcfg, stored, compatErr
+			return newcfg, storedBlock, compatErr
 		}
 	}
 	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
-		return newcfg, common.Hash{}, err
+		return newcfg, nil, err
 	}
-	return newcfg, stored, nil
+	return newcfg, storedBlock, nil
 }
 
 func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {

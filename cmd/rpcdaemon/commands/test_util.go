@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -52,11 +51,10 @@ func createTestDb() (ethdb.Database, error) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
 	if err != nil {
 		return nil, err
 	}
-	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 
 	engine := ethash.NewFaker()
 

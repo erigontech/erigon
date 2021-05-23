@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -61,49 +62,49 @@ func TestSetupGenesis(t *testing.T) {
 	oldcustomg.Config = &params.ChainConfig{HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		name       string
-		fn         func(*ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error)
+		fn         func(*ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error)
 		wantConfig *params.ChainConfig
 		wantHash   common.Hash
 		wantErr    error
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
-				return core.SetupGenesisBlock(db, new(core.Genesis), true /* history */, false /* overwrite */)
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
+				return core.SetupGenesisBlock(db, new(core.Genesis), true)
 			},
 			wantErr:    core.ErrGenesisNoConfig,
 			wantConfig: params.AllEthashProtocolChanges,
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
-				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
+				return core.SetupGenesisBlock(db, nil, true)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
-				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
+				return core.SetupGenesisBlock(db, nil, true)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
-				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, nil, true)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
 		},
 		{
 			name: "custom block in DB, genesis == ropsten",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
-				return core.SetupGenesisBlock(db, core.DefaultRopstenGenesisBlock(), true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, core.DefaultRopstenGenesisBlock(), true)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
 			wantHash:   params.RopstenGenesisHash,
@@ -111,29 +112,29 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
 				oldcustomg.MustCommit(db)
-				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, &customg, true)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, error) {
+			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, *types.Block, error) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
 				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, nil, false /* intermediateHashes */)
 				if err != nil {
-					return nil, common.Hash{}, err
+					return nil, nil, err
 				}
 				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), blocks, true /* checkRoot */); err != nil {
-					return nil, common.Hash{}, err
+					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, &customg, true)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -150,17 +151,20 @@ func TestSetupGenesis(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			db := ethdb.NewTestDB(t)
-			config, hash, err := test.fn(db)
+			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
 				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
-				t.Errorf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
+				t.Fatalf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
 			}
 			if !reflect.DeepEqual(config, test.wantConfig) {
 				t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
 			}
-			if hash != test.wantHash {
-				t.Errorf("%s: returned hash %s, want %s", test.name, hash.Hex(), test.wantHash.Hex())
+			if err != nil {
+				return
+			}
+			if genesis.Hash() != test.wantHash {
+				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				// Check database content.
 				stored := rawdb.ReadBlockDeprecated(db, test.wantHash, 0)

@@ -94,7 +94,7 @@ func GetStorageModeFromDB(db KVGetter) (StorageMode, error) {
 	return sm, nil
 }
 
-func OverrideStorageMode(db Database, sm StorageMode) error {
+func OverrideStorageMode(db RwTx, sm StorageMode) error {
 	var (
 		err error
 	)
@@ -122,7 +122,7 @@ func OverrideStorageMode(db Database, sm StorageMode) error {
 	return nil
 }
 
-func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
+func SetStorageModeIfNotExist(db RwTx, sm StorageMode) error {
 	var (
 		err error
 	)
@@ -153,7 +153,7 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 	return nil
 }
 
-func setMode(db Database, key []byte, currentValue bool) error {
+func setMode(db RwTx, key []byte, currentValue bool) error {
 	val := []byte{2}
 	if currentValue {
 		val = []byte{1}
@@ -164,7 +164,7 @@ func setMode(db Database, key []byte, currentValue bool) error {
 	return nil
 }
 
-func setModeOnEmpty(db Database, key []byte, currentValue bool) error {
+func setModeOnEmpty(db RwTx, key []byte, currentValue bool) error {
 	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
 	if err != nil {
 		return err

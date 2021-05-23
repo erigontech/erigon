@@ -38,7 +38,7 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapshotMode snapshotsync.SnapshotMode) *ethdb.ObjectDatabase {
+func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapshotMode snapshotsync.SnapshotMode) ethdb.RwKV {
 	db := ethdb.NewObjectDatabase(openKV(path, false))
 	if applyMigrations {
 		has, err := migrations.NewMigrator().HasPendingMigrations(db)
@@ -57,10 +57,10 @@ func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapsh
 		}
 	}
 	metrics.AddCallback(db.RwKV().CollectMetrics)
-	return db
+	return db.RwKV()
 }
 
-func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
+func openDatabase(path string, applyMigrations bool) ethdb.RwKV {
 	mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
 	if err != nil {
 		panic(err)
