@@ -272,7 +272,7 @@ func TestHeaderStep(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -316,7 +316,7 @@ func TestReorg(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -369,7 +369,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,7 +415,7 @@ func TestReorg(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	// This is unwind step
 	highestSeenHeader = uint64(long1[len(long1)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +452,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2[len(short2)-1].NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 }

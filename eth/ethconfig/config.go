@@ -174,6 +174,8 @@ type Config struct {
 
 	// Berlin block override (TODO: remove after the fork)
 	StagedSync *stagedsync.StagedSync `toml:"-"`
+
+	StateStream bool
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {
