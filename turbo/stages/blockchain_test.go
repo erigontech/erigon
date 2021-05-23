@@ -918,10 +918,6 @@ func TestEIP155Transition(t *testing.T) {
 		genesis = gspec.MustCommit(db)
 	)
 
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
-
 	blocks, _, chainErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var (
 			tx      types.Transaction
@@ -970,12 +966,12 @@ func TestEIP155Transition(t *testing.T) {
 	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); chainErr != nil {
 		t.Fatal(chainErr)
 	}
-	block := blockchain.GetBlockByNumber(1)
+	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
 	if block.Transactions()[0].Protected() {
 		t.Error("Expected block[0].txs[0] to not be replay protected")
 	}
 
-	block = blockchain.GetBlockByNumber(3)
+	block, _ = rawdb.ReadBlockByNumberDeprecated(db, 3)
 	if block.Transactions()[0].Protected() {
 		t.Error("Expected block[3].txs[0] to not be replay protected")
 	}
@@ -1034,13 +1030,6 @@ func doModesTest(t *testing.T, history, preimages, receipts, txlookup bool) erro
 		}
 		genesis, _, _ = gspec.Commit(db, history)
 	)
-
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	blockchain.EnableReceipts(receipts)
-	blockchain.EnablePreimages(preimages)
-	blockchain.EnableTxLookupIndex(txlookup)
-	defer blockchain.Stop()
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, func(i int, block *core.BlockGen) {
 		var (
@@ -1248,10 +1237,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 		genesis = gspec.MustCommit(db)
 	)
-
-	txCacher := core.NewTxSenderCacher(1)
-	blockchain, _ := core.NewBlockChain(db, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	defer blockchain.Stop()
 
 	var theAddr common.Address
 
