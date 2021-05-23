@@ -255,24 +255,24 @@ func TestHeaderStep(t *testing.T) {
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          1,
 		BlockHeadersPacket: chain.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -295,9 +295,9 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -307,15 +307,15 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -348,9 +348,9 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 
 	// Send headers of the short branch
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -360,14 +360,14 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -379,9 +379,9 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 
 	// Send headers of the long2 branch
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -391,9 +391,9 @@ func TestReorg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 
 	// Send headers of the long1 branch
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -401,14 +401,14 @@ func TestReorg(t *testing.T) {
 		BlockHeadersPacket: long1.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
 	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,9 +427,9 @@ func TestReorg(t *testing.T) {
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 
 	// Send headers of the short branch
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -437,14 +437,14 @@ func TestReorg(t *testing.T) {
 		BlockHeadersPacket: short2.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
-	m.receiveWg.Add(1)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 }

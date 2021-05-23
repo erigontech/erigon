@@ -443,6 +443,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		txPool,
 		false,
 		nil,
+		nil,
 	)
 	if err != nil {
 		return err

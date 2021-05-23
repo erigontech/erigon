@@ -207,7 +207,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 	defer tx.Rollback()
 
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -265,7 +265,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
 		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(db, false, false, 0, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir),
+			stagedsync.StageExecuteBlocksCfg(db, false, false, 0, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir), nil,
 		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)

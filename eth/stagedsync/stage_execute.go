@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 )
 
@@ -103,7 +104,15 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database, params ExecuteBlockCfg, writeChangesets bool, traceCursor ethdb.RwCursorDupSort) error {
+func executeBlockWithGo(
+	block *types.Block,
+	tx ethdb.RwTx,
+	batch ethdb.Database,
+	params ExecuteBlockCfg,
+	writeChangesets bool,
+	traceCursor ethdb.RwCursorDupSort,
+	accumulator *shards.Accumulator,
+) error {
 	blockNum := block.NumberU64()
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -117,10 +126,13 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 	if params.writerBuilder != nil {
 		stateWriter = params.writerBuilder(batch, tx, blockNum)
 	} else {
+		if accumulator != nil {
+			accumulator.StartChange(blockNum, block.Hash(), false /* unwind */)
+		}
 		if writeChangesets {
-			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
 		} else {
-			stateWriter = state.NewPlainStateWriterNoHistory(batch, blockNum)
+			stateWriter = state.NewPlainStateWriterNoHistory(batch, blockNum).SetAccumulator(accumulator)
 		}
 	}
 
@@ -197,7 +209,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.RwTx, batch ethdb.Database,
 	return nil
 }
 
-func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
+func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -274,7 +286,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			if cfg.pruningDistance > 0 && to-blockNum > cfg.pruningDistance {
 				writeChangesets = false
 			}
-			if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor); err != nil {
+			if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor, accumulator); err != nil {
 				return err
 			}
 		}
@@ -367,7 +379,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -384,7 +396,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err := unwindExecutionStage(u, s, tx, quit, cfg); err != nil {
+	if err := unwindExecutionStage(u, s, tx, quit, cfg, accumulator); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
@@ -399,11 +411,18 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
 	logPrefix := s.state.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
+	if accumulator != nil {
+		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+		if err != nil {
+			return fmt.Errorf("%s: reading canonical hash of unwind point: %v", logPrefix, err)
+		}
+		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
+	}
 	changes, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, cfg.tmpdir, quit)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
@@ -435,15 +454,32 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
+				if accumulator != nil {
+					accumulator.ChangeAccount(address, newV)
+				}
 				if err := next(k, k, newV); err != nil {
 					return err
 				}
 			} else {
+				if accumulator != nil {
+					var address common.Address
+					copy(address[:], k)
+					accumulator.DeleteAccount(address)
+				}
 				if err := next(k, k, nil); err != nil {
 					return err
 				}
 			}
 			return nil
+		}
+		if accumulator != nil {
+			var address common.Address
+			var incarnation uint64
+			var location common.Hash
+			copy(address[:], k[:common.AddressLength])
+			incarnation = binary.BigEndian.Uint64(k[common.AddressLength:])
+			copy(location[:], k[common.AddressLength+common.IncarnationLength:])
+			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(value))
 		}
 		if len(value) > 0 {
 			if err := next(k, k[:storageKeyLength], value); err != nil {

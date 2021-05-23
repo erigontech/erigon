@@ -20,7 +20,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
 - [Getting in touch](#getting-in-touch)
-    + [Turbo-Geth Discord Server](#turbo-geth-discord-server)
+    + [Erigon Discord Server](#erigon-discord-server)
     + [Reporting security issues/concerns](#reporting-security-issues-concerns)
     + [Team](#team)
 - [Known issues](#known-issues)
@@ -53,8 +53,8 @@ Usage
 ### Getting Started
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
-> cd turbo-geth
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+> cd erigon
 > make tg
 > ./build/bin/tg
 ```
@@ -63,8 +63,8 @@ Usage
 
 If you would like to give turbo-geth a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/turbo-geth.git
-> cd turbo-geth
+> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+> cd erigon
 > make tg
 > ./build/bin/tg --datadir goerli --chain goerli
 ```
@@ -91,9 +91,11 @@ Support only remote-miners.
 
 ### Windows
 
-Windows users may run turbo-geth in 3 possible ways:
+Windows users may run erigon in 3 possible ways:
 
-* Build tg binaries natively for Windows : while this method is possible we still lack a fully automated build process thus, at the moment, is not to be preferred. Besides there's also a caveat which might cause your experience with TG as native on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the option `--lmdb.mapSize`
+* Build executable binaries natively for Windows using provided `win-build.ps1` PowerShell script which has to be run with local Administrator privileges.
+The script creates `libmdbx.dll` (MDBX is current default database for Erigon) and copies it into Windows's `system32` folder (generally `C:\Windows\system32`). 
+Though is still possible to run erigon with LMDB database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
@@ -138,7 +140,7 @@ accounts and the storage.
 
 ### Faster Initial Sync
 
-Turbo-Geth uses a rearchitected full sync algorithm from
+Erigon uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
 
@@ -158,15 +160,17 @@ Examples of stages are:
 
 * Downloading block bodies;
 
+* Recovering senders' addresses;
+
 * Executing blocks;
 
 * Validating root hashes and building intermediate hashes for the state Merkle trie;
 
-* And more...
+* [...]
 
 ### JSON-RPC daemon
 
-In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
+In Erigon RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
 it can run from a snapshot of a database for read-only calls. 
@@ -222,7 +226,7 @@ XDG_DATA_HOME=/preferred/data/folder docker-compose up
 Getting in touch
 ================
 
-### Turbo-Geth Discord Server
+### Erigon Discord Server
 
 The main discussions are happening on our Discord server. 
 To get an invite, send an email to `tg [at] torquem.ch` with your name, occupation, 
@@ -240,11 +244,11 @@ Core contributors (in alpabetical order of first names):
 
 * Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
-* Andrea Lanfranchi
+* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
 
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
-* Artem Vorotnikov
+* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
 
 * Boris Petrov ([b00ris](https://github.com/b00ris))
 
@@ -252,7 +256,7 @@ Core contributors (in alpabetical order of first names):
 
 * Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
-* Giulio Rebuffo
+* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
 
 * Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
@@ -271,7 +275,7 @@ Known issues
 
 ### `htop` shows incorrect memory usage
 
-TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
+Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
 
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App", 
@@ -286,7 +290,7 @@ Without `grep` you can see details - `section MALLOC ZONE column Resident Size` 
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
+Erigon uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
 
 **Warning:** Multiple instances of TG on same machine will touch Disk concurrently, 
 it impacts performance - one of main TG optimisations: "reduce Disk random access". 

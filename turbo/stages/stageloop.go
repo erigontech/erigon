@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -53,6 +54,7 @@ func StageLoop(
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
+	stateStream bool,
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
@@ -67,7 +69,11 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
+		var accumulator *shards.Accumulator
+		if !initialCycle && stateStream {
+			accumulator = &shards.Accumulator{}
+		}
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -92,6 +98,7 @@ func StageLoopStep(
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
 	initialCycle bool,
+	accumulator *shards.Accumulator,
 ) (err error) {
 	// avoid crash because TG's core does many things -
 	defer func() {
@@ -139,7 +146,7 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, ethdb.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
+	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, ethdb.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil, accumulator)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}

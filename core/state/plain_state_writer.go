@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
@@ -17,6 +18,7 @@ type PlainStateWriter struct {
 	db          ethdb.Database
 	csw         *ChangeSetWriter
 	blockNumber uint64
+	accumulator *shards.Accumulator
 }
 
 func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) *PlainStateWriter {
@@ -34,6 +36,11 @@ func NewPlainStateWriterNoHistory(db ethdb.Database, blockNumber uint64) *PlainS
 	}
 }
 
+func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *PlainStateWriter {
+	w.accumulator = accumulator
+	return w
+}
+
 func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
@@ -42,6 +49,9 @@ func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
+	if w.accumulator != nil {
+		w.accumulator.ChangeAccount(address, value)
+	}
 	return w.db.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
@@ -50,6 +60,9 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 			return err
 		}
+	}
+	if w.accumulator != nil {
+		w.accumulator.ChangeCode(address, incarnation, code)
 	}
 	if err := w.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
@@ -62,6 +75,9 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
 			return err
 		}
+	}
+	if w.accumulator != nil {
+		w.accumulator.DeleteAccount(address)
 	}
 	if err := w.db.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
 		return err
@@ -88,6 +104,9 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 
 	v := value.Bytes()
+	if w.accumulator != nil {
+		w.accumulator.ChangeStorage(address, incarnation, *key, v)
+	}
 	if len(v) == 0 {
 		return w.db.Delete(dbutils.PlainStateBucket, compositeKey, nil)
 	}

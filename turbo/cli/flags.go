@@ -121,6 +121,10 @@ var (
 		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
 		Value: "",
 	}
+	StateStreamFlag = cli.BoolFlag{
+		Name:  "state.stream",
+		Usage: "Enable streaming of state changes from core to RPC daemon",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -157,6 +161,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
+	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
 }
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
@@ -194,6 +199,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
 		cfg.ExternalSnapshotDownloaderAddr = *v
+	}
+	if v := f.Bool(StateStreamFlag.Name, false, StateStreamFlag.Usage); v != nil {
+		cfg.StateStream = *v
 	}
 }
 

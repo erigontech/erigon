@@ -124,7 +124,7 @@ func RecvMessage(
 }
 
 //Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, waitForDone chan struct{}) {
+func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
 	stages.StageLoop(
 		ctx,
 		db,
@@ -132,6 +132,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		controlServer.hd,
 		controlServer.chainConfig,
 		notifier,
+		stateStream,
 		waitForDone,
 	)
 }
