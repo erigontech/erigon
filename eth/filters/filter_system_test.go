@@ -178,11 +178,11 @@ func TestBlockSubscription(t *testing.T) {
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, deadline)
 		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
-		chain, _, _ = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 		chainEvents = []core.ChainEvent{}
 	)
 
-	for _, blk := range chain {
+	for _, blk := range chain.Blocks {
 		chainEvents = append(chainEvents, core.ChainEvent{Hash: blk.Hash(), Block: blk})
 	}
 
