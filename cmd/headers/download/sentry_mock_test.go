@@ -68,12 +68,6 @@ func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
 	}
 }
 
-func (ms *MockSentry) Close() {
-	ms.cancel()
-	ms.db.Close()
-	os.RemoveAll(ms.tmpdir)
-}
-
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
@@ -111,7 +105,6 @@ func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxM
 
 func mock(t *testing.T) *MockSentry {
 	mock := &MockSentry{}
-	t.Cleanup(mock.Close)
 	mock.ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.db = ethdb.NewTestKV(t)
 	var err error
@@ -228,6 +221,11 @@ func mock(t *testing.T) *MockSentry {
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage)
+	t.Cleanup(func() {
+		mock.cancel()
+		txPool.Stop()
+		txPoolServer.TxFetcher.Stop()
+	})
 	return mock
 }
 
