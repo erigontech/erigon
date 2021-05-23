@@ -84,7 +84,15 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 	}
 }
 
-func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+// RecvMessage is normally run in a separate go-routine because it only exists when there a no more messages
+// to be received (end of process, or interruption, or end of test)
+// wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil
+func RecvMessage(
+	ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -108,6 +116,9 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvMessage: Handling incoming message", "error", err)
+		}
+		if wg != nil {
+			wg.Done()
 		}
 	}
 }

@@ -53,6 +53,7 @@ type MockSentry struct {
 	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
 	streamLock   sync.Mutex
 	peerId       *ptypes.H512
+	receiveWg    sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
@@ -225,7 +226,7 @@ func mock(t *testing.T) *MockSentry {
 		t.Fatal(err)
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
-	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage)
+	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage, &mock.receiveWg)
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
@@ -256,6 +257,7 @@ func TestHeaderStep(t *testing.T) {
 	require.NoError(t, err)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	// Send all the headers
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
@@ -268,6 +270,8 @@ func TestHeaderStep(t *testing.T) {
 	require.NoError(t, err)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
@@ -297,6 +301,7 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 
 	// Send all the headers
 	headers := make([]*types.Header, len(blocks))
@@ -312,6 +317,8 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
@@ -351,6 +358,7 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 
 	// Send headers of the short branch
 	headers = make([]*types.Header, len(short))
@@ -366,6 +374,8 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
 	initialCycle = false
@@ -383,6 +393,7 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 
 	// Send headers of the long2 branch
 	headers = make([]*types.Header, len(long2))
@@ -398,6 +409,7 @@ func TestReorg(t *testing.T) {
 	}
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 
 	// Send headers of the long1 branch
 	headers = make([]*types.Header, len(long1))
@@ -411,8 +423,9 @@ func TestReorg(t *testing.T) {
 	require.NoError(t, err)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	time.Sleep(100 * time.Millisecond)
 	// This is unwind step
 	highestSeenHeader = uint64(long1[len(long1)-1].NumberU64())
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
@@ -436,6 +449,7 @@ func TestReorg(t *testing.T) {
 	require.NoError(t, err)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 
 	// Send headers of the short branch
 	headers = make([]*types.Header, len(short2))
@@ -449,6 +463,8 @@ func TestReorg(t *testing.T) {
 	require.NoError(t, err)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader = uint64(short2[len(short2)-1].NumberU64())
 	initialCycle = false
