@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"errors"
-	"runtime"
 	"sort"
 	"testing"
 
@@ -428,14 +427,6 @@ func TestClique(t *testing.T) {
 			engine := New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.fakeDiff = true
 
-			txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-			chain, err := core.NewBlockChain(db, &config, engine, vm.Config{}, nil, txCacher)
-			if err != nil {
-				t.Errorf("test %d: failed to create test chain: %v", i, err)
-				engine.Close()
-				return
-			}
-
 			genesisBlock, _, _ := genesis.ToBlock()
 			blocks, _, err := core.GenerateChain(&config, genesisBlock, engine, db.RwKV(), len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
@@ -498,7 +489,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := blocks[len(blocks)-1]
 
-			snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
+			snap, err := engine.snapshot(stagedsync.ChainReader{Cfg: config, Db: db}, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)
