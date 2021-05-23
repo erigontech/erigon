@@ -217,6 +217,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	} else {
 		config.StorageMode = sm
 	}
+	log.Info("Effective", "storage mode", config.StorageMode)
 
 	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
 		return nil, err

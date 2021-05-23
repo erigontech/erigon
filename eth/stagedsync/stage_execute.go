@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"sort"
 	"time"
@@ -233,7 +234,9 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		return nil
 	}
 	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	if to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
 
 	var traceCursor ethdb.RwCursorDupSort
 	if cfg.writeCallTraces {
@@ -346,6 +349,16 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 		}
 	}
+	// Prune changesets if needed
+	if cfg.pruningDistance > 0 {
+		if err := pruneChangeSets(tx, logPrefix, "account changesets", dbutils.AccountChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
+			return err
+		}
+		if err := pruneChangeSets(tx, logPrefix, "storage changesets", dbutils.StorageChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
+			return err
+		}
+	}
+
 	if !useExternalTx {
 		if traceCursor != nil {
 			traceCursor.Close()
@@ -358,6 +371,49 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
 	return stoppedErr
+}
+
+func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName string, endBlock uint64, pruningDistance uint64, logChannel <-chan time.Time) error {
+	changeSetCursor, err := tx.RwCursorDupSort(tableName)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create cursor for pruning %s: %v", logPrefix, name, err)
+	}
+	var prunedMin uint64 = math.MaxUint64
+	var prunedMax uint64 = 0
+	var k []byte
+
+	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if endBlock-blockNum <= pruningDistance {
+			break
+		}
+		select {
+		default:
+		case <-logChannel:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] Pruning", logPrefix), "table", tableName, "number", blockNum,
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
+		}
+		if err = changeSetCursor.DeleteCurrent(); err != nil {
+			return fmt.Errorf("%s: failed to remove %s for block %d: %v", logPrefix, name, blockNum, err)
+		}
+		if blockNum < prunedMin {
+			prunedMin = blockNum
+		}
+		if blockNum > prunedMax {
+			prunedMax = blockNum
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("%s: failed to move %s cleanup cursor: %w", logPrefix, tableName, err)
+	}
+	if prunedMax != 0 && prunedMax > prunedMin+16 {
+		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", tableName, "from", prunedMin, "to", prunedMax)
+	}
+	return nil
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {

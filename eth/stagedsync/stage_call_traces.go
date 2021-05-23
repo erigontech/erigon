@@ -184,6 +184,16 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if endBlock-blockNum <= params.FullImmutabilityThreshold {
 			break
 		}
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
+		}
 		if err = traceCursor.DeleteCurrent(); err != nil {
 			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
 		}
@@ -197,8 +207,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cleanup cursor: %w", logPrefix, err)
 	}
-	if prunedMax != 0 {
-		log.Info(fmt.Sprintf("[%s] Pruned trace call index", logPrefix), "from", prunedMin, "to", prunedMax)
+	if prunedMax != 0 && prunedMax > prunedMin+16 {
+		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
