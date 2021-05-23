@@ -170,7 +170,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	signer := types.MakeSigner(params.TestChainConfig, 1)
 
 	testGenesisNonce := int64(-1)
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db.RwKV(), totalLen, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db.RwKV(), totalLen, func(i int, block *core.BlockGen) {
 		if i < existingLen || existingLen == 0 {
 			block.SetCoinbase(zeroAddress)
 
@@ -220,13 +220,13 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 
 	// Convert the block-chain into a hash-chain and header/block maps
 	td := new(big.Int).Set(tc.td(parent.Hash()))
-	for i, b := range blocks[existingLen:] {
+	for i, b := range chain.Blocks[existingLen:] {
 		td = td.Add(td, b.Difficulty())
 		hash := b.Hash()
 		tc.chain = append(tc.chain, hash)
 		tc.blockm[hash] = b
 		tc.headerm[hash] = b.Header()
-		tc.receiptm[hash] = receipts[existingLen+i]
+		tc.receiptm[hash] = chain.Receipts[existingLen+i]
 		tc.tdm[hash] = new(big.Int).Set(td)
 	}
 }
