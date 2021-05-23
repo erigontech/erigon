@@ -99,12 +99,6 @@ func TestMatreshkaStream(t *testing.T) {
 	fmt.Println("currentBlock", currentBlock.Number.Uint64())
 	blockNum := uint64(1)
 	limit := currentBlock.Number.Uint64()
-	blockchain, err := core.NewBlockChain(db, chainConfig, ethash.NewFaker(), vm.Config{
-		NoReceipts: true,
-	}, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
 	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(db, tx, blockNum))
@@ -117,7 +111,7 @@ func TestMatreshkaStream(t *testing.T) {
 			t.Fatal(err, currentBlock)
 		}
 
-		_, err = core.ExecuteBlockEphemerally(blockchain.Config(), blockchain.GetVMConfig(), getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter)
+		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter)
 		if err != nil {
 			t.Fatal(err, currentBlock)
 		}

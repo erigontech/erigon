@@ -59,9 +59,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genesis := genspec.MustCommit(db)
 
 	// Generate a batch of blocks, each properly signed
-	txCacher := core.NewTxSenderCacher(1)
-	chain, _ := core.NewBlockChain(db, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
-	defer chain.Stop()
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
 
 	blocks, _, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
@@ -75,7 +73,7 @@ func TestReimportMirroredState(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			block.AddTxWithChain(chain.GetHeader, chain.Engine(), tx)
+			block.AddTxWithChain(getHeader, engine, tx)
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -93,6 +91,7 @@ func TestReimportMirroredState(t *testing.T) {
 		copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
 		blocks[i] = block.WithSeal(header)
 	}
+
 	// Insert the first two blocks and make sure the chain is valid
 	db = ethdb.NewTestDB(t)
 	genspec.MustCommit(db)
@@ -109,10 +108,6 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	txCacher2 := core.NewTxSenderCacher(1)
-	chain2, _ := core.NewBlockChain(db, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
-	defer chain2.Stop()
-
 	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
