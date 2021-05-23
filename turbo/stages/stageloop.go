@@ -54,6 +54,7 @@ func StageLoop(
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
+	stateStream bool,
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
@@ -69,7 +70,7 @@ func StageLoop(
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		var accumulator *shards.Accumulator
-		if !initialCycle {
+		if !initialCycle && stateStream {
 			accumulator = &shards.Accumulator{}
 		}
 		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator); err != nil {
