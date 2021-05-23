@@ -70,7 +70,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if to < s.BlockNumber+16 {
+	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	var root common.Hash
