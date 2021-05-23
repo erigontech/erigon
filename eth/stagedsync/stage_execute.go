@@ -410,7 +410,7 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 	if err != nil {
 		return fmt.Errorf("%s: failed to move %s cleanup cursor: %w", logPrefix, tableName, err)
 	}
-	if prunedMax != 0 && prunedMax < prunedMin+16 {
+	if prunedMax != 0 && prunedMax > prunedMin+16 {
 		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", tableName, "from", prunedMin, "to", prunedMax)
 	}
 	return nil

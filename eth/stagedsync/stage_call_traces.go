@@ -207,7 +207,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cleanup cursor: %w", logPrefix, err)
 	}
-	if prunedMax != 0 && prunedMax < prunedMin+16 {
+	if prunedMax != 0 && prunedMax > prunedMin+16 {
 		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
