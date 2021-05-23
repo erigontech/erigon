@@ -155,10 +155,13 @@ func TestSetupGenesis(t *testing.T) {
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
 				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
-				t.Errorf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
+				t.Fatalf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
 			}
 			if !reflect.DeepEqual(config, test.wantConfig) {
 				t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
+			}
+			if err != nil {
+				return
 			}
 			if genesis.Hash() != test.wantHash {
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
