@@ -68,7 +68,7 @@ func createTestDb() (ethdb.Database, error) {
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction
@@ -183,7 +183,7 @@ func createTestDb() (ethdb.Database, error) {
 		return nil, err
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
 		return nil, err
 	}
 

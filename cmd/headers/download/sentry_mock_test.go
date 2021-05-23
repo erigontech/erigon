@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -51,21 +50,15 @@ type MockSentry struct {
 	genesis      *types.Block
 	sentryClient *SentryClientDirect
 	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
-	streamLock   sync.Mutex
+	streamWg     sync.WaitGroup
 	peerId       *ptypes.H512
+	receiveWg    sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
-	for {
-		ms.streamLock.Lock()
-		if ms.stream != nil {
-			ms.streamLock.Unlock()
-			return ms.stream
-		}
-		ms.streamLock.Unlock()
-		time.Sleep(time.Millisecond)
-	}
+	ms.streamWg.Wait()
+	return ms.stream
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
@@ -90,9 +83,8 @@ func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*emptypb.E
 	return nil, nil
 }
 func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveMessagesServer) error {
-	ms.streamLock.Lock()
 	ms.stream = stream
-	ms.streamLock.Unlock()
+	ms.streamWg.Done()
 	<-ms.ctx.Done()
 	return nil
 }
@@ -225,7 +217,8 @@ func mock(t *testing.T) *MockSentry {
 		t.Fatal(err)
 	}
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
-	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage)
+	mock.streamWg.Add(1)
+	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage, &mock.receiveWg)
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
@@ -242,7 +235,7 @@ func TestHeaderStep(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 100, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -250,28 +243,27 @@ func TestHeaderStep(t *testing.T) {
 	}
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: blocks[len(blocks)-1],
+		Block: chain.TopBlock,
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 	// Send all the headers
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          1,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: chain.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
-	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
+	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +273,7 @@ func TestReorg(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 10, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -289,52 +281,51 @@ func TestReorg(t *testing.T) {
 	}
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: blocks[len(blocks)-1],
+		Block: chain.TopBlock,
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Send all the headers
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          1,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: chain.Headers,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
-	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
+	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// Now generate three competing branches, one short and two longer ones
-	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 2, func(i int, b *core.BlockGen) {
+	short, err := core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
-	long1, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 10, func(i int, b *core.BlockGen) {
+	long1, err := core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
-	long2, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 9, func(i int, b *core.BlockGen) {
+	long2, err := core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 9, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -343,31 +334,30 @@ func TestReorg(t *testing.T) {
 
 	// Send NewBlock message for short branch
 	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short[len(short)-1],
+		Block: short.TopBlock,
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Send headers of the short branch
-	headers = make([]*types.Header, len(short))
-	for i, block := range short {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          2,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: short.Headers,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
+	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
@@ -375,53 +365,48 @@ func TestReorg(t *testing.T) {
 
 	// Send NewBlock message for long1 branch
 	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: long1[len(long1)-1],
+		Block: long1.TopBlock,
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Send headers of the long2 branch
-	headers = make([]*types.Header, len(long2))
-	for i, block := range long2 {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          3,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: long2.Headers,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Send headers of the long1 branch
-	headers = make([]*types.Header, len(long1))
-	for i, block := range long1 {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          4,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: long1.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	time.Sleep(100 * time.Millisecond)
 	// This is unwind step
-	highestSeenHeader = uint64(long1[len(long1)-1].NumberU64())
+	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
-	short2, _, err := core.GenerateChain(m.chainConfig, long1[len(long1)-1], m.engine, m.db, 2, func(i int, b *core.BlockGen) {
+	short2, err := core.GenerateChain(m.chainConfig, long1.TopBlock, m.engine, m.db, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -430,27 +415,26 @@ func TestReorg(t *testing.T) {
 
 	// Send NewBlock message for short branch
 	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short2[len(short2)-1],
+		Block: short2.TopBlock,
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Send headers of the short branch
-	headers = make([]*types.Header, len(short2))
-	for i, block := range short2 {
-		headers[i] = block.Header()
-	}
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          5,
-		BlockHeadersPacket: headers,
+		BlockHeadersPacket: short2.Headers,
 	})
 	require.NoError(t, err)
+	m.receiveWg.Add(1)
 	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = uint64(short2[len(short2)-1].NumberU64())
+	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
 	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
 		t.Fatal(err)

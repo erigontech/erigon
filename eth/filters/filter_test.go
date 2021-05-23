@@ -53,7 +53,7 @@ func BenchmarkFilters(b *testing.B) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
-	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 100010, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 100010, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 2403:
 			receipt := makeReceipt(addr1)
@@ -73,7 +73,7 @@ func BenchmarkFilters(b *testing.B) {
 	if err != nil {
 		b.Fatalf("generate chain: %v", err)
 	}
-	for i, block := range chain {
+	for i, block := range chain.Blocks {
 		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
 			panic(err)
 		}
@@ -81,7 +81,7 @@ func BenchmarkFilters(b *testing.B) {
 			panic(err)
 		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
-		if err := rawdb.WriteReceipts(db, block.NumberU64(), receipts[i]); err != nil {
+		if err := rawdb.WriteReceipts(db, block.NumberU64(), chain.Receipts[i]); err != nil {
 			panic(err)
 		}
 	}

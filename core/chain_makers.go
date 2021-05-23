@@ -192,6 +192,14 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 
 var GenerateTrace bool
 
+type ChainPack struct {
+	Length   int
+	Headers  []*types.Header
+	Blocks   []*types.Block
+	Receipts []types.Receipts
+	TopBlock *types.Block // Convinience field to access the last block
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -206,15 +214,15 @@ var GenerateTrace bool
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.RwKV, n int, gen func(int, *BlockGen),
 	intermediateHashes bool,
-) ([]*types.Block, []types.Receipts, error) {
+) (*ChainPack, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
-	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
+	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
-		return nil, nil, errBegin
+		return nil, errBegin
 	}
 	defer tx.Rollback()
 
@@ -323,8 +331,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
-			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
+			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
+		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
@@ -332,7 +341,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	tx.Rollback()
 
-	return blocks, receipts, nil
+	return &ChainPack{Length: n, Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {

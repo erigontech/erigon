@@ -51,7 +51,7 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
-	blocks, _, err := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db.RwKV(), n, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db.RwKV(), n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 
 		// If the block number is multiple of 3, send a bonus transaction to the miner
@@ -75,7 +75,7 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 	hashes[len(hashes)-1] = parent.Hash()
 	blockm := make(map[common.Hash]*types.Block, n+1)
 	blockm[parent.Hash()] = parent
-	for i, b := range blocks {
+	for i, b := range chain.Blocks {
 		hashes[len(hashes)-i-2] = b.Hash()
 		blockm[b.Hash()] = b
 	}

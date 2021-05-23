@@ -77,7 +77,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	}
 
 	// Generate testing blocks
-	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 32, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt().SetUint64(100), 21000, uint256.NewInt().SetUint64(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -89,7 +89,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{db: db, cfg: params.TestChainConfig}
