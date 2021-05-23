@@ -39,31 +39,27 @@ func TestHeaderVerification(t *testing.T) {
 		engine  = ethash.NewFaker()
 	)
 
-	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 8, nil, false /* intemediateHashes */)
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
 
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
-	for i := 0; i < len(blocks); i++ {
+	for i := 0; i < chain.Length; i++ {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: db}, []*types.Header{chain.Headers[i]}, []bool{true})
 			} else {
-				engine := ethash.NewFakeFailer(headers[i].Number.Uint64())
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: db}, []*types.Header{headers[i]}, []bool{true})
+				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: db}, []*types.Header{chain.Headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 			}
 		}
 		engine := ethash.NewFaker()
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
