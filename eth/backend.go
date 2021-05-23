@@ -717,7 +717,7 @@ func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
 		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
-		go download.Loop(s.downloadV2Ctx, s.chainDB, s.stagedSync2, s.downloadServer, s.events, s.waitForStageLoopStop)
+		go download.Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.waitForStageLoopStop)
 	} else {
 		eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())
 		// Start the networking layer and the light server if requested

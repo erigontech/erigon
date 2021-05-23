@@ -40,7 +40,7 @@ type MockSentry struct {
 	sentry.UnimplementedSentryServer
 	ctx          context.Context
 	cancel       context.CancelFunc
-	memDb        ethdb.Database
+	db           ethdb.RwKV
 	tmpdir       string
 	engine       consensus.Engine
 	chainConfig  *params.ChainConfig
@@ -70,7 +70,7 @@ func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
 
 func (ms *MockSentry) Close() {
 	ms.cancel()
-	ms.memDb.Close()
+	ms.db.Close()
 	os.RemoveAll(ms.tmpdir)
 }
 
@@ -113,10 +113,10 @@ func mock(t *testing.T) *MockSentry {
 	mock := &MockSentry{}
 	t.Cleanup(mock.Close)
 	mock.ctx, mock.cancel = context.WithCancel(context.Background())
-	mock.memDb = ethdb.NewMemDatabase()
+	mock.db = ethdb.NewTestKV(t)
 	var err error
 	mock.tmpdir = t.TempDir()
-	db := mock.memDb.RwKV()
+	db := mock.db
 	sm := ethdb.DefaultStorageMode
 	mock.engine = ethash.NewFaker()
 	mock.chainConfig = params.AllEthashProtocolChanges
@@ -140,7 +140,7 @@ func mock(t *testing.T) *MockSentry {
 	txPoolConfig := core.DefaultTxPoolConfig
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
-	txPool := core.NewTxPool(txPoolConfig, mock.chainConfig, mock.memDb, txCacher)
+	txPool := core.NewTxPool(txPoolConfig, mock.chainConfig, ethdb.NewObjectDatabase(mock.db), txCacher)
 	txSentryClient := &SentryClientDirect{}
 	txSentryClient.SetServer(mock)
 	txPoolServer, err := eth.NewTxPoolServer(mock.ctx, []sentry.SentryClient{txSentryClient}, txPool)
@@ -163,7 +163,7 @@ func mock(t *testing.T) *MockSentry {
 		},
 	}
 	// Committed genesis will be shared between download and mock sentry
-	mock.genesis = gspec.MustCommit(mock.memDb)
+	mock.genesis = gspec.MustCommit(ethdb.NewObjectDatabase(mock.db))
 	blockDownloaderWindow := 128
 	networkID := uint64(1)
 	mock.sentryClient = &SentryClientDirect{}
@@ -239,7 +239,7 @@ func TestHeaderStep(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb.RwKV(), 100, func(i int, b *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -269,7 +269,7 @@ func TestHeaderStep(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -278,7 +278,7 @@ func TestReorg(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
-	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.memDb.RwKV(), 10, func(i int, b *core.BlockGen) {
+	blocks, _, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -313,25 +313,25 @@ func TestReorg(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(blocks[len(blocks)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
 
 	// Now generate three competing branches, one short and two longer ones
-	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 2, func(i int, b *core.BlockGen) {
+	short, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
-	long1, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 10, func(i int, b *core.BlockGen) {
+	long1, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
-	long2, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.memDb.RwKV(), 9, func(i int, b *core.BlockGen) {
+	long2, _, err := core.GenerateChain(m.chainConfig, blocks[len(blocks)-1], m.engine, m.db, 9, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -366,7 +366,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short[len(short)-1].NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
 
@@ -412,13 +412,13 @@ func TestReorg(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	// This is unwind step
 	highestSeenHeader = uint64(long1[len(long1)-1].NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
 
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
-	short2, _, err := core.GenerateChain(m.chainConfig, long1[len(long1)-1], m.engine, m.memDb.RwKV(), 2, func(i int, b *core.BlockGen) {
+	short2, _, err := core.GenerateChain(m.chainConfig, long1[len(long1)-1], m.engine, m.db, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -449,7 +449,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2[len(short2)-1].NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.memDb, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle); err != nil {
 		t.Fatal(err)
 	}
 }
