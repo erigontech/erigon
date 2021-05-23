@@ -54,7 +54,9 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
+	if to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
+	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
 		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, quit); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
@@ -409,7 +411,9 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 	} else {
 		changeSetBucket = dbutils.AccountChangeSetBucket
 	}
-	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+	if to > from+16 {
+		log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+	}
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
