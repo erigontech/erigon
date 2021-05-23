@@ -682,7 +682,7 @@ func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (consensus.Eng
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 
-	blocks, receipts, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), len(txs), func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), len(txs), func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)
@@ -712,7 +712,7 @@ func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (consensus.Eng
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
-	return engine, db, blocks, receipts, err
+	return engine, db, chain.Blocks, chain.Receipts, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
