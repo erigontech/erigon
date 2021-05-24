@@ -27,7 +27,6 @@ import (
 //After 3 seconds, we rollback Ro tx, and migration must continue without any errors.
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
-
 func TestSnapshotMigratorStage(t *testing.T) {
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
@@ -128,7 +127,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}()
 
 	for !(sb.Finished(10)) {
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 100)
 	}
 
 	//note. We need here only main database.
@@ -153,9 +152,13 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 	rotx.Rollback()
 
-	snodb := ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
+	snokv := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)
+	snRoTx, err := snokv.BeginRo(context.Background())
+	require.NoError(t, err)
+	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
 	headerNumber = 0
-	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -163,6 +166,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 
 		return true, nil
 	})
+	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +241,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	generateChan <- 20
 
 	rollbacked := false
+	//3s - just to be sure that it blocks here
 	c := time.After(time.Second * 3)
 	for !(sb.Finished(20)) {
 		select {
@@ -245,7 +250,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 			rollbacked = true
 		default:
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 100)
 	}
 
 	if !rollbacked {
@@ -267,9 +272,9 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 
 	headerNumber = 0
-	snRoTx, err := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
+	snRoTx, err = db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
+	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
 	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
