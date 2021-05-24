@@ -378,7 +378,9 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			defer batch.Rollback()
 		}
 
-		for range logEvery.C {
+		select {
+		default:
+		case <-logEvery.C:
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()

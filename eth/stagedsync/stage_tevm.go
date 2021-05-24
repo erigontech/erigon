@@ -130,9 +130,14 @@ func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.
 							return tryError(fmt.Errorf("cannot begin the batch transaction on %q: %w",
 								common.BytesToHash(c.hash), err), done)
 						}
+
+						// TODO: This creates stacked up deferrals
+						defer tx.Rollback()
 					}
 
 					batch = ethdb.NewBatch(tx)
+					// TODO: This creates stacked up deferrals
+					defer batch.Rollback()
 
 					stageTranspileGauge.Inc(int64(currentSize))
 				}
