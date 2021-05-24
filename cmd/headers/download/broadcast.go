@@ -29,7 +29,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 		return
 	}
 	req := &proto_sentry.OutboundMessageData{
-		Id:   proto_sentry.MessageId_NewBlockHashes,
+		Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
 		Data: data,
 	}
 	for _, sentry := range cs.sentries {
@@ -53,7 +53,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	req := proto_sentry.SendMessageToRandomPeersRequest{
 		MaxPeers: 1024,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_NewBlock,
+			Id:   proto_sentry.MessageId_NEW_BLOCK_66,
 			Data: data,
 		},
 	}

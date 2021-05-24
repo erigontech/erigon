@@ -384,27 +384,27 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders})
+			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GET_BLOCK_HEADERS_66})
 		case eth.BlockHeadersMsg:
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BlockHeaders})
+			trySend(receiveCh, &StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BLOCK_HEADERS_66})
 		case eth.GetBlockBodiesMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies})
+			trySend(receiveUploadCh, &StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GET_BLOCK_BODIES_66})
 		case eth.BlockBodiesMsg:
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BlockBodies})
+			trySend(receiveCh, &StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BLOCK_BODIES_66})
 		case eth.GetNodeDataMsg:
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -416,13 +416,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes})
+			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NEW_BLOCK_HASHES_66})
 		case eth.NewBlockMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
+			trySend(receiveCh, &StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NEW_BLOCK_66})
 		case eth.NewPooledTransactionHashesMsg:
 			// Drop message if not ready
 			if atomic.LoadUint32(txSubscribed) > 0 {
@@ -430,7 +430,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NewPooledTransactionHashes})
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "NewPooledTransactionHashesMsg", proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66})
 			}
 		case eth.GetPooledTransactionsMsg:
 			// Drop message if not ready
@@ -439,7 +439,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GetPooledTransactions})
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "GetPooledTransactionsMsg", proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66})
 			}
 		case eth.TransactionsMsg:
 			// Drop message if not ready
@@ -448,7 +448,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_Transactions})
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "TransactionsMsg", proto_sentry.MessageId_TRANSACTIONS_66})
 			}
 		case eth.PooledTransactionsMsg:
 			// Drop message if not ready
@@ -457,7 +457,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_PooledTransactions})
+				trySend(receiveTxCh, &StreamMsg{b, peerID, "PooledTransactionsMsg", proto_sentry.MessageId_POOLED_TRANSACTIONS_66})
 			}
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
@@ -709,9 +709,9 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	}
 	var msgcode uint64
 	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GetBlockHeaders:
+	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
 		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_GetBlockBodies:
+	case proto_sentry.MessageId_GET_BLOCK_BODIES_66:
 		msgcode = eth.GetBlockBodiesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
@@ -739,19 +739,19 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerInfo := x.(*PeerInfo)
 	var msgcode uint64
 	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GetBlockHeaders:
+	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
 		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_BlockHeaders:
+	case proto_sentry.MessageId_BLOCK_HEADERS_66:
 		msgcode = eth.BlockHeadersMsg
-	case proto_sentry.MessageId_BlockBodies:
+	case proto_sentry.MessageId_BLOCK_BODIES_66:
 		msgcode = eth.BlockBodiesMsg
-	case proto_sentry.MessageId_GetReceipts:
+	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		msgcode = eth.GetReceiptsMsg
-	case proto_sentry.MessageId_Receipts:
+	case proto_sentry.MessageId_RECEIPTS_66:
 		msgcode = eth.ReceiptsMsg
-	case proto_sentry.MessageId_PooledTransactions:
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66:
 		msgcode = eth.PooledTransactionsMsg
-	case proto_sentry.MessageId_GetPooledTransactions:
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
 		msgcode = eth.GetPooledTransactionsMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
@@ -773,9 +773,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	var msgcode uint64
 	switch req.Data.Id {
-	case proto_sentry.MessageId_NewBlock:
+	case proto_sentry.MessageId_NEW_BLOCK_66:
 		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NewBlockHashes:
+	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
 		msgcode = eth.NewBlockHashesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
@@ -820,9 +820,9 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	var msgcode uint64
 	switch req.Id {
-	case proto_sentry.MessageId_NewBlock:
+	case proto_sentry.MessageId_NEW_BLOCK_66:
 		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NewBlockHashes:
+	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
 		msgcode = eth.NewBlockHashesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)

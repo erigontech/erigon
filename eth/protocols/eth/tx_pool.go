@@ -86,7 +86,7 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_PooledTransactions, Data: b},
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_66, Data: b},
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
@@ -107,7 +107,7 @@ func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashe
 
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GetPooledTransactions, Data: bytes},
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: bytes},
 	}
 
 	// if sentry not found peers to send such message, try next one. stop if found.
@@ -139,13 +139,13 @@ func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 
 func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
-	case proto_sentry.MessageId_NewPooledTransactionHashes:
+	case proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 		return tp.newPooledTransactionHashes(ctx, inreq, sentry)
-	case proto_sentry.MessageId_PooledTransactions:
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66:
 		return tp.pooledTransactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_Transactions:
+	case proto_sentry.MessageId_TRANSACTIONS_66:
 		return tp.transactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GetPooledTransactions:
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
 		return tp.getPooledTransactions(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)

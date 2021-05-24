@@ -48,7 +48,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	outreq := proto_sentry.SendMessageByMinBlockRequest{
 		MinBlock: req.BlockNums[len(req.BlockNums)-1],
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_GetBlockBodies,
+			Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
 			Data: bytes,
 		},
 	}
@@ -94,7 +94,7 @@ func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerd
 	outreq := proto_sentry.SendMessageByMinBlockRequest{
 		MinBlock: minBlock,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_GetBlockHeaders,
+			Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 			Data: bytes,
 		},
 	}
