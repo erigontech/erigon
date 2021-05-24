@@ -1,5 +1,7 @@
 package vm
 
+// todo: TBD actual TEVM interpreter
+
 // TEVMInterpreter represents an TEVM interpreter
 type TEVMInterpreter struct {
 	*EVMInterpreter

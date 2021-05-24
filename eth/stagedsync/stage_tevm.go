@@ -215,10 +215,6 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	return currentContract, currentTime
 }
 
-func transpileCode(code []byte) ([]byte, error) {
-	return append(make([]byte, 0, len(code)), code...), nil
-}
-
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -279,7 +275,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	return nil
 }
 
-func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg TranspileCfg) error {
+func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan struct{}, cfg TranspileCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -302,4 +298,9 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}
 	}
 	return nil
+}
+
+// todo: TBD actual TEVM translator
+func transpileCode(code []byte) ([]byte, error) {
+	return append(make([]byte, 0, len(code)), code...), nil
 }
