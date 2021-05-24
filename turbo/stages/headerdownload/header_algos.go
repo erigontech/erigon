@@ -778,7 +778,7 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
 }
 
-func (hi *HeaderInserter) AnythingDone() bool {
+func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 

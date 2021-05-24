@@ -147,12 +147,15 @@ func HeadersForward(
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
-		if !initialCycle && headerInserter.AnythingDone() {
-			// if this is not an initial cycle, we need to react quickly when new headers are coming in
-			break
-		}
-		if initialCycle && headerInserter.AnythingDone() && inSync {
-			break
+		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
+			if !initialCycle {
+				// if this is not an initial cycle, we need to react quickly when new headers are coming in
+				break
+			}
+			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
+			if inSync {
+				break
+			}
 		}
 		timer := time.NewTimer(1 * time.Second)
 		select {
