@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -50,7 +49,7 @@ type contract struct {
 	code []byte
 }
 
-func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}) error {
+func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.DbWithPendingMutations, cfg TranspileCfg, useExternalTx bool, quitCh <-chan struct{}) error {
 	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
 	if err != nil {
 		return err
@@ -58,110 +57,160 @@ func transpileWithGo(tx ethdb.RwTx, batch ethdb.Database, quitCh <-chan struct{}
 	defer c.Close()
 
 	numWorkers := runtime.NumCPU()
-	wg := sync.WaitGroup{}
+	wg := new(errgroup.Group)
 
 	done := make(chan struct{})
 	inContracts := make(chan contract, 32768)
 	outContracts := make(chan contract, 32768)
-	errs := make(chan error, numWorkers+1)
 
 	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() error {
 			for {
 				select {
 				case c := <-inContracts:
-					transpiledCode, err := transpile(c.code)
+					transpiledCode, err := transpileCode(c.code)
 					if err != nil {
-						errs <- fmt.Errorf("contract %q cannot be transalated: %w",
-							common.BytesToHash(c.hash).String(), err)
-
-						common.SafeClose(done)
+						return tryError(fmt.Errorf("contract %q cannot be transalated: %w",
+							common.BytesToHash(c.hash).String(), err), done)
 					}
 
 					outContracts <- contract{c.hash, transpiledCode}
 				case <-done:
-					return
+					return nil
 				}
 			}
-		}()
+		})
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
+	stageProgress := uint64(0)
+	logBlock := stageProgress
+	logTime := time.Now()
+
+	// store translated results
+	wg.Go(func() error {
 		for {
 			select {
 			case c := <-outContracts:
 				err = batch.Put(dbutils.ContractTEVMCodeBucket, c.hash, c.code)
 				if err != nil {
-					errs <- fmt.Errorf("cannot store %q: %w", common.BytesToHash(c.hash), err)
-
-					common.SafeClose(done)
-
-					return
+					return tryError(fmt.Errorf("cannot store %q: %w", common.BytesToHash(c.hash), err), done)
 				}
 
 				err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, c.hash, nil)
 				if err != nil {
-					errs <- fmt.Errorf("cannot reset translation status %q: %w",
-						common.BytesToHash(c.hash), err)
-
-					common.SafeClose(done)
-
-					return
+					return tryError(fmt.Errorf("cannot reset translation status %q: %w",
+						common.BytesToHash(c.hash), err), done)
 				}
 
+				stageProgress++
+
+				currentSize := batch.BatchSize()
+				updateProgress := currentSize >= int(cfg.batchSize)
+				if updateProgress {
+					if err = batch.Commit(); err != nil {
+						return tryError(fmt.Errorf("cannot commit the batch of translations on %q: %w",
+							common.BytesToHash(c.hash), err), done)
+					}
+
+					if !useExternalTx {
+						if err = s.Update(tx, stageProgress); err != nil {
+							return tryError(fmt.Errorf("cannot update the stage status on %q: %w",
+								common.BytesToHash(c.hash), err), done)
+						}
+						if err = tx.Commit(); err != nil {
+							return tryError(fmt.Errorf("cannot commit the external transation on %q: %w",
+								common.BytesToHash(c.hash), err), done)
+						}
+
+						tx, err = cfg.db.BeginRw(context.Background())
+						if err != nil {
+							return tryError(fmt.Errorf("cannot begin the batch transaction on %q: %w",
+								common.BytesToHash(c.hash), err), done)
+						}
+					}
+
+					batch = ethdb.NewBatch(tx)
+
+					stageTranspileGauge.Inc(int64(currentSize))
+				}
+
+			case <-logEvery.C:
+				logBlock, logTime = logTEVMProgress(logPrefix, logBlock, logTime, stageProgress)
+				if hasTx, ok := tx.(ethdb.HasTx); ok {
+					hasTx.Tx().CollectMetrics()
+				}
 			case <-done:
-				return
+				return nil
 			}
 		}
-	}()
+	})
 
-	if err := ethdb.ForEach(c, func(codeHash, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+	// read contracts pending for translation
+	wg.Go(func() error {
+		if err := ethdb.ForEach(c, func(codeHash, v []byte) (bool, error) {
+			if err := common.Stopped(quitCh); err != nil {
+				return false, err
+			}
+			if err := common.Stopped(done); err != nil {
+				// return nil error to not overwrite error from errs channel
+				return false, nil
+			}
+
+			// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
+			contractCode, err := tx.GetOne(dbutils.CodeBucket, codeHash)
+			if err != nil {
+				return false, err
+			}
+
+			inContracts <- contract{codeHash, contractCode}
+
+			return true, nil
+		}); err != nil {
+			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
 		}
-		if err := common.Stopped(done); err != nil {
-			// return nil error to not overwrite error from errs channel
-			return false, nil
-		}
 
-		// load the contract code
-		contractCode, err := batch.GetOne(dbutils.CodeBucket, codeHash)
-		if err != nil {
-			return false, err
-		}
+		return nil
+	})
 
-		inContracts <- contract{codeHash, contractCode}
+	err = wg.Wait()
 
-		return true, nil
-	}); err != nil {
-		return err
-	}
+	fmt.Println("===-2 Going to add", stageProgress)
 
-	select {
-	case <-done:
-	// Channel was already closed
-	case err := <-errs:
-		common.SafeClose(done)
-		wg.Wait()
+	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "contracts", stageProgress)
 
-		return err
-	default:
-		common.SafeClose(done)
-	}
-
-	wg.Wait()
-
-	return nil
+	return err
 }
 
-func transpile(code []byte) ([]byte, error) {
+func tryError(err error, done chan struct{}) error {
+	if err == nil {
+		return nil
+	}
+
+	common.SafeClose(done)
+
+	return err
+}
+
+func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, currentContract uint64) (uint64, time.Time) {
+	currentTime := time.Now()
+	interval := currentTime.Sub(prevTime)
+	speed := float64(currentContract-prevContract) / float64(interval/time.Second)
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	var logpairs = []interface{}{
+		"number", currentContract,
+		"contracts/second", speed,
+	}
+	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	log.Info(fmt.Sprintf("[%s] Translated contracts", logPrefix), logpairs...)
+
+	return currentContract, currentTime
+}
+
+func transpileCode(code []byte) ([]byte, error) {
 	return append(make([]byte, 0, len(code)), code...), nil
 }
 
@@ -197,66 +246,17 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	stageProgress := s.BlockNumber
-	logBlock := stageProgress
-	logTime := time.Now()
-
-	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		err := common.Stopped(quit)
-		if err != nil {
-			return err
-		}
-		var block *types.Block
-		if block, err = readBlock(blockNum, tx); err != nil {
-			return err
-		}
-		if block == nil {
-			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
-			break
-		}
-
-		if err = transpileWithGo(tx, batch, quit); err != nil {
-			return err
-		}
-
-		stageProgress = blockNum
-
-		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if updateProgress {
-			if err = batch.Commit(); err != nil {
-				return err
-			}
-
-			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
-				if err = tx.Commit(); err != nil {
-					return err
-				}
-
-				tx, err = cfg.db.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-			}
-			batch = ethdb.NewBatch(tx)
-		}
-
-		select {
-		default:
-		case <-logEvery.C:
-			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
-			if hasTx, ok := tx.(ethdb.HasTx); ok {
-				hasTx.Tx().CollectMetrics()
-			}
-		}
-		stageTranspileGauge.Update(int64(blockNum))
+	err := common.Stopped(quit)
+	if err != nil {
+		return err
 	}
 
-	if err := s.Update(batch, stageProgress); err != nil {
+	if err = transpileBatch(logPrefix, s, tx, batch, cfg, useExternalTx, quit); err != nil {
+		return err
+	}
+
+	// commit the same number as execution
+	if err := s.Update(batch, prevStageProgress); err != nil {
 		return err
 	}
 	if err := batch.Commit(); err != nil {
@@ -269,7 +269,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", prevStageProgress)
 	s.Done()
 	return nil
 }

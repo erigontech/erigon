@@ -301,6 +301,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 					return err
 				}
 			}
+			fmt.Println("===-1 Going to add", len(codeHashes))
 		}
 
 		stageProgress = blockNum
@@ -335,9 +336,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			batch = ethdb.NewBatch(tx)
 		}
 
-		select {
-		default:
-		case <-logEvery.C:
+		for range logEvery.C {
 			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
