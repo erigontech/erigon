@@ -172,9 +172,6 @@ func HeadersForward(
 		}
 		timer.Stop()
 	}
-	if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
-		return err
-	}
 	if headerInserter.UnwindPoint() < headerProgress {
 		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
@@ -192,11 +189,11 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", cfg.hd.Progress(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
 		return common.ErrStopped
 	}
-	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
+	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
 	return nil
 }
 
