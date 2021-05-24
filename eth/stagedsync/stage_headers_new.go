@@ -189,10 +189,11 @@ func HeadersForward(
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", cfg.hd.Progress(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
 		return common.ErrStopped
 	}
+	// We do not print the followin line if the stage was interrupted
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
 	return nil
 }
