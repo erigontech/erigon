@@ -563,11 +563,11 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 		}
 		*pc = pos.Uint64()
 	} else {
-		*pc++
 		err := enterBlock(callContext, *pc)
 		if err != nil {
 			return nil, err
 		}
+		*pc++
 	}
 	return nil, nil
 }
@@ -861,7 +861,7 @@ func makeLog(size int) executionFunc {
 
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	info := callContext.contract.opsInfo[*pc].(PushInfo)
+	info := callContext.contract.opsInfo[*pc].(*PushInfo)
 	integer := info.data
 	callContext.stack.Push(&integer)
 	*pc++
@@ -871,7 +871,7 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]b
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-		info := callContext.contract.opsInfo[*pc].(PushInfo)
+		info := callContext.contract.opsInfo[*pc].(*PushInfo)
 		integer := info.data
 		callContext.stack.Push(&integer)
 		*pc += size

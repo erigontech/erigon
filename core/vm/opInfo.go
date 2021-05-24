@@ -41,24 +41,28 @@ func NewBlockInfo(pc uint64) *BlockInfo {
 
 // destination for static jump
 type JumpInfo struct {
+	pc          uint64 // pc of jump in contract code
 	dest uint64 // pc to jump to
 }
 
 func (JumpInfo) opInfo() {}
 func NewJumpInfo(pc uint64, dest uint64) *JumpInfo {
 	p := new(JumpInfo)
+	p.pc = pc
 	p.dest = dest
 	return p
 }
 
 // decoded push data for PUSH*
 type PushInfo struct {
+	pc   uint64     // pc of push in contract code
 	data uint256.Int
 }
 
 func (PushInfo) opInfo() {}
 func NewPushInfo(pc uint64, data uint256.Int) *PushInfo {
 	p := new(PushInfo)
+	p.pc = pc
 	p.data = data
 	return p
 }
@@ -67,12 +71,16 @@ func NewPushInfo(pc uint64, data uint256.Int) *PushInfo {
 func getBlockInfo(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	contract := ctx.contract
 	if contract.opsInfo == nil {
-		contract.opsInfo = make([]OpInfo, len(contract.Code), len(contract.Code))
+        contract.opsInfo = make([]OpInfo, len(contract.Code), len(contract.Code))
+		info, err := analyzeBlock(ctx, 0)
+		contract.preInfo = info
+		return info, err
+	} else if (int64(pc) == -1) {
+		return contract.preInfo, nil
+	} else if contract.opsInfo[pc] != nil {
+		return contract.opsInfo[pc].(*BlockInfo), nil
 	}
-
-	info := contract.opsInfo[pc]
-	if info != nil {
-		return info.(*BlockInfo), nil
-	}
-	return analyzeBlock(ctx, pc)
+	info, err := analyzeBlock(ctx, pc)
+	contract.opsInfo[pc] = info
+	return info, err
 }

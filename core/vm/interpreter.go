@@ -169,10 +169,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			interpreter: in,
 		}
 
-		// For optimisation reason we're using uint64 as the program counter.
-		// It's theoretically possible to go above 2^64. The YP defines the PC
+		// For optimisation reason we're using int64 as the program counter.
+		// It's theoretically possible to go above 2^63. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc	= uint64(0) // program counter
+		pc = uint64(0) // program counter
 		res []byte // result of the opcode execution function
 	)
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
@@ -188,12 +188,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 
-	err = enterBlock(callContext, pc)
+	err = enterBlock(callContext, pc-1)
 	if err != nil {
 		return nil, err
 	}
 	for {
-		op := contract.GetOp(pc)
+	    o := contract.Code[pc]
+		op := OpCode(o)
+	    if op == NOOP { continue }
 
 		// none of these bare ops can resize memory or use dynamic gas
 		switch op {
@@ -338,37 +340,46 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			info := callContext.contract.opsInfo[pc].(*PushInfo)
 			integer := info.data
 			callContext.stack.Push(&integer)
+			pc++
 		case PUSH2:
-			info := callContext.contract.opsInfo[pc].(PushInfo)
+			info := callContext.contract.opsInfo[pc].(*PushInfo)
 			integer := info.data
 			callContext.stack.Push(&integer)
+			pc += 2
 
-		// TODO -- analysis needs to check destinations
+		case PUSH3:
+			info := callContext.contract.opsInfo[pc].(*PushInfo)
+			integer := info.data
+			callContext.stack.Push(&integer)
+			pc += 3
+
 		case JMP:
-			info := callContext.contract.opsInfo[pc].(JumpInfo)
+			info := callContext.contract.opsInfo[pc].(*JumpInfo)
 			pc = info.dest
 			continue
 		case JMPI:
 			cond := locStack.Pop()
 			if !cond.IsZero() {
-				info := callContext.contract.opsInfo[pc].(JumpInfo)
+				info := callContext.contract.opsInfo[pc].(*JumpInfo)
 				pc = info.dest
+			    continue
 			} else {
-				pc++
+			    pc++
 				err = enterBlock(callContext, pc)
 				if err != nil {
 					return nil, err
 				}
+			    continue
 			}
-			continue
 		case JUMPDEST:
 			err = enterBlock(callContext, pc)
 			if err != nil {
 				return nil, err
 			}
-
+			
+		case NOOP:
+            
 		default:
-
 			operation, err := runGasMemory(in, op, contract, locStack, mem)
 			if err != nil {
 				return nil, err
@@ -376,6 +387,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 			// execute the operation
 			res, err = operation.execute(&pc, in, callContext)
+			
 			// if the operation clears the return data (e.g. it has returning data)
 			// set the last return to the result of the operation.
 			if operation.returns {
@@ -404,13 +416,13 @@ func (in *EVMInterpreter) CanRun(code []byte) bool {
 // check block's stack bounds and use constant gas
 func enterBlock(ctx *callCtx, pc uint64) error {
 
-	// block info is created first time block is entered
-	info, err := getBlockInfo(ctx, pc)
-	if info == nil || err != nil {
-		return err
-	}
+    // block info is created first time block is entered
+    contract := ctx.contract
+    info, err := getBlockInfo(ctx, pc)
+    if err != nil { return err }
+
 	// check gas & stack usage
-	if !ctx.contract.UseGas(info.constantGas) {
+	if !contract.UseGas(info.constantGas) {
 		return ErrOutOfGas
 	} else if sLen := ctx.stack.Len(); sLen < info.minStack {
 		return &ErrStackUnderflow{stackLen: sLen, required: info.minStack}

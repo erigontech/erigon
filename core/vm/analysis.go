@@ -22,19 +22,31 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-// fill in segment of operation information array for a block
+// fill in a segment of the operation information array for a block
+// -- conditions for block boundaries are subtle
+//
 func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
+	contract := ctx.contract
 	blockInfo := NewBlockInfo(pc)
-	ctx.contract.opsInfo[pc] = blockInfo
-	code := ctx.contract.Code
+	if (int64(pc) == -1) {
+		contract.preInfo = blockInfo
+		pc++
+	} else {
+		contract.opsInfo[pc] = blockInfo
+	}
+	code := contract.Code
 	codeLen := len(code)
 	jumpTable := ctx.interpreter.jt
-
-	height := 0
-	minHeight := 0
-	maxHeight := 0
+	var (
+		height		int
+		minHeight	int
+		maxHeight	int
+		op			OpCode
+		prevOp      OpCode
+		prevPC      uint64
+	)
 	for ; pc < uint64(codeLen); pc++ {
-		op := OpCode(code[pc])
+		op = OpCode(code[pc])
 		oper := jumpTable[op]
 		if oper == nil {
 			continue
@@ -46,9 +58,10 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 		height += oper.numPush
 		maxHeight = max(maxHeight, height)	// will be >= 0
 		blockInfo.constantGas += oper.constantGas
+		pushByteSize := 0
 
 		if PUSH1 <= op && op <= PUSH32 {
-		    pushByteSize := int(op) - int(PUSH1) + 1
+			pushByteSize = int(op) - int(PUSH1) + 1
 
 			startMin := int(pc + 1)
 			if startMin >= codeLen {
@@ -66,46 +79,53 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 
 			// attach PushInfo with decoded push data to PUSHn
 			pushInfo := NewPushInfo(pc, *integer)
-			ctx.contract.opsInfo[pc] = pushInfo
+			contract.opsInfo[pc] = pushInfo
 
+			prevOp = op
+			prevPC = pc
 			pc += uint64(pushByteSize)
 			continue
-		}
 
-		// check jump destinations and optimize static jumps
-		if op == JUMP || op == JUMPI {
-			prevPC := pc - 1
-			prevOp := OpCode(code[prevPC])
-			if prevOp >= PUSH1 && prevOp <= PUSH32 {
+		} else if op == JUMP || op == JUMPI {
 
-				pos := ctx.contract.opsInfo[prevPC].(PushInfo).data
-				if valid, _ := ctx.contract.validJumpdest(&pos); !valid {
+			// check jump destinations and optimize static jumps
+			if PUSH1 <= prevOp && prevOp <= PUSH32 {
+				pos := contract.opsInfo[prevPC].(*PushInfo).data
+				if valid, _ := contract.validJumpdest(&pos); !valid {
 					return nil, ErrInvalidJump
 				}
-				jumpInfo := NewJumpInfo(pc, pos.Uint64())
-				ctx.contract.opsInfo[pc] = jumpInfo
-				ctx.contract.opsInfo[prevPC] = nil
-
-				// replace with JMP NOOP or JMPI NOOP and attach JumpInfo to JMP or JMPI
+				// replace PUSH* JUMP with JMP NOOP...
 				if op == JUMP {
 					code[prevPC] = byte(JMP)
+					code[prevPC+1] = byte(NOOP)
 				}
+				// replace PUSH* JUMPI with JMPI JUMPDEST NOOP...
 				if op == JUMPI {
 					code[prevPC] = byte(JMPI)
+					code[prevPC+1] = byte(JUMPDEST)
 				}
-				code[pc] = byte(NOOP)
-
-				// end block
-				break
+				for i := prevPC+2; i <= pc; i++ {
+					code[i] = byte(NOOP)
+				}	
+				// attach JumpInfo			
+				contract.opsInfo[prevPC] = NewJumpInfo(prevPC, pos.Uint64())
+				break // end block
 			}
 		}
-		if	op == JUMPDEST || op == STOP || op == RETURN || op == REVERT || op == SELFDESTRUCT {
-
-			// end block
-			break
+		prevOp = OpCode(0)
+		prevPC = 0
+		if op == JUMPI {
+			if (pc != blockInfo.pc) { // if op doesn't start block
+				break // end block
+			}
+		} else if op == JUMPDEST {
+			if (pc != blockInfo.pc) { // if op doesn't start block
+				break // end block
+			}
+		} else if op == JUMP || op == STOP || op == RETURN || op == REVERT || op == SELFDESTRUCT {
+			break // end block
 		}
 	}
-
 	// min and max absolute stack length to avoid stack underflow or underflow
 	blockInfo.minStack = -minHeight
 	blockInfo.maxStack = maxHeight

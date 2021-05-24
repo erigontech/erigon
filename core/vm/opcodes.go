@@ -389,6 +389,9 @@ var opCodeToString = map[OpCode]string{
 	PUSH: "PUSH",
 	DUP:  "DUP",
 	SWAP: "SWAP",
+	JMP:  "JMP",
+	JMPI: "JMPI",
+	NOOP: "NOOP",
 }
 
 func (op OpCode) String() string {

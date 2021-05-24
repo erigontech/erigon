@@ -55,6 +55,7 @@ type Contract struct {
 	// code also lazily analyzed to gather info on operations:
 	//	 basic blocks, jump destinations, push constants ...
 	//	 nils will be change to point to info as needed
+	preInfo		  *BlockInfo
 	opsInfo		  []OpInfo
 	
 	Code	 []byte
