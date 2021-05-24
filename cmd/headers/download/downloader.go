@@ -133,6 +133,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		controlServer.chainConfig,
 		notifier,
 		stateStream,
+		controlServer.updateHead,
 		waitForDone,
 	)
 }
@@ -178,7 +179,6 @@ func NewStagedSync(
 			controlServer.bd,
 			controlServer.sendBodyRequest,
 			controlServer.penalize,
-			controlServer.updateHead,
 			controlServer.BroadcastNewBlock,
 			bodyDownloadTimeout,
 			*controlServer.chainConfig,
@@ -481,7 +481,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	if err != nil {
 		return fmt.Errorf("send header response: %v", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", inreq.PeerId, query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -515,7 +515,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	if err != nil {
 		return fmt.Errorf("send bodies response: %v", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil
 }
 
@@ -552,7 +552,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 	if err != nil {
 		return fmt.Errorf("send bodies response: %v", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
+	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil
 }
 

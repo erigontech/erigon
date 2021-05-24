@@ -53,6 +53,7 @@ type MockSentry struct {
 	streamWg     sync.WaitGroup
 	peerId       *ptypes.H512
 	receiveWg    sync.WaitGroup
+	updateHead   func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 }
 
 // Stream returns stream, waiting if necessary
@@ -116,7 +117,7 @@ func mock(t *testing.T) *MockSentry {
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte {
 		return nil
 	}
-	updateHead := func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+	mock.updateHead = func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 	}
 	blockPropagator := func(ctx context.Context, block *types.Block, td *big.Int) {
 	}
@@ -179,7 +180,6 @@ func mock(t *testing.T) *MockSentry {
 			mock.downloader.bd,
 			sendBodyRequest,
 			penalize,
-			updateHead,
 			blockPropagator,
 			blockDowloadTimeout,
 			*mock.chainConfig,
@@ -264,7 +264,7 @@ func TestHeaderStep(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -307,7 +307,7 @@ func TestReorg(t *testing.T) {
 	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -359,7 +359,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,7 +400,7 @@ func TestReorg(t *testing.T) {
 
 	// This is unwind step
 	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -436,7 +436,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil); err != nil {
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
 		t.Fatal(err)
 	}
 }
