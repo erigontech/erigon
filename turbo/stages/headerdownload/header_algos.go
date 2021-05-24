@@ -735,10 +735,12 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
 			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
-		hi.headerProgress = blockHeight
 		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
 			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 		}
+		hi.highest = blockHeight
+		hi.highestHash = hash
+		hi.highestTimestamp = header.Time
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
@@ -757,11 +759,6 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash
-	if blockHeight > hi.highest {
-		hi.highest = blockHeight
-		hi.highestHash = hash
-		hi.highestTimestamp = header.Time
-	}
 	return nil
 }
 
@@ -781,7 +778,7 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
 }
 
-func (hi *HeaderInserter) AnythingDone() bool {
+func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 

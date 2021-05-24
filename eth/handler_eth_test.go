@@ -49,9 +49,6 @@ type testEthHandler struct {
 	txBroadcasts    event.Feed
 }
 
-func (h *testEthHandler) Chain() *core.BlockChain              { panic("no backing chain") }
-func (h *testEthHandler) ChainConfig() *params.ChainConfig     { panic("no backing chain") }
-func (h *testEthHandler) GenesisHash() common.Hash             { panic("no backing chain") }
 func (h *testEthHandler) DB() ethdb.RwKV                       { panic("no backing chain") }
 func (h *testEthHandler) TxPool() eth.TxPool                   { panic("no backing tx pool") }
 func (h *testEthHandler) AcceptTxs() bool                      { return true }

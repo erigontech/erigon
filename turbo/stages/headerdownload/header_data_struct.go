@@ -261,15 +261,13 @@ type HeaderInserter struct {
 	highestHash      common.Hash
 	highestTimestamp uint64
 	localTd          *big.Int
-	headerProgress   uint64
 }
 
 func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
-		logPrefix:      logPrefix,
-		localTd:        localTd,
-		headerProgress: headerProgress,
-		unwindPoint:    headerProgress,
+		logPrefix:   logPrefix,
+		localTd:     localTd,
+		unwindPoint: headerProgress,
 	}
 }
 
