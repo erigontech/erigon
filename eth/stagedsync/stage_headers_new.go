@@ -151,7 +151,7 @@ func HeadersForward(
 			// if this is not an initial cycle, we need to react quickly when new headers are coming in
 			break
 		}
-		if initialCycle && inSync {
+		if initialCycle && headerInserter.AnythingDone() && inSync {
 			break
 		}
 		timer := time.NewTimer(1 * time.Second)
