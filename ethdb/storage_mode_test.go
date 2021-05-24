@@ -8,8 +8,8 @@ import (
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
-	db := NewTestDB(t)
-	sm, err := GetStorageModeFromDB(db)
+	_, tx := NewTestTx(t)
+	sm, err := GetStorageModeFromDB(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,8 +18,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal()
 	}
 
-	err = SetStorageModeIfNotExist(db, StorageMode{
-		true,
+	err = SetStorageModeIfNotExist(tx, StorageMode{
 		true,
 		true,
 		true,
@@ -31,13 +30,12 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sm, err = GetStorageModeFromDB(db)
+	sm, err = GetStorageModeFromDB(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if !reflect.DeepEqual(sm, StorageMode{
-		true,
 		true,
 		true,
 		true,

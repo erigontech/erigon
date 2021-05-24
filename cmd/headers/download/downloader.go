@@ -39,8 +39,11 @@ import (
 func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.MaxDelay = 30 * time.Second
 	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
@@ -81,7 +84,15 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 	}
 }
 
-func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+// RecvMessage is normally run in a separate go-routine because it only exists when there a no more messages
+// to be received (end of process, or interruption, or end of test)
+// wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil
+func RecvMessage(
+	ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -106,11 +117,14 @@ func RecvMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleIn
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvMessage: Handling incoming message", "error", err)
 		}
+		if wg != nil {
+			wg.Done()
+		}
 	}
 }
 
 //Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, waitForDone chan struct{}) {
+func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
 	stages.StageLoop(
 		ctx,
 		db,
@@ -118,6 +132,7 @@ func Loop(ctx context.Context, db ethdb.Database, sync *stagedsync.StagedSync, c
 		controlServer.hd,
 		controlServer.chainConfig,
 		notifier,
+		stateStream,
 		waitForDone,
 	)
 }
@@ -142,9 +157,9 @@ func NewStagedSync(
 	txPool *core.TxPool,
 	txPoolServer *eth.TxPoolServer,
 ) (*stagedsync.StagedSync, error) {
-	var increment uint64
-	if sm.Pruning {
-		increment = params.FullImmutabilityThreshold
+	var pruningDistance uint64
+	if !sm.History {
+		pruningDistance = params.FullImmutabilityThreshold
 	}
 
 	return stages.NewStagedSync(ctx, sm,
@@ -156,7 +171,6 @@ func NewStagedSync(
 			controlServer.PropagateNewBlockHashes,
 			controlServer.penalize,
 			batchSize,
-			increment,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
 		stagedsync.StageBodiesCfg(
@@ -175,6 +189,7 @@ func NewStagedSync(
 			db,
 			sm.Receipts,
 			sm.CallTraces,
+			pruningDistance,
 			batchSize,
 			nil,
 			nil,
@@ -451,6 +466,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	}
 	defer tx.Rollback()
 	headers, err := eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
+	tx.Rollback()
 	if err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}

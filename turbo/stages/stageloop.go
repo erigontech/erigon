@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -49,11 +50,12 @@ func NewStagedSync(
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	db ethdb.Database,
+	db ethdb.RwKV,
 	sync *stagedsync.StagedSync,
 	hd *headerdownload.HeaderDownload,
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
+	stateStream bool,
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
@@ -68,13 +70,17 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle); err != nil {
+		var accumulator *shards.Accumulator
+		if !initialCycle && stateStream {
+			accumulator = &shards.Accumulator{}
+		}
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
 
 			log.Error("Stage loop failure", "error", err)
-			if recoveryErr := hd.RecoverFromDb(db.RwKV()); recoveryErr != nil {
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header downoader", "error", recoveryErr)
 			}
 			continue
@@ -87,12 +93,13 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
-	db ethdb.Database,
+	db ethdb.RwKV,
 	sync *stagedsync.StagedSync,
 	highestSeenHeader uint64,
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
 	initialCycle bool,
+	accumulator *shards.Accumulator,
 ) (err error) {
 	// avoid crash because TG's core does many things -
 	defer func() {
@@ -107,54 +114,56 @@ func StageLoopStep(
 			}
 		}
 	}()
+	var sm ethdb.StorageMode
+	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		sm, err = ethdb.GetStorageModeFromDB(tx)
+		if err != nil {
+			return err
+		}
+		origin, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return err
+		}
+		hashStateStageProgress, err = stages.GetStageProgress(tx, stages.Bodies) // TODO: shift this when more stages are added
+		if err != nil {
+			return err
+		}
+		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish) // TODO: shift this when more stages are added
+		if err != nil {
+			return err
+		}
+		var v []byte
+		v, err = tx.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			unwindTo = binary.BigEndian.Uint64(v)
+		}
 
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, db, nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil)
+	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, ethdb.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil, accumulator)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
 
-	origin, err := stages.GetStageProgress(db, stages.Headers)
-	if err != nil {
-		return err
-	}
-	hashStateStageProgress, err1 := stages.GetStageProgress(db, stages.Bodies) // TODO: shift this when more stages are added
-	if err1 != nil {
-		return err1
-	}
-	finishProgressBefore, err1 := stages.GetStageProgress(db, stages.Finish) // TODO: shift this when more stages are added
-	if err1 != nil {
-		return err1
-	}
-
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
-
-	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
-	if err != nil {
-		return err
-	}
-	notifyFrom := finishProgressBefore
-	if len(v) > 0 {
-		n := binary.BigEndian.Uint64(v)
-		if n != 0 {
-			notifyFrom = n
-		}
-	}
 
 	var tx ethdb.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
-		tx, err = db.RwKV().BeginRw(context.Background())
+		tx, err = db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx)
+	err = st.Run(ethdb.NewObjectDatabase(db), tx)
 	if err != nil {
 		return err
 	}
@@ -167,7 +176,7 @@ func StageLoopStep(
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
 
-	err = stagedsync.NotifyNewHeaders2(finishProgressBefore, notifyFrom, notifier, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
 	if err != nil {
 		return err
 	}

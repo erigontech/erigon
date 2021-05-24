@@ -49,10 +49,11 @@ var (
 // purpose is to allow testing the request/reply workflows and wire serialization
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
-	db        ethdb.Database
-	txpool    *core.TxPool
-	chain     *core.BlockChain
-	headBlock *types.Block
+	db          ethdb.Database
+	txpool      *core.TxPool
+	headBlock   *types.Block
+	genesis     *types.Block
+	chainConfig *params.ChainConfig
 }
 
 // newTestBackend creates an empty chain and wraps it into a mock backend.
@@ -72,31 +73,30 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 
 	headBlock := genesis
 	if blocks > 0 {
-		bs, _, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, generator, true)
-		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), bs, true /* checkRoot */); err != nil {
+		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, generator, true)
+		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
 			panic(err)
 		}
-		headBlock = bs[len(bs)-1]
+		headBlock = chain.TopBlock
 	}
 	txconfig := core.DefaultTxPoolConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
-	chain, _ := core.NewBlockChain(db, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
 	txCacher := core.NewTxSenderCacher(1)
 	b := &testBackend{
-		db:        db,
-		txpool:    core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
-		chain:     chain,
-		headBlock: headBlock,
+		db:          db,
+		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
+		headBlock:   headBlock,
+		genesis:     genesis,
+		chainConfig: params.TestChainConfig,
 	}
 	t.Cleanup(func() {
 		b.txpool.Stop()
-		b.chain.Stop()
 	})
 	return b
 }
 
-func (b *testBackend) DB() ethdb.RwKV { return b.chain.ChainDb().(ethdb.HasRwKV).RwKV() }
+func (b *testBackend) DB() ethdb.RwKV { return b.db.(ethdb.HasRwKV).RwKV() }
 func (b *testBackend) TxPool() TxPool { return b.txpool }
 func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
@@ -110,6 +110,26 @@ func (b *testBackend) AcceptTxs() bool {
 }
 func (b *testBackend) Handle(*Peer, Packet) error {
 	panic("data processing tests should be done in the handler package")
+}
+func (b *testBackend) GetBlockHashesFromHash(hash common.Hash, max uint64) []common.Hash {
+	// Get the origin header from which to fetch
+	header, _ := rawdb.ReadHeaderByHash(b.db, hash)
+	if header == nil {
+		return nil
+	}
+	// Iterate the headers until enough is collected or the genesis reached
+	chain := make([]common.Hash, 0, max)
+	for i := uint64(0); i < max; i++ {
+		next := header.ParentHash
+		if header = rawdb.ReadHeader(b.db, next, header.Number.Uint64()-1); header == nil {
+			break
+		}
+		chain = append(chain, next)
+		if header.Number.Sign() == 0 {
+			break
+		}
+	}
+	return chain
 }
 
 // Tests that block headers can be retrieved from a remote chain based on user queries.
@@ -189,7 +209,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		// Ensure protocol limits are honored
 		{
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 1}, Amount: limit + 10, Reverse: true},
-			backend.chain.GetBlockHashesFromHash(rawdb.ReadCurrentHeader(backend.db).Hash(), limit),
+			backend.GetBlockHashesFromHash(rawdb.ReadCurrentHeader(backend.db).Hash(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
@@ -309,7 +329,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		{10, nil, nil, 10},           // Multiple random blocks should be retrievable
 		{limit, nil, nil, limit},     // The maximum possible blocks should be retrievable
 		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
-		{0, []common.Hash{backend.chain.Genesis().Hash()}, []bool{true}, 1},             // The genesis block should be retrievable
+		{0, []common.Hash{backend.genesis.Hash()}, []bool{true}, 1},                     // The genesis block should be retrievable
 		{0, []common.Hash{rawdb.ReadCurrentHeader(backend.db).Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
 		{0, []common.Hash{{}}, []bool{false}, 0},                                        // A non existent block should not be returned
 

@@ -603,7 +603,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		defer fstl.tx.Rollback()
 	}
 	tx := fstl.tx
-	c, err := tx.Cursor(dbutils.CurrentStateBucketOld2)
+	c, err := tx.Cursor(dbutils.HashedAccountsBucket)
 	if err != nil {
 		return SubTries{}, err
 	}

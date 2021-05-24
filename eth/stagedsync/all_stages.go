@@ -72,6 +72,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					world.DB.RwKV(),
 					world.storageMode.Receipts,
 					world.storageMode.CallTraces,
+					0,
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,
@@ -86,10 +87,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg)
+						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg, nil)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg)
+						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg, nil)
 					},
 				}
 			},
@@ -341,6 +342,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 		nil,
 		false,
+		nil,
 		nil,
 	)
 	if err2 != nil {

@@ -52,7 +52,7 @@ func must(err error) {
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withApiAddr(cmd *cobra.Command) {
@@ -69,15 +69,15 @@ func openDatabase(path string) *ethdb.ObjectDatabase {
 }
 
 func openKV(path string, exclusive bool) ethdb.RwKV {
-	if database == "mdbx" {
-		opts := ethdb.NewMDBX().Path(path)
+	if database == "lmdb" {
+		opts := ethdb.NewLMDB().Path(path)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
 		return opts.MustOpen()
 	}
 
-	opts := ethdb.NewLMDB().Path(path)
+	opts := ethdb.NewMDBX().Path(path)
 	if exclusive {
 		opts = opts.Exclusive()
 	}

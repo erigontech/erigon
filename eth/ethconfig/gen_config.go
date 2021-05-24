@@ -17,7 +17,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               uint64
 		EthDiscoveryURLs        []string
-		Pruning                 bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		StorageMode             string
 		OnlyAnnounce            bool
@@ -37,7 +36,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
-	enc.Pruning = c.Pruning
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
 	enc.Preimages = c.Preimages
@@ -60,7 +58,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               *uint64
 		EthDiscoveryURLs        []string
-		Pruning                 *bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		Mode                    *string
 		OnlyAnnounce            *bool
@@ -91,9 +88,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
-	}
-	if dec.Pruning != nil {
-		c.Pruning = *dec.Pruning
 	}
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist

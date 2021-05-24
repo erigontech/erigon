@@ -199,7 +199,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 				logPrefix, stage.DisabledDescription,
 			)
 
-			log.Info(message)
+			log.Debug(message)
 
 			s.NextStage()
 			continue

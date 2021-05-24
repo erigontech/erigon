@@ -20,7 +20,7 @@ var (
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
-		Value: "lmdb",
+		Value: "mdbx",
 	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
@@ -53,11 +53,6 @@ var (
 	DownloadV2Flag = cli.BoolTFlag{
 		Name:  "download.v2",
 		Usage: "enable experimental downloader v2",
-	}
-
-	PruningFlag = cli.BoolFlag{
-		Name:  "prune",
-		Usage: "Enable pruning ancient data",
 	}
 
 	StorageModeFlag = cli.StringFlag{
@@ -126,6 +121,10 @@ var (
 		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
 		Value: "",
 	}
+	StateStreamFlag = cli.BoolFlag{
+		Name:  "state.stream",
+		Usage: "Enable streaming of state changes from core to RPC daemon",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -136,10 +135,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
-	if ctx.GlobalBool(PruningFlag.Name) {
-		cfg.StorageMode.Pruning = true
-		cfg.StorageMode.Initialised = true
-	}
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -166,6 +161,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
+	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
 }
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
@@ -203,6 +199,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
 		cfg.ExternalSnapshotDownloaderAddr = *v
+	}
+	if v := f.Bool(StateStreamFlag.Name, false, StateStreamFlag.Usage); v != nil {
+		cfg.StateStream = *v
 	}
 }
 

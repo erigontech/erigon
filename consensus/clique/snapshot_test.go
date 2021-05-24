@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"errors"
-	"runtime"
 	"sort"
 	"testing"
 
@@ -428,16 +427,8 @@ func TestClique(t *testing.T) {
 			engine := New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.fakeDiff = true
 
-			txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-			chain, err := core.NewBlockChain(db, &config, engine, vm.Config{}, nil, txCacher)
-			if err != nil {
-				t.Errorf("test %d: failed to create test chain: %v", i, err)
-				engine.Close()
-				return
-			}
-
 			genesisBlock, _, _ := genesis.ToBlock()
-			blocks, _, err := core.GenerateChain(&config, genesisBlock, engine, db.RwKV(), len(tt.votes), func(j int, gen *core.BlockGen) {
+			chain, err := core.GenerateChain(&config, genesisBlock, engine, db.RwKV(), len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {
@@ -450,11 +441,11 @@ func TestClique(t *testing.T) {
 				t.Fatalf("generate blocks: %v", err)
 			}
 			// Iterate through the blocks and seal them individually
-			for j, block := range blocks {
+			for j, block := range chain.Blocks {
 				// Get the header and prepare it for signing
 				header := block.Header()
 				if j > 0 {
-					header.ParentHash = blocks[j-1].Hash()
+					header.ParentHash = chain.Blocks[j-1].Hash()
 				}
 				header.Extra = make([]byte, ExtraVanity+ExtraSeal)
 				if auths := tt.votes[j].checkpoint; auths != nil {
@@ -465,11 +456,11 @@ func TestClique(t *testing.T) {
 
 				// Generate the signature, embed it into the header and the block
 				accounts.sign(header, tt.votes[j].signer)
-				blocks[j] = block.WithSeal(header)
+				chain.Blocks[j] = block.WithSeal(header)
 			}
 			// Split the blocks up into individual import batches (cornercase testing)
 			batches := [][]*types.Block{nil}
-			for j, block := range blocks {
+			for j, block := range chain.Blocks {
 				if tt.votes[j].newbatch {
 					batches = append(batches, nil)
 				}
@@ -496,9 +487,9 @@ func TestClique(t *testing.T) {
 				return
 			}
 			// No failure was produced or requested, generate the final voting snapshot
-			head := blocks[len(blocks)-1]
+			head := chain.Blocks[len(chain.Blocks)-1]
 
-			snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
+			snap, err := engine.snapshot(stagedsync.ChainReader{Cfg: config, Db: db}, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)

@@ -443,6 +443,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		txPool,
 		false,
 		nil,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -502,12 +503,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	if err != nil {
 		return err
 	}
-	notifyFrom := finishAtBefore
+	var unwindTo uint64
 	if len(v) > 0 {
-		n := binary.BigEndian.Uint64(v)
-		if n != 0 {
-			notifyFrom = binary.BigEndian.Uint64(v)
-		}
+		unwindTo = binary.BigEndian.Uint64(v)
 	}
 
 	err = d.stagedSyncState.Run(d.stateDB, nil)
@@ -515,7 +513,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return err
 	}
 
-	err = stagedsync.NotifyNewHeaders2(finishAtBefore, notifyFrom, d.stagedSync.Notifier, d.stateDB)
+	err = stagedsync.NotifyNewHeaders(context.Background(), finishAtBefore, unwindTo, d.stagedSync.Notifier, d.stateDB.RwKV())
 	if err != nil {
 		return err
 	}

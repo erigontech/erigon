@@ -81,12 +81,14 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
-	if headerProgress-bodyProgress <= 16 {
+	logPrefix := s.LogPrefix()
+	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
 		timeout = 1
+	} else {
+		// Do not print logs for short periods
+		log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
-	logPrefix := s.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var prevDeliveredCount float64 = 0

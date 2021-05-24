@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 )
 
 type FinishCfg struct {
@@ -83,32 +83,32 @@ func UnwindFinish(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg FinishCfg) e
 	return nil
 }
 
-func NotifyNewHeaders2(finishStageBeforeSync, unwindTo uint64, notifier ChainEventNotifier, db ethdb.Database) error {
-	finishAt, err := stages.GetStageProgress(db, stages.Finish) // because later stages can be disabled
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync, unwindTo uint64, notifier ChainEventNotifier, db ethdb.RwKV) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
 	if err != nil {
 		return err
 	}
 	notifyFrom := finishStageBeforeSync + 1
-	if unwindTo < finishStageBeforeSync {
+	if unwindTo != 0 && unwindTo < finishStageBeforeSync {
 		notifyFrom = unwindTo + 1
 	}
-	return NotifyNewHeaders(notifyFrom, finishAt, notifier, db)
-}
-
-func NotifyNewHeaders(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
 	}
-	log.Info("Update current block for the RPC API", "from", from, "to", to)
-	for i := from; i <= to; i++ {
-		header := rawdb.ReadHeaderByNumber(db, i)
+	log.Info("Update current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+	for i := notifyFrom; i <= notifyTo; i++ {
+		header := rawdb.ReadHeaderByNumber(tx, i)
 		if header == nil {
 			return fmt.Errorf("could not find canonical header for number: %d", i)
 		}
 		notifier.OnNewHeader(header)
 	}
-
 	return nil
 }
 

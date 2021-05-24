@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
@@ -55,6 +56,7 @@ type StageParameters struct {
 	snapshotsDir    string
 	btClient        *snapshotsync.Client
 	SnapshotBuilder *snapshotsync.SnapshotMigrator
+	Accumulator     *shards.Accumulator // State change accumulator
 }
 
 type MiningCfg struct {
@@ -269,6 +271,7 @@ func DefaultStages() StageBuilders {
 					world.DB.RwKV(),
 					world.storageMode.Receipts,
 					world.storageMode.CallTraces,
+					0,
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,
@@ -283,10 +286,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg)
+						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg, nil)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg)
+						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg, nil)
 					},
 				}
 			},

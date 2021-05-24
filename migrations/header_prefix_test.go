@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func TestHeaderPrefix(t *testing.T) {
 
 	migrator := NewMigrator()
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
-	err = migrator.Apply(db, t.TempDir())
+	err = migrator.Apply(db, t.TempDir(), debug.TestDB() == "mdbx")
 	require.NoError(err)
 
 	num := 0

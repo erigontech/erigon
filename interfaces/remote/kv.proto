@@ -14,6 +14,8 @@ service KV {
 
   // Tx exposes read-only transactions for the key-value store
   rpc Tx(stream Cursor) returns (stream Pair);
+
+  rpc ReceiveStateChanges(google.protobuf.Empty) returns (stream StateChange);
 }
 
 enum Op {
@@ -49,4 +51,38 @@ message Pair {
   bytes k = 1;
   bytes v = 2;
   uint32 cursorID = 3;
+}
+
+enum Action {
+  STORAGE = 0;     // Change only in the storage
+  UPSERT = 1;      // Change of balance or nonce (and optionally storage)
+  CODE = 2;        // Change of code (and optionally storage)
+  UPSERT_CODE = 3; // Change in (balance or nonce) and code (and optinally storage)
+  DELETE = 4;      // Account is deleted
+}
+
+message StorageChange {
+  types.H256 location = 1;
+  bytes data = 2;
+}
+
+message AccountChange {
+  types.H160 address = 1;
+  uint64 incarnation = 2;
+  Action action = 3;
+  bytes data = 4; // nil if there is no UPSERT in action
+  bytes code = 5; // nil if there is no CODE in action
+  repeated StorageChange storageChanges = 6;
+}
+
+enum Direction {
+  FORWARD = 0;
+  UNWIND = 1;
+}
+
+message StateChange {
+  Direction direction = 1;
+  uint64 blockHeight = 2;
+  types.H256 blockHash = 3;
+  repeated AccountChange changes = 4;
 }

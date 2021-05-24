@@ -165,10 +165,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, ctx.Done(), exec)
+						return SpawnExecuteBlocksStage(s, tx, 0, ctx.Done(), exec, world.Accumulator)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec)
+						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.Accumulator)
 					},
 				}
 			},
@@ -239,6 +239,23 @@ func ReplacementStages(ctx context.Context,
 			},
 		},
 		{
+			ID: stages.CallTraces,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.CallTraces,
+					Description:         "Generate call traces index",
+					DisabledDescription: "Work In Progress",
+					Disabled:            !sm.CallTraces,
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnCallTraces(s, tx, ctx.Done(), callTraces)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						return UnwindCallTraces(u, s, tx, ctx.Done(), callTraces)
+					},
+				}
+			},
+		},
+		{
 			ID: stages.AccountHistoryIndex,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -285,23 +302,6 @@ func ReplacementStages(ctx context.Context,
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindLogIndex(u, s, tx, logIndex, ctx.Done())
-					},
-				}
-			},
-		},
-		{
-			ID: stages.CallTraces,
-			Build: func(world StageParameters) *Stage {
-				return &Stage{
-					ID:                  stages.CallTraces,
-					Description:         "Generate call traces index",
-					DisabledDescription: "Work In Progress",
-					Disabled:            !sm.CallTraces,
-					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnCallTraces(s, tx, ctx.Done(), callTraces)
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindCallTraces(u, s, tx, ctx.Done(), callTraces)
 					},
 				}
 			},
@@ -364,10 +364,10 @@ func ReplacementUnwindOrder() UnwindOrder {
 		16,
 		5, 6, 7, 8, // senders, exec, state snapshot
 		10, 9, // Unwinding of IHashes needs to happen after unwinding HashState
-		11, 12, // history
-		13, // log index
-		14, // call traces
+		11,     // call traces
+		12, 13, // history
+		14, // log index
 		15, // tx lookup
-		17,
+		17, // finish
 	}
 }

@@ -78,7 +78,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -112,12 +112,12 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

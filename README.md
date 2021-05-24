@@ -1,8 +1,7 @@
 
 # Erigon
 
-Erigon was originally called Turbo-Geth, a fork of [Go-Ethereum](https://github.com/ethereum/go-ethereum) with focus on performance.
-Now it a very different product.
+Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -21,7 +20,7 @@ Now it a very different product.
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
 - [Getting in touch](#getting-in-touch)
-    + [Turbo-Geth Discord Server](#turbo-geth-discord-server)
+    + [Erigon Discord Server](#erigon-discord-server)
     + [Reporting security issues/concerns](#reporting-security-issues-concerns)
     + [Team](#team)
 - [Known issues](#known-issues)
@@ -56,8 +55,8 @@ Usage
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 > cd erigon
-> make erigon
-> ./build/bin/erigon
+> make tg
+> ./build/bin/tg
 ```
 
 ### Testnets
@@ -66,8 +65,8 @@ If you would like to give turbo-geth a try, but do not have spare 2Tb on your dr
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 > cd erigon
-> make erigon
-> ./build/bin/erigon --datadir goerli --chain goerli
+> make tg
+> ./build/bin/tg --datadir goerli --chain goerli
 ```
 
 Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
@@ -92,9 +91,11 @@ Support only remote-miners.
 
 ### Windows
 
-Windows users may run turbo-geth in 3 possible ways:
+Windows users may run erigon in 3 possible ways:
 
-* Build Erigon binaries natively for Windows : while this method is possible we still lack a fully automated build process thus, at the moment, is not to be preferred. Besides there's also a caveat which might cause your experience with TG as native on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the option `--lmdb.mapSize`
+* Build executable binaries natively for Windows using provided `win-build.ps1` PowerShell script which has to be run with local Administrator privileges.
+The script creates `libmdbx.dll` (MDBX is current default database for Erigon) and copies it into Windows's `system32` folder (generally `C:\Windows\system32`). 
+Though is still possible to run erigon with LMDB database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
@@ -104,12 +105,12 @@ Windows users may run turbo-geth in 3 possible ways:
 > sudo apt install build-essential git golang golang-go
 ```
 
-Once this last step is completed you can run erigon as if you were on Linux as described the [Usage](#usage) section.
+Once this last step is completed you can run tg as if you were on Linux as described the [Usage](#usage) section.
 
-**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have Erigon store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as 
+**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have TG store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as 
 
 ```sh
-> ./erigon --datadir /mnt/d/[<optional-subfolder>/]
+> ./tg --datadir /mnt/d/[<optional-subfolder>/]
 ```
 
 
@@ -139,7 +140,7 @@ accounts and the storage.
 
 ### Faster Initial Sync
 
-Turbo-Geth uses a rearchitected full sync algorithm from
+Erigon uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
 
@@ -159,15 +160,17 @@ Examples of stages are:
 
 * Downloading block bodies;
 
+* Recovering senders' addresses;
+
 * Executing blocks;
 
 * Validating root hashes and building intermediate hashes for the state Merkle trie;
 
-* And more...
+* [...]
 
 ### JSON-RPC daemon
 
-In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
+In Erigon RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
 it can run from a snapshot of a database for read-only calls. 
@@ -189,7 +192,7 @@ In this mode, some RPC API methods do not work. Please see "For dual mode" secti
 This works regardless of whether RPC daemon is on the same computer with turbo-geth, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run turbo-geth in one terminal window
 
 ```
-> ./build/bin/erigon --private.api.addr=localhost:9090
+> ./build/bin/tg --private.api.addr=localhost:9090
 ```
 
 Run RPC daemon
@@ -197,7 +200,7 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
 
-**gRPC ports**: `9090` Erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+**gRPC ports**: `9090` TG, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
 **For dual mode**
 
@@ -223,11 +226,11 @@ XDG_DATA_HOME=/preferred/data/folder docker-compose up
 Getting in touch
 ================
 
-### Turbo-Geth Discord Server
+### Erigon Discord Server
 
 The main discussions are happening on our Discord server. 
 To get an invite, send an email to `tg [at] torquem.ch` with your name, occupation, 
-a brief explanation of why you want to join the Discord, and how you heard about Erigon.
+a brief explanation of why you want to join the Discord, and how you heard about Turbo-Geth.
 
 ### Reporting security issues/concerns
 
@@ -235,13 +238,17 @@ Send an email to `security [at] torquem.ch`.
 
 ### Team
 
-Core contributors:
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+Core contributors (in alpabetical order of first names):
 
 * Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
+* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+
+* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
+
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
+
+* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
 
 * Boris Petrov ([b00ris](https://github.com/b00ris))
 
@@ -249,7 +256,7 @@ Core contributors:
 
 * Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
-* Giulio Rebuffo
+* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
 
 * Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
@@ -268,7 +275,7 @@ Known issues
 
 ### `htop` shows incorrect memory usage
 
-TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
+Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
 
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App", 
@@ -283,13 +290,13 @@ Without `grep` you can see details - `section MALLOC ZONE column Resident Size` 
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
+Erigon uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory. 
 
-**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, 
-it impacts performance - one of main Erigon optimisations: "reduce Disk random access". 
+**Warning:** Multiple instances of TG on same machine will touch Disk concurrently, 
+it impacts performance - one of main TG optimisations: "reduce Disk random access". 
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk. 
-If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
+If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 

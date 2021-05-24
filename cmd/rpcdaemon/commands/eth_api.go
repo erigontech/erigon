@@ -7,10 +7,10 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
@@ -158,7 +158,7 @@ func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx ethdb.Tx) (*type
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend core.ApiBackend
+	ethBackend services.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
 	db         ethdb.RoKV
@@ -166,7 +166,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db ethdb.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

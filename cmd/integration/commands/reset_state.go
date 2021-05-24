@@ -42,8 +42,9 @@ var cmdClearUnwindStack = &cobra.Command{
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		err := clearUnwindStack(db, ctx)
-		if err != nil {
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+			return clearUnwindStack(tx, ctx)
+		}); err != nil {
 			log.Error(err.Error())
 			return err
 		}
@@ -62,7 +63,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(db ethdb.Putter, _ context.Context) error {
+func clearUnwindStack(db ethdb.RwTx, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0); err != nil {
 			return err
@@ -71,12 +72,11 @@ func clearUnwindStack(db ethdb.Putter, _ context.Context) error {
 	return nil
 }
 
-func resetState(db ethdb.Database, ctx context.Context) error {
+func resetState(kv ethdb.RwKV, ctx context.Context) error {
 	fmt.Printf("Before reset: \n")
-	if err := printStages(db); err != nil {
+	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
-	kv := db.(ethdb.HasRwKV).RwKV()
 	// don't reset senders here
 	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
 		return err
@@ -119,7 +119,7 @@ func resetState(db ethdb.Database, ctx context.Context) error {
 	}
 
 	fmt.Printf("After reset: \n")
-	if err := printStages(db); err != nil {
+	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
 	return nil
@@ -274,7 +274,7 @@ func resetFinish(tx ethdb.RwTx) error {
 	return nil
 }
 
-func printStages(db ethdb.Getter) error {
+func printStages(db ethdb.KVGetter) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

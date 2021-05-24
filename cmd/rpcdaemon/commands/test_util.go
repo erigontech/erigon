@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -52,11 +51,10 @@ func createTestDb() (ethdb.Database, error) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
+	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
 	if err != nil {
 		return nil, err
 	}
-	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
 
 	engine := ethash.NewFaker()
 
@@ -70,7 +68,7 @@ func createTestDb() (ethdb.Database, error) {
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction
@@ -185,7 +183,7 @@ func createTestDb() (ethdb.Database, error) {
 		return nil, err
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
 		return nil, err
 	}
 

@@ -116,7 +116,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		currentHeaderIdx++
 	}
 
-	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	bodies, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 
 		copy(canonical[blockNumber-from-1][:], v)
 	}
-	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
 	sendersC, err := tx.Cursor(dbutils.Senders)
 	if err != nil {

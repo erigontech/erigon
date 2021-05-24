@@ -180,10 +180,10 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blocks, receipts, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
-	b.pendingBlock = blocks[0]
-	b.pendingReceipts = receipts[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	chain, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingReceipts = chain.Receipts[0]
+	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
 	b.pendingReader = state.NewPlainStateReader(b.database)
 	b.pendingState = state.New(b.pendingReader)
@@ -660,7 +660,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
@@ -670,9 +670,9 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		return err
 	}
 	//fmt.Printf("==== End producing block %d\n", b.pendingBlock.NumberU64())
-	b.pendingBlock = blocks[0]
-	b.pendingReceipts = receipts[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingReceipts = chain.Receipts[0]
+	b.pendingHeader = chain.Headers[0]
 	return nil
 }
 
@@ -781,7 +781,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.engine, tx)
 		}
@@ -790,8 +790,8 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	if err != nil {
 		return err
 	}
-	b.pendingBlock = blocks[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingHeader = chain.Headers[0]
 
 	return nil
 }
