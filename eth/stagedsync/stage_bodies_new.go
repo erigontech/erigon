@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -28,7 +27,6 @@ type BodiesCfg struct {
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
-	updateHead      func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
 	chanConfig      params.ChainConfig
@@ -40,13 +38,12 @@ func StageBodiesCfg(
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []headerdownload.PenaltyItem),
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, updateHead: updateHead, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -99,7 +96,6 @@ func BodiesForward(
 	var peer []byte
 	stopped := false
 	var headHash common.Hash
-	var headSet bool
 	for !stopped {
 		// TODO: this is incorrect use
 		if req == nil {
@@ -178,7 +174,6 @@ func BodiesForward(
 				}
 				headHash = header.Hash()
 				rawdb.WriteHeadBlockHash(tx, headHash)
-				headSet = true
 			}
 		}
 		d5 += time.Since(start)
@@ -204,15 +199,6 @@ func BodiesForward(
 		}
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
-	}
-	if headSet {
-		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
-			headTd256 := new(uint256.Int)
-			headTd256.SetFromBig(headTd)
-			cfg.updateHead(ctx, bodyProgress, headHash, headTd256)
-		} else {
-			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
-		}
 	}
 	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
 		return err

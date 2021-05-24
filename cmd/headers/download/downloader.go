@@ -133,6 +133,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		controlServer.chainConfig,
 		notifier,
 		stateStream,
+		controlServer.updateHead,
 		waitForDone,
 	)
 }
@@ -178,7 +179,6 @@ func NewStagedSync(
 			controlServer.bd,
 			controlServer.sendBodyRequest,
 			controlServer.penalize,
-			controlServer.updateHead,
 			controlServer.BroadcastNewBlock,
 			bodyDownloadTimeout,
 			*controlServer.chainConfig,
