@@ -268,6 +268,7 @@ func init() {
 	withBatchSize(cmdStageExec)
 	withSilkworm(cmdStageExec)
 	withTxTrace(cmdStageExec)
+	withChain(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -276,6 +277,7 @@ func init() {
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
 	withBatchSize(cmdStageHashState)
+	withChain(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
 
@@ -284,6 +286,7 @@ func init() {
 	withBlock(cmdStageTrie)
 	withUnwind(cmdStageTrie)
 	withIntegrityChecks(cmdStageTrie)
+	withChain(cmdStageTrie)
 
 	rootCmd.AddCommand(cmdStageTrie)
 
@@ -776,13 +779,31 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 		panic(err)
 	}
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
-	chainConfig := params.MainnetChainConfig
+	var chainConfig *params.ChainConfig
+	var genesis *core.Genesis
+	switch chain {
+	case "", params.MainnetChainName:
+		chainConfig = params.MainnetChainConfig
+		genesis = core.DefaultGenesisBlock()
+	case params.RopstenChainName:
+		chainConfig = params.RopstenChainConfig
+		genesis = core.DefaultRopstenGenesisBlock()
+	case params.GoerliChainName:
+		chainConfig = params.GoerliChainConfig
+		genesis = core.DefaultGoerliGenesisBlock()
+	case params.RinkebyChainName:
+		chainConfig = params.RinkebyChainConfig
+		genesis = core.DefaultRinkebyGenesisBlock()
+	case params.BaikalChainName:
+		chainConfig = params.BaikalChainConfig
+		genesis = core.DefaultBaikalGenesisBlock()
+	}
 	events := remotedbserver.NewEvents()
 
 	txCacher := core.NewTxSenderCacher(1)
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, ethdb.NewObjectDatabase(db), txCacher)
 
-	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), core.DefaultGenesisBlock(), sm.History)
+	chainConfig, genesisBlock, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), genesis, sm.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
@@ -794,7 +815,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 
 	engine := ethash.NewFaker()
 	blockDownloaderWindow := 65536
-	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesis.Hash(), engine, 1, nil, blockDownloaderWindow)
+	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
 	if err != nil {
 		panic(err)
 	}

@@ -192,12 +192,7 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	price := st.gasPrice
-	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
-		// price = min(tip, feeCap - baseFee) + baseFee
-		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
-	}
-	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), price.ToBig())
+	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), st.gasPrice.ToBig())
 	gasCost, overflow := uint256.FromBig(mgval)
 	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
 		if !gasBailout {
@@ -344,12 +339,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	st.gas += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	price := st.gasPrice
-	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
-		// price = min(tip, feeCap - baseFee) + baseFee
-		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
-	}
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), price)
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is
