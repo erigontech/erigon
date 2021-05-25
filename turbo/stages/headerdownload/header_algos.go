@@ -195,7 +195,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
-func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (bool, error) {
 	// Find attachment anchor again
 	anchorHeader := segment.Headers[start]
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
@@ -207,15 +207,19 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 			}
 		}
 		newAnchorHeader := segment.Headers[end-1]
-		newAnchor := &Anchor{
-			parentHash:  newAnchorHeader.ParentHash,
-			timestamp:   0,
-			peerID:      anchor.peerID,
-			blockHeight: newAnchorHeader.Number.Uint64(),
-		}
-		if newAnchor.blockHeight > 0 {
-			hd.anchors[newAnchorHeader.ParentHash] = newAnchor
-			heap.Push(hd.anchorQueue, newAnchor)
+		var newAnchor *Anchor
+		newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
+		if !preExisting {
+			newAnchor = &Anchor{
+				parentHash:  newAnchorHeader.ParentHash,
+				timestamp:   0,
+				peerID:      anchor.peerID,
+				blockHeight: newAnchorHeader.Number.Uint64(),
+			}
+			if newAnchor.blockHeight > 0 {
+				hd.anchors[newAnchorHeader.ParentHash] = newAnchor
+				heap.Push(hd.anchorQueue, newAnchor)
+			}
 		}
 
 		delete(hd.anchors, anchor.parentHash)
@@ -242,10 +246,9 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 			// Mark the entire segment as preverified
 			hd.markPreverified(prevLink)
 		}
-	} else {
-		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
+		return !preExisting, nil
 	}
-	return nil
+	return false, fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 }
 
 // Connect connects some working trees using anchors of some, and a link of another
@@ -821,11 +824,11 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 			log.Debug("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
-			if err := hd.extendDown(segment, start, end); err != nil {
+			var err error
+			if requestMore, err = hd.extendDown(segment, start, end); err != nil {
 				log.Debug("ExtendDown failed", "error", err)
 				return
 			}
-			requestMore = true
 			log.Debug("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
