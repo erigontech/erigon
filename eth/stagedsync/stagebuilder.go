@@ -465,7 +465,12 @@ func DefaultStages() StageBuilders {
 	}
 }
 
-func MiningStages(cfg params.MiningConfig) StageBuilders {
+func MiningStages(
+	createBlockCfg MiningCreateBlockCfg,
+	execCfg MiningExecCfg,
+	hashStateCfg HashStateCfg,
+	trieCfg TrieCfg,
+) StageBuilders {
 	return []StageBuilder{
 		{
 			ID: stages.MiningCreateBlock,
@@ -475,11 +480,8 @@ func MiningStages(cfg params.MiningConfig) StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningCreateBlockStage(s, tx,
-							cfg,
+							createBlockCfg,
 							world.mining.Block,
-							*world.ChainConfig,
-							world.Engine,
-							world.txPool,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
@@ -494,15 +496,11 @@ func MiningStages(cfg params.MiningConfig) StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningExecStage(s, tx,
-							cfg,
+							execCfg,
 							world.mining.Block,
-							world.ChainConfig,
-							world.vmConfig,
-							world.Engine,
 							world.mining.Block.LocalTxs,
 							world.mining.Block.RemoteTxs,
 							world.mining.noempty,
-							world.notifier,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
@@ -512,12 +510,11 @@ func MiningStages(cfg params.MiningConfig) StageBuilders {
 		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHashStateCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHashStateStage(s, tx, cfg, world.QuitCh)
+						return SpawnHashStateStage(s, tx, hashStateCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}
@@ -526,12 +523,11 @@ func MiningStages(cfg params.MiningConfig) StageBuilders {
 		{
 			ID: stages.IntermediateHashes,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageTrieCfg(world.DB.RwKV(), false, true, world.TmpDir)
 				return &Stage{
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, cfg, world.QuitCh)
+						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, world.QuitCh)
 						if err != nil {
 							return err
 						}

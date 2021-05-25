@@ -231,7 +231,12 @@ func mock(t *testing.T) *MockSentry {
 	mock.minedBlocks = make(chan *types.Block, 1)
 
 	mock.miningSync = stagedsync.New(
-		stagedsync.MiningStages(miningConfig),
+		stagedsync.MiningStages(
+			stagedsync.StageMiningCreateBlockCfg(db, miningConfig, *mock.chainConfig, mock.engine, txPool, mock.tmpdir),
+			stagedsync.StageMiningExecCfg(db, miningConfig, nil, *mock.chainConfig, mock.engine, &vm.Config{}, mock.tmpdir),
+			stagedsync.StageHashStateCfg(db, mock.tmpdir),
+			stagedsync.StageTrieCfg(db, false, true, mock.tmpdir),
+		),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)

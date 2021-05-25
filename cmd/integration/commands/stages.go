@@ -820,7 +820,12 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 		panic(err)
 	}
 	stMining := stagedsync.New(
-		stagedsync.MiningStages(),
+		stagedsync.MiningStages(
+			stagedsync.StageMiningCreateBlockCfg(db, ethconfig.Defaults.Miner, *chainConfig, engine, txPool, ""),
+			stagedsync.StageMiningExecCfg(db, ethconfig.Defaults.Miner, events, *chainConfig, engine, &vm.Config{}, ""),
+			stagedsync.StageHashStateCfg(db, ""),
+			stagedsync.StageTrieCfg(db, false, true, ""),
+		),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc(), Notifier: events},
 	)

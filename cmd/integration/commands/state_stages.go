@@ -320,11 +320,13 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder, tx ethdb.RwTx) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
-					miningConfig,
+					stagedsync.StageMiningCreateBlockCfg(db,
+						miningConfig,
+						*chainConfig,
+						engine,
+						txPool,
+						tmpDir),
 					miningWorld.Block,
-					*chainConfig,
-					engine,
-					txPool,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
