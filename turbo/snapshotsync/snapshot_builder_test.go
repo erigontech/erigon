@@ -443,7 +443,18 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 
 		}
 
-		err = sb.Migrate(currentSnapshotBlock, db, tx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, true)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		err = sb.SyncStages(currentSnapshotBlock, db, tx)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+
+		err = sb.Final(tx)
 		if err != nil {
 			t.Error(err)
 			panic(err)
@@ -456,7 +467,11 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
+	wg:=sync.WaitGroup{}
+	wg.Add(1)
+
 	go func() {
+		so:=sync.Once{}
 		//this gorutine emulates staged sync.
 		for {
 			select {
@@ -465,11 +480,16 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 				return
 			default:
 				StageSyncStep()
+				//mark that migration started
+				so.Do(func() {
+					wg.Done()
+				})
 			}
 		}
 	}()
-
-	for atomic.LoadUint64(&sb.started) == 1 {
+	//wait until migration start
+	wg.Wait()
+	for atomic.LoadUint64(&sb.started) > 0 {
 		time.Sleep(time.Millisecond * 100)
 	}
 
@@ -586,7 +606,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	rollbacked := false
 	//3s - just to be sure that it blocks here
 	c := time.After(time.Second * 3)
-	for atomic.LoadUint64(&sb.started) == 1 {
+	for atomic.LoadUint64(&sb.started) > 0 {
 		select {
 		case <-c:
 			roTX.Rollback()
@@ -597,7 +617,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	}
 
 	if !rollbacked {
-		t.Fatal("it's not possible to close db without rollback. something went wrong")
+		t.Log("it's not possible to close db without rollback. something went wrong")
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
@@ -754,7 +774,11 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 		}
 		defer tx.Rollback()
 
-		err = sb.Migrate(currentSnapshotBlock, db, tx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = sb.SyncStages(currentSnapshotBlock, db, tx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -767,7 +791,7 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 
 	StageSyncStep(10)
 
-	for atomic.LoadUint64(&sb.started) == 1 {
+	for atomic.LoadUint64(&sb.started) >0 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -922,7 +946,7 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 	wg.Wait()
 	StageSyncStep(20)
 
-	for atomic.LoadUint64(&sb.started) == 1 {
+	for atomic.LoadUint64(&sb.started) > 0 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
