@@ -39,7 +39,11 @@ func (tp *TxPoolServer) Start() {
 	go RecvTxMessage(tp.ctx, tp.sentries[0], tp.HandleInboundMessage)
 }
 
-func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	return tp.newPooledTransactionHashes65(ctx, inreq, sentry)
+}
+
+func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding NewPooledTransactionHashesPacket: %v, data: %x", err, inreq.Data)
@@ -47,7 +51,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *p
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query PooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding PooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
@@ -56,7 +60,19 @@ func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sen
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
 }
 
-func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	var query PooledTransactionsPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding PooledTransactionsPacket: %v, data: %x", err, inreq.Data)
+	}
+
+	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, true)
+}
+
+func (tp *TxPoolServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	return tp.transactions65(ctx, inreq, sentry)
+}
+func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -67,7 +83,7 @@ func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.In
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
 
-func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -87,6 +103,31 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_66, Data: b},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send pooled transactions response: %v", err)
+	}
+	return nil
+}
+
+func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	if tp.txPool == nil {
+		return nil
+	}
+	var query GetPooledTransactionsPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+	}
+	_, txs := AnswerGetPooledTransactions(tp.txPool, query)
+	b, err := rlp.EncodeToBytes(PooledTransactionsRLPPacket(txs))
+	if err != nil {
+		return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %v", err)
+	}
+	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_65, Data: b},
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
@@ -139,14 +180,26 @@ func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 
 func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
+
+	// ==== eth 65 ====
+	case proto_sentry.MessageId_TRANSACTIONS_65:
+		return tp.transactions65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
+		return tp.newPooledTransactionHashes65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		return tp.getPooledTransactions65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_65:
+		return tp.pooledTransactions65(ctx, inreq, sentry)
+
+	// ==== eth 66 ====
 	case proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
-		return tp.newPooledTransactionHashes(ctx, inreq, sentry)
+		return tp.newPooledTransactionHashes66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66:
-		return tp.pooledTransactions(ctx, inreq, sentry)
+		return tp.pooledTransactions66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_TRANSACTIONS_66:
-		return tp.transactions(ctx, inreq, sentry)
+		return tp.transactions66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
-		return tp.getPooledTransactions(ctx, inreq, sentry)
+		return tp.getPooledTransactions66(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

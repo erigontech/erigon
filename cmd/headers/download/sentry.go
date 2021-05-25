@@ -245,6 +245,54 @@ func MakeProtocols(ctx context.Context,
 			},
 			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
 		},
+		{
+			Name:           eth.ProtocolName,
+			Version:        eth.ProtocolVersions[1],
+			Length:         17,
+			DialCandidates: dialCandidates,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+				peerID := peer.ID().String()
+				if _, ok := peers.Load(peerID); ok {
+					log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+					return nil
+				}
+				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
+				if err := handShake(ctx, statusFn(), peerID, rw, eth.ProtocolVersions[1], eth.ProtocolVersions[1]); err != nil {
+					return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+				}
+				log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+				peerInfo := &PeerInfo{
+					peer: peer,
+					rw:   rw,
+				}
+				peers.Store(peerID, peerInfo)
+				if err := runPeer(
+					ctx,
+					peerID,
+					rw,
+					peerInfo,
+					receiveCh,
+					receiveUploadCh,
+					receiveTxCh,
+					txSubscribed,
+				); err != nil {
+					log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+				}
+				peers.Delete(peerID)
+				return nil
+			},
+			NodeInfo: func() interface{} {
+				return readNodeInfo()
+			},
+			PeerInfo: func(id enode.ID) interface{} {
+				p, ok := peers.Load(id.String())
+				if !ok {
+					return nil
+				}
+				return p.(*PeerInfo).peer.Info()
+			},
+			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		},
 	}
 }
 
