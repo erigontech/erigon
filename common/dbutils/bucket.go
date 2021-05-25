@@ -209,9 +209,6 @@ const (
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
 
-	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
-	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
-
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
@@ -268,8 +265,6 @@ var Rename = map[string]string{
 	InodesBucket:              "Inode",
 	Senders:                   "TxSender",
 	HeadBlockKey:              "LastBlock",
-	InvalidBlock:              "InvalidBlock",
-	UncleanShutdown:           "UncleanShutdown",
 	Migrations:                "Migration",
 	Sequence:                  "Sequence",
 	HeadHeaderKey:             "LastHeader",
@@ -446,7 +441,6 @@ var BucketsConfigs = BucketsCfg{
 	CallTraceSet: {
 		Flags: DupSort,
 	},
-	InvalidBlock: {},
 }
 
 func sortBuckets() {
