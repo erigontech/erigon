@@ -326,7 +326,7 @@ func init() {
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDatadir(cmdSetStorageMode)
-	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htr", "Storage mode to override database")
+	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htre", "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetStorageMode)
 }
 

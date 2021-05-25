@@ -96,30 +96,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 			},
 		},
 		{
-			ID: stages.Translation,
-			Build: func(world StageParameters) *Stage {
-				transCfg := StageTranspileCfg(
-					world.DB.RwKV(),
-					world.BatchSize,
-					world.stateReaderBuilder,
-					world.stateWriterBuilder,
-					world.ChainConfig,
-				)
-				return &Stage{
-					ID:                  stages.Translation,
-					Description:         "Transpile marked EVM contracts to TEVM",
-					Disabled:            !world.storageMode.TEVM,
-					DisabledDescription: "Enable by adding `e` to --storage-mode",
-					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindTranspileStage(u, s, tx, world.QuitCh, transCfg)
-					},
-				}
-			},
-		},
-		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
 				hashStateCfg := StageHashStateCfg(world.DB.RwKV(), world.TmpDir)
@@ -326,7 +302,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12}, OptionalParameters{})
+	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,

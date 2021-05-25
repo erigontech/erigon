@@ -292,6 +292,8 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	logBlock := stageProgress
 	logTime := time.Now()
 
+	toTranslate := 0
+
 	var stoppedErr error
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -334,12 +336,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			// TEVM marking new contracts sub-stage
 			codeHashes := stateReaderWriter.AllTouches()
 			for codeHash := range codeHashes {
-				err = tx.Put(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes(), []byte{dbutils.TEVMScheduled})
+				err = batch.Put(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes(), []byte{dbutils.TEVMScheduled})
 				if err != nil {
 					return err
 				}
 			}
-			fmt.Println("===-1 Going to add", len(codeHashes))
+
+			toTranslate += len(codeHashes)
 		}
 
 		stageProgress = blockNum
@@ -385,6 +388,8 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
 			}
+
+			toTranslate = 0
 		}
 		stageExecutionGauge.Update(int64(blockNum))
 	}
@@ -713,16 +718,19 @@ func (d *TouchReaderWriter) ReadAccountStorage(address common.Address, incarnati
 }
 
 func (d *TouchReaderWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	_, ok := d.readCodes[codeHash]
-	if !ok {
-		ok, err := d.check(codeHash)
-		if err != nil {
-			return nil, err
-		}
+	if codeHash != (common.Hash{}) {
+		_, ok := d.readCodes[codeHash]
 		if !ok {
-			d.readCodes[codeHash] = struct{}{}
+			ok, err := d.check(codeHash)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				d.readCodes[codeHash] = struct{}{}
+			}
 		}
 	}
+
 	return d.r.ReadAccountCode(address, incarnation, codeHash)
 }
 
@@ -747,14 +755,16 @@ func (d *TouchReaderWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (d *TouchReaderWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	_, ok := d.updatedCodes[codeHash]
-	if !ok {
-		ok, err := d.check(codeHash)
-		if err != nil {
-			return err
-		}
+	if codeHash != (common.Hash{}) {
+		_, ok := d.updatedCodes[codeHash]
 		if !ok {
-			d.updatedCodes[codeHash] = struct{}{}
+			ok, err := d.check(codeHash)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				d.updatedCodes[codeHash] = struct{}{}
+			}
 		}
 	}
 	return d.w.UpdateAccountCode(address, incarnation, codeHash, code)

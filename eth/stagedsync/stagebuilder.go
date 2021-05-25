@@ -295,30 +295,6 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
-			ID: stages.Translation,
-			Build: func(world StageParameters) *Stage {
-				transCfg := StageTranspileCfg(
-					world.DB.RwKV(),
-					world.BatchSize,
-					world.stateReaderBuilder,
-					world.stateWriterBuilder,
-					world.ChainConfig,
-				)
-				return &Stage{
-					ID:                  stages.Translation,
-					Description:         "Transpile marked EVM contracts to TEVM",
-					Disabled:            !world.storageMode.TEVM,
-					DisabledDescription: "Enable by adding `e` to --storage-mode",
-					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnTranspileStage(s, tx, 0, world.QuitCh, transCfg)
-					},
-					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindTranspileStage(u, s, tx, world.QuitCh, transCfg)
-					},
-				}
-			},
-		},
-		{
 			ID: stages.CreateStateSnapshot,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -604,21 +580,20 @@ func DefaultUnwindOrder() UnwindOrder {
 		2,  //headers snapshot
 		3,  //bodies
 		4,  //bodies snapshot
-		16, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		15, //Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
 		5, //senders
 		6, //execution
-		7, //tevm
-		8, //state snapshot
+		7, //state snapshot
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		10, //intermediate hashes
-		9,  //hash state
-		11, //acc history
-		12, //st history
-		13, //log index
-		14, //call traces
-		15, //tx lookup
-		17,
+		9,  //intermediate hashes
+		8,  //hash state
+		10, //acc history
+		11, //st history
+		12, //log index
+		13, //call traces
+		14, //tx lookup
+		16,
 	}
 }
 

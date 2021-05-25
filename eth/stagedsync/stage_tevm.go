@@ -50,33 +50,32 @@ type contract struct {
 }
 
 func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.DbWithPendingMutations, cfg TranspileCfg, useExternalTx bool, quitCh <-chan struct{}) error {
-	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	numWorkers := runtime.NumCPU()
-	wg := new(errgroup.Group)
-
 	done := make(chan struct{})
 	inContracts := make(chan contract, 32768)
 	outContracts := make(chan contract, 32768)
 
+	readWG := new(errgroup.Group)
+	numWorkers := runtime.NumCPU()
 	for i := 0; i < numWorkers; i++ {
-		wg.Go(func() error {
+		readWG.Go(func() error {
 			for {
 				select {
-				case c := <-inContracts:
-					transpiledCode, err := transpileCode(c.code)
-					if err != nil {
-						return tryError(fmt.Errorf("contract %q cannot be transalated: %w",
-							common.BytesToHash(c.hash).String(), err), done)
+				case evmContract, closed := <-inContracts:
+					if !closed {
+						return nil
 					}
 
-					outContracts <- contract{c.hash, transpiledCode}
+					transpiledCode, err := transpileCode(evmContract.code)
+					if err != nil {
+						return tryError(fmt.Errorf("contract %q cannot be transalated: %w",
+							common.BytesToHash(evmContract.hash).String(), err), done)
+					}
+
+					outContracts <- contract{evmContract.hash, transpiledCode}
 				case <-done:
 					return nil
+				case <-quitCh:
+					return common.ErrStopped
 				}
 			}
 		})
@@ -90,45 +89,52 @@ func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.
 	logTime := time.Now()
 
 	// store translated results
-	wg.Go(func() error {
+	writeWG := new(errgroup.Group)
+	writeWG.Go(func() error {
+		var err error
 		for {
 			select {
-			case c := <-outContracts:
-				err = batch.Put(dbutils.ContractTEVMCodeBucket, c.hash, c.code)
-				if err != nil {
-					return tryError(fmt.Errorf("cannot store %q: %w", common.BytesToHash(c.hash), err), done)
+			case tevmContract, closed := <-outContracts:
+				if !closed {
+					return nil
 				}
 
-				err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, c.hash, nil)
+				err = batch.Put(dbutils.ContractTEVMCodeBucket, tevmContract.hash, tevmContract.code)
+				if err != nil {
+					return tryError(fmt.Errorf("cannot store %q: %w", common.BytesToHash(tevmContract.hash), err), done)
+				}
+
+				err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, tevmContract.hash, nil)
 				if err != nil {
 					return tryError(fmt.Errorf("cannot reset translation status %q: %w",
-						common.BytesToHash(c.hash), err), done)
+						common.BytesToHash(tevmContract.hash), err), done)
 				}
 
 				stageProgress++
 
 				currentSize := batch.BatchSize()
 				updateProgress := currentSize >= int(cfg.batchSize)
+
 				if updateProgress {
 					if err = batch.Commit(); err != nil {
 						return tryError(fmt.Errorf("cannot commit the batch of translations on %q: %w",
-							common.BytesToHash(c.hash), err), done)
+							common.BytesToHash(tevmContract.hash), err), done)
 					}
 
 					if !useExternalTx {
 						if err = s.Update(tx, stageProgress); err != nil {
 							return tryError(fmt.Errorf("cannot update the stage status on %q: %w",
-								common.BytesToHash(c.hash), err), done)
+								common.BytesToHash(tevmContract.hash), err), done)
 						}
 						if err = tx.Commit(); err != nil {
 							return tryError(fmt.Errorf("cannot commit the external transation on %q: %w",
-								common.BytesToHash(c.hash), err), done)
+								common.BytesToHash(tevmContract.hash), err), done)
 						}
 
 						tx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return tryError(fmt.Errorf("cannot begin the batch transaction on %q: %w",
-								common.BytesToHash(c.hash), err), done)
+								common.BytesToHash(tevmContract.hash), err), done)
 						}
 
 						// TODO: This creates stacked up deferrals
@@ -149,40 +155,51 @@ func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.
 				}
 			case <-done:
 				return nil
+			case <-quitCh:
+				return common.ErrStopped
 			}
 		}
 	})
 
 	// read contracts pending for translation
-	wg.Go(func() error {
-		if err := ethdb.ForEach(c, func(codeHash, v []byte) (bool, error) {
-			if err := common.Stopped(quitCh); err != nil {
-				return false, err
-			}
-			if err := common.Stopped(done); err != nil {
-				// return nil error to not overwrite error from errs channel
-				return false, nil
-			}
+	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 
-			// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
-			contractCode, err := tx.GetOne(dbutils.CodeBucket, codeHash)
-			if err != nil {
-				return false, err
-			}
-
-			inContracts <- contract{codeHash, contractCode}
-
-			return true, nil
-		}); err != nil {
-			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
+	if err := ethdb.ForEach(c, func(codeHash, _ []byte) (bool, error) {
+		if err := common.Stopped(quitCh); err != nil {
+			return false, err
+		}
+		if err := common.Stopped(done); err != nil {
+			// return nil error to not overwrite error from errs channel
+			return false, nil
 		}
 
-		return nil
-	})
+		// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
+		contractCode, err := tx.GetOne(dbutils.CodeBucket, codeHash)
+		if err != nil {
+			return false, err
+		}
 
-	err = wg.Wait()
+		inContracts <- contract{codeHash, contractCode}
+		return true, nil
+	}); err != nil {
+		return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
+	}
 
-	fmt.Println("===-2 Going to add", stageProgress)
+	close(inContracts)
+	err = readWG.Wait()
+	if err != nil {
+		return err
+	}
+
+	close(outContracts)
+	err = writeWG.Wait()
+	if err != nil {
+		return err
+	}
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "contracts", stageProgress)
 

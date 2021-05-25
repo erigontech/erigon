@@ -179,7 +179,7 @@ func ReplacementStages(ctx context.Context,
 				return &Stage{
 					ID:                  stages.Translation,
 					Description:         "Transpile marked EVM contracts to TEVM",
-					Disabled:            !world.storageMode.TEVM,
+					Disabled:            !sm.TEVM,
 					DisabledDescription: "Enable by adding `e` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnTranspileStage(s, tx, 0, ctx.Done(), trans)

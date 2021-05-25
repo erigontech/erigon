@@ -139,24 +139,34 @@ func testKVPath() string {
 	return dir
 }
 
-func GetCheckTEVMStatus(db KVGetter) func(codeHash common.Hash) (bool, error) {
+// todo: return TEVM code and use it
+func GetCheckTEVM(db KVGetter) func(codeHash common.Hash) (bool, error) {
+	checked := map[common.Hash]struct{}{}
+	var ok bool
+
 	return func(codeHash common.Hash) (bool, error) {
+		if _, ok = checked[codeHash]; ok {
+			return true, nil
+		}
+
 		ok, err := db.Has(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes())
 		if !errors.Is(err, ErrKeyNotFound) {
 			return false, err
 		}
-		return ok, nil
-	}
-}
 
-func GetCheckTEVM(db KVGetter) func(codeHash common.Hash) (bool, error) {
-	return func(codeHash common.Hash) (bool, error) {
-		ok, err := db.Has(dbutils.ContractTEVMCodeBucket, codeHash.Bytes())
+		if ok {
+			return false, ErrKeyNotFound
+		}
+
+		ok, err = db.Has(dbutils.ContractTEVMCodeBucket, codeHash.Bytes())
 		if !errors.Is(err, ErrKeyNotFound) {
 			return false, err
 		}
 
-		// todo return TEVM code and use it
+		if !ok {
+			checked[codeHash] = struct{}{}
+		}
+
 		return ok, nil
 	}
 }
