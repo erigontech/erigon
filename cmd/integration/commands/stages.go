@@ -776,13 +776,13 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 		panic(err)
 	}
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
-	chainConfig := params.GoerliChainConfig
+	chainConfig := params.MainnetChainConfig
 	events := remotedbserver.NewEvents()
 
 	txCacher := core.NewTxSenderCacher(1)
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, ethdb.NewObjectDatabase(db), txCacher)
 
-	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), core.DefaultGoerliGenesisBlock(), sm.History)
+	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), core.DefaultGenesisBlock(), sm.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
