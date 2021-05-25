@@ -493,6 +493,10 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 }
 
 func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	return cs.newBlock65(ctx, inreq, sentry)
+}
+
+func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -500,51 +504,6 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 		return fmt.Errorf("decode 1 NewBlockMsg: %w", err)
 	}
 	_, err = rlpStream.List() // Now stream is at the beginning of the header
-	if err != nil {
-		return fmt.Errorf("decode 2 NewBlockMsg: %w", err)
-	}
-	var headerRaw []byte
-	if headerRaw, err = rlpStream.Raw(); err != nil {
-		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
-	}
-	// Parse the entire request from scratch
-	var request eth.NewBlockPacket
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode 4 NewBlockMsg: %v", err)
-	}
-	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
-		if penalty == headerdownload.NoPenalty {
-			cs.hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
-		} else {
-			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  inreq.PeerId,
-				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-			}
-			for _, sentry := range cs.sentries {
-				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-					log.Error("Could not send penalty", "err", err1)
-				}
-			}
-		}
-	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
-	}
-	cs.bd.AddToPrefetch(request.Block)
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   inreq.PeerId,
-		MinBlock: request.Block.NumberU64(),
-	}
-	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		log.Error("Could not send min block for peer", "err", err1)
-	}
-	log.Debug(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
-	return nil
-}
-
-func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
-	_, err := rlpStream.List() // Now stream is at the beginning of the header
 	if err != nil {
 		return fmt.Errorf("decode 2 NewBlockMsg: %w", err)
 	}
