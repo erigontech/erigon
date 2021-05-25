@@ -234,7 +234,7 @@ var (
 		Threshold: 2,
 	}
 
-	// MainnetChainConfig is the chain parameters to run a PoW dev net to test turbo-geth mining
+	// MainnetChainConfig is the chain parameters to run a PoW dev net to test Erigon mining
 	TurboMineChainConfig = &ChainConfig{
 		ChainName:           TurboMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("turbo-mine")),

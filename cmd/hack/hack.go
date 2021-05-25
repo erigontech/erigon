@@ -831,7 +831,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 }
 
 func repairCurrent() {
-	historyDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
+	historyDb := ethdb.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
 	defer historyDb.Close()
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()

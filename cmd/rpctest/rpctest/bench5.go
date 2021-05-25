@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func Bench5(turbogethURL string) {
+func Bench5(erigonURL string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -23,7 +23,7 @@ func Bench5(turbogethURL string) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		req_id++
-		if err = post(client, turbogethURL, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
+		if err = post(client, erigonURL, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
 			fmt.Printf("Count not get receipt: %s: %v\n", scanner.Text(), err)
 			return
 		}

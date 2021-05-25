@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// TgAPI TurboGeth specific routines
-type TgAPI interface {
+// ErigonAPI Erigon specific routines
+type ErigonAPI interface {
 	// System related (see ./tg_system.go)
 	Forks(ctx context.Context) (Forks, error)
 
@@ -22,21 +22,21 @@ type TgAPI interface {
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
 
-	// Issuance / reward related (see ./tg_issuance.go)
+	// Issuance / reward related (see ./erigon_issuance.go)
 	// BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 	// UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 }
 
-// TgImpl is implementation of the TgAPI interface
-type TgImpl struct {
+// ErigonImpl is implementation of the ErigonAPI interface
+type ErigonImpl struct {
 	*BaseAPI
 	db ethdb.RoKV
 }
 
-// NewTgAPI returns TgImpl instance
-func NewTgAPI(base *BaseAPI, db ethdb.RoKV) *TgImpl {
-	return &TgImpl{
+// NewErigonAPI returns ErigonImpl instance
+func NewErigonAPI(base *BaseAPI, db ethdb.RoKV) *ErigonImpl {
+	return &ErigonImpl{
 		BaseAPI: base,
 		db:      db,
 	}

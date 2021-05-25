@@ -1,6 +1,6 @@
 # How to run the new header/body downloader
 
-In the root of `turbo-geth` project, use this command to build the program:
+In the root of `Erigon` project, use this command to build the program:
 
 ```
 make headers
@@ -37,7 +37,7 @@ configured using options `--nat`, `--port`, `--staticpeers`, `--netrestrict`, `-
 
 ## Running p2p sentry
 
-We are currently testing against two implementations of the p2p sentry - one internal to `turbo-geth`, and another -
+We are currently testing against two implementations of the p2p sentry - one internal to `Erigon`, and another -
 written in Rust as a part of `rust-ethereum`: https://github.com/rust-ethereum/sentry
 In order to run the internal sentry, use the following command:
 

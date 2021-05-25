@@ -182,7 +182,7 @@ Acknowledgements:
 
  - Jens Alfke (Mobile Architect at [Couchbase](https://www.couchbase.com/)) for [NimDBX](https://github.com/snej/nimdbx).
  - Clément Renault (CTO at [MeiliSearch](https://www.meilisearch.com/)) for [mdbx-rs](https://github.com/Kerollmops/mdbx-rs).
- - Alex Sharov (Go-Lang Teach Lead at [TurboGeth/Ethereum](https://ethereum.org/)) for an extreme test cases and bug reporting.
+ - Alex Sharov (Go-Lang Teach Lead at [Erigon/Ethereum](https://ethereum.org/)) for an extreme test cases and bug reporting.
  - George Hazan (CTO at [Miranda NG](https://www.miranda-ng.org/)) for bug reporting.
  - [Positive Technologies](https://www.ptsecurity.com/) for funding and [The Standoff](https://standoff365.com/).
 

@@ -30,8 +30,8 @@ const (
 
 // the regular main function
 func main() {
-	// initializing turbo-geth application here and providing our custom flag
-	app := turbocli.MakeApp(runTurboGeth,
+	// initializing Erigon application here and providing our custom flag
+	app := turbocli.MakeApp(runErigon,
 		append(turbocli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
 	)
 	if err := app.Run(os.Args); err != nil {
@@ -72,8 +72,8 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	)
 }
 
-// turbo-geth main function
-func runTurboGeth(ctx *cli.Context) {
+// Erigon main function
+func runErigon(ctx *cli.Context) {
 	// creating a staged sync with our new stage
 	sync := stagedsync.New(
 		syncStages(ctx),
@@ -100,6 +100,6 @@ func runTurboGeth(ctx *cli.Context) {
 	err := tg.Serve()
 
 	if err != nil {
-		log.Error("error while serving a turbo-geth node", "err", err)
+		log.Error("error while serving a Erigon node", "err", err)
 	}
 }

@@ -49,7 +49,7 @@ type Flags struct {
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
-	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
+	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
 func RootCommand() (*cobra.Command, *Flags) {
@@ -57,7 +57,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to turbo-geth working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "mdbx", "lmdb|mdbx engines")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
@@ -133,7 +133,7 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {
-		return fmt.Errorf("database does not have major schema version. upgrade and restart turbo-geth core")
+		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
 	}
 	major := binary.BigEndian.Uint32(version[:])
 	minor := binary.BigEndian.Uint32(version[4:])

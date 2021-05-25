@@ -218,14 +218,14 @@ func (g *RequestGenerator) Geth(method, body string, response interface{}) CallR
 	return g.call(Geth, method, body, response)
 }
 
-func (g *RequestGenerator) TurboGeth(method, body string, response interface{}) CallResult {
-	return g.call(TurboGeth, method, body, response)
+func (g *RequestGenerator) Erigon(method, body string, response interface{}) CallResult {
+	return g.call(Erigon, method, body, response)
 }
 
 func (g *RequestGenerator) Geth2(method, body string) CallResult {
 	return g.call2(Geth, method, body)
 }
 
-func (g *RequestGenerator) TurboGeth2(method, body string) CallResult {
-	return g.call2(TurboGeth, method, body)
+func (g *RequestGenerator) Erigon2(method, body string) CallResult {
+	return g.call2(Erigon, method, body)
 }

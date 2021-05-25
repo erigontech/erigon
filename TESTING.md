@@ -1,21 +1,21 @@
-Testing of new releases of Turbo-Geth should ideally include these checks.
+Testing of new releases of Erigon should ideally include these checks.
 
 ## Incremental Sync
-This check requires having the turbo-geth database synced previously. Lets assume (for command line examples) it is in the directory `~/mainnet/tg/chaindata`.
-Using `git pull` or `git checkout`, update the code to the version that is to be released (or very close to it). Then, build turbo-geth executable:
+This check requires having the Erigon database synced previously. Lets assume (for command line examples) it is in the directory `~/mainnet/erigon/chaindata`.
+Using `git pull` or `git checkout`, update the code to the version that is to be released (or very close to it). Then, build erigon executable:
 ```
-make tg
+make erigon
 ```
-Now run turbo-geth as usually, to try to catch up with the mainnet
+Now run Erigon as usually, to try to catch up with the mainnet
 ```
-./build/bin/tg --datadir ~/mainnet
+./build/bin/erigon --datadir ~/mainnet
 ```
 It is useful to pipe the output into a text file for later inspection, for example:
 ```
-./build/bin/tg --datadir ~/mainnet 2>&1 | tee tg.log
+./build/bin/erigon --datadir ~/mainnet 2>&1 | tee erigon.log
 ```
 
-Wait until turbo-geth catches up with the network. This can be determined by looking at the output and seeing that sync cycles usually go through just a single block,
+Wait until Erigon catches up with the network. This can be determined by looking at the output and seeing that sync cycles usually go through just a single block,
 and that block is recent (can be verified on etherscan.io, for example). For example, output may look like this:
 ```
 INFO [03-24|13:41:14.101] [1/14 Headers] Imported new block headers count=1  elapsed=1.621ms     number=12101885 hash="8fe088…b877ee"
@@ -42,7 +42,7 @@ INFO [03-24|13:41:20.391] Commit cycle                             in=2.16378229
 ```
 Here we see that the sync cycle went through all the stages for a single block `12101885`.
 
-After that, it is useful to wait more until an Unwind is encoutered and check that turbo-geth handled it without errors. Usually, errors occur at the stage
+After that, it is useful to wait more until an Unwind is encoutered and check that Erigon handled it without errors. Usually, errors occur at the stage
 `[7/14 IntermediateHashes]` and manifest in the wrong trie root. Here is an example of processing an unwind without errors (look for the word "Unwind" in the log):
 
 ```
@@ -101,7 +101,7 @@ INFO [03-24|13:41:39.443] Commit cycle                             in=2.09050909
 
 In this example, the Unwind starts with the stage `[1/14 Headers]` reporting the reorg: `reorg=true`
 and also showing how back do we need to rewind to perform the reorg: `forkBlockNumber=12101884`. After that, all the stages are unwound in the "Unwinding order",
-which is almost the reverse order of stages, but with some exceptions (like `TxPool` stage). After unwinding all the stages to the `forkBlockNumber`, turbo-geth
+which is almost the reverse order of stages, but with some exceptions (like `TxPool` stage). After unwinding all the stages to the `forkBlockNumber`, Erigon
 applies the new chain branch, in the example above it is two new blocks. In the `Timings` log output one can see the timings of unwinding stages as well as timings
 of normal stage operation when the chain branch is applied.
 
@@ -115,7 +115,7 @@ on investigating/fixing it.
 ERROR[03-24|13:49:53.343] Ethereum peer removal failed             peer=bfa4a38e err="peer not registered"
 ```
 
-The second error happens during the unwinding the `TxPool` stage. It has been reported in this issue: https://github.com/ledgerwatch/turbo-geth/issues/848
+The second error happens during the unwinding the `TxPool` stage. It has been reported in this issue: https://github.com/ledgerwatch/erigon/issues/848
 ```
 ERROR[08-01|14:30:38.297] Demoting invalidated transaction         hash="6ee8a8…92bf22"
 ERROR[08-01|14:30:38.299] Demoting invalidated transaction         hash="7abab0…eccbed"
@@ -153,13 +153,13 @@ The way to perform this check is almost the same as the Incremental Sync, but st
 (can take 2-3 days on good hardware), that is why it should be done perhaps weekly.
 
 ## Executing historical transactions
-Having up-to-date database, and having shut down the turbo-geth node (it will work without shutting down, but it will lead to bloating of the database file),
+Having up-to-date database, and having shut down the Erigon node (it will work without shutting down, but it will lead to bloating of the database file),
 this command can be executed:
 ```
 ./build/bin/state checkChangeSets --datadir <path to datadir> --block 11000000
 ```
-Please note the difference in notation when referring to the database. Turbo-geth command uses `--datadir` which points to `~mainnet`, and it looks for the
-actual database directory under `tg/chaindata`, but `checkChangeSets` need to be given slightly different path, pointing directly to the database directory.
+Please note the difference in notation when referring to the database. Erigon command uses `--datadir` which points to `~mainnet`, and it looks for the
+actual database directory under `erigon/chaindata`, but `checkChangeSets` need to be given slightly different path, pointing directly to the database directory.
 Parameter `--block` is used to specify from which historical block the execution needs to start.
 
 Normally, this command reports the progress after every 1000 blocks, and if there are no errors after few thousand blocks, this check can be regarded as complete.
@@ -169,15 +169,15 @@ We might add another option to this command to specify at which block number to 
 
 These tests have been originally created to compare the responses that RPC daemon gives to various JSON RPC queries with go-ethereum and OpenEthereum.
 However, such tests require access to archive nodes of go-ethereum or OpenEthereum, and those require a long time to set up. Therefore, if we make
-assumption that the previous release of turbo-geth worked correctly, we can compare behaviour of the new release compared to the previous one.
+assumption that the previous release of Erigon worked correctly, we can compare behaviour of the new release compared to the previous one.
 To set this up, imagine that we have two computer, on the network addresses `192.168.1.1` (previous release) and `192.168.1.2` (new release).
-On the first computer, we launch turbo-geth:
+On the first computer, we launch Erigon:
 
 ```
 git checkout PREV_RELEASE_TAG
 git pull
-make tg
-./build/bin/tg --datadir ~/mainnet --private.api.addr 192.168.1.1:9090
+make erigon
+./build/bin/erigon --datadir ~/mainnet --private.api.addr 192.168.1.1:9090
 ```
 
 And in another terminal window (or in other way to launch separate process), RPC daemon connected to it (it can also be launched on a different computer)
@@ -189,9 +189,9 @@ make rpcdaemon
 ./build/bin/rpcdaemon --private.api.addr 192.168.1.1:9090 --http.addr 192.168.1.1 --http.port 8545 --http.api eth,debug,trace
 ```
 
-Note that if turbo-geth and RPC daemon are running on the same computer, they can also communicate via loopback (`localhost`, `127.0.0.1`) interface. To
-make this happen, pass `--private.api.addr localhost:9090` or `--private.api.addr 127.0.0.1:9090` to both turbo-geth and RPC daemon. Also note that
-choice of the port `9090` is arbitrary, it can be any port free port number, as long as the value matches in turbo-geth and RPC daemon.
+Note that if Erigon and RPC daemon are running on the same computer, they can also communicate via loopback (`localhost`, `127.0.0.1`) interface. To
+make this happen, pass `--private.api.addr localhost:9090` or `--private.api.addr 127.0.0.1:9090` to both Erigon and RPC daemon. Also note that
+choice of the port `9090` is arbitrary, it can be any port free port number, as long as the value matches in Erigon and RPC daemon.
 
 On the second computer (or on the same computer, but using different directories and port numbers), the same combination of processes is launched,
 but from the `master` branch or the tag that is being tested:
@@ -199,8 +199,8 @@ but from the `master` branch or the tag that is being tested:
 ```
 git checkout master
 git pull
-make tg
-./build/bin/tg --datadir ~/mainnet --private.api.addr 192.168.1.2:9090
+make erigon
+./build/bin/erigon --datadir ~/mainnet --private.api.addr 192.168.1.2:9090
 ```
 
 ```
@@ -216,7 +216,7 @@ Once both RPC daemons are running, RPC test utility can be run:
 git checkout master
 git pull
 make rpctest
-./build/bin/rpctest bench8 --tgUrl http://192.168.1.2:8545 --gethUrl http://192.168.1.1:8545 --needCompare --blockFrom 9000000 --blockTo 9000100
+./build/bin/rpctest bench8 --erigonUrl http://192.168.1.2:8545 --gethUrl http://192.168.1.1:8545 --needCompare --blockFrom 9000000 --blockTo 9000100
 ```
 
 In the example above, the `bench8` command is used. RPC test utility has a few of such "benches". These benches automatically generate JSON RPC
@@ -226,16 +226,16 @@ requests for certain RPC methods, using hits provided by options `--blockFrom` a
 3. `bench12` tests `debug_traceCall` RPC method (compatibility with go-ethereum tracing)
 4. `bench13` tests `trace_callMany` RPC method (compability with OpenEthereum tracing)
 
-Options `--tgUrl` and `--gethUrl` specify HTTP endpoints that needs to be tested against each other. Despite its name, `--gethUrl` option does not have to
+Options `--erigonUrl` and `--gethUrl` specify HTTP endpoints that needs to be tested against each other. Despite its name, `--gethUrl` option does not have to
 point to go-ethereum node, it can point to anything that it supposed to be "correct" for the purpose of the test (go-ethereum node, OpenEthereum node,
-or turbo-geth RPC daemon & turbo-geth node built from the previous release code).
+or Erigon RPC daemon & Erigon node built from the previous release code).
 
 Option `--needCompare` triggers the comparison of JSON RPC responses. If omitted, requests to `--gethUrl` are not done. When comparison is turned on,
 the utility stops at the first occurrence of mistmatch.
 
 ## RPC test recording and replay
 In order to facilitate the automation of testing, we are adding the ability to record JSON RPC requests generated by RPC test utility, and responses
-received from turbo-geth. Once these are recorded in a file, they can be later replayed, without the need of having the second RPC daemon present.
+received from Erigon. Once these are recorded in a file, they can be later replayed, without the need of having the second RPC daemon present.
 To turn on recording, option `--recordFile <filename>` needs to be added. Currently, only `bench8`, `bench11` and `bench13` support recording.
 Only queries and responses for which the comparison produced the match, are recorded. If `--needCompare` is not specified, but `--recordFile` is,
 then all generated queries and responses are recorded. This can be used to separate the testing into 2 parts in time.
@@ -243,7 +243,7 @@ then all generated queries and responses are recorded. This can be used to separ
 Example of recording command:
 
 ```
-./build/bin/rpctest bench8 --tgUrl http://192.168.1.2:8545 --gethUrl http://192.168.1.1:8545 --needCompare --blockFrom 9000000 --blockTo 9000100 --recordFile req.txt
+./build/bin/rpctest bench8 --erigonUrl http://192.168.1.2:8545 --gethUrl http://192.168.1.1:8545 --needCompare --blockFrom 9000000 --blockTo 9000100 --recordFile req.txt
 ```
 
 The file format is plain text, with requests and responses are written in separate lines, and delimited by the tripple line breaks, like this:
@@ -266,6 +266,6 @@ The file format is plain text, with requests and responses are written in separa
 To replay recorded queries, `replay` command can be used:
 
 ```
-./build/bin/rpctest replay --tgUrl http://192.168.1.2:8545 --recordFile req.txt
+./build/bin/rpctest replay --erigonUrl http://192.168.1.2:8545 --recordFile req.txt
 ```
 

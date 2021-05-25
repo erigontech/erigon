@@ -14,4 +14,4 @@ Snappy is a compression/decompression library. It does not aim for maximum compr
 Why Snappy
 ==========
 
-In the case of turbo-geth, compression is needed to reduce database size, however we cannot have slow processing while doing so. thanks, to snappy we can reduce the size of block bodies without having to sacrifice a significant amount of time during the insertion of block bodies in the database in stage 2.
+In the case of Erigon, compression is needed to reduce database size, however we cannot have slow processing while doing so. thanks, to snappy we can reduce the size of block bodies without having to sacrifice a significant amount of time during the insertion of block bodies in the database in stage 2.

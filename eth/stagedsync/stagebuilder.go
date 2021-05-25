@@ -126,7 +126,7 @@ func (bb StageBuilders) Build(world StageParameters) []*Stage {
 	return stages
 }
 
-// DefaultStages contains the list of default stage builders that are used by turbo-geth.
+// DefaultStages contains the list of default stage builders that are used by Erigon.
 func DefaultStages() StageBuilders {
 	return []StageBuilder{
 		{

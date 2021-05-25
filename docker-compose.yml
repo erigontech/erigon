@@ -2,12 +2,12 @@ version: '2.2'
 
 services:
 
-  turbo-geth:
+  erigon:
     image: turbo-geth:latest
     build: .
-    command: tg --metrics --metrics.addr="0.0.0.0" --metrics.port="6060" --private.api.addr="0.0.0.0:9090" --pprof --pprof.addr="0.0.0.0" --pprof.port="6061"
+    command: erigon --metrics --metrics.addr="0.0.0.0" --metrics.port="6060" --private.api.addr="0.0.0.0:9090" --pprof --pprof.addr="0.0.0.0" --pprof.port="6061"
     volumes:
-      - ${XDG_DATA_HOME:-~/.local/share}/turbogeth:/root/.local/share/turbogeth
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon:/root/.local/share/erigon
     ports:
       - 30303:30303/tcp
       - 30303:30303/udp
@@ -18,22 +18,22 @@ services:
     ports:
       - 9090:9090
     volumes:
-      - ${TG_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
-      - ${XDG_DATA_HOME:-~/.local/share}/tg-prometheus:/prometheus
+      - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon-prometheus:/prometheus
 
   grafana:
     image: grafana/grafana:7.5.5
     ports:
       - 3000:3000
     volumes:
-      - ${TG_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
+      - ${ERIGON_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
-      - ${XDG_DATA_HOME:-~/.local/share}/tg-grafana:/var/lib/grafana
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
 
   rpcdaemon:
     image: turbo-geth:latest
-    command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
+    command: rpcdaemon --private.api.addr="erigon:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
     ports:
       - 8545:8545
 

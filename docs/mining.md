@@ -17,7 +17,7 @@ Support only remote-miners.
 
 ## Testing
 
-Integration tool - supports mining of existing blocks. It moving TurboGeth to block X, does mine block X+1, then compare
+Integration tool - supports mining of existing blocks. It moves Erigon to block X, does mine block X+1, then compare
 mined block with real block X+1 in db. To enable - just add `--mine --miner.etherbase=<etherbase>` flag
 to `integration state_stages` command:
 
@@ -26,7 +26,7 @@ to `integration state_stages` command:
 ```
 
 * TODO:
-  + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/turbo-geth/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+  + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
   + eth_newPendingTransactionFilter
   + eth_newBlockFilter
   + eth_newFilter

@@ -263,7 +263,7 @@ func testExtendCanonical(t *testing.T, full bool) {
 // forks do not take canonical ownership.
 func TestShorterForkHeaders(t *testing.T) { testShorterFork(t, false) }
 func TestShorterForkBlocks(t *testing.T) {
-	t.Skip("turbo-geth does not insert shorter forks")
+	t.Skip("Erigon does not insert shorter forks")
 	testShorterFork(t, true)
 }
 
@@ -318,7 +318,7 @@ func testLongerFork(t *testing.T, full bool) {
 // forks do take canonical ownership.
 func TestEqualForkHeaders(t *testing.T) { testEqualFork(t, false) }
 func TestEqualForkBlocks(t *testing.T) {
-	t.Skip("turbo-geth does not insert equal forks")
+	t.Skip("Erigon does not insert equal forks")
 	testEqualFork(t, true)
 }
 
@@ -1177,7 +1177,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 /*
 
 func TestBlockchainRecovery(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
+	t.Skip("should be restored. skipped for Erigon. tag: reorg")
 	// Configure and generate a sample block chain
 	gendb := ethdb.NewMemDatabase()
 	defer gendb.Close()
@@ -1245,7 +1245,7 @@ func TestBlockchainRecovery(t *testing.T) {
 }
 
 func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth. tag: fast-sync")
+	t.Skip("should be restored. skipped for Erigon. tag: fast-sync")
 	// Configure and generate a sample block chain
 	gendb := ethdb.NewMemDatabase()
 	defer gendb.Close()

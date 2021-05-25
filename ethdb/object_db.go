@@ -424,12 +424,12 @@ func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
 }
 
 func InspectDatabase(db Database) error {
-	// FIXME: implement in Turbo-Geth
+	// FIXME: implement in Erigon
 	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
 	return errNotSupported
 }
 
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
-	// FIXME: implement freezer in Turbo-Geth
+	// FIXME: implement freezer in Erigon
 	return db, nil
 }

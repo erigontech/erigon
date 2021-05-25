@@ -40,7 +40,7 @@ func init() {
 
 var cmdTestCore = &cobra.Command{
 	Use:   "test_core",
-	Short: "Test server for testing core of turbo-geth or equivalent component",
+	Short: "Test server for testing core of Erigon or equivalent component",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
 

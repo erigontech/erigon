@@ -31,7 +31,7 @@ func Replay(tgURL string, recordFile string) {
 	for s.Scan() {
 		// Request comes firs
 		request := s.Text()
-		res = reqGen.TurboGeth2("", request)
+		res = reqGen.Erigon2("", request)
 		if res.Err != nil {
 			fmt.Printf("Could not get replay for %s: %v\n", request, res.Err)
 			return

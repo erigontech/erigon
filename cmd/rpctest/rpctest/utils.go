@@ -353,7 +353,7 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	for addr := range allAddresses {
 		tgAcc, tgOk := tg[addr]
 		if !tgOk {
-			fmt.Printf("missing account in TurboGeth %x\n", addr)
+			fmt.Printf("missing account in Erigon %x\n", addr)
 			return false
 		}
 
@@ -371,7 +371,7 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 			fmt.Printf("Different nonce for %x: turbo %d, geth %d\n", addr, tgAcc.Nonce, gethAcc.Nonce)
 			different = true
 		}
-		// We do not compare Root, because Turbo-geth does not compute it
+		// We do not compare Root, because Erigon does not compute it
 		if tgAcc.CodeHash != gethAcc.CodeHash {
 			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.CodeHash, gethAcc.CodeHash)
 			different = true
@@ -538,6 +538,6 @@ func print(client *http.Client, url, request string) {
 
 func setRoutes(tgUrl, gethURL string) {
 	routes = make(map[string]string)
-	routes[TurboGeth] = tgUrl
+	routes[Erigon] = tgUrl
 	routes[Geth] = gethURL
 }

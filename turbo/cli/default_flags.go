@@ -6,7 +6,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-// DefaultFlags contains all flags that are used and supported by turbo-geth binary.
+// DefaultFlags contains all flags that are used and supported by Erigon binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.EthashDatasetDirFlag,

@@ -23,14 +23,14 @@ var (
 
 func main() {
 	// creating a turbo-api app with all defaults
-	app := turbocli.MakeApp(runTurboGeth, turbocli.DefaultFlags)
+	app := turbocli.MakeApp(runErigon, turbocli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func runTurboGeth(cliCtx *cli.Context) {
+func runErigon(cliCtx *cli.Context) {
 	silkwormPath := cliCtx.String(turbocli.SilkwormFlag.Name)
 	var silkwormExecutionFunc unsafe.Pointer
 	if silkwormPath != "" {
@@ -61,6 +61,6 @@ func runTurboGeth(cliCtx *cli.Context) {
 	err := tg.Serve()
 
 	if err != nil {
-		log.Error("error while serving a turbo-geth node", "err", err)
+		log.Error("error while serving a Erigon node", "err", err)
 	}
 }

@@ -926,7 +926,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 					d.pivotHeader = headers[0]
 					d.pivotLock.Unlock()
 
-					// turbo-geth: this code is commented out because turbo-geth does not support
+					// Erigon: this code is commented out because Erigon does not support
 					// fast sync
 					//
 					// Write out the pivot into the database so a rollback beyond

@@ -8,9 +8,9 @@ Command takes long time. Kill it when `vegeta_turbo_geth_debug_storageRangeAt.tx
 File `vegeta_turbo_geth_*.txt` will produce load to `turbo_geth` node, `vegeta_geth_*.txt` to `geth`.
 Change host/port in `--gethUrl`, `--tgUrl` variable. 
 
-By default `go run ./cmd/rpctest/main.go bench1` calling only turbogeth node 
+By default `go run ./cmd/rpctest/main.go bench1` calling only Erigon node 
 because `cmd/rpctest/rpctest/bench1.go` calling it with first parameter `needCompare=false`.
-Set `--needCompare` to call Geth and TurboGeth nodes and compare results.   
+Set `--needCompare` to call Geth and Erigon nodes and compare results.   
 
 ### Install Vegeta
 ```
