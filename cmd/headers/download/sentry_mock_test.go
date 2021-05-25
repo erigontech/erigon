@@ -532,3 +532,104 @@ func TestAnchorReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAnchorReplace2(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	m := mock(t)
+	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 10, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	short, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 20, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	long, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 30, func(i int, b *core.BlockGen) {
+		if i < 10 {
+			b.SetCoinbase(common.Address{1})
+		} else {
+			b.SetCoinbase(common.Address{2})
+		}
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	// Create anchor from the long chain suffix
+	var b []byte
+	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: long.TopBlock,
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	// Send headers of the long suffix
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: long.Headers[10:],
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	// Create anchor from the short chain suffix
+	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: short.TopBlock,
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	// Send headers of the short suffix (far end)
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          2,
+		BlockHeadersPacket: short.Headers[15:],
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	// Send headers of the short suffix (near end)
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          3,
+		BlockHeadersPacket: short.Headers[10:15],
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
+
+	// Now send the prefix chain
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          4,
+		BlockHeadersPacket: chain.Headers,
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
+
+	highestSeenHeader := uint64(long.TopBlock.NumberU64())
+	notifier := &remotedbserver.Events{}
+	initialCycle := true
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
+		t.Fatal(err)
+	}
+}
