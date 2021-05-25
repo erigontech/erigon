@@ -21,6 +21,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -39,6 +40,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"lukechampine.com/blake3"
 )
 
 const (
@@ -541,7 +544,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 }
 
 func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) *SentryServerImpl {
-	return &SentryServerImpl{
+	ss := &SentryServerImpl{
 		ctx:             ctx,
 		datadir:         datadir,
 		ReceiveCh:       make(chan StreamMsg, 1024),
@@ -552,6 +555,9 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) 
 		txStopCh:        make(chan struct{}),
 		p2pListenAddr:   p2pListenAddr,
 	}
+	ss.checksumCache, _ = lru.New(1024)
+	ss.blake3hasher = blake3.New(32, nil)
+	return ss
 }
 
 func p2pServer(ctx context.Context,
@@ -642,6 +648,8 @@ type SentryServerImpl struct {
 	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	TxSubscribed    uint32        // Set to non-zero if downloader is subscribed to transaction messages
 	lock            sync.RWMutex
+	checksumCache   *lru.Cache // Cache of BLAKE3 checksums of the incoming messages (for deduplication)
+	blake3hasher    *blake3.Hasher
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
@@ -896,6 +904,16 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 			log.Warn("Finished receive messages")
 			return nil
 		case streamMsg := <-ss.ReceiveCh:
+			// Compute checksum
+			ss.blake3hasher.Reset()
+			ss.blake3hasher.Write(streamMsg.b)
+			var checksum [32]byte
+			ss.blake3hasher.Sum(checksum[:])
+			if _, ok := ss.checksumCache.Get(checksum); ok {
+				// This message has already been seen recently, skip
+				continue
+			}
+			ss.checksumCache.Add(checksum, struct{}{})
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,
