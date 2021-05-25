@@ -571,7 +571,7 @@ func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry
 func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetBlockHeader66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockHeaders66: %v, data: %x", err, inreq.Data)
 	}
 
 	tx, err := cs.db.BeginRo(ctx)

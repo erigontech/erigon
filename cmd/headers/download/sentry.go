@@ -757,9 +757,9 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	}
 	var msgcode uint64
 	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
+	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66, proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
 		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_GET_BLOCK_BODIES_66:
+	case proto_sentry.MessageId_GET_BLOCK_BODIES_66, proto_sentry.MessageId_GET_BLOCK_BODIES_65:
 		msgcode = eth.GetBlockBodiesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
@@ -787,19 +787,19 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerInfo := x.(*PeerInfo)
 	var msgcode uint64
 	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
+	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66, proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
 		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_BLOCK_HEADERS_66:
+	case proto_sentry.MessageId_BLOCK_HEADERS_66, proto_sentry.MessageId_BLOCK_HEADERS_65:
 		msgcode = eth.BlockHeadersMsg
-	case proto_sentry.MessageId_BLOCK_BODIES_66:
+	case proto_sentry.MessageId_BLOCK_BODIES_66, proto_sentry.MessageId_BLOCK_BODIES_65:
 		msgcode = eth.BlockBodiesMsg
-	case proto_sentry.MessageId_GET_RECEIPTS_66:
+	case proto_sentry.MessageId_GET_RECEIPTS_66, proto_sentry.MessageId_GET_RECEIPTS_65:
 		msgcode = eth.GetReceiptsMsg
-	case proto_sentry.MessageId_RECEIPTS_66:
+	case proto_sentry.MessageId_RECEIPTS_66, proto_sentry.MessageId_RECEIPTS_65:
 		msgcode = eth.ReceiptsMsg
-	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66:
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_POOLED_TRANSACTIONS_65:
 		msgcode = eth.PooledTransactionsMsg
-	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
 		msgcode = eth.GetPooledTransactionsMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
@@ -821,9 +821,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	var msgcode uint64
 	switch req.Data.Id {
-	case proto_sentry.MessageId_NEW_BLOCK_66:
+	case proto_sentry.MessageId_NEW_BLOCK_66, proto_sentry.MessageId_NEW_BLOCK_65:
 		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
+	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66, proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
 		msgcode = eth.NewBlockHashesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
@@ -868,9 +868,9 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	var msgcode uint64
 	switch req.Id {
-	case proto_sentry.MessageId_NEW_BLOCK_66:
+	case proto_sentry.MessageId_NEW_BLOCK_66, proto_sentry.MessageId_NEW_BLOCK_65:
 		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
+	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66, proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
 		msgcode = eth.NewBlockHashesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)
