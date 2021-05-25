@@ -34,7 +34,7 @@ func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	} else {
 		contract.opsInfo[pc] = blockInfo
 	}
-	code := contract.Code
+	code := ctx.code
 	codeLen := len(code)
 	jumpTable := ctx.interpreter.jt
 	var (

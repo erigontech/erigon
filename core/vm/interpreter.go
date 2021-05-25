@@ -52,8 +52,8 @@ type Interpreter interface {
 	//
 	// ```golang
 	// for _, interpreter := range interpreters {
-	//	  if interpreter.CanRun(contract.code) {
-	//		 interpreter.Run(contract.code, input)
+	//	  if interpreter.CanRun(contract.Code) {
+	//		 interpreter.Run(contract.Code, input)
 	//	  }
 	// }
 	// ```
@@ -63,6 +63,7 @@ type Interpreter interface {
 // callCtx contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type callCtx struct {
+	code        []byte
 	memory		*Memory
 	stack		*stack.Stack
 	contract	*Contract
@@ -163,18 +164,20 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		mem			= NewMemory() // bound memory
 		locStack	= stack.New()
 		callContext = &callCtx{
-			memory:		 mem,
-			stack:		 locStack,
-			contract:	 contract,
-			interpreter: in,
+			memory:   mem,
+			stack:    locStack,
+			contract: contract,
 		}
 
-		// For optimisation reason we're using int64 as the program counter.
-		// It's theoretically possible to go above 2^63. The YP defines the PC
+		// For optimisation reason we're using uint64 as the program counter.
+		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc = uint64(0) // program counter
+		pc          = uint64(0) // program counter
 		res []byte // result of the opcode execution function
 	)
+    callContext.code = make([]byte, len(contract.Code)+32)
+    copy(callContext.code, contract.Code)
+	 
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
