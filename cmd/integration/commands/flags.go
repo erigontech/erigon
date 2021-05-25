@@ -31,6 +31,7 @@ var (
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
 	storageMode        string
+	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
 func must(err error) {
@@ -131,4 +132,8 @@ func withSilkworm(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withChain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
 }
