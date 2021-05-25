@@ -44,6 +44,7 @@ type MockSentry struct {
 	engine       consensus.Engine
 	chainConfig  *params.ChainConfig
 	sync         *stagedsync.StagedSync
+	miningSync   *stagedsync.StagedSync
 	downloader   *ControlServerImpl
 	key          *ecdsa.PrivateKey
 	address      common.Address
@@ -216,6 +217,12 @@ func mock(t *testing.T) *MockSentry {
 	if err = SetSentryStatus(mock.ctx, sentries, mock.downloader); err != nil {
 		t.Fatal(err)
 	}
+	mock.miningSync = stagedsync.New(
+		stagedsync.MiningStages(),
+		stagedsync.MiningUnwindOrder(),
+		stagedsync.OptionalParameters{},
+	)
+
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	mock.streamWg.Add(1)
 	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage, &mock.receiveWg)
@@ -232,6 +239,44 @@ func TestEmptyStageSync(t *testing.T) {
 }
 
 func TestHeaderStep(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	m := mock(t)
+
+	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 100, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+	// Send NewBlock message
+	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: chain.TopBlock,
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	// Send all the headers
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: chain.Headers,
+	})
+	require.NoError(t, err)
+	m.receiveWg.Add(1)
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+	require.NoError(t, err)
+	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
+
+	notifier := &remotedbserver.Events{}
+	initialCycle := true
+	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMine(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	m := mock(t)
 
