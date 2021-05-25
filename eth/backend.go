@@ -96,13 +96,14 @@ type Ethereum struct {
 
 	torrentClient *snapshotsync.Client
 
-	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	events        *remotedbserver.Events
-	chainConfig   *params.ChainConfig
-	genesisHash   common.Hash
-	quitMining    chan struct{}
-	pendingBlocks chan *types.Block
-	minedBlocks   chan *types.Block
+	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	events            *remotedbserver.Events
+	chainConfig       *params.ChainConfig
+	genesisHash       common.Hash
+	quitMining        chan struct{}
+	miningSealingQuit chan struct{}
+	pendingBlocks     chan *types.Block
+	minedBlocks       chan *types.Block
 
 	// downloader v2 fields
 	downloadV2Ctx        context.Context
@@ -262,12 +263,18 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
+	backend.quitMining = make(chan struct{})
+	backend.miningSealingQuit = make(chan struct{})
+	backend.pendingBlocks = make(chan *types.Block, 1)
+	backend.minedBlocks = make(chan *types.Block, 1)
+
 	mining := stagedsync.New(
 		stagedsync.MiningStages(
 			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, backend.config.Miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainKV, backend.config.Miner, backend.events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
+			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, backend.pendingBlocks, backend.minedBlocks, backend.miningSealingQuit),
 		), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
@@ -425,9 +432,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	backend.quitMining = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
 	go func() {
 		for {
 			select {
@@ -638,7 +642,7 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- s.miningStep(kv, pendingBlocksCh, minedBlocksCh, mining, cfg, tmpdir, quitCh) }()
+				go func() { errc <- s.miningStep(kv, mining, tmpdir, quitCh) }()
 			}
 		}
 	}()
@@ -646,8 +650,7 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 	return nil
 }
 
-func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, minedBlockCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, tmpdir string, quitCh chan struct{}) error {
-	sealCancel := make(chan struct{})
+func (s *Ethereum) miningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
@@ -668,7 +671,7 @@ func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, m
 		nil,
 		s.txPool,
 		false,
-		stagedsync.StageMiningCfg(true, pendingBlockCh, minedBlockCh, sealCancel),
+		stagedsync.StageMiningCfg(true),
 		nil,
 	)
 	if err != nil {

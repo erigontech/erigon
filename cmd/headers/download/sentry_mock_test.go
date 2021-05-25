@@ -236,6 +236,7 @@ func mock(t *testing.T) *MockSentry {
 			stagedsync.StageMiningExecCfg(db, miningConfig, nil, *mock.chainConfig, mock.engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(db, mock.tmpdir),
 			stagedsync.StageTrieCfg(db, false, true, mock.tmpdir),
+			stagedsync.StageMiningFinishCfg(db, *mock.chainConfig, mock.engine, mock.pendingBlocks, mock.minedBlocks, mock.ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{},

@@ -117,7 +117,7 @@ var cmdSnapshotCheck = &cobra.Command{
 }
 
 func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync(db)
+	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 
 	var snapshotBlock uint64 = 11_000_000
 	var lastBlockHeaderNumber, blockNum uint64
