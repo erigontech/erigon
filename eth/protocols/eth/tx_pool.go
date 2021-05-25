@@ -122,12 +122,12 @@ func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *prot
 	}
 	var query GetPooledTransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getPooledTransactions65: %v, data: %x", err, inreq.Data)
 	}
 	_, txs := AnswerGetPooledTransactions(tp.txPool, query)
 	b, err := rlp.EncodeToBytes(PooledTransactionsRLPPacket(txs))
 	if err != nil {
-		return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %v", err)
+		return fmt.Errorf("encode getPooledTransactions65 response: %v", err)
 	}
 	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
 	outreq := proto_sentry.SendMessageByIdRequest{
