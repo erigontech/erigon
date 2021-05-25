@@ -40,13 +40,17 @@ func (tp *TxPoolServer) Start() {
 }
 
 func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	return tp.newPooledTransactionHashes65(ctx, inreq, sentry)
+	var query NewPooledTransactionHashesPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding newPooledTransactionHashes66: %v, data: %x", err, inreq.Data)
+	}
+	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
 func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding NewPooledTransactionHashesPacket: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newPooledTransactionHashes65: %v, data: %x", err, inreq.Data)
 	}
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
@@ -54,7 +58,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq 
 func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query PooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding PooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding pooledTransactions66: %v, data: %x", err, inreq.Data)
 	}
 
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
@@ -63,7 +67,7 @@ func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_s
 func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	var query PooledTransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding PooledTransactionsPacket: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding pooledTransactions65: %v, data: %x", err, inreq.Data)
 	}
 
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, true)
@@ -72,6 +76,7 @@ func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_s
 func (tp *TxPoolServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	return tp.transactions65(ctx, inreq, sentry)
 }
+
 func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
