@@ -122,4 +122,3 @@ service Sentry {
       returns (stream InboundMessage);
   rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
 }
-l
