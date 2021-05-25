@@ -827,7 +827,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 			stagedsync.StageTrieCfg(db, false, true, ""),
 		),
 		stagedsync.MiningUnwindOrder(),
-		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc(), Notifier: events},
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	)
 	return sm, engine, chainConfig, vmConfig, txPool, st, stMining
 }

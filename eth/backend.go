@@ -250,7 +250,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: backend.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
