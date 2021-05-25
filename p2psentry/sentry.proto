@@ -11,7 +11,7 @@ enum MessageId {
   // ======= eth 65 protocol ===========
 
   // from eth 64
-  NEW_BLOCK_HEADERS_65 = 0;
+  GET_BLOCK_HEADERS_65 = 0;
   BLOCK_HASHES_65 = 1;
   GET_BLOCK_BODIES_65 = 2;
   BLOCK_BODIES_65 = 3;
