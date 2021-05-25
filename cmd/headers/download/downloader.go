@@ -795,7 +795,7 @@ func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *pr
 	case proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
 		return cs.newBlockHashes65(ctx, inreq, sentry)
 
-		// transactions-related methods are in tx-pool server
+	// transactions-related methods are in tx-pool server
 
 	// ========= eth 66 ==========
 
