@@ -544,7 +544,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 }
 
 func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) *SentryServerImpl {
-	ss := &SentryServerImpl{
+	return &SentryServerImpl{
 		ctx:             ctx,
 		datadir:         datadir,
 		ReceiveCh:       make(chan StreamMsg, 1024),
@@ -555,7 +555,6 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) 
 		txStopCh:        make(chan struct{}),
 		p2pListenAddr:   p2pListenAddr,
 	}
-	return ss
 }
 
 func p2pServer(ctx context.Context,
@@ -909,7 +908,7 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 			blake3hasher.Reset()
 			blake3hasher.Write(streamMsg.b)
 			var checksum [32]byte
-			blake3hasher.Sum(checksum[:])
+			blake3hasher.Sum(checksum[:0])
 			if _, ok := checksumCache.Get(checksum); ok {
 				// This message has already been seen recently, skip
 				continue
