@@ -26,7 +26,7 @@ type MessageId int32
 
 const (
 	// from eth 64
-	MessageId_NEW_BLOCK_HEADERS_65             MessageId = 0
+	MessageId_GET_BLOCK_HEADERS_65             MessageId = 0
 	MessageId_BLOCK_HASHES_65                  MessageId = 1
 	MessageId_GET_BLOCK_BODIES_65              MessageId = 2
 	MessageId_BLOCK_BODIES_65                  MessageId = 3

@@ -267,7 +267,7 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 	return cs, err
 }
 
-func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
@@ -287,6 +287,42 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, req *proto_sent
 				Skip:    0,
 				Origin:  eth.HashOrNumber{Hash: announce.Hash},
 			},
+		})
+		if err != nil {
+			return fmt.Errorf("encode header request: %v", err)
+		}
+		outreq := proto_sentry.SendMessageByIdRequest{
+			PeerId: req.PeerId,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Data: b,
+			},
+		}
+
+		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			return fmt.Errorf("send header request: %v", err)
+		}
+	}
+	return nil
+}
+
+func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
+	var request eth.NewBlockHashesPacket
+	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+		return fmt.Errorf("decode NewBlockHashes: %v", err)
+	}
+	for _, announce := range request {
+		cs.hd.SaveExternalAnnounce(announce.Hash)
+		if cs.hd.HasLink(announce.Hash) {
+			continue
+		}
+		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
+			Amount:  1,
+			Reverse: false,
+			Skip:    0,
+			Origin:  eth.HashOrNumber{Hash: announce.Hash},
 		})
 		if err != nil {
 			return fmt.Errorf("encode header request: %v", err)
@@ -559,7 +595,7 @@ func (cs *ControlServerImpl) getReceipts(ctx context.Context, inreq *proto_sentr
 func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
 	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
-		return cs.newBlockHashes(ctx, inreq, sentry)
+		return cs.newBlockHashes66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_BLOCK_HEADERS_66:
 		return cs.blockHeaders(ctx, inreq, sentry)
 	case proto_sentry.MessageId_NEW_BLOCK_66:
