@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package sentry;
+
+option go_package = "./sentry;sentry";
+
+enum MessageId {
+  // ======= eth 65 protocol ===========
+
+  // from eth 64
+  NEW_BLOCK_HEADERS_65 = 0;
+  BLOCK_HASHES_65 = 1;
+  GET_BLOCK_BODIES_65 = 2;
+  BLOCK_BODIES_65 = 3;
+  GET_NODE_DATA_65 = 4;
+  NODE_DATA_65 = 5;
+  GET_RECEIPTS_65 = 6;
+  RECEIPTS_65 = 7;
+  NEW_BLOCK_HASHES_65 = 8;
+  NEW_BLOCK_65 = 9;
+  TRANSACTIONS_65 = 10;
+  NEW_POOLED_TRANSACTION_HASHES_65 = 11;
+  GET_POOLED_TRANSACTIONS_65 = 12;
+  POOLED_TRANSACTIONS_65 = 13;
+
+
+  // ======= eth 66 protocol ===========
+
+  // eth64 announcement messages (no id)
+  NEW_BLOCK_HASHES_66 = 14;
+  NEW_BLOCK_66 = 15;
+  TRANSACTIONS_66 = 16;
+
+  // eth65 announcement messages (no id)
+  NEW_POOLED_TRANSACTION_HASHES_66 = 17;
+
+  // eth66 messages with request-id
+  GET_BLOCK_HEADERS_66 = 18;
+  GET_BLOCK_BODIES_66 = 19;
+  GET_NODE_DATA_66 = 20;
+  GET_RECEIPTS_66 = 21;
+  GET_POOLED_TRANSACTIONS_66 = 22;
+  BLOCK_HEADERS_66 = 23;
+  BLOCK_BODIES_66 = 24;
+  NODE_DATA_66 = 25;
+  RECEIPTS_66 = 26;
+  POOLED_TRANSACTIONS_66 = 27;
+
+
+
+  // ======= eth 67 protocol ===========
+  // ...
+}
+
+message OutboundMessageData {
+  MessageId id = 1;
+  bytes data = 2;
+}
+
+message SendMessageByMinBlockRequest {
+  OutboundMessageData data = 1;
+  uint64 min_block = 2;
+}
+
+message SendMessageByIdRequest {
+  OutboundMessageData data = 1;
+  types.H512 peer_id = 2;
+}
+
+message SendMessageToRandomPeersRequest {
+  OutboundMessageData data = 1;
+  uint64 max_peers = 2;
+}
+
+message SentPeers {repeated types.H512 peers = 1;}
+
+enum PenaltyKind {Kick = 0;}
+
+message PenalizePeerRequest {
+  types.H512 peer_id = 1;
+  PenaltyKind penalty = 2;
+}
+
+message PeerMinBlockRequest {
+  types.H512 peer_id = 1;
+  uint64 min_block = 2;
+}
+
+message InboundMessage {
+  MessageId id = 1;
+  bytes data = 2;
+  types.H512 peer_id = 3;
+}
+
+message Forks {
+  types.H256 genesis = 1;
+  repeated uint64 forks = 2;
+}
+
+message StatusData {
+  uint64 network_id = 1;
+  types.H256 total_difficulty = 2;
+  types.H256 best_hash = 3;
+  Forks fork_data = 4;
+  uint64 max_block = 5;
+}
+
+service Sentry {
+  rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
+  rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
+  rpc SendMessageByMinBlock(SendMessageByMinBlockRequest) returns (SentPeers);
+  rpc SendMessageById(SendMessageByIdRequest) returns (SentPeers);
+  rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
+      returns (SentPeers);
+  rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
+  rpc SetStatus(StatusData) returns (google.protobuf.Empty);
+  rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc ReceiveUploadMessages(google.protobuf.Empty)
+      returns (stream InboundMessage);
+  rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
+}
+l
