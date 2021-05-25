@@ -300,23 +300,27 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID string) error {
+func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID string) (bool, error) {
 	anchorHeader := segment.Headers[end-1]
 
-	if anchorHeader.Number.Uint64() < hd.highestInDb {
-		return fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
+	var anchor *Anchor
+	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
+	if !preExisting {
+		if anchorHeader.Number.Uint64() < hd.highestInDb {
+			return false, fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
+		}
+		if len(hd.anchors) >= hd.anchorLimit {
+			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
+		}
+		anchor = &Anchor{
+			parentHash:  anchorHeader.ParentHash,
+			peerID:      peerID,
+			timestamp:   0,
+			blockHeight: anchorHeader.Number.Uint64(),
+		}
+		hd.anchors[anchorHeader.ParentHash] = anchor
+		heap.Push(hd.anchorQueue, anchor)
 	}
-	if len(hd.anchors) >= hd.anchorLimit {
-		return fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
-	}
-	anchor := &Anchor{
-		parentHash:  anchorHeader.ParentHash,
-		peerID:      peerID,
-		timestamp:   0,
-		blockHeight: anchorHeader.Number.Uint64(),
-	}
-	hd.anchors[anchorHeader.ParentHash] = anchor
-	heap.Push(hd.anchorQueue, anchor)
 	// Iterate over headers backwards (from parents towards children)
 	var prevLink *Link
 	for i := end - 1; i >= start; i-- {
@@ -332,7 +336,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerI
 			hd.markPreverified(link)
 		}
 	}
-	return nil
+	return !preExisting, nil
 }
 
 func (hd *HeaderDownload) AnchorState() string {
@@ -835,11 +839,11 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		}
 	} else {
 		// NewAnchor
-		if err := hd.newAnchor(segment, start, end, peerID); err != nil {
+		var err error
+		if requestMore, err = hd.newAnchor(segment, start, end, peerID); err != nil {
 			log.Debug("NewAnchor failed", "error", err)
 			return
 		}
-		requestMore = true
 		log.Debug("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
