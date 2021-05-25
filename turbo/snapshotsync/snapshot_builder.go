@@ -403,6 +403,7 @@ func (sm *SnapshotMigrator) Migrate(db ethdb.RwKV, tx ethdb.RwTx, toBlock uint64
 		if binary.BigEndian.Uint64(v) == sm.HeadersNewSnapshot {
 			atomic.StoreUint64(&sm.Stage, StageStart)
 			atomic.StoreUint64(&sm.HeadersCurrentSnapshot, sm.HeadersNewSnapshot)
+			log.Info("CurrentHeadersSnapshotBlock commited", "block", binary.BigEndian.Uint64(v))
 		}
 		log.Info("Finish success", "t", time.Since(tt))
 

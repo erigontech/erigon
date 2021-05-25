@@ -18,8 +18,16 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
+//Testcase plan
+//Step 1. Generate headers from 0 to 11.
+//Step 2. Run in a separate goroutine snapshot with epoch 10 blocks.
+//Step 3. Wait until the snapshot builder passes the first cycle. It must generate a new snapshot and remove duplicate data from
+//the main database. After it we must check that headers from 0 to 10 is in snapshot and headers 11 is in the main DB.
+//Stap 4. Begin new Ro tx and generate data from 11 to 20. Snapshot migration must be blocked by Ro tx on the replace snapshot stage.
+//After 3 seconds, we rollback Ro tx, and migration must continue without any errors.
+// Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
+// it started seeding a new snapshot and removed the old one.
 func TestSnapshotMigratorStage(t *testing.T) {
-	t.Skip("flaky test")
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
@@ -46,7 +54,10 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	btCli.trackers = [][]string{}
 
 	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
-	defer db.Close()
+	quit := make(chan struct{})
+	defer func() {
+		close(quit)
+	}()
 
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
@@ -74,6 +85,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			t.Error(err)
+			panic(err)
 		}
 		defer tx.Rollback()
 
@@ -104,15 +116,22 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	go func() {
 		//this gorutine emulates staged sync.
 		for {
-			StageSyncStep()
+			select {
+			case <-quit:
+				db.Close()
+				return
+			default:
+				StageSyncStep()
+			}
 		}
 	}()
 
 	for !(sb.Finished(10)) {
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 100)
 	}
 
-	rotx, err := db.BeginRo(context.Background())
+	//note. We need here only main database.
+	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
 	roc, err := rotx.Cursor(dbutils.HeadersBucket)
@@ -131,10 +150,15 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	if headerNumber != 12 {
 		t.Fatal(headerNumber)
 	}
+	rotx.Rollback()
 
-	snodb := ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV))
+	snokv := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)
+	snRoTx, err := snokv.BeginRo(context.Background())
+	require.NoError(t, err)
+	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
 	headerNumber = 0
-	err = snodb.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -142,6 +166,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 
 		return true, nil
 	})
+	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,12 +231,17 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	//just start snapshot transaction
-	roTX.GetOne(dbutils.HeadersBucket, []byte{})
+	// it can't be empty slice but shouldn't be in main db
+	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer roTX.Rollback()
 
 	generateChan <- 20
 
 	rollbacked := false
+	//3s - just to be sure that it blocks here
 	c := time.After(time.Second * 3)
 	for !(sb.Finished(20)) {
 		select {
@@ -220,21 +250,21 @@ func TestSnapshotMigratorStage(t *testing.T) {
 			rollbacked = true
 		default:
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 100)
 	}
 
 	if !rollbacked {
 		t.Fatal("it's not possible to close db without rollback. something went wrong")
 	}
 
-	rotx, err = db.BeginRo(context.Background())
+	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
 	roc, err = rotx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
 
 	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
-		t.Fatal("main db must be empty here")
+		t.Fatal("main db must be empty here", k)
 		return true, nil
 	})
 	if err != nil {
@@ -242,7 +272,11 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = ethdb.NewObjectDatabase(db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)).Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+	snRoTx, err = db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
+	require.NoError(t, err)
+	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -250,6 +284,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 
 		return true, nil
 	})
+	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,13 +5,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -56,6 +59,7 @@ func StageLoop(
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
 	stateStream bool,
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
@@ -74,7 +78,7 @@ func StageLoop(
 		if !initialCycle && stateStream {
 			accumulator = &shards.Accumulator{}
 		}
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -100,6 +104,7 @@ func StageLoopStep(
 	notifier stagedsync.ChainEventNotifier,
 	initialCycle bool,
 	accumulator *shards.Accumulator,
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 ) (err error) {
 	// avoid crash because TG's core does many things -
 	defer func() {
@@ -175,6 +180,29 @@ func StageLoopStep(
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
+	var rotx ethdb.Tx
+	if rotx, err = db.BeginRo(ctx); err != nil {
+		return err
+	}
+	defer rotx.Rollback()
+
+	// Update sentry status for peers to see our sync status
+	var headTd *big.Int
+	var head uint64
+	var headHash common.Hash
+	if head, err = stages.GetStageProgress(rotx, stages.Finish); err != nil {
+		return err
+	}
+	if headHash, err = rawdb.ReadCanonicalHash(rotx, head); err != nil {
+		return err
+	}
+	if headTd, err = rawdb.ReadTd(rotx, headHash, head); err != nil {
+		return err
+	}
+	rotx.Rollback()
+	headTd256 := new(uint256.Int)
+	headTd256.SetFromBig(headTd)
+	updateHead(ctx, head, headHash, headTd256)
 
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
 	if err != nil {
