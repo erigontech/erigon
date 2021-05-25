@@ -555,8 +555,6 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) 
 		txStopCh:        make(chan struct{}),
 		p2pListenAddr:   p2pListenAddr,
 	}
-	ss.checksumCache, _ = lru.New(1024)
-	ss.blake3hasher = blake3.New(32, nil)
 	return ss
 }
 
@@ -648,8 +646,6 @@ type SentryServerImpl struct {
 	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	TxSubscribed    uint32        // Set to non-zero if downloader is subscribed to transaction messages
 	lock            sync.RWMutex
-	checksumCache   *lru.Cache // Cache of BLAKE3 checksums of the incoming messages (for deduplication)
-	blake3hasher    *blake3.Hasher
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
@@ -898,6 +894,11 @@ func (ss *SentryServerImpl) restartReceive() {
 
 func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveMessagesServer) error {
 	ss.restartReceive()
+	checksumCache, err := lru.New(1024)
+	if err != nil {
+		return err
+	}
+	blake3hasher := blake3.New(32, nil)
 	for {
 		select {
 		case <-ss.stopCh:
@@ -905,21 +906,21 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 			return nil
 		case streamMsg := <-ss.ReceiveCh:
 			// Compute checksum
-			ss.blake3hasher.Reset()
-			ss.blake3hasher.Write(streamMsg.b)
+			blake3hasher.Reset()
+			blake3hasher.Write(streamMsg.b)
 			var checksum [32]byte
-			ss.blake3hasher.Sum(checksum[:])
-			if _, ok := ss.checksumCache.Get(checksum); ok {
+			blake3hasher.Sum(checksum[:])
+			if _, ok := checksumCache.Get(checksum); ok {
 				// This message has already been seen recently, skip
 				continue
 			}
-			ss.checksumCache.Add(checksum, struct{}{})
+			checksumCache.Add(checksum, struct{}{})
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,
 				Data:   streamMsg.b,
 			}
-			if err := server.Send(&outreq); err != nil {
+			if err = server.Send(&outreq); err != nil {
 				log.Error("Sending msg to core P2P failed", "msg", streamMsg.msgName, "error", err)
 				return err
 			}
