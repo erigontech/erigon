@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -37,24 +38,26 @@ import (
 
 type MockSentry struct {
 	sentry.UnimplementedSentryServer
-	ctx          context.Context
-	cancel       context.CancelFunc
-	db           ethdb.RwKV
-	tmpdir       string
-	engine       consensus.Engine
-	chainConfig  *params.ChainConfig
-	sync         *stagedsync.StagedSync
-	miningSync   *stagedsync.StagedSync
-	downloader   *ControlServerImpl
-	key          *ecdsa.PrivateKey
-	address      common.Address
-	genesis      *types.Block
-	sentryClient *SentryClientDirect
-	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
-	streamWg     sync.WaitGroup
-	peerId       *ptypes.H512
-	receiveWg    sync.WaitGroup
-	updateHead   func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	ctx           context.Context
+	cancel        context.CancelFunc
+	db            ethdb.RwKV
+	tmpdir        string
+	engine        consensus.Engine
+	chainConfig   *params.ChainConfig
+	sync          *stagedsync.StagedSync
+	miningSync    *stagedsync.StagedSync
+	pendingBlocks chan *types.Block
+	minedBlocks   chan *types.Block
+	downloader    *ControlServerImpl
+	key           *ecdsa.PrivateKey
+	address       common.Address
+	genesis       *types.Block
+	sentryClient  *SentryClientDirect
+	stream        sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
+	streamWg      sync.WaitGroup
+	peerId        *ptypes.H512
+	receiveWg     sync.WaitGroup
+	updateHead    func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 }
 
 // Stream returns stream, waiting if necessary
@@ -217,8 +220,18 @@ func mock(t *testing.T) *MockSentry {
 	if err = SetSentryStatus(mock.ctx, sentries, mock.downloader); err != nil {
 		t.Fatal(err)
 	}
+
+	miningConfig := ethconfig.Defaults.Miner
+	miningConfig.Enabled = true
+	miningConfig.Noverify = false
+	miningConfig.Etherbase = mock.address
+	miningConfig.SigKey = mock.key
+
+	mock.pendingBlocks = make(chan *types.Block, 1)
+	mock.minedBlocks = make(chan *types.Block, 1)
+
 	mock.miningSync = stagedsync.New(
-		stagedsync.MiningStages(),
+		stagedsync.MiningStages(miningConfig),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)

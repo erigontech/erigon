@@ -60,9 +60,6 @@ type StageParameters struct {
 }
 
 type MiningCfg struct {
-	// configs
-	params.MiningConfig
-
 	// noempty is the flag used to control whether the feature of pre-seal empty
 	// block is enabled. The default value is false(pre-seal is enabled by default).
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
@@ -78,8 +75,8 @@ type MiningCfg struct {
 	Block *miningBlock
 }
 
-func StageMiningCfg(cfg params.MiningConfig, noempty bool, pendingBlocks chan<- *types.Block, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
-	return &MiningCfg{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, pendingBlocks: pendingBlocks, minedBlocks: resultCh, sealCancel: sealCancel}
+func StageMiningCfg(noempty bool, pendingBlocks chan<- *types.Block, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
+	return &MiningCfg{noempty: noempty, Block: &miningBlock{}, pendingBlocks: pendingBlocks, minedBlocks: resultCh, sealCancel: sealCancel}
 
 }
 
@@ -468,7 +465,7 @@ func DefaultStages() StageBuilders {
 	}
 }
 
-func MiningStages() StageBuilders {
+func MiningStages(cfg params.MiningConfig) StageBuilders {
 	return []StageBuilder{
 		{
 			ID: stages.MiningCreateBlock,
@@ -478,13 +475,10 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningCreateBlockStage(s, tx,
+							cfg,
 							world.mining.Block,
 							*world.ChainConfig,
 							world.Engine,
-							world.mining.ExtraData,
-							world.mining.GasFloor,
-							world.mining.GasCeil,
-							world.mining.Etherbase,
 							world.txPool,
 							world.QuitCh)
 					},
@@ -500,13 +494,13 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningExecStage(s, tx,
+							cfg,
 							world.mining.Block,
 							world.ChainConfig,
 							world.vmConfig,
 							world.Engine,
 							world.mining.Block.LocalTxs,
 							world.mining.Block.RemoteTxs,
-							world.mining.Etherbase,
 							world.mining.noempty,
 							world.notifier,
 							world.QuitCh)

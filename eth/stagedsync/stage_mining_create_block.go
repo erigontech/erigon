@@ -10,7 +10,6 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -34,7 +33,7 @@ type miningBlock struct {
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg params.MiningConfig, current *miningBlock, chainConfig params.ChainConfig, engine consensus.Engine, txPool *core.TxPool, quit <-chan struct{}) error {
 	txPoolLocals := txPool.Locals()
 	pendingTxs, err := txPool.Pending()
 	if err != nil {
@@ -46,7 +45,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 		staleThreshold = 7
 	)
 
-	if coinbase == (common.Address{}) {
+	if cfg.Etherbase == (common.Address{}) {
 		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
@@ -63,7 +62,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 	blockNum := executionAt + 1
 	signer := types.MakeSigner(&chainConfig, blockNum)
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, engine, cfg.Etherbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
@@ -107,14 +106,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, current *miningBl
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, gasFloor, gasCeil),
-		Extra:      extra,
+		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.GasFloor, cfg.GasCeil),
+		Extra:      cfg.ExtraData,
 		Time:       uint64(timestamp),
 	}
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	//if w.isRunning() {
-	header.Coinbase = coinbase
+	header.Coinbase = cfg.Etherbase
 	//}
 
 	if err = engine.Prepare(chain, header); err != nil {

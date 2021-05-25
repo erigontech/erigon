@@ -20,7 +20,7 @@ import (
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg params.MiningConfig, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
 	vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
@@ -45,7 +45,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, cfg.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -57,7 +57,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, cfg.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}

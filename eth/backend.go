@@ -262,7 +262,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
+	mining := stagedsync.New(stagedsync.MiningStages(backend.config.Miner), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -662,7 +662,7 @@ func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, m
 		nil,
 		s.txPool,
 		false,
-		stagedsync.StageMiningCfg(cfg, true, pendingBlockCh, minedBlockCh, sealCancel),
+		stagedsync.StageMiningCfg(true, pendingBlockCh, minedBlockCh, sealCancel),
 		nil,
 	)
 	if err != nil {

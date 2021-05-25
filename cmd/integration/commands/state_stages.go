@@ -309,7 +309,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.StageMiningCfg(miningConfig, true, nil, miningResultCh, quit)
+			miningWorld := stagedsync.StageMiningCfg(true, nil, miningResultCh, quit)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -320,13 +320,10 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder, tx ethdb.RwTx) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
+					miningConfig,
 					miningWorld.Block,
 					*chainConfig,
 					engine,
-					miningWorld.ExtraData,
-					miningWorld.GasFloor,
-					miningWorld.GasCeil,
-					miningWorld.Etherbase,
 					txPool,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
