@@ -21,6 +21,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -39,6 +40,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"lukechampine.com/blake3"
 )
 
 const (
@@ -890,18 +893,33 @@ func (ss *SentryServerImpl) restartReceive() {
 
 func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveMessagesServer) error {
 	ss.restartReceive()
+	checksumCache, err := lru.New(1024)
+	if err != nil {
+		return err
+	}
+	blake3hasher := blake3.New(32, nil)
 	for {
 		select {
 		case <-ss.stopCh:
 			log.Warn("Finished receive messages")
 			return nil
 		case streamMsg := <-ss.ReceiveCh:
+			// Compute checksum
+			blake3hasher.Reset()
+			blake3hasher.Write(streamMsg.b)
+			var checksum [32]byte
+			blake3hasher.Sum(checksum[:0])
+			if _, ok := checksumCache.Get(checksum); ok {
+				// This message has already been seen recently, skip
+				continue
+			}
+			checksumCache.Add(checksum, struct{}{})
 			outreq := proto_sentry.InboundMessage{
 				PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
 				Id:     streamMsg.msgId,
 				Data:   streamMsg.b,
 			}
-			if err := server.Send(&outreq); err != nil {
+			if err = server.Send(&outreq); err != nil {
 				log.Error("Sending msg to core P2P failed", "msg", streamMsg.msgName, "error", err)
 				return err
 			}
