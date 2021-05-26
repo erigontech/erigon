@@ -20,7 +20,7 @@ var DefaultStorageMode = StorageMode{
 	History:     true,
 	Receipts:    true,
 	TxIndex:     true,
-	CallTraces:  false,
+	CallTraces:  true,
 	TEVM:        false,
 }
 
