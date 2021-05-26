@@ -55,21 +55,21 @@ Usage
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 > cd erigon
-> make tg
-> ./build/bin/tg
+> make erigon
+> ./build/bin/erigon
 ```
 
 ### Testnets
 
-If you would like to give turbo-geth a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
+If you would like to give Erigon a try, but do not have spare 2Tb on your driver, a good option is to start syncing one of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 ```sh
 > git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 > cd erigon
-> make tg
-> ./build/bin/tg --datadir goerli --chain goerli
+> make erigon
+> ./build/bin/erigon --datadir goerli --chain goerli
 ```
 
-Please note the `--datadir` option that allows you to store turbo-geth files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
+Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example, in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if the chain in `--chain`.
 
 ### Mining
 
@@ -81,7 +81,7 @@ Support only remote-miners.
 * RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
 * RPCDaemon supports websocket methods: newPendingTransaction
 * TODO:
-  + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/turbo-geth/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+  + we don't broadcast mined blocks to p2p-network yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
   + eth_newPendingTransactionFilter
   + eth_newBlockFilter
   + eth_newFilter
@@ -105,12 +105,12 @@ Windows users may run erigon in 3 possible ways:
 > sudo apt install build-essential git golang golang-go
 ```
 
-Once this last step is completed you can run tg as if you were on Linux as described the [Usage](#usage) section.
+Once this last step is completed you can run erigon as if you were on Linux as described the [Usage](#usage) section.
 
-**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have TG store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have TG store its data there you will haave to launch TG as
+**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have Erigon store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have Erigon store its data there you will have to launch Erigon as
 
 ```sh
-> ./tg --datadir /mnt/d/[<optional-subfolder>/]
+> ./erigon --datadir /mnt/d/[<optional-subfolder>/]
 ```
 
 
@@ -121,12 +121,12 @@ Key features
 
 ### More Efficient State Storage
 
-**Flat KV storage.** Turbo-Geth uses a key-value database and storing accounts and storage in
+**Flat KV storage.** Erigon uses a key-value database and storing accounts and storage in
 a simple way.
 
 <code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
 
-**Preprocessing**. For some operations, turbo-geth uses temporary files to preprocess data before
+**Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before
 inserting it into the main DB. That reduces write amplification and
 DB inserts are orders of magnitude quicker.
 
@@ -134,7 +134,7 @@ DB inserts are orders of magnitude quicker.
 
 **Plain state**.
 
-**Single accounts/state trie**. Turbo-Geth uses a single Merkle trie for both
+**Single accounts/state trie**. Erigon uses a single Merkle trie for both
 accounts and the storage.
 
 
@@ -148,7 +148,7 @@ Erigon uses a rearchitected full sync algorithm from
 
 It uses the same network primitives and is compatible with regular go-ethereum
 nodes that are using full sync, you do not need any special sync capabilities
-for turbo-geth to sync.
+for Erigon to sync.
 
 When reimagining the full sync, we focused on batching data together and minimize DB overwrites.
 That makes it possible to sync Ethereum mainnet in under 2 days if you have a fast enough network connection
@@ -172,27 +172,27 @@ Examples of stages are:
 
 In Erigon RPC calls are extracted out of the main binary into a separate daemon.
 This daemon can use both local or remote DBs. That means, that this RPC daemon
-doesn't have to be running on the same machine as the main turbo-geth binary or
+doesn't have to be running on the same machine as the main Erigon binary or
 it can run from a snapshot of a database for read-only calls.
 
 <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 **For local DB**
 
-This is only possible if RPC daemon runs on the same computer as turbo-geth. This mode of operation uses shared memory access to the database of turbo-geth, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
+This is only possible if RPC daemon runs on the same computer as Erigon. This mode of operation uses shared memory access to the database of Erigon, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
 > make rpcdaemon
-> ./build/bin/rpcdaemon --datadir ~/Library/TurboGeth/ --http.api=eth,debug,net
+> ./build/bin/rpcdaemon --datadir ~/Library/Erigon/ --http.api=eth,debug,net
 ```
 
 In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
 
 **For remote DB**
 
-This works regardless of whether RPC daemon is on the same computer with turbo-geth, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run turbo-geth in one terminal window
+This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
 ```
-> ./build/bin/tg --private.api.addr=localhost:9090
+> ./build/bin/erigon --private.api.addr=localhost:9090
 ```
 
 Run RPC daemon
@@ -200,11 +200,11 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
 ```
 
-**gRPC ports**: `9090` TG, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+**gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
 **For dual mode**
 
-If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as turbo-geth. In this mode, most data transfer from turbo-geth to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
+If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as Erigon. In this mode, most data transfer from Erigon to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
@@ -212,7 +212,7 @@ For a details on the implementation status of each command, [see this table](./c
 
 ### Run all components by docker-compose
 
-Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
+Next command starts: Erigon on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
 ```
 docker-compose build
@@ -230,7 +230,7 @@ Getting in touch
 
 The main discussions are happening on our Discord server.
 To get an invite, send an email to `tg [at] torquem.ch` with your name, occupation,
-a brief explanation of why you want to join the Discord, and how you heard about Turbo-Geth.
+a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 
@@ -262,7 +262,7 @@ Core contributors (in alpabetical order of first names):
 
 Thanks to:
 
-* All contributors of Turbo-Geth
+* All contributors of Erigon
 
 * All contributors of Go-Ethereum
 
@@ -282,9 +282,9 @@ Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, w
 but it's not informative, because if `htop` says that app using 90% of memory you still
 can run 3 more instances of app on the same machine - because most of that `90%` is "OS pages cache".  
 OS automatically free this cache any time it needs memory.
-Smaller "page cache size" may not impact performance of TurboGeth at all.
+Smaller "page cache size" may not impact performance of Erigon at all.
 
-Next tools show correct memory usage of TurboGeth:
+Next tools show correct memory usage of Erigon:
 - `vmmap -summary PID | grep -i "Physical footprint"`.
   Without `grep` you can see details - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size` shows OS pages cache size.
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
@@ -292,11 +292,11 @@ Next tools show correct memory usage of TurboGeth:
 
 Erigon uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory.
 
-**Warning:** Multiple instances of TG on same machine will touch Disk concurrently,
-it impacts performance - one of main TG optimisations: "reduce Disk random access".
+**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently,
+it impacts performance - one of main Erigon optimisations: "reduce Disk random access".
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk.
-If genesis sync passed, then it's fine to run multiple TG on same Disk.
+If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 

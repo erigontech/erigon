@@ -106,7 +106,7 @@ func StageLoopStep(
 	accumulator *shards.Accumulator,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 ) (err error) {
-	// avoid crash because TG's core does many things -
+	// avoid crash because Erigon's core does many things -
 	defer func() {
 		if r := recover(); r != nil { // just log is enough
 			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
@@ -208,5 +208,53 @@ func StageLoopStep(
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+	// avoid crash because TG's core does many things -
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				err = fmt.Errorf("%w, trace: %s", typed, stack)
+			default:
+				err = fmt.Errorf("%+v, trace: %s", typed, stack)
+			}
+		}
+	}()
+
+	tx, err := kv.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	miningState, err := mining.Prepare(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		tx,
+		"",
+		ethdb.DefaultStorageMode,
+		".",
+		0,
+		ctx.Done(),
+		nil,
+		nil,
+		false,
+		stagedsync.StageMiningCfg(true),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if err = miningState.Run(nil, tx); err != nil {
+		return err
+	}
+	tx.Rollback()
 	return nil
 }

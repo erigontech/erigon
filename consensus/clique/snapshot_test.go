@@ -367,7 +367,7 @@ func TestClique(t *testing.T) {
 			failure: errRecentlySigned,
 		}, {
 			// Recent signatures should not reset on checkpoint blocks imported in a new
-			// batch (https://github.com/ledgerwatch/turbo-geth/issues/17593). Whilst this
+			// batch (https://github.com/ledgerwatch/erigon/issues/17593). Whilst this
 			// seems overly specific and weird, it was a Rinkeby consensus split.
 			name:    "Recent signatures should not reset on checkpoint blocks imported in a new batch",
 			epoch:   3,

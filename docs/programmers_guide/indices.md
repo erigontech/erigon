@@ -1,4 +1,4 @@
-Indices implementation in Turbo-Geth
+Indices implementation in Erigon
 ====================================
 
 Indices (inverted indices) - allow search data by multiple filters. 
@@ -195,13 +195,13 @@ It means in 1 db call you can Get/Put up to 4Kb of sub-bucket keys.
 
 [lmdb docs](https://github.com/ledgerwatch/lmdb-go/blob/master/lmdb/lmdb.h)
 
-TurboGeth
+Erigon
 ---------
 
 This article target is to show tricky concepts on simple examples. 
-Real way how TurboGeth stores accounts value and accounts history is a bit different and described [here](./db_walkthrough.MD#bucket-history-of-accounts)    
- 
-TurboGeth supports multiple typed cursors, see [AbstractKV.md](./../../ethdb/AbstractKV.md)
+Real way how Erigon stores accounts value and accounts history is a bit different and described [here](./db_walkthrough.MD#bucket-history-of-accounts)    
+
+Erigon supports multiple typed cursors, see [AbstractKV.md](./../../ethdb/AbstractKV.md)
 
 
 

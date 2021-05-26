@@ -176,13 +176,13 @@ $Erigon.Build   = "go build -v -trimpath -tags=mdbx -ldflags ""-X main.gitCommit
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
 
-Write-Host " Building tg ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "tg.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/tg"
+Write-Host " Building Erigon ..."
+$outExecutable = [string](Join-Path $Erigon.BinPath "erigon.exe")
+$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/erigon"
 $BuildCommand += ';$?'
 $success = Invoke-Expression -Command $BuildCommand
 if (-not $success) {
-    Write-Host "Could not build tg executable"
+    Write-Host "Could not build Erigon executable"
     return
 }
 

@@ -119,7 +119,7 @@ var (
 	}
 	SilkwormFlag = cli.StringFlag{
 		Name:  "silkworm",
-		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
+		Usage: "File path of libsilkworm_erigon_api dynamic library (default = do not use Silkworm)",
 		Value: "",
 	}
 	StateStreamFlag = cli.BoolFlag{

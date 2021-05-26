@@ -16,31 +16,31 @@ In order to download the code and compile you need the following commands:
 
 .. code-block:: sh
 
-    $ git clone https://github.com/ledgerwatch/turbo-geth
+    $ git clone https://github.com/ledgerwatch/erigon
 
-    $ cd turbo-geth
+    $ cd erigon
 
     $ make
 
 Running
 =======
 
-After this is done, you can run turbo-geth by executing.
+After this is done, you can run Erigon by executing.
 
 .. code-block:: sh
 
-    $ ./build/bin/tg
+    $ ./build/bin/erigon
 
 what this will do is start a sync process in mainnet.
 
 RPC Daemon
 ==========
 
-Unlike Go-Ethereum (geth), Turbo-Geth has a separate RPC service called rpcdaemon, this service is used for managin JSON RPC API. In fact, they are not present in turbo-geth with `--rpc` flag but we have to start a separate service for it. first of all turbo-geth must give access to the rpcdaemon to the database through an API. so we need to run turbo-geth with the flag **--private.api.addr** which by convention should be set to **localhost:9090**.
+Unlike Go-Ethereum (geth), Erigon has a separate RPC service called rpcdaemon, this service is used for managing JSON RPC API. In fact, they are not present in Erigon with `--rpc` flag but we have to start a separate service for it. first of all Erigon must give access to the rpcdaemon to the database through an API. so we need to run Erigon with the flag **--private.api.addr** which by convention should be set to **localhost:9090**.
 
 .. code-block:: sh
 
-    $ ./build/bin/tg --private.api.addr=localhost:9090
+    $ ./build/bin/erigon --private.api.addr=localhost:9090
 
 then to run the rpcdaemon attached to our node we just run
 

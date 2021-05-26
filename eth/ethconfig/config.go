@@ -87,19 +87,19 @@ func init() {
 		}
 	}
 	if runtime.GOOS == "darwin" {
-		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "tg-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
 	} else if runtime.GOOS == "windows" {
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "tg-thash")
+			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
-			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "tg-ethash")
+			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "eriogn-ethash")
 		}
 	} else {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "tg-ethash")
+			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/tg-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
 	}
 }
 

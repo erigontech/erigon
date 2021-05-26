@@ -60,9 +60,6 @@ type StageParameters struct {
 }
 
 type MiningCfg struct {
-	// configs
-	params.MiningConfig
-
 	// noempty is the flag used to control whether the feature of pre-seal empty
 	// block is enabled. The default value is false(pre-seal is enabled by default).
 	// But in some special scenario the consensus engine will seal blocks instantaneously,
@@ -70,17 +67,12 @@ type MiningCfg struct {
 	// non-stop and no real transaction will be included.
 	noempty bool
 
-	pendingBlocks chan<- *types.Block
-	minedBlocks   chan<- *types.Block
-	sealCancel    <-chan struct{}
-
 	// runtime dat
 	Block *miningBlock
 }
 
-func StageMiningCfg(cfg params.MiningConfig, noempty bool, pendingBlocks chan<- *types.Block, resultCh chan<- *types.Block, sealCancel <-chan struct{}) *MiningCfg {
-	return &MiningCfg{MiningConfig: cfg, noempty: noempty, Block: &miningBlock{}, pendingBlocks: pendingBlocks, minedBlocks: resultCh, sealCancel: sealCancel}
-
+func StageMiningCfg(noempty bool) *MiningCfg {
+	return &MiningCfg{noempty: noempty, Block: &miningBlock{}}
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -126,7 +118,7 @@ func (bb StageBuilders) Build(world StageParameters) []*Stage {
 	return stages
 }
 
-// DefaultStages contains the list of default stage builders that are used by turbo-geth.
+// DefaultStages contains the list of default stage builders that are used by Erigon.
 func DefaultStages() StageBuilders {
 	return []StageBuilder{
 		{
@@ -468,7 +460,13 @@ func DefaultStages() StageBuilders {
 	}
 }
 
-func MiningStages() StageBuilders {
+func MiningStages(
+	createBlockCfg MiningCreateBlockCfg,
+	execCfg MiningExecCfg,
+	hashStateCfg HashStateCfg,
+	trieCfg TrieCfg,
+	finish MiningFinishCfg,
+) StageBuilders {
 	return []StageBuilder{
 		{
 			ID: stages.MiningCreateBlock,
@@ -478,14 +476,8 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningCreateBlockStage(s, tx,
+							createBlockCfg,
 							world.mining.Block,
-							*world.ChainConfig,
-							world.Engine,
-							world.mining.ExtraData,
-							world.mining.GasFloor,
-							world.mining.GasCeil,
-							world.mining.Etherbase,
-							world.txPool,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
@@ -500,15 +492,11 @@ func MiningStages() StageBuilders {
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
 						return SpawnMiningExecStage(s, tx,
+							execCfg,
 							world.mining.Block,
-							world.ChainConfig,
-							world.vmConfig,
-							world.Engine,
 							world.mining.Block.LocalTxs,
 							world.mining.Block.RemoteTxs,
-							world.mining.Etherbase,
 							world.mining.noempty,
-							world.notifier,
 							world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
@@ -518,12 +506,11 @@ func MiningStages() StageBuilders {
 		{
 			ID: stages.HashState,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageHashStateCfg(world.DB.RwKV(), world.TmpDir)
 				return &Stage{
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHashStateStage(s, tx, cfg, world.QuitCh)
+						return SpawnHashStateStage(s, tx, hashStateCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}
@@ -532,12 +519,11 @@ func MiningStages() StageBuilders {
 		{
 			ID: stages.IntermediateHashes,
 			Build: func(world StageParameters) *Stage {
-				cfg := StageTrieCfg(world.DB.RwKV(), false, true, world.TmpDir)
 				return &Stage{
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, cfg, world.QuitCh)
+						stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, world.QuitCh)
 						if err != nil {
 							return err
 						}
@@ -555,7 +541,7 @@ func MiningStages() StageBuilders {
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnMiningFinishStage(s, tx, world.mining.Block, world.Engine, *world.ChainConfig, world.mining.pendingBlocks, world.mining.minedBlocks, world.mining.sealCancel, world.QuitCh)
+						return SpawnMiningFinishStage(s, tx, world.mining.Block, finish, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}

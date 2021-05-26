@@ -211,7 +211,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	// Retrieve the transaction and assemble its EVM context
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	cc, err := api.chainConfig(tx)

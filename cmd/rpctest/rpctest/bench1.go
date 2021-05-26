@@ -15,14 +15,14 @@ import (
 
 var routes map[string]string
 
-// bench1 compares response of TurboGeth with Geth
+// bench1 compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
-// needCompare - if false - doesn't call TurboGeth and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
+// needCompare - if false - doesn't call Erigon and doesn't compare responses
+// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, gethURL)
+func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -38,7 +38,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	resultsCh <- res
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
@@ -55,15 +55,15 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
-		res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
 		resultsCh <- res
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (turbo-geth) %d: %v\n", bn, res.Err)
+			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 			return
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (turbo-geth): %d %s\n", b.Error.Code, b.Error.Message)
+			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
 		if needCompare {
@@ -102,10 +102,10 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 					for nextKey != nil {
 						var sr DebugStorageRange
 						reqGen.reqID++
-						res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
-							fmt.Printf("Could not get storageRange (turbo-geth): %s: %v\n", tx.Hash, res.Err)
+							fmt.Printf("Could not get storageRange (Erigon): %s: %v\n", tx.Hash, res.Err)
 							return
 						}
 						if sr.Error != nil {
@@ -164,15 +164,15 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 			reqGen.reqID++
 
 			var trace EthTxTrace
-			res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not trace transaction (turbo-geth) %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
+				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Erigon], reqGen.traceTransaction(tx.Hash))
 			}
 
 			if trace.Error != nil {
-				fmt.Printf("Error tracing transaction (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
+				fmt.Printf("Error tracing transaction (Erigon): %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
 			if needCompare {
@@ -198,15 +198,15 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 			reqGen.reqID++
 
 			var receipt EthReceipt
-			res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
+			res = reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Count not get receipt (turbo-geth): %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
+				fmt.Printf("Count not get receipt (Erigon): %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Erigon], reqGen.getTransactionReceipt(tx.Hash))
 				return
 			}
 			if receipt.Error != nil {
-				fmt.Printf("Error getting receipt (turbo-geth): %d %s\n", receipt.Error.Code, receipt.Error.Message)
+				fmt.Printf("Error getting receipt (Erigon): %d %s\n", receipt.Error.Code, receipt.Error.Message)
 				return
 			}
 			if needCompare {
@@ -225,7 +225,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 				if !compareReceipts(&receipt, &receiptg) {
 					fmt.Printf("Different receipts block %d, tx %s\n", bn, tx.Hash)
 					print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
-					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
+					print(client, routes[Erigon], reqGen.getTransactionReceipt(tx.Hash))
 					return
 				}
 			}
@@ -236,14 +236,14 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 		reqGen.reqID++
 
 		var balance EthBalance
-		res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
+		res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
 		resultsCh <- res
 		if res.Err != nil {
-			fmt.Printf("Could not get account balance (turbo-geth): %v\n", res.Err)
+			fmt.Printf("Could not get account balance (Erigon): %v\n", res.Err)
 			return
 		}
 		if balance.Error != nil {
-			fmt.Printf("Error getting account balance (turbo-geth): %d %s", balance.Error.Code, balance.Error.Message)
+			fmt.Printf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
 			return
 		}
 		if needCompare {
@@ -268,14 +268,14 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 			// Checking modified accounts
 			reqGen.reqID++
 			var mag DebugModifiedAccounts
-			res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
+			res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 			resultsCh <- res
 			if res.Err != nil {
-				fmt.Printf("Could not get modified accounts (turbo-geth): %v\n", res.Err)
+				fmt.Printf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				return
 			}
 			if mag.Error != nil {
-				fmt.Printf("Error getting modified accounts (turbo-geth): %d %s\n", mag.Error.Code, mag.Error.Message)
+				fmt.Printf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
 				return
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
@@ -283,29 +283,29 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 			page := common.Hash{}.Bytes()
 			pageGeth := common.Hash{}.Bytes()
 
-			var accRangeTG map[common.Address]state.DumpAccount
+			var accRangeErigon map[common.Address]state.DumpAccount
 			var accRangeGeth map[common.Address]state.DumpAccount
 
 			for len(page) > 0 {
-				accRangeTG = make(map[common.Address]state.DumpAccount)
+				accRangeErigon = make(map[common.Address]state.DumpAccount)
 				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
 				reqGen.reqID++
-				res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
+				res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 				resultsCh <- res
 
 				if res.Err != nil {
-					fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)
+					fmt.Printf("Could not get accountRange (Erigon): %v\n", res.Err)
 					return
 				}
 
 				if sr.Error != nil {
-					fmt.Printf("Error getting accountRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
+					fmt.Printf("Error getting accountRange (Erigon): %d %s\n", sr.Error.Code, sr.Error.Message)
 					break
 				} else {
 					page = sr.Result.Next
 					for k, v := range sr.Result.Accounts {
-						accRangeTG[k] = v
+						accRangeErigon[k] = v
 					}
 				}
 				if needCompare {
@@ -328,7 +328,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 					if !bytes.Equal(page, pageGeth) {
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
-					if !compareAccountRanges(accRangeTG, accRangeGeth) {
+					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
 						fmt.Printf("Different in account ranges tx\n")
 						return
 					}
@@ -340,29 +340,29 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 }
 
 // vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
-// results to /$tmp$/turbo_geth_stress_test/results_*.csv
-// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
+// results to /$tmp$/erigon_stress_test/results_*.csv
+// vegeta format going to files /$tmp$/erigon_stress_test/vegeta_*.txt
 func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 	var err error
 	var files map[string]map[string]*os.File
 	var vegetaFiles map[string]map[string]*os.File
 	if enabled {
 		files = map[string]map[string]*os.File{
-			Geth:      make(map[string]*os.File),
-			TurboGeth: make(map[string]*os.File),
+			Geth:   make(map[string]*os.File),
+			Erigon: make(map[string]*os.File),
 		}
 		vegetaFiles = map[string]map[string]*os.File{
-			Geth:      make(map[string]*os.File),
-			TurboGeth: make(map[string]*os.File),
+			Geth:   make(map[string]*os.File),
+			Erigon: make(map[string]*os.File),
 		}
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
-		dir := path.Join(tmpDir, "turbo_geth_stress_test")
+		dir := path.Join(tmpDir, "erigon_stress_test")
 		if err = os.MkdirAll(dir, 0770); err != nil {
 			panic(err)
 		}
 
-		for _, route := range []string{Geth, TurboGeth} {
+		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := path.Join(dir, "results_"+route+"_"+method+".csv")
 				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
@@ -372,7 +372,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 			}
 		}
 
-		for _, route := range []string{Geth, TurboGeth} {
+		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
 				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
@@ -398,9 +398,9 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 			}
 
 			// vegeta files, write into all target files
-			// because if "needCompare" is false - then we don't have responses from TurboGeth
-			// but we still have enough information to build vegeta file for TurboGeth
-			for _, target := range []string{Geth, TurboGeth} {
+			// because if "needCompare" is false - then we don't have responses from Erigon
+			// but we still have enough information to build vegeta file for Erigon
+			for _, target := range []string{Geth, Erigon} {
 				if f, ok := vegetaFiles[target][res.Method]; ok {
 					template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
 					row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))

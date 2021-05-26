@@ -595,8 +595,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.TurboMineName:
-			urls = params.TurboMineBootnodes
+		case params.ErigonMineName:
+			urls = params.ErigonBootnodes
 		case params.BaikalChainName:
 			urls = params.BaikalBootnodes
 		default:
@@ -635,8 +635,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.TurboMineName:
-			urls = params.TurboMineBootnodes
+		case params.ErigonMineName:
+			urls = params.ErigonBootnodes
 		case params.BaikalChainName:
 			urls = params.BaikalBootnodes
 		default:
@@ -920,7 +920,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
 	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
@@ -984,7 +984,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.Enabled = true
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1152,11 +1152,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.TurboMineName:
+	case params.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
+			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
-		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
+		cfg.Genesis = core.DefaultErigonGenesisBlock()
 	case params.BaikalChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1642 // baikal
@@ -1245,8 +1245,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.TurboMineName:
-		genesis = core.DefaultTurboMineGenesisBlock()
+	case params.ErigonMineName:
+		genesis = core.DefaultErigonGenesisBlock()
 	case params.BaikalChainName:
 		genesis = core.DefaultBaikalGenesisBlock()
 	case params.DevChainName:

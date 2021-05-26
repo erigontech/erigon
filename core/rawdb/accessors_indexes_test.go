@@ -39,7 +39,7 @@ func TestLookupStorage(t *testing.T) {
 				WriteTxLookupEntries(db, block)
 			},
 		},
-		// Turbo-Geth: older databases are removed, no backward compatibility
+		// Erigon: older databases are removed, no backward compatibility
 	}
 
 	for _, tc := range tests {

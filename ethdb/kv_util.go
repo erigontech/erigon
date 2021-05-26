@@ -132,7 +132,7 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 }
 
 func testKVPath() string {
-	dir, err := ioutil.TempDir(os.TempDir(), "tg-test-db")
+	dir, err := ioutil.TempDir(os.TempDir(), "erigon-test-db")
 	if err != nil {
 		panic(err)
 	}
