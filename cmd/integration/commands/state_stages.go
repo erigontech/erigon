@@ -137,7 +137,7 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx context.Context) error {
-	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync(db)
+	sm, engine, chainConfig, vmConfig, txPool, st, mining, _, miningResultCh := newSync(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -232,8 +232,6 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
-	miningResultCh := make(chan *types.Block, 1)
-	defer close(miningResultCh)
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -309,7 +307,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.StageMiningCfg(miningConfig, true, nil, miningResultCh, quit)
+			miningWorld := stagedsync.StageMiningCfg(true)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -320,14 +318,13 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder, tx ethdb.RwTx) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
+					stagedsync.StageMiningCreateBlockCfg(db,
+						miningConfig,
+						*chainConfig,
+						engine,
+						txPool,
+						tmpDir),
 					miningWorld.Block,
-					*chainConfig,
-					engine,
-					miningWorld.ExtraData,
-					miningWorld.GasFloor,
-					miningWorld.GasCeil,
-					miningWorld.Etherbase,
-					txPool,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
@@ -418,7 +415,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 
 func loopIh(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync(db)
+	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -493,7 +490,7 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	ch := ctx.Done()
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync(db)
+	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

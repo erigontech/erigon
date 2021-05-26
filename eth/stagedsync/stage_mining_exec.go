@@ -17,16 +17,46 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
+type MiningExecCfg struct {
+	db          ethdb.RwKV
+	mining      params.MiningConfig
+	notifier    ChainEventNotifier
+	chainConfig params.ChainConfig
+	engine      consensus.Engine
+	vmConfig    *vm.Config
+	tmpdir      string
+}
+
+func StageMiningExecCfg(
+	db ethdb.RwKV,
+	mining params.MiningConfig,
+	notifier ChainEventNotifier,
+	chainConfig params.ChainConfig,
+	engine consensus.Engine,
+	vmConfig *vm.Config,
+	tmpdir string,
+) MiningExecCfg {
+	return MiningExecCfg{
+		db:          db,
+		mining:      mining,
+		notifier:    notifier,
+		chainConfig: chainConfig,
+		engine:      engine,
+		vmConfig:    vmConfig,
+		tmpdir:      tmpdir,
+	}
+}
+
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
-	vmConfig.NoReceipts = false
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, current *miningBlock, localTxs, remoteTxs types.TransactionsStream, noempty bool, quit <-chan struct{}) error {
+	cfg.vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
 	ibs := state.New(state.NewPlainStateReader(tx))
 	stateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, current.Header.Number.Uint64())
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
+	if cfg.chainConfig.DAOForkSupport && cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
@@ -45,7 +75,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, localTxs, cfg.mining.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -53,11 +83,11 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(logPrefix, notifier, logs)
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs)
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, remoteTxs, cfg.mining.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -65,12 +95,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(logPrefix, notifier, logs)
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs)
 			//}
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(engine, current.Header, current.Txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs); err != nil {
 		return err
 	}
 
@@ -110,18 +140,18 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, current *miningBlock, ch
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
-	signer := types.MakeSigner(chainConfig, header.Number.Uint64())
+	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
+		receipt, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err
@@ -241,16 +271,4 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
-}
-
-func NotifyPendingBlock(logPrefix string, notifier ChainEventNotifier, block *types.Block) {
-	if block == nil {
-		return
-	}
-
-	if notifier == nil {
-		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
-		return
-	}
-	notifier.OnNewPendingBlock(block)
 }

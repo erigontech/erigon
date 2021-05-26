@@ -62,6 +62,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -96,13 +97,14 @@ type Ethereum struct {
 
 	torrentClient *snapshotsync.Client
 
-	lock          sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	events        *remotedbserver.Events
-	chainConfig   *params.ChainConfig
-	genesisHash   common.Hash
-	quitMining    chan struct{}
-	pendingBlocks chan *types.Block
-	minedBlocks   chan *types.Block
+	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	events            *remotedbserver.Events
+	chainConfig       *params.ChainConfig
+	genesisHash       common.Hash
+	quitMining        chan struct{}
+	miningSealingQuit chan struct{}
+	pendingBlocks     chan *types.Block
+	minedBlocks       chan *types.Block
 
 	// downloader v2 fields
 	downloadV2Ctx        context.Context
@@ -250,7 +252,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 	if stagedSync == nil {
 		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: backend.events, SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
 	} else {
 		// otherwise we add one if needed
 		if stagedSync.Notifier == nil {
@@ -262,7 +264,19 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
+	backend.quitMining = make(chan struct{})
+	backend.miningSealingQuit = make(chan struct{})
+	backend.pendingBlocks = make(chan *types.Block, 1)
+	backend.minedBlocks = make(chan *types.Block, 1)
+
+	mining := stagedsync.New(
+		stagedsync.MiningStages(
+			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, backend.config.Miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainKV, backend.config.Miner, backend.events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
+			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
+			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, backend.pendingBlocks, backend.minedBlocks, backend.miningSealingQuit),
+		), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -419,9 +433,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	backend.quitMining = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
 	go func() {
 		for {
 			select {
@@ -440,7 +451,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}()
 
-	if err := backend.StartMining(backend.chainKV, backend.pendingBlocks, backend.minedBlocks, mining, backend.config.Miner, backend.gasPrice, tmpdir, backend.quitMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
 	}
 
@@ -555,7 +566,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, tmpdir string, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -621,6 +632,9 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 			case err := <-errc:
 				works = false
 				hasWork = false
+				if errors.Is(err, common.ErrStopped) {
+					return
+				}
 				if err != nil {
 					log.Warn("mining", "err", err)
 				}
@@ -632,46 +646,11 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- s.miningStep(kv, pendingBlocksCh, minedBlocksCh, mining, cfg, tmpdir, quitCh) }()
+				go func() { errc <- stages2.MiningStep(ctx, kv, mining) }()
 			}
 		}
 	}()
 
-	return nil
-}
-
-func (s *Ethereum) miningStep(kv ethdb.RwKV, pendingBlockCh chan *types.Block, minedBlockCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, tmpdir string, quitCh chan struct{}) error {
-	sealCancel := make(chan struct{})
-	tx, err := kv.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	miningState, err := mining.Prepare(
-		nil,
-		s.chainConfig,
-		s.engine,
-		&vm.Config{},
-		ethdb.NewObjectDatabase(kv),
-		tx,
-		"",
-		ethdb.DefaultStorageMode,
-		tmpdir,
-		0,
-		quitCh,
-		nil,
-		s.txPool,
-		false,
-		stagedsync.StageMiningCfg(cfg, true, pendingBlockCh, minedBlockCh, sealCancel),
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx); err != nil {
-		return err
-	}
-	tx.Rollback()
 	return nil
 }
 
@@ -719,7 +698,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil /* waitGroup */)
-		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil)
 		go download.Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	} else {
 		eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())

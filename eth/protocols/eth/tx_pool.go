@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon/common"
@@ -20,7 +21,7 @@ import (
 
 type TxPoolServer struct {
 	ctx       context.Context
-	sentries  []proto_sentry.SentryClient
+	Sentries  []proto_sentry.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
@@ -28,15 +29,11 @@ type TxPoolServer struct {
 func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		ctx:      ctx,
-		sentries: sentries,
+		Sentries: sentries,
 		txPool:   txPool,
 	}
 
 	return cs, nil
-}
-
-func (tp *TxPoolServer) Start() {
-	go RecvTxMessage(tp.ctx, tp.sentries[0], tp.HandleInboundMessage)
 }
 
 func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
@@ -112,7 +109,7 @@ func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashe
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
-		sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+		sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 		if err1 != nil {
 			log.Error("Could not send get pooled tx request", "err", err1)
 			continue
@@ -127,12 +124,12 @@ func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashe
 
 func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
-	if len(tp.sentries) > 1 {
-		i = rand.Intn(len(tp.sentries) - 1)
+	if len(tp.Sentries) > 1 {
+		i = rand.Intn(len(tp.Sentries) - 1)
 	}
 	to := i
 	return i, true, func() (int, bool) {
-		i = (i + 1) % len(tp.sentries)
+		i = (i + 1) % len(tp.Sentries)
 		return i, i != to
 	}
 }
@@ -152,7 +149,13 @@ func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_s
 	}
 }
 
-func RecvTxMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+// RecvTxMessage
+// wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
+func RecvTxMessage(ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -175,6 +178,9 @@ func RecvTxMessage(ctx context.Context, sentry proto_sentry.SentryClient, handle
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvTxMessage: Handling incoming message", "error", err)
+		}
+		if wg != nil {
+			wg.Done()
 		}
 	}
 }
