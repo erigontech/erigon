@@ -3,7 +3,6 @@ package download
 import (
 	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 	"os"
 	"sync"
@@ -314,7 +313,7 @@ func TestHeaderStep(t *testing.T) {
 	}
 }
 
-func TestMine(t *testing.T) {
+func TestMineBlockWith1Tx(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	require, m := require.New(t), mock(t)
 
@@ -352,13 +351,17 @@ func TestMine(t *testing.T) {
 		}
 	}
 
-	chain, err = core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+	price := uint256.NewInt().SetUint64(1)
+	chain, err = core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 1, func(i int, gen *core.BlockGen) {
+		// In block 1, addr1 sends addr2 some ether.
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.address), common.Address{1}, uint256.NewInt().SetUint64(10_000), params.TxGas, price, nil), *types.LatestSignerForChainID(m.chainConfig.ChainID), m.key)
+		require.NoError(err)
+		gen.AddTx(tx)
 	}, false /* intemediateHashes */)
 	require.NoError(err)
 
 	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(eth.TransactionsPacket(chain.TopBlock.Transactions()))
+	b, err := rlp.EncodeToBytes(chain.TopBlock.Transactions())
 	require.NoError(err)
 	m.receiveWg.Add(1)
 	err = m.TxStream().Send(&sentry.InboundMessage{Id: sentry.MessageId_Transactions, Data: b, PeerId: m.peerId})
@@ -369,7 +372,9 @@ func TestMine(t *testing.T) {
 	require.NoError(err)
 
 	got := <-m.pendingBlocks
-	fmt.Printf("%d\n", got.Transactions().Len())
+	require.Equal(chain.TopBlock.Transactions().Len(), got.Transactions().Len())
+	got2 := <-m.minedBlocks
+	require.Equal(chain.TopBlock.Transactions().Len(), got2.Transactions().Len())
 }
 
 func TestReorg(t *testing.T) {
