@@ -212,6 +212,7 @@ func mock(t *testing.T) *MockSentry {
 			db,
 			sm.Receipts,
 			sm.CallTraces,
+			sm.TEVM,
 			0,
 			batchSize,
 			nil,

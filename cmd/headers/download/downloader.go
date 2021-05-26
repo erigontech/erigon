@@ -198,6 +198,7 @@ func NewStagedSync(
 			db,
 			sm.Receipts,
 			sm.CallTraces,
+			sm.TEVM,
 			pruningDistance,
 			batchSize,
 			nil,

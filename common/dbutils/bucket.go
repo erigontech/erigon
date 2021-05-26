@@ -93,18 +93,14 @@ const (
 	IncarnationMapBucket = "incarnationMap"
 
 	//TEVMCodeStatusBucket -
-	//key - contract code hash
-	//value - contract TEVM code status
+	//key - encoded timestamp(block number)
+	//value - contract codes hashes: [code_hash1]+[code_hash2]
 	ContractTEVMCodeStatusBucket = "TEVM-code-status"
 
 	//TEVMCodeBucket -
 	//key - contract code hash
 	//value - contract EVTM code
 	ContractTEVMCodeBucket = "TEVM-code"
-)
-
-const (
-	TEVMScheduled = 0
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket

@@ -39,6 +39,11 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	if header.Eip1559 {
 		baseFee.SetFromBig(header.BaseFee)
 	}
+	if checkTEVM == nil {
+		checkTEVM = func(_ common.Hash) (bool, error) {
+			return false, nil
+		}
+	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    Transfer,
