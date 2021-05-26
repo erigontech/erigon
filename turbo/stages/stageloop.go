@@ -105,7 +105,7 @@ func StageLoopStep(
 	accumulator *shards.Accumulator,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 ) (err error) {
-	// avoid crash because TG's core does many things -
+	// avoid crash because Erigon's core does many things -
 	defer func() {
 		if r := recover(); r != nil { // just log is enough
 			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")

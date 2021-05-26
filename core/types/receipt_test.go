@@ -50,7 +50,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			"StoredReceiptRLP",
 			encodeAsStoredReceiptRLP,
 		},
-		// Turbo-Geth: all the legacy formats are removed intentionally
+		// Erigon: all the legacy formats are removed intentionally
 	}
 
 	tx := NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)

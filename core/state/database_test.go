@@ -49,7 +49,7 @@ import (
 
 // Create revival problem
 func TestCreate2Revive(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
+	t.Skip("switch to Erigon state readers/writers")
 
 	// Configure and generate a sample block chain
 	db := ethdb.NewTestDB(t)

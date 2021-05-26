@@ -19,14 +19,14 @@ func main() {
 		needCompare bool
 		fullTest    bool
 		gethURL     string
-		tgURL       string
+		erigonURL   string
 		blockFrom   uint64
 		blockTo     uint64
 		chaindata   string
 		recordFile  string
 	)
-	withTGUrl := func(cmd *cobra.Command) {
-		cmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545", "turbogeth rpcdaemon url")
+	withErigonUrl := func(cmd *cobra.Command) {
+		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
 	}
 	withGethUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
@@ -52,10 +52,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench1(tgURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
+			rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench1Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
+	with(bench1Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 	bench1Cmd.Flags().BoolVar(&fullTest, "fullTest", false, "some text")
 
 	var bench2Cmd = &cobra.Command{
@@ -63,7 +63,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench2(tgURL)
+			rpctest.Bench2(erigonURL)
 		},
 	}
 	var bench3Cmd = &cobra.Command{
@@ -71,132 +71,132 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench3(tgURL, gethURL)
+			rpctest.Bench3(erigonURL, gethURL)
 		},
 	}
-	with(bench3Cmd, withTGUrl, withGethUrl)
+	with(bench3Cmd, withErigonUrl, withGethUrl)
 
 	var bench4Cmd = &cobra.Command{
 		Use:   "bench4",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench4(tgURL)
+			rpctest.Bench4(erigonURL)
 		},
 	}
-	with(bench4Cmd, withTGUrl)
+	with(bench4Cmd, withErigonUrl)
 
 	var bench5Cmd = &cobra.Command{
 		Use:   "bench5",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench5(tgURL)
+			rpctest.Bench5(erigonURL)
 		},
 	}
-	with(bench5Cmd, withTGUrl)
+	with(bench5Cmd, withErigonUrl)
 	var bench6Cmd = &cobra.Command{
 		Use:   "bench6",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench6(tgURL)
+			rpctest.Bench6(erigonURL)
 		},
 	}
-	with(bench6Cmd, withTGUrl)
+	with(bench6Cmd, withErigonUrl)
 
 	var bench7Cmd = &cobra.Command{
 		Use:   "bench7",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench7(tgURL, gethURL)
+			rpctest.Bench7(erigonURL, gethURL)
 		},
 	}
-	with(bench7Cmd, withTGUrl, withGethUrl)
+	with(bench7Cmd, withErigonUrl, withGethUrl)
 
 	var bench8Cmd = &cobra.Command{
 		Use:   "bench8",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench8(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.Bench8(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench8Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
+	with(bench8Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench9(tgURL, gethURL, needCompare)
+			rpctest.Bench9(erigonURL, gethURL, needCompare)
 		},
 	}
-	with(bench9Cmd, withTGUrl, withGethUrl, withNeedCompare)
+	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
 	var bench10Cmd = &cobra.Command{
 		Use:   "bench10",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench10(tgURL, gethURL, blockFrom, blockTo, recordFile)
+			err := rpctest.Bench10(erigonURL, gethURL, blockFrom, blockTo, recordFile)
 			if err != nil {
 				log.Error("bench 10 err", "err", err)
 			}
 		},
 	}
-	with(bench10Cmd, withGethUrl, withTGUrl, withBlockNum, withRecord)
+	with(bench10Cmd, withGethUrl, withErigonUrl, withBlockNum, withRecord)
 
 	var bench11Cmd = &cobra.Command{
 		Use:   "bench11",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench11(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.Bench11(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench11Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+	with(bench11Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench12Cmd = &cobra.Command{
 		Use:   "bench12",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench12(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.Bench12(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench12Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+	with(bench12Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench13Cmd = &cobra.Command{
 		Use:   "bench13",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench13(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.Bench13(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench13Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+	with(bench13Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var benchTraceBlockCmd = &cobra.Command{
 		Use:   "benchTraceBlock",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.BenchTraceBlock(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchTraceBlock(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(benchTraceBlockCmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchTraceBlockCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var benchTraceFilterCmd = &cobra.Command{
 		Use:   "benchTraceFilter",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.BenchTraceFilter(tgURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchTraceFilter(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(benchTraceFilterCmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var proofsCmd = &cobra.Command{
 		Use:   "proofs",
@@ -225,10 +225,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Replay(tgURL, recordFile)
+			rpctest.Replay(erigonURL, recordFile)
 		},
 	}
-	with(replayCmd, withTGUrl, withRecord)
+	with(replayCmd, withErigonUrl, withRecord)
 
 	var tmpDataDir, tmpDataDirOrig string
 	var database string
@@ -238,17 +238,17 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(tgURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData, database)
+			rpctest.CompareAccountRange(erigonURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData, database)
 		},
 	}
-	with(compareAccountRange, withTGUrl, withGethUrl, withBlockNum)
+	with(compareAccountRange, withErigonUrl, withGethUrl, withBlockNum)
 	compareAccountRange.Flags().BoolVar(&notRegenerateGethData, "regenGethData", false, "")
 	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 
 	var rootCmd = &cobra.Command{Use: "test"}
-	rootCmd.Flags().StringVar(&tgURL, "tgUrl", "http://localhost:8545", "turbogeth rpcdaemon url")
+	rootCmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
 	rootCmd.Flags().StringVar(&gethURL, "gethUrl", "http://localhost:8546", "geth rpc url")
 	rootCmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")

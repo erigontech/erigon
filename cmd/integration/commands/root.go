@@ -16,16 +16,16 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "integration",
-	Short: "long and heavy integration tests for turbo-geth",
+	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "tg", "chaindata")
+			chaindata = path.Join(datadir, "erigon", "chaindata")
 		}
 		if snapshotDir == "" {
-			snapshotDir = path.Join(datadir, "tg", "snapshot")
+			snapshotDir = path.Join(datadir, "erigon", "snapshot")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

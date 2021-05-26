@@ -4607,12 +4607,12 @@
         "current": {
           "selected": false,
           "text": [
-            "turbogeth16c.weblogix.it:6060",
-            "turbogeth16d.weblogix.it:6060"
+            "erigon16c.weblogix.it:6060",
+            "erigon16d.weblogix.it:6060"
           ],
           "value": [
-            "turbogeth16c.weblogix.it:6060",
-            "turbogeth16d.weblogix.it:6060"
+            "erigon16c.weblogix.it:6060",
+            "erigon16d.weblogix.it:6060"
           ]
         },
         "datasource": "Prometheus",
@@ -4670,7 +4670,7 @@
     ]
   },
   "timezone": "",
-  "title": "TurboGeth Prometheus",
+  "title": "erigon Prometheus",
   "uid": "FPpjH6Hik",
   "version": 98
 }

@@ -26,7 +26,7 @@ import (
 
 type Flags struct {
 	PrivateApiAddr       string
-	SingleNodeMode       bool // TG's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with TG process.
+	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	Datadir              string
 	Database             string
 	Chaindata            string
@@ -49,7 +49,7 @@ type Flags struct {
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
-	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
+	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
 func RootCommand() (*cobra.Command, *Flags) {
@@ -57,7 +57,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to turbo-geth working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "mdbx", "lmdb|mdbx engines")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
@@ -74,7 +74,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "tg"}, "API's offered over the HTTP-RPC interface")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 25000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
@@ -104,10 +104,10 @@ func RootCommand() (*cobra.Command, *Flags) {
 				cfg.Datadir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = path.Join(cfg.Datadir, "tg", "chaindata")
+				cfg.Chaindata = path.Join(cfg.Datadir, "erigon", "chaindata")
 			}
 			//if cfg.SnapshotDir == "" {
-			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "tg", "snapshot")
+			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "erigon", "snapshot")
 			//}
 		}
 		return nil
@@ -133,7 +133,7 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {
-		return fmt.Errorf("database does not have major schema version. upgrade and restart turbo-geth core")
+		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
 	}
 	major := binary.BigEndian.Uint32(version[:])
 	minor := binary.BigEndian.Uint32(version[4:])

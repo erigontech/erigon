@@ -1,4 +1,4 @@
-# How to prepare turbo-geth release (things not to forget)
+# How to prepare Erigon release (things not to forget)
 
 ## Update Jump dest optimisation code
 This step does not have to be completed during emergency updates, because failure to complete it has only a minor impact on the

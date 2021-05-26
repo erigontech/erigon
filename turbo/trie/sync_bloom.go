@@ -24,11 +24,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
@@ -101,7 +101,7 @@ func (b *SyncBloom) init(database ethdb.Database) {
 				bloomLoadMeter.Mark(1)
 			}
 			return true, nil
-			// FIXME: restore or remove in Turbo-Geth
+			// FIXME: restore or remove in Erigon
 			// If enough time elapsed since the last iterator swap, restart
 			//if time.Since(swap) > 8*time.Second {
 			//	key := common.CopyBytes(it.Key())

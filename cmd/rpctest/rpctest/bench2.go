@@ -2,13 +2,14 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
-func Bench2(turbogeth_url string) {
+func Bench2(erigon_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -16,7 +17,7 @@ func Bench2(turbogeth_url string) {
 	req_id++
 	blockNumTemplate := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
 	var blockNumber EthBlockNumber
-	if err := post(client, turbogeth_url, fmt.Sprintf(blockNumTemplate, req_id), &blockNumber); err != nil {
+	if err := post(client, erigon_url, fmt.Sprintf(blockNumTemplate, req_id), &blockNumber); err != nil {
 		fmt.Printf("Could not get block number: %v\n", err)
 		return
 	}
@@ -32,7 +33,7 @@ func Bench2(turbogeth_url string) {
 		req_id++
 		blockByNumTemplate := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}` //nolint
 		var b EthBlockByNumber
-		if err := post(client, turbogeth_url, fmt.Sprintf(blockByNumTemplate, bn, req_id), &b); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(blockByNumTemplate, bn, req_id), &b); err != nil {
 			fmt.Printf("Could not retrieve block %d: %v\n", bn, err)
 			return
 		}
@@ -50,7 +51,7 @@ func Bench2(turbogeth_url string) {
 				nextKey := &common.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
-					if err := post(client, turbogeth_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
+					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
 						fmt.Printf("Could not get storageRange: %x: %v\n", tx.Hash, err)
 						return
 					}
@@ -80,7 +81,7 @@ func Bench2(turbogeth_url string) {
 			req_id++
 			accountRangeTemplate := `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}` //nolint
 			var ma DebugModifiedAccounts
-			if err := post(client, turbogeth_url, fmt.Sprintf(accountRangeTemplate, prevBn, bn, req_id), &ma); err != nil {
+			if err := post(client, erigon_url, fmt.Sprintf(accountRangeTemplate, prevBn, bn, req_id), &ma); err != nil {
 				fmt.Printf("Could not get modified accounts: %v\n", err)
 				return
 			}

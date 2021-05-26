@@ -250,8 +250,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.TurboMineGenesisHash:
-		return params.TurboMineChainConfig
+	case ghash == params.ErigonGenesisHash:
+		return params.ErigonChainConfig
 	case ghash == params.BaikalGenesisHash:
 		return params.BaikalChainConfig
 	default:
@@ -493,14 +493,14 @@ func DefaultGoerliGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultTurboMineGenesisBlock() *Genesis {
+func DefaultErigonGenesisBlock() *Genesis {
 	return &Genesis{
-		Config:     params.TurboMineChainConfig,
+		Config:     params.ErigonChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
 		GasLimit:   1000000000,
 		Difficulty: big.NewInt(1048576),
-		Alloc:      readPrealloc("allocs/turbomine.json"),
+		Alloc:      readPrealloc("allocs/erigonmine.json"),
 	}
 }
 

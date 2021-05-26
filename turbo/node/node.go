@@ -1,4 +1,4 @@
-// Package node contains classes for running a turbo-geth node.
+// Package node contains classes for running a Erigon node.
 package node
 
 import (
@@ -14,35 +14,35 @@ import (
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
-	turbocli "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/urfave/cli"
 )
 
-// TurboGethNode represents a single node, that runs sync and p2p network.
+// ErigonNode represents a single node, that runs sync and p2p network.
 // it also can export the private endpoint for RPC daemon, etc.
-type TurboGethNode struct {
+type ErigonNode struct {
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
-func (tg *TurboGethNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	tg.stack.SetP2PListenFunc(listenFunc)
+func (eri *ErigonNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
+	eri.stack.SetP2PListenFunc(listenFunc)
 }
 
 // Serve runs the node and blocks the execution. It returns when the node is existed.
-func (tg *TurboGethNode) Serve() error {
-	defer tg.stack.Close()
+func (eri *ErigonNode) Serve() error {
+	defer eri.stack.Close()
 
-	tg.run()
+	eri.run()
 
-	tg.stack.Wait()
+	eri.stack.Wait()
 
 	return nil
 }
 
-func (tg *TurboGethNode) run() {
-	utils.StartNode(tg.stack)
+func (eri *ErigonNode) run() {
+	utils.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
 	// see cmd/geth/main.go#startNode for full implementation
@@ -59,7 +59,7 @@ type Params struct {
 	CustomBuckets dbutils.BucketsCfg
 }
 
-// New creates a new `TurboGethNode`.
+// New creates a new `ErigonNode`.
 // * ctx - `*cli.Context` from the main function. Necessary to be able to configure the node based on the command-line flags
 // * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
 // * optionalParams - additional parameters for running a node.
@@ -67,13 +67,13 @@ func New(
 	ctx *cli.Context,
 	sync *stagedsync.StagedSync,
 	optionalParams Params,
-) *TurboGethNode {
+) *ErigonNode {
 	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
 
 	nodeConfig := NewNodeConfig(optionalParams)
 	utils.SetNodeConfig(ctx, nodeConfig)
-	turbocli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
+	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
@@ -84,7 +84,7 @@ func New(
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
-	return &TurboGethNode{stack: node, backend: ethereum}
+	return &ErigonNode{stack: node, backend: ethereum}
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
@@ -99,7 +99,7 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, gitCommit strin
 func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, node, ethConfig)
-	turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
+	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
 	return ethConfig
 }
 
@@ -112,14 +112,14 @@ func NewNodeConfig(p Params) *node.Config {
 		nodeConfig.Version = params.Version
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
-	nodeConfig.Name = "turbo-geth"
+	nodeConfig.Name = "erigon"
 	return &nodeConfig
 }
 
 func makeConfigNode(config *node.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {
-		utils.Fatalf("Failed to create turbo-geth node: %v", err)
+		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
 	return stack
@@ -132,23 +132,23 @@ func prepare(ctx *cli.Context) {
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
 	case params.RopstenChainName:
-		log.Info("Starting Turbo-Geth on Ropsten testnet...")
+		log.Info("Starting Erigon on Ropsten testnet...")
 
 	case params.RinkebyChainName:
-		log.Info("Starting Turbo-Geth on Rinkeby testnet...")
+		log.Info("Starting Erigon on Rinkeby testnet...")
 
 	case params.GoerliChainName:
-		log.Info("Starting Turbo-Geth on Görli testnet...")
+		log.Info("Starting Erigon on Görli testnet...")
 
 	case params.DevChainName:
-		log.Info("Starting Turbo-Geth in ephemeral dev mode...")
+		log.Info("Starting Erigon in ephemeral dev mode...")
 
 	case "", params.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
-			log.Info("Starting Turbo-Geth on Ethereum mainnet...")
+			log.Info("Starting Erigon on Ethereum mainnet...")
 		}
 	default:
-		log.Info("Starting Turbo-Geth on", "devnet", chain)
+		log.Info("Starting Erigon on", "devnet", chain)
 	}
 
 	// Start system runtime metrics collection

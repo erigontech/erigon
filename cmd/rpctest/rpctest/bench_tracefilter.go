@@ -10,13 +10,13 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-// Compares response of TurboGeth with OpenEthereum
+// Compares response of Erigon with OpenEthereum
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
-// needCompare - if false - doesn't call TurboGeth and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
-func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, oeURL)
+// needCompare - if false - doesn't call Erigon and doesn't compare responses
+// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -44,7 +44,7 @@ func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, b
 
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -59,13 +59,13 @@ func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, b
 		// Checking modified accounts
 		reqGen.reqID++
 		var mag DebugModifiedAccounts
-		res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
+		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			fmt.Printf("Could not get modified accounts (turbo-geth): %v\n", res.Err)
+			fmt.Printf("Could not get modified accounts (Erigon): %v\n", res.Err)
 			return
 		}
 		if mag.Error != nil {
-			fmt.Printf("Error getting modified accounts (turbo-geth): %d %s\n", mag.Error.Code, mag.Error.Message)
+			fmt.Printf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
 			return
 		}
 		if res.Err == nil && mag.Error == nil {
@@ -74,13 +74,13 @@ func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, b
 				recording := rec != nil // This flag will be set to false if recording is not to be performed
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
-				res = reqGen.TurboGeth2("trace_filter", request)
+				res = reqGen.Erigon2("trace_filter", request)
 				if res.Err != nil {
-					fmt.Printf("Could not trace filter from (turbo-geth) %d: %v\n", bn, res.Err)
+					fmt.Printf("Could not trace filter from (Erigon) %d: %v\n", bn, res.Err)
 					return
 				}
 				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing filter from (turbo-geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+					fmt.Printf("Error tracing filter from (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
 				if needCompare {
@@ -107,13 +107,13 @@ func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, b
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
-				res = reqGen.TurboGeth2("trace_filter", request)
+				res = reqGen.Erigon2("trace_filter", request)
 				if res.Err != nil {
-					fmt.Printf("Could not trace filter to (turbo-geth) %d: %v\n", bn, res.Err)
+					fmt.Printf("Could not trace filter to (Erigon) %d: %v\n", bn, res.Err)
 					return
 				}
 				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing filter to (turbo-geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+					fmt.Printf("Error tracing filter to (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
 				if needCompare {
