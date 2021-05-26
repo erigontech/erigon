@@ -104,7 +104,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeObject:
 		obj, err := v.Object()
 		if err != nil {
-			return fmt.Errorf("convering tg val to object at prefix %s: %w", prefix, err)
+			return fmt.Errorf("convering erigon val to object at prefix %s: %w", prefix, err)
 		}
 		objg, errg := vg.Object()
 		if errg != nil {
@@ -116,7 +116,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 			}
 			v1 := obj.Get(string(key))
 			if v1 == nil && vg1.Type() != fastjson.TypeNull {
-				err = fmt.Errorf("tg missing value at prefix: %s", prefix+"."+string(key))
+				err = fmt.Errorf("erigon missing value at prefix: %s", prefix+"."+string(key))
 				return
 			}
 			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
@@ -126,7 +126,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 		if err != nil {
 			return err
 		}
-		// Finding keys that are present in TG but missing in G
+		// Finding keys that are present in Erigon but missing in G
 		obj.Visit(func(key []byte, v1 *fastjson.Value) {
 			if err != nil {
 				return
@@ -142,7 +142,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeArray:
 		arr, err := v.Array()
 		if err != nil {
-			return fmt.Errorf("converting tg val to array at prefix %s: %w", prefix, err)
+			return fmt.Errorf("converting Erigon val to array at prefix %s: %w", prefix, err)
 		}
 		arrg, errg := vg.Array()
 		if errg != nil {
@@ -164,7 +164,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeNumber:
 		i, err := v.Int()
 		if err != nil {
-			return fmt.Errorf("converting tg val to int at prefix %s: %w", prefix, err)
+			return fmt.Errorf("converting Erigon val to int at prefix %s: %w", prefix, err)
 		}
 		ig, errg := vg.Int()
 		if errg != nil {
@@ -340,9 +340,9 @@ func getTopics(v *fastjson.Value) []common.Hash {
 	return topics
 }
 
-func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
+func compareAccountRanges(erigon, geth map[common.Address]state.DumpAccount) bool {
 	allAddresses := make(map[common.Address]struct{})
-	for k := range tg {
+	for k := range erigon {
 		allAddresses[k] = struct{}{}
 	}
 
@@ -351,9 +351,9 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	}
 
 	for addr := range allAddresses {
-		tgAcc, tgOk := tg[addr]
-		if !tgOk {
-			fmt.Printf("missing account in TurboGeth %x\n", addr)
+		eriAcc, eriOk := erigon[addr]
+		if !eriOk {
+			fmt.Printf("missing account in Erigon %x\n", addr)
 			return false
 		}
 
@@ -363,21 +363,21 @@ func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 			return false
 		}
 		different := false
-		if tgAcc.Balance != gethAcc.Balance {
-			fmt.Printf("Different balance for %x: turbo %s, geth %s\n", addr, tgAcc.Balance, gethAcc.Balance)
+		if eriAcc.Balance != gethAcc.Balance {
+			fmt.Printf("Different balance for %x: erigon %s, geth %s\n", addr, eriAcc.Balance, gethAcc.Balance)
 			different = true
 		}
-		if tgAcc.Nonce != gethAcc.Nonce {
-			fmt.Printf("Different nonce for %x: turbo %d, geth %d\n", addr, tgAcc.Nonce, gethAcc.Nonce)
+		if eriAcc.Nonce != gethAcc.Nonce {
+			fmt.Printf("Different nonce for %x: erigon %d, geth %d\n", addr, eriAcc.Nonce, gethAcc.Nonce)
 			different = true
 		}
-		// We do not compare Root, because Turbo-geth does not compute it
-		if tgAcc.CodeHash != gethAcc.CodeHash {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.CodeHash, gethAcc.CodeHash)
+		// We do not compare Root, because Erigon does not compute it
+		if eriAcc.CodeHash != gethAcc.CodeHash {
+			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.CodeHash, gethAcc.CodeHash)
 			different = true
 		}
-		if tgAcc.Code != gethAcc.Code {
-			fmt.Printf("Different codehash for %x: turbo %s, geth %s\n", addr, tgAcc.Code, gethAcc.Code)
+		if eriAcc.Code != gethAcc.Code {
+			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.Code, gethAcc.Code)
 			different = true
 		}
 		if different {
@@ -536,8 +536,8 @@ func print(client *http.Client, url, request string) {
 	fmt.Printf("%s\n", buf[:l])
 }
 
-func setRoutes(tgUrl, gethURL string) {
+func setRoutes(erigonUrl, gethURL string) {
 	routes = make(map[string]string)
-	routes[TurboGeth] = tgUrl
+	routes[Erigon] = erigonUrl
 	routes[Geth] = gethURL
 }

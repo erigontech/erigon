@@ -10,7 +10,7 @@ import (
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
-// see https://github.com/ledgerwatch/turbo-geth/issues/1645
+// see https://github.com/ledgerwatch/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	db, err := createTestKV()

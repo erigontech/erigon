@@ -1,4 +1,4 @@
-# Merry-Go-Round sync (turbo-geth design)
+# Merry-Go-Round sync (Erigon design)
 
 Initial discussion here: https://ethresear.ch/t/merry-go-round-sync/7158
 

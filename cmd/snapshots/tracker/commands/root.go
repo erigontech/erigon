@@ -28,7 +28,7 @@ import (
 const DefaultInterval = 60             //in seconds
 const SoftLimit = 5                    //in seconds
 const DisconnectInterval = time.Minute //in seconds
-var trackerID = "tg snapshot tracker"
+var trackerID = "erigon snapshot tracker"
 
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))

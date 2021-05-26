@@ -831,7 +831,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 }
 
 func repairCurrent() {
-	historyDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
+	historyDb := ethdb.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
 	defer historyDb.Close()
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()
@@ -1867,7 +1867,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeObject:
 		obj, err := v.Object()
 		if err != nil {
-			return fmt.Errorf("convering tg val to object at prefix %s: %w", prefix, err)
+			return fmt.Errorf("convering Erigon val to object at prefix %s: %w", prefix, err)
 		}
 		objg, errg := vg.Object()
 		if errg != nil {
@@ -1879,7 +1879,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 			}
 			v1 := obj.Get(string(key))
 			if v1 == nil && vg1.Type() != fastjson.TypeNull {
-				err = fmt.Errorf("tg missing value at prefix: %s", prefix+"."+string(key))
+				err = fmt.Errorf("erigon missing value at prefix: %s", prefix+"."+string(key))
 				return
 			}
 			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
@@ -1889,7 +1889,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 		if err != nil {
 			return err
 		}
-		// Finding keys that are present in TG but missing in G
+		// Finding keys that are present in Erigon but missing in G
 		obj.Visit(func(key []byte, v1 *fastjson.Value) {
 			if err != nil {
 				return
@@ -1905,7 +1905,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeArray:
 		arr, err := v.Array()
 		if err != nil {
-			return fmt.Errorf("converting tg val to array at prefix %s: %w", prefix, err)
+			return fmt.Errorf("converting Erigon val to array at prefix %s: %w", prefix, err)
 		}
 		arrg, errg := vg.Array()
 		if errg != nil {
@@ -1927,7 +1927,7 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 	case fastjson.TypeNumber:
 		i, err := v.Int()
 		if err != nil {
-			return fmt.Errorf("converting tg val to int at prefix %s: %w", prefix, err)
+			return fmt.Errorf("converting Erigon val to int at prefix %s: %w", prefix, err)
 		}
 		ig, errg := vg.Int()
 		if errg != nil {

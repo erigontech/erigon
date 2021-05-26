@@ -40,7 +40,7 @@ type Filters struct {
 }
 
 func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
-	log.Info("rpc filters: subscribing to tg events")
+	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
 		headsSubs:        make(map[HeadsSubID]chan *types.Header),

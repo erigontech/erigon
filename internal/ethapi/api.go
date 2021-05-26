@@ -1375,7 +1375,7 @@ func (api *PrivateDebugAPI) ChaindbProperty(property string) (string, error) {
 // ChaindbCompact flattens the entire key-value database into a single level,
 // removing all unused slots and merging all keys.
 func (api *PrivateDebugAPI) ChaindbCompact() error {
-	// Intentionally disabled in TurboGeth
+	// Intentionally disabled in Erigon
 	return nil
 }
 

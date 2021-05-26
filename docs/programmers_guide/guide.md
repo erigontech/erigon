@@ -1,4 +1,4 @@
-Turbo-Geth programmer's guide
+Erigon programmer's guide
 ==============================
 
 Ethereum State
@@ -389,8 +389,8 @@ The step of this algorithm is implemented by the function `GenStructStep` in [tu
 
 ### Converting sequence of keys and value into a multiproof
 
-One of the biggest difference between Turbo-Geth and go-ethereum is in the way the Ethereum state is persisted in
-the database. In go-ethereum, the model for persistence is Merkle Patricia tree. In Turbo-Geth, the model for
+One of the biggest difference between Erigon and go-ethereum is in the way the Ethereum state is persisted in
+the database. In go-ethereum, the model for persistence is Merkle Patricia tree. In Erigon, the model for
 persistence is sequence of key-value pairs, where keys are either derived from account addresses, or from
 storage indices. In this model, computing Merkle Patricia tree from part of data is a very commonly used operation.
 This operation is called "Resolution" because it normally arises from a need to look up (resolve) some keys and corresponding
@@ -515,7 +515,7 @@ For an ordinary (non-mining) node,
 block headers and block bodies are coming from the outside, via the peer-to-peer network. While processing those, the node maintains
 the view of the current state of the Ethereum (bright yellow box), as well as generates the timestamped history of the changes in the state
 (this is optional). History of the state is shown as a series of dull yellow boxes. Some transactions also produce log messages, and those
-are included into transaction receipts. Receipts are also optionally persisted and are shown as green stacks of sheets. Turbo-geth's
+are included into transaction receipts. Receipts are also optionally persisted and are shown as green stacks of sheets. Erigon's
 default mode of operation does not persist the receipts, but recalculates them on demand. It looks up the state at the point just before
 the transaction in question (for which we would like a receipt), re-executes transaction, and re-generates the receipt. This can only
 work if the history of the state is available for the period of time including the transaction.

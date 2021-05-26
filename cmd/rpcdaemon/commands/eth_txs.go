@@ -87,7 +87,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	txs := block.Transactions()
@@ -112,7 +112,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
@@ -137,7 +137,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	txs := block.Transactions()
@@ -167,7 +167,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	return newRPCRawTransactionFromBlockIndex(block, uint64(index))

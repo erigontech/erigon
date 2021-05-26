@@ -1,5 +1,5 @@
-// Copyright 2020 The turbo-geth Authors
-// This file is part of the turbo-geth library.
+// Copyright 2020 The Erigon Authors
+// This file is part of the Erigon library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by

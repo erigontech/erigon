@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func Bench10(tgUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile string) error {
-	setRoutes(tgUrl, gethUrl)
+func Bench10(erigonUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile string) error {
+	setRoutes(erigonUrl, gethUrl)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -21,25 +21,25 @@ func Bench10(tgUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		var b EthBlockByNumber
-		res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
 		if res.Err != nil {
-			return fmt.Errorf("retrieve block (turbo-geth) %d: %v", blockFrom, res.Err)
+			return fmt.Errorf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
 		}
 		if b.Error != nil {
-			return fmt.Errorf("retrieving block (turbo-geth): %d %s", b.Error.Code, b.Error.Message)
+			return fmt.Errorf("retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
 
 			var trace EthTxTrace
-			res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
 			if res.Err != nil {
-				fmt.Printf("Could not trace transaction (turbo-geth) %s: %v\n", tx.Hash, res.Err)
-				print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
+				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Erigon], reqGen.traceTransaction(tx.Hash))
 			}
 
 			if trace.Error != nil {
-				fmt.Printf("Error tracing transaction (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
+				fmt.Printf("Error tracing transaction (Erigon): %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
 			var traceg EthTxTrace

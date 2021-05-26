@@ -17,7 +17,7 @@
 // Package bind generates Ethereum contract Go bindings.
 //
 // Detailed usage document and tutorial available on the go-ethereum Wiki page:
-// https://github.com/ledgerwatch/turbo-geth/wiki/Native-DApps:-Go-bindings-to-Ethereum-contracts
+// https://github.com/ledgerwatch/erigon/wiki/Native-DApps:-Go-bindings-to-Ethereum-contracts
 package bind
 
 import (

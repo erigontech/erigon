@@ -95,7 +95,7 @@ func TestRandomCases(t *testing.T) {
 		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000011")}, // step 17
 		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 18
 		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 19
-		// FIXME: fix these testcases for turbo-geth
+		// FIXME: fix these testcases for Erigon
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000014")},           // step 20
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000015")},           // step 21
 		//{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000016")},         // step 22
@@ -188,7 +188,7 @@ func runRandTest(rt randTest) bool {
 			newtr := New(hash)
 			tr = newtr
 		case opItercheckhash:
-			// FIXME: restore for turbo-geth
+			// FIXME: restore for Erigon
 			/*
 				checktr := New(common.Hash{})
 				it := NewIterator(tr.NodeIterator(nil))

@@ -3,14 +3,14 @@
 `go run ./cmd/rpctest/main.go bench1` will print tmpDir. 
 And create in tmpDir `results_*.csv` and `vegeta_*.txt` files. 
 
-Command takes long time. Kill it when `vegeta_turbo_geth_debug_storageRangeAt.txt` is few MB. 
+Command takes long time. Kill it when `vegeta_erigon_debug_storageRangeAt.txt` is few MB. 
 
-File `vegeta_turbo_geth_*.txt` will produce load to `turbo_geth` node, `vegeta_geth_*.txt` to `geth`.
-Change host/port in `--gethUrl`, `--tgUrl` variable. 
+File `vegeta_erigon_*.txt` will produce load to `erigon` node, `vegeta_geth_*.txt` to `geth`.
+Change host/port in `--gethUrl`, `--erigonUrl` variable. 
 
-By default `go run ./cmd/rpctest/main.go bench1` calling only turbogeth node 
+By default `go run ./cmd/rpctest/main.go bench1` calling only Erigon node 
 because `cmd/rpctest/rpctest/bench1.go` calling it with first parameter `needCompare=false`.
-Set `--needCompare` to call Geth and TurboGeth nodes and compare results.   
+Set `--needCompare` to call Geth and Erigon nodes and compare results.   
 
 ### Install Vegeta
 ```
@@ -20,7 +20,7 @@ go get -u github.com/tsenart/vegeta
 ### Run vegeta
 ``` 
 tmpDir = "/var/folders/x_/1mnbt25s3291zr5_fxhjfnq9n86kng/T/"
-cat $(tmpDir)/turbo_geth_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s -timeout=300s | vegeta plot > plot.html
+cat $(tmpDir)/erigon_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s -timeout=300s | vegeta plot > plot.html
 open plot.html
 ```
 
@@ -29,15 +29,15 @@ open plot.html
 
 
 ### Results from my Macbook:
-start rpcdaemon with turbo_geth: 
+start rpcdaemon with erigon:
 ```
-GODEBUG=remotedb.debug=1 go run ./cmd/tg --private.api.addr localhost:9997   --rpcport 8545  --rpc --rpcapi eth,debug,net --nodiscover
+GODEBUG=remotedb.debug=1 go run ./cmd/erigon --private.api.addr localhost:9997   --rpcport 8545  --rpc --rpcapi eth,debug,net --nodiscover
 GODEBUG=remotedb.debug=1 go run ./cmd/rpcdaemon --rpcapi eth,debug,net --rpcport 9545 --private.api.addr 127.0.0.1:9997
 ```
 
 On simple requests `eth_getBlockByNumber` RPC Daemon looks well:  
 ```
-cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s -timeout=300s | vegeta report
+cat /tmp/erigon_stress_test/vegeta_erigon_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s -timeout=300s | vegeta report
 
 300rps: 
 - Geth Alone: 80% of CPU, 95-Latency 2ms

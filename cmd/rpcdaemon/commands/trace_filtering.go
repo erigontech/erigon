@@ -27,7 +27,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 
 	txn, _, blockNumber, txIndex := rawdb.ReadTransaction(tx, txHash)
 	if txn == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	bn := hexutil.Uint64(blockNumber)

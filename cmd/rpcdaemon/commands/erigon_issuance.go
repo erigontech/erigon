@@ -12,7 +12,7 @@ import (
 )
 
 // BlockReward returns the block reward for this block
-// func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+// func (api *ErigonImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 //	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 //	if err != nil {
 //		return Issuance{}, err
@@ -23,7 +23,7 @@ import (
 //}
 
 // UncleReward returns the uncle reward for this block
-// func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+// func (api *ErigonImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 //	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 //	if err != nil {
 //		return Issuance{}, err
@@ -33,8 +33,8 @@ import (
 //	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
 //}
 
-// Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
-func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+// Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
+func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Issuance{}, err
@@ -69,7 +69,7 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 	return ret, nil
 }
 
-func (api *TgImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
+func (api *ErigonImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
 	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/node"
 
-	turbocli "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/urfave/cli"
 )
@@ -30,9 +30,9 @@ const (
 
 // the regular main function
 func main() {
-	// initializing turbo-geth application here and providing our custom flag
-	app := turbocli.MakeApp(runTurboGeth,
-		append(turbocli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
+	// initializing Erigon application here and providing our custom flag
+	app := erigoncli.MakeApp(runErigon,
+		append(erigoncli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
 	)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -72,8 +72,8 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	)
 }
 
-// turbo-geth main function
-func runTurboGeth(ctx *cli.Context) {
+// Erigon main function
+func runErigon(ctx *cli.Context) {
 	// creating a staged sync with our new stage
 	sync := stagedsync.New(
 		syncStages(ctx),
@@ -91,15 +91,15 @@ func runTurboGeth(ctx *cli.Context) {
 	)
 
 	// running a node and initializing a custom bucket with all default settings
-	tg := node.New(ctx, sync, node.Params{
+	eri := node.New(ctx, sync, node.Params{
 		CustomBuckets: map[string]dbutils.BucketConfigItem{
 			customBucketName: {},
 		},
 	})
 
-	err := tg.Serve()
+	err := eri.Serve()
 
 	if err != nil {
-		log.Error("error while serving a turbo-geth node", "err", err)
+		log.Error("error while serving a Erigon node", "err", err)
 	}
 }

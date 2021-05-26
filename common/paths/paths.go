@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const dirname = "TurboGeth"
+const dirname = "Erigon"
 
 // DefaultDataDir is the default data directory to use for the databases and other
 // persistence requirements.

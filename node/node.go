@@ -558,7 +558,7 @@ func (n *Node) OpenDatabase(name string, datadir string) (*ethdb.ObjectDatabase,
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-// NOTE: kept for compatibility and for easier rebases (turbo-geth)
+// NOTE: kept for compatibility and for easier rebases (erigon)
 func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
