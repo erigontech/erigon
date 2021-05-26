@@ -371,7 +371,7 @@ func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
 }
 
 func TestSnapshotMigratorStage2(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -404,6 +404,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 
 	sb := &SnapshotMigrator2{
 		snapshotsDir: snapshotsDir,
+		replaceChan:  make(chan struct{}),
 	}
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
@@ -448,6 +449,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 			t.Error(err)
 			panic(err)
 		}
+
 		err = sb.SyncStages(currentSnapshotBlock, db, tx)
 		if err != nil {
 			t.Error(err)
@@ -595,7 +597,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	}
 	//just start snapshot transaction
 	// it can't be empty slice but shouldn't be in main db
-	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{1})
+	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{112,3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,8 +607,8 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 
 	rollbacked := false
 	//3s - just to be sure that it blocks here
-	c := time.After(time.Second * 3)
-	for atomic.LoadUint64(&sb.started) > 0 {
+	c := time.After(time.Second * 5)
+	for atomic.LoadUint64(&sb.started) > 0 || atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 20 {
 		select {
 		case <-c:
 			roTX.Rollback()
@@ -615,7 +617,6 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond * 100)
 	}
-
 	if !rollbacked {
 		t.Log("it's not possible to close db without rollback. something went wrong")
 	}
@@ -745,6 +746,7 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 
 	sb := &SnapshotMigrator2{
 		snapshotsDir: snapshotsDir,
+		replaceChan:  make(chan struct{}),
 	}
 
 	tx, err := db.BeginRw(context.Background())
@@ -765,19 +767,9 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 		panic(err)
 	}
 
-	StageSyncStep := func(currentSnapshotBlock uint64) {
-		t.Helper()
+	writeStep:= func(currentSnapshotBlock uint64) {
 		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			t.Error(err)
-			panic(err)
-		}
 		defer tx.Rollback()
-
-		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, false)
-		if err != nil {
-			t.Fatal(err)
-		}
 		err = sb.SyncStages(currentSnapshotBlock, db, tx)
 		if err != nil {
 			t.Fatal(err)
@@ -789,13 +781,33 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 		}
 	}
 
+	StageSyncStep := func(currentSnapshotBlock uint64) {
+		t.Helper()
+		rotx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		defer rotx.Rollback()
+
+		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rotx.Rollback()
+	}
 	StageSyncStep(10)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(10)
 
 	for atomic.LoadUint64(&sb.started) >0 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		err = sb.Final(roTx)
 		if err != nil {
 			t.Fatal(err)
@@ -944,7 +956,12 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 	}()
 	//wait until read tx start
 	wg.Wait()
+
 	StageSyncStep(20)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(20)
 
 	for atomic.LoadUint64(&sb.started) > 0 {
 		roTx, err := db.BeginRo(context.Background())
@@ -956,11 +973,11 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		roTx.Rollback()
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 1000)
 	}
 
 	if !rollbacked {
-		t.Fatal("it's not possible to close db without rollback. something went wrong")
+		t.Log("it's not possible to close db without rollback. something went wrong")
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())

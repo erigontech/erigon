@@ -138,7 +138,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 			}()
 		}
 		wg.Wait()
-		close(done)
+		done <- struct{}{}
 	}()
 }
 
