@@ -149,6 +149,8 @@ func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_s
 	}
 }
 
+// RecvTxMessage
+// wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
 func RecvTxMessage(ctx context.Context,
 	sentry proto_sentry.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,

@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -351,10 +352,9 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		}
 	}
 
-	price := uint256.NewInt().SetUint64(1)
 	chain, err = core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 1, func(i int, gen *core.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.address), common.Address{1}, uint256.NewInt().SetUint64(10_000), params.TxGas, price, nil), *types.LatestSignerForChainID(m.chainConfig.ChainID), m.key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.address), common.Address{1}, uint256.NewInt().SetUint64(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.chainConfig.ChainID), m.key)
 		require.NoError(err)
 		gen.AddTx(tx)
 	}, false /* intemediateHashes */)
