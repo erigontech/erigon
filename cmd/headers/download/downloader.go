@@ -56,7 +56,11 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	return proto_sentry.NewSentryClient(conn), nil
 }
 
-func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
+func RecvUploadMessage(ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -81,6 +85,10 @@ func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, ha
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
 		}
+		if wg != nil {
+			wg.Done()
+		}
+
 	}
 }
 
@@ -120,6 +128,7 @@ func RecvMessage(
 		if wg != nil {
 			wg.Done()
 		}
+
 	}
 }
 
@@ -207,7 +216,9 @@ func NewStagedSync(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			txPoolServer.Start()
+			for _, s := range txPoolServer.Sentries {
+				go eth.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+			}
 			txPoolServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(db, tmpdir),

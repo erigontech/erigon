@@ -451,7 +451,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}()
 
-	if err := backend.StartMining(backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
 	}
 
@@ -566,7 +566,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -646,7 +646,7 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- stages2.MiningStep(kv, mining, quitCh) }()
+				go func() { errc <- stages2.MiningStep(ctx, kv, mining) }()
 			}
 		}
 	}()
@@ -698,7 +698,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	if s.config.EnableDownloadV2 {
 		go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil /* waitGroup */)
-		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage)
+		go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil)
 		go download.Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	} else {
 		eth.StartENRUpdater(s.chainConfig, s.genesisHash, s.events, s.p2pServer.LocalNode())

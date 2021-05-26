@@ -210,7 +210,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, quitCh chan struct{}) (err error) {
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
 	// avoid crash because TG's core does many things -
 	defer func() {
 		if r := recover(); r != nil { // just log is enough
@@ -225,7 +225,7 @@ func MiningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, quitCh chan struct
 		}
 	}()
 
-	tx, err := kv.BeginRw(context.Background())
+	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func MiningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, quitCh chan struct
 		ethdb.DefaultStorageMode,
 		".",
 		0,
-		quitCh,
+		ctx.Done(),
 		nil,
 		nil,
 		false,

@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"os"
 	"sync"
@@ -53,17 +54,28 @@ type MockSentry struct {
 	address       common.Address
 	genesis       *types.Block
 	sentryClient  *SentryClientDirect
-	stream        sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
-	streamWg      sync.WaitGroup
 	peerId        *ptypes.H512
 	receiveWg     sync.WaitGroup
 	updateHead    func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+
+	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
+	txStream     sentry.Sentry_ReceiveTxMessagesServer
+	uploadStream sentry.Sentry_ReceiveUploadMessagesServer
+	streamWg     sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
 	ms.streamWg.Wait()
 	return ms.stream
+}
+func (ms *MockSentry) TxStream() sentry.Sentry_ReceiveTxMessagesServer {
+	ms.streamWg.Wait()
+	return ms.txStream
+}
+func (ms *MockSentry) UploadStream() sentry.Sentry_ReceiveUploadMessagesServer {
+	ms.streamWg.Wait()
+	return ms.uploadStream
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
@@ -93,10 +105,16 @@ func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_Rec
 	<-ms.ctx.Done()
 	return nil
 }
-func (ms *MockSentry) ReceiveUploadMessages(*emptypb.Empty, sentry.Sentry_ReceiveUploadMessagesServer) error {
+func (ms *MockSentry) ReceiveUploadMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveUploadMessagesServer) error {
+	ms.uploadStream = stream
+	ms.streamWg.Done()
+	<-ms.ctx.Done()
 	return nil
 }
-func (ms *MockSentry) ReceiveTxMessages(*emptypb.Empty, sentry.Sentry_ReceiveTxMessagesServer) error {
+func (ms *MockSentry) ReceiveTxMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveTxMessagesServer) error {
+	ms.txStream = stream
+	ms.streamWg.Done()
+	<-ms.ctx.Done()
 	return nil
 }
 
@@ -133,16 +151,16 @@ func mock(t *testing.T) *MockSentry {
 	txPool := core.NewTxPool(txPoolConfig, mock.chainConfig, ethdb.NewObjectDatabase(mock.db), txCacher)
 	txSentryClient := &SentryClientDirect{}
 	txSentryClient.SetServer(mock)
-	txPoolServer, err := eth.NewTxPoolServer(mock.ctx, []sentry.SentryClient{txSentryClient}, txPool)
+	txPoolP2PServer, err := eth.NewTxPoolServer(mock.ctx, []sentry.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fetchTx := func(peerID string, hashes []common.Hash) error {
-		txPoolServer.SendTxsRequest(context.TODO(), peerID, hashes)
+		txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
 		return nil
 	}
 
-	txPoolServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
+	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	mock.key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	mock.address = crypto.PubkeyToAddress(mock.key.PublicKey)
 	funds := big.NewInt(1000000000)
@@ -212,8 +230,9 @@ func mock(t *testing.T) *MockSentry {
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, mock.tmpdir, mock.chainConfig, mock.engine),
 		stagedsync.StageTxLookupCfg(db, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			txPoolServer.Start()
-			txPoolServer.TxFetcher.Start()
+			mock.streamWg.Add(1)
+			go eth.RecvTxMessage(mock.ctx, mock.sentryClient, txPoolP2PServer.HandleInboundMessage, &mock.receiveWg)
+			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),
 	)
@@ -248,7 +267,7 @@ func mock(t *testing.T) *MockSentry {
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
-		txPoolServer.TxFetcher.Stop()
+		txPoolP2PServer.TxFetcher.Stop()
 	})
 	return mock
 }
@@ -297,40 +316,60 @@ func TestHeaderStep(t *testing.T) {
 
 func TestMine(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	m := mock(t)
+	require, m := require.New(t), mock(t)
 
-	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 100, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.chainConfig, m.genesis, m.engine, m.db, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
+	require.NoError(err)
+	{ // Do 1 step to start txPool
+
+		// Send NewBlock message
+		b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+			Block: chain.TopBlock,
+			TD:    big.NewInt(1), // This is ignored anyway
+		})
+		require.NoError(err)
+		m.receiveWg.Add(1)
+		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
+		require.NoError(err)
+		// Send all the headers
+		b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+			RequestId:          1,
+			BlockHeadersPacket: chain.Headers,
+		})
+		require.NoError(err)
+		m.receiveWg.Add(1)
+		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
+		require.NoError(err)
+		m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
+
+		notifier := &remotedbserver.Events{}
+		initialCycle := true
+		highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+		if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
+			t.Fatal(err)
+		}
 	}
+
+	chain, err = core.GenerateChain(m.chainConfig, chain.TopBlock, m.engine, m.db, 1, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	require.NoError(err)
+
 	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	require.NoError(t, err)
+	b, err := rlp.EncodeToBytes(eth.TransactionsPacket(chain.TopBlock.Transactions()))
+	require.NoError(err)
 	m.receiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.peerId})
-	require.NoError(t, err)
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(t, err)
-	m.receiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.peerId})
-	require.NoError(t, err)
+	err = m.TxStream().Send(&sentry.InboundMessage{Id: sentry.MessageId_Transactions, Data: b, PeerId: m.peerId})
+	require.NoError(err)
 	m.receiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	notifier := &remotedbserver.Events{}
-	initialCycle := true
-	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.ctx, m.db, m.sync, highestSeenHeader, m.chainConfig, notifier, initialCycle, nil, m.updateHead); err != nil {
-		t.Fatal(err)
-	}
+	err = stages.MiningStep(m.ctx, m.db, m.miningSync)
+	require.NoError(err)
+
+	got := <-m.pendingBlocks
+	fmt.Printf("%d\n", got.Transactions().Len())
 }
 
 func TestReorg(t *testing.T) {
