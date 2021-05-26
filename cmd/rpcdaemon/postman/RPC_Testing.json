@@ -303,9 +303,9 @@
                       "}",
                       "",
                       "pm.test('Has correct result', function() {",
-                      "  var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+                      "  var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
                       "  var jsonData = pm.response.json();",
-                      "  if (!isTurbo) {",
+                      "  if (!isErigon) {",
                       "    delete jsonData.result.author;",
                       "    delete jsonData.result.sealFields;",
                       "  }",
@@ -381,9 +381,9 @@
                       "}",
                       "",
                       "pm.test('Has correct result', function() {",
-                      "  var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+                      "  var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
                       "  var jsonData = pm.response.json();",
-                      "  if (!isTurbo) {",
+                      "  if (!isErigon) {",
                       "    delete jsonData.result.author;",
                       "    delete jsonData.result.sealFields;",
                       "  }",
@@ -1015,9 +1015,9 @@
                       "}",
                       "",
                       "pm.test('Has correct result', function() {",
-                      "  var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+                      "  var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
                       "  var jsonData = pm.response.json();",
-                      "  if (!isTurbo) {",
+                      "  if (!isErigon) {",
                       "    delete jsonData.result.author;",
                       "    delete jsonData.result.sealFields;",
                       "  }",
@@ -1067,9 +1067,9 @@
                       "}",
                       "",
                       "pm.test('Has correct result', function() {",
-                      "  var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+                      "  var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
                       "  var jsonData = pm.response.json();",
-                      "  if (!isTurbo) {",
+                      "  if (!isErigon) {",
                       "    delete jsonData.result.author;",
                       "    delete jsonData.result.sealFields;",
                       "  }",
@@ -2704,7 +2704,7 @@
       "protocolProfileBehavior": {}
     },
     {
-      "name": "tg",
+      "name": "erigon",
       "item": [
         {
           "name": "forks",
@@ -2751,7 +2751,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_forks\",\n\t\"params\":[],\n\t\"id\":\"1\"\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"erigon_forks\",\n\t\"params\":[],\n\t\"id\":\"1\"\n}",
               "options": {
                 "raw": {}
               }
@@ -2814,7 +2814,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_getHeaderByNumber\",\n\t\"params\":[\n\t\t\"0x3\"\n\t],\n\t\"id\":\"1\"\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"erigon_getHeaderByNumber\",\n\t\"params\":[\n\t\t\"0x3\"\n\t],\n\t\"id\":\"1\"\n}",
               "options": {
                 "raw": {}
               }
@@ -2877,7 +2877,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_getHeaderByHash\",\n\t\"params\":[\n\t\t\"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\"\n\t],\n\t\"id\":\"1\"\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"erigon_getHeaderByHash\",\n\t\"params\":[\n\t\t\"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\"\n\t],\n\t\"id\":\"1\"\n}",
               "options": {
                 "raw": {}
               }
@@ -2941,7 +2941,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_getLogsByHash\",\n\t\"params\":[\n\t\t\"0x2f244c154cbacb0305581295b80efa6dffb0224b60386a5fc6ae9585e2a140c4\"\n\t],\n\t\"id\":\"1\"\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"erigon_getLogsByHash\",\n\t\"params\":[\n\t\t\"0x2f244c154cbacb0305581295b80efa6dffb0224b60386a5fc6ae9585e2a140c4\"\n\t],\n\t\"id\":\"1\"\n}",
               "options": {
                 "raw": {}
               }
@@ -2991,7 +2991,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_issuance\",\n\t\"params\":[\n\t\t\"0x3\"\n\t],\n\t\"id\":\"1\"\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"erigon_issuance\",\n\t\"params\":[\n\t\t\"0x3\"\n\t],\n\t\"id\":\"1\"\n}",
               "options": {
                 "raw": {}
               }
@@ -3023,8 +3023,8 @@
                   "  utils.notImplemented(\"debug_storageRangeAt\", pm.response.json())",
                   "  return;",
                   "}",
-                  "var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
-                  "if (isTurbo) {",
+                  "var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+                  "if (isErigon) {",
                   "  utils.cannotTest(\"debug_accountRange\", pm.response.json())",
                   "  return;",
                   "}",
@@ -4136,9 +4136,9 @@
         "exec": [
           "utils = {",
           "  notImplemented: function(methodName, jsonData) {",
-          "    var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+          "    var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
           "    var isSilk = pm.environment.get('HOST') == \"{{SILKRPC}}\";",
-          "    if (!isTurbo && !isSilk) // only test turbo",
+          "    if (!isErigon && !isSilk) // only test erigon",
           "      return;",
           "",
           "    var testNotImplemented = pm.globals.get('TEST_NOT_IMPLEMENTED') === 'true';",
@@ -4165,9 +4165,9 @@
           "  },",
           "",
           "  isDeprecated: function(methodName, jsonData) {",
-          "    var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+          "    var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
           "    var isSilk = pm.environment.get('HOST') == \"{{SILKRPC}}\";",
-          "    if (!isTurbo && !isSilk) // only test turbo",
+          "    if (!isErigon && !isSilk) // only test erigon",
           "      return;",
           "",
           "    var testDeprecated = pm.globals.get('TEST_DEPRECATED') === 'true';",
@@ -4195,9 +4195,9 @@
           "  },",
           "",
           "  cannotTest: function(methodName, jsonData) {",
-          "    var isTurbo = pm.environment.get('HOST') == \"{{ERIGON}}\";",
+          "    var isErigon = pm.environment.get('HOST') == \"{{ERIGON}}\";",
           "    var isSilk = pm.environment.get('HOST') == \"{{SILKRPC}}\";",
-          "    if (!isTurbo && !isSilk) // only test turbo",
+          "    if (!isErigon && !isSilk) // only test erigon",
           "      return;",
           "",
           "      var expected = {",

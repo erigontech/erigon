@@ -33,7 +33,7 @@ import (
 //	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
 //}
 
-// Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
+// Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {

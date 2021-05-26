@@ -21,8 +21,8 @@ var routes map[string]string
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, gethURL)
+func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -283,11 +283,11 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 			page := common.Hash{}.Bytes()
 			pageGeth := common.Hash{}.Bytes()
 
-			var accRangeTG map[common.Address]state.DumpAccount
+			var accRangeErigon map[common.Address]state.DumpAccount
 			var accRangeGeth map[common.Address]state.DumpAccount
 
 			for len(page) > 0 {
-				accRangeTG = make(map[common.Address]state.DumpAccount)
+				accRangeErigon = make(map[common.Address]state.DumpAccount)
 				accRangeGeth = make(map[common.Address]state.DumpAccount)
 				var sr DebugAccountRange
 				reqGen.reqID++
@@ -305,7 +305,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 				} else {
 					page = sr.Result.Next
 					for k, v := range sr.Result.Accounts {
-						accRangeTG[k] = v
+						accRangeErigon[k] = v
 					}
 				}
 				if needCompare {
@@ -328,7 +328,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 					if !bytes.Equal(page, pageGeth) {
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
-					if !compareAccountRanges(accRangeTG, accRangeGeth) {
+					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
 						fmt.Printf("Different in account ranges tx\n")
 						return
 					}
@@ -340,8 +340,8 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockFrom ui
 }
 
 // vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
-// results to /$tmp$/turbo_geth_stress_test/results_*.csv
-// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
+// results to /$tmp$/erigon_stress_test/results_*.csv
+// vegeta format going to files /$tmp$/erigon_stress_test/vegeta_*.txt
 func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 	var err error
 	var files map[string]map[string]*os.File
@@ -357,7 +357,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		}
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
-		dir := path.Join(tmpDir, "turbo_geth_stress_test")
+		dir := path.Join(tmpDir, "erigon_stress_test")
 		if err = os.MkdirAll(dir, 0770); err != nil {
 			panic(err)
 		}

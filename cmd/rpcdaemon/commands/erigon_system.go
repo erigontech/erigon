@@ -13,7 +13,7 @@ type Forks struct {
 	Forks       []uint64    `json:"forks"`
 }
 
-// Forks implements tg_forks. Returns the genesis block hash and a sorted list of all forks block numbers
+// Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {

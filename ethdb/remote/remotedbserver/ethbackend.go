@@ -104,5 +104,5 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("TurboGeth", params.VersionWithCommit(s.gitCommit, ""))}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("Erigon", params.VersionWithCommit(s.gitCommit, ""))}, nil
 }

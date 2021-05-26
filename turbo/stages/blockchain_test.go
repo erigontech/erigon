@@ -480,7 +480,7 @@ func TestBadBlockHashes(t *testing.T)  { testBadHashes(t, true) }
 
 func testBadHashes(t *testing.T, full bool) {
 
-	t.Skip("to support this error in TG")
+	t.Skip("to support this error in Erigon")
 	// Create a pristine chain and database
 	db, _ := newCanonical(t, ethash.NewFaker(), 0, full)
 	var err error

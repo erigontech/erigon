@@ -37,7 +37,7 @@ If you have direct access to Erigon's database folder, you may run the `rpcdaemo
 After building, run this command to start the daemon locally:
 
 ```[bash]
-./build/bin/rpcdaemon --datadir ~/Library/TurboGeth/ --http.api=eth,debug,net,web3
+./build/bin/rpcdaemon --datadir ~/Library/Erigon/ --http.api=eth,debug,net,web3
 ```
 
 This mode is mostly convenient for debugging purposes, because we know that the database does not change as we are sending requests to the RPC daemon.

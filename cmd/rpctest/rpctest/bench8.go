@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, gethURL)
+func Bench8(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -70,11 +70,11 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 			accountSet := extractAccountMap(&mag)
 			for account := range accountSet {
 				reqGen.reqID++
-				startTG := time.Now()
+				startErigon := time.Now()
 				request := reqGen.getLogs(prevBn, bn, account)
 				recording := rec != nil // This flag will be set to false if recording is not to be performed
 				res = reqGen.Erigon2("eth_getLogs", request)
-				durationTG := time.Since(startTG).Seconds()
+				durationErigon := time.Since(startErigon).Seconds()
 				if res.Err != nil {
 					fmt.Printf("Could not get logs for account (Erigon) %x: %v\n", account, res.Err)
 					return
@@ -104,7 +104,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 						}
 					}
 				}
-				log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
+				log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
 				if recording {
 					fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 				}
@@ -112,11 +112,11 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 				// All combination of account and one topic
 				for _, topic := range topics {
 					reqGen.reqID++
-					startTG := time.Now()
+					startErigon := time.Now()
 					request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
 					recording = rec != nil
 					res = reqGen.Erigon2("eth_getLogs", request)
-					durationTG := time.Since(startTG).Seconds()
+					durationErigon := time.Since(startErigon).Seconds()
 					if res.Err != nil {
 						fmt.Printf("Could not get logs for account (Erigon) %x %x: %v\n", account, topic, res.Err)
 						return
@@ -148,7 +148,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 					if recording {
 						fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 					}
-					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
+					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
 				}
 				// Random combinations of two topics
 				if len(topics) >= 2 {

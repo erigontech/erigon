@@ -15,8 +15,8 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchTraceFilter(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, oeURL)
+func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}

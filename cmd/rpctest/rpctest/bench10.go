@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func Bench10(tgUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile string) error {
-	setRoutes(tgUrl, gethUrl)
+func Bench10(erigonUrl, gethUrl string, blockFrom uint64, blockTo uint64, recordFile string) error {
+	setRoutes(erigonUrl, gethUrl)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}

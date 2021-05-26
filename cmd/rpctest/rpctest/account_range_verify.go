@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool, database string) {
+func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool, database string) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Fatal(err)
@@ -102,7 +102,7 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFr
 			next = ar.Result.Next
 		}
 	}
-	err = f(tgURL, resultsDB)
+	err = f(erigonURL, resultsDB)
 	if err != nil {
 		log.Fatal(err)
 	}

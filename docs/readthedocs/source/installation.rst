@@ -29,7 +29,7 @@ After this is done, you can run Erigon by executing.
 
 .. code-block:: sh
 
-    $ ./build/bin/tg
+    $ ./build/bin/erigon
 
 what this will do is start a sync process in mainnet.
 
@@ -40,7 +40,7 @@ Unlike Go-Ethereum (geth), Erigon has a separate RPC service called rpcdaemon, t
 
 .. code-block:: sh
 
-    $ ./build/bin/tg --private.api.addr=localhost:9090
+    $ ./build/bin/erigon --private.api.addr=localhost:9090
 
 then to run the rpcdaemon attached to our node we just run
 

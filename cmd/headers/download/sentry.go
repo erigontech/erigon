@@ -49,7 +49,7 @@ const (
 )
 
 func nodeKey(datadir string) *ecdsa.PrivateKey {
-	keyfile := path.Join(datadir, "tg", "nodekey")
+	keyfile := path.Join(datadir, "erigon", "nodekey")
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key
 	}
@@ -155,7 +155,7 @@ func makeP2PServer(
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = path.Join(datadir, "tg", "nodes")
+	p2pConfig.NodeDatabase = path.Join(datadir, "erigon", "nodes")
 	p2pConfig.ListenAddr = p2pListenAddr
 	var urls []string
 	switch genesisHash {

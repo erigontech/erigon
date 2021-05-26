@@ -1,13 +1,13 @@
 Erigon-API
 ---
 
-Turbo-API is a set of tools for building applications containing Erigon node.
+Erigon-API is a set of tools for building applications containing Erigon node.
 
 Our own binary [`erigon`](../cmd/erigon) is built using it.
 
 ## Modules
 
-* [`cli`](./cli) - turbo-cli, methods & helpers to run a CLI app with Erigon node.
+* [`cli`](./cli) - erigon-cli, methods & helpers to run a CLI app with Erigon node.
 
 * [`node`](./node) - represents an Ethereum node, running devp2p and sync and writing state to the database.
 
@@ -15,7 +15,7 @@ Our own binary [`erigon`](../cmd/erigon) is built using it.
 
 ## Examples
 
-* [`erigon`](../cmd/erigon/main.go) - our binary is using turbo-api with all defaults
+* [`erigon`](../cmd/erigon/main.go) - our binary is using erigon-api with all defaults
 
 * [`erigoncustom`](../cmd/erigoncustom/main.go) - a very simple example of adding a custom stage, a custom bucket and a custom command-line parameter
 

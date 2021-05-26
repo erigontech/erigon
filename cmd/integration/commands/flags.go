@@ -125,7 +125,7 @@ func withMigration(cmd *cobra.Command) {
 }
 
 func withSilkworm(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
+	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_erigon_api.so")
 	must(cmd.MarkFlagFilename("silkworm"))
 }
 

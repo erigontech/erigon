@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
-	turbocli "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/urfave/cli"
 )
@@ -26,23 +26,23 @@ type ErigonNode struct {
 	backend *eth.Ethereum
 }
 
-func (tg *ErigonNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	tg.stack.SetP2PListenFunc(listenFunc)
+func (eri *ErigonNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
+	eri.stack.SetP2PListenFunc(listenFunc)
 }
 
 // Serve runs the node and blocks the execution. It returns when the node is existed.
-func (tg *ErigonNode) Serve() error {
-	defer tg.stack.Close()
+func (eri *ErigonNode) Serve() error {
+	defer eri.stack.Close()
 
-	tg.run()
+	eri.run()
 
-	tg.stack.Wait()
+	eri.stack.Wait()
 
 	return nil
 }
 
-func (tg *ErigonNode) run() {
-	utils.StartNode(tg.stack)
+func (eri *ErigonNode) run() {
+	utils.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
 	// see cmd/geth/main.go#startNode for full implementation
@@ -73,7 +73,7 @@ func New(
 
 	nodeConfig := NewNodeConfig(optionalParams)
 	utils.SetNodeConfig(ctx, nodeConfig)
-	turbocli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
+	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
@@ -99,7 +99,7 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, gitCommit strin
 func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, node, ethConfig)
-	turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
+	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
 	return ethConfig
 }
 

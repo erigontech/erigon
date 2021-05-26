@@ -17,7 +17,7 @@ func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool
 
 	base := NewBaseApi(filters)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
-	tgImpl := NewErigonAPI(base, db)
+	erigonImpl := NewErigonAPI(base, db)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
@@ -76,11 +76,11 @@ func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool
 				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
-		case "tg":
+		case "erigon":
 			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "tg",
+				Namespace: "erigon",
 				Public:    true,
-				Service:   ErigonAPI(tgImpl),
+				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
 		}

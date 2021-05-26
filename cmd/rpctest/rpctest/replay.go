@@ -10,8 +10,8 @@ import (
 	"github.com/valyala/fastjson"
 )
 
-func Replay(tgURL string, recordFile string) {
-	setRoutes(tgURL, "")
+func Replay(erigonURL string, recordFile string) {
+	setRoutes(erigonURL, "")
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}

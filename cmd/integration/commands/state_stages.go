@@ -33,7 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
-	turbocli "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
 var stateStags = &cobra.Command{
@@ -53,10 +53,10 @@ Examples:
 		cfg := &node.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
+		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
+		db := openDatabase2(path.Join(cfg.DataDir, "erigon", "chaindata"), true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
