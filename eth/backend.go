@@ -334,6 +334,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
+	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
+	if err != nil {
+		return nil, err
+	}
+
 	checkpoint := config.Checkpoint
 	if backend.config.EnableDownloadV2 {
 		backend.downloadV2Ctx, backend.downloadV2Cancel = context.WithCancel(context.Background())
@@ -346,7 +351,17 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				backend.sentries = append(backend.sentries, sentry)
 			}
 		} else {
-			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr)
+			var readNodeInfo = func() *eth.NodeInfo {
+				var res *eth.NodeInfo
+				_ = backend.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+					res = eth.ReadNodeInfo(tx, backend.chainConfig, backend.genesisHash, backend.networkID)
+					return nil
+				})
+
+				return res
+			}
+
+			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)
 			sentry := &download.SentryClientDirect{}
 			sentry.SetServer(backend.sentryServer)
 			backend.sentries = []proto_sentry.SentryClient{sentry}
@@ -450,15 +465,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
-	if err != nil {
-		return nil, err
-	}
-
-	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
-	if err != nil {
-		return nil, err
-	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())

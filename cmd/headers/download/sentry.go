@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
@@ -119,29 +118,11 @@ func makeP2PServer(
 	ctx context.Context,
 	datadir string,
 	nodeName string,
-	readNodeInfo func() *eth.NodeInfo,
 	natSetting string,
 	p2pListenAddr string,
-	peers *sync.Map,
 	genesisHash common.Hash,
-	statusFn func() *proto_sentry.StatusData,
-	receiveCh chan<- StreamMsg,
-	receiveUploadCh chan<- StreamMsg,
-	receiveTxCh chan<- StreamMsg,
-	txSubscribed *uint32,
+	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
-	client := dnsdisc.NewClient(dnsdisc.Config{})
-
-	var dialCandidates enode.Iterator
-	var err error
-	dns := params.KnownDNSNetwork(genesisHash, "all")
-	if dns != "" {
-		dialCandidates, err = client.NewIterator(dns)
-		if err != nil {
-			return nil, fmt.Errorf("create discovery candidates: %v", err)
-		}
-	}
-
 	serverKey := nodeKey(datadir)
 	p2pConfig := p2p.Config{}
 	natif, err := nat.Parse(natSetting)
@@ -182,120 +163,8 @@ func makeP2PServer(
 		}
 	}
 
-	p2pConfig.Protocols = MakeProtocols(ctx, readNodeInfo, dialCandidates, peers, statusFn, receiveCh, receiveUploadCh, receiveTxCh, txSubscribed)
+	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
-}
-
-func MakeProtocols(ctx context.Context,
-	readNodeInfo func() *eth.NodeInfo,
-	dialCandidates enode.Iterator,
-	peers *sync.Map,
-	statusFn func() *proto_sentry.StatusData,
-	receiveCh chan<- StreamMsg,
-	receiveUploadCh chan<- StreamMsg,
-	receiveTxCh chan<- StreamMsg,
-	txSubscribed *uint32,
-) []p2p.Protocol {
-	return []p2p.Protocol{
-		{
-			Name:           eth.ProtocolName,
-			Version:        eth.ProtocolVersions[0],
-			Length:         17,
-			DialCandidates: dialCandidates,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-				peerID := peer.ID().String()
-				if _, ok := peers.Load(peerID); ok {
-					log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
-					return nil
-				}
-				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
-				if err := handShake(ctx, statusFn(), peerID, rw, eth.ProtocolVersions[0], eth.ProtocolVersions[0]); err != nil {
-					return fmt.Errorf("handshake to peer %s: %v", peerID, err)
-				}
-				log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
-				peerInfo := &PeerInfo{
-					peer: peer,
-					rw:   rw,
-				}
-				peers.Store(peerID, peerInfo)
-				if err := runPeer(
-					ctx,
-					peerID,
-					eth.ProtocolVersions[0],
-					rw,
-					peerInfo,
-					receiveCh,
-					receiveUploadCh,
-					receiveTxCh,
-					txSubscribed,
-				); err != nil {
-					log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
-				}
-				peers.Delete(peerID)
-				return nil
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(id enode.ID) interface{} {
-				p, ok := peers.Load(id.String())
-				if !ok {
-					return nil
-				}
-				return p.(*PeerInfo).peer.Info()
-			},
-			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-		},
-		{
-			Name:           eth.ProtocolName,
-			Version:        eth.ProtocolVersions[1],
-			Length:         17,
-			DialCandidates: dialCandidates,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-				peerID := peer.ID().String()
-				if _, ok := peers.Load(peerID); ok {
-					log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
-					return nil
-				}
-				log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
-				if err := handShake(ctx, statusFn(), peerID, rw, eth.ProtocolVersions[1], eth.ProtocolVersions[1]); err != nil {
-					return fmt.Errorf("handshake to peer %s: %v", peerID, err)
-				}
-				log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
-				peerInfo := &PeerInfo{
-					peer: peer,
-					rw:   rw,
-				}
-				peers.Store(peerID, peerInfo)
-				if err := runPeer(
-					ctx,
-					peerID,
-					eth.ProtocolVersions[1],
-					rw,
-					peerInfo,
-					receiveCh,
-					receiveUploadCh,
-					receiveTxCh,
-					txSubscribed,
-				); err != nil {
-					log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
-				}
-				peers.Delete(peerID)
-				return nil
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(id enode.ID) interface{} {
-				p, ok := peers.Load(id.String())
-				if !ok {
-					return nil
-				}
-				return p.(*PeerInfo).peer.Info()
-			},
-			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-		},
-	}
 }
 
 func handShake(
@@ -579,7 +448,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	}
 	grpcServer = grpc.NewServer(opts...)
 
-	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr)
+	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, eth.ETH66)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -592,8 +461,8 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	return sentryServer, nil
 }
 
-func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) *SentryServerImpl {
-	return &SentryServerImpl{
+func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
+	ss := &SentryServerImpl{
 		ctx:             ctx,
 		datadir:         datadir,
 		ReceiveCh:       make(chan StreamMsg, 1024),
@@ -604,12 +473,63 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string) 
 		txStopCh:        make(chan struct{}),
 		p2pListenAddr:   p2pListenAddr,
 	}
+
+	ss.protocol = p2p.Protocol{
+		Name:           eth.ProtocolName,
+		Version:        protocol,
+		Length:         17,
+		DialCandidates: dialCandidates,
+		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+			peerID := peer.ID().String()
+			if _, ok := ss.Peers.Load(peerID); ok {
+				log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+				return nil
+			}
+			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
+			if err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol); err != nil {
+				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+			}
+			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+			peerInfo := &PeerInfo{
+				peer: peer,
+				rw:   rw,
+			}
+			ss.Peers.Store(peerID, peerInfo)
+			if err := runPeer(
+				ctx,
+				peerID,
+				eth.ProtocolVersions[0],
+				rw,
+				peerInfo,
+				ss.ReceiveCh,
+				ss.ReceiveUploadCh,
+				ss.ReceiveTxCh,
+				&ss.TxSubscribed,
+			); err != nil {
+				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+			}
+			ss.Peers.Delete(peerID)
+			return nil
+		},
+		NodeInfo: func() interface{} {
+			return readNodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			p, ok := ss.Peers.Load(id.String())
+			if !ok {
+				return nil
+			}
+			return p.(*PeerInfo).peer.Info()
+		},
+		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+	}
+
+	return ss
 }
 
 func p2pServer(ctx context.Context,
 	datadir string,
 	nodeName string,
-	readNodeInfo func() *eth.NodeInfo,
 	sentryServer *SentryServerImpl,
 	natSetting string, p2pListenAddr string, staticPeers []string, discovery bool, netRestrict string,
 	genesisHash common.Hash,
@@ -618,16 +538,10 @@ func p2pServer(ctx context.Context,
 		ctx,
 		datadir,
 		nodeName,
-		readNodeInfo,
 		natSetting,
 		p2pListenAddr,
-		&sentryServer.Peers,
 		genesisHash,
-		sentryServer.GetStatus,
-		sentryServer.ReceiveCh,
-		sentryServer.ReceiveUploadCh,
-		sentryServer.ReceiveTxCh,
-		&sentryServer.TxSubscribed,
+		sentryServer.protocol,
 	)
 	if err != nil {
 		return nil, err
@@ -675,6 +589,7 @@ type StreamMsg struct {
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx             context.Context
+	protocol        p2p.Protocol
 	datadir         string
 	natSetting      string
 	p2pListenAddr   string
@@ -910,7 +825,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.P2pServer, err = p2pServer(ss.ctx, ss.datadir, ss.nodeName, func() *eth.NodeInfo { return nil }, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.datadir, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return &empty.Empty{}, err
 		}
