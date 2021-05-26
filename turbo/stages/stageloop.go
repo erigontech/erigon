@@ -209,3 +209,51 @@ func StageLoopStep(
 	}
 	return nil
 }
+
+func MiningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, quitCh chan struct{}) (err error) {
+	// avoid crash because TG's core does many things -
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				err = fmt.Errorf("%w, trace: %s", typed, stack)
+			default:
+				err = fmt.Errorf("%+v, trace: %s", typed, stack)
+			}
+		}
+	}()
+
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	miningState, err := mining.Prepare(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		tx,
+		"",
+		ethdb.DefaultStorageMode,
+		".",
+		0,
+		quitCh,
+		nil,
+		nil,
+		false,
+		stagedsync.StageMiningCfg(true),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if err = miningState.Run(nil, tx); err != nil {
+		return err
+	}
+	tx.Rollback()
+	return nil
+}

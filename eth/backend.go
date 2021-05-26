@@ -62,6 +62,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -450,7 +451,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}()
 
-	if err := backend.StartMining(backend.chainKV, backend.pendingBlocks, backend.minedBlocks, mining, backend.config.Miner, backend.gasPrice, tmpdir, backend.quitMining); err != nil {
+	if err := backend.StartMining(backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
 	}
 
@@ -565,7 +566,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block, minedBlocksCh chan *types.Block, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, tmpdir string, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -631,6 +632,9 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 			case err := <-errc:
 				works = false
 				hasWork = false
+				if errors.Is(err, common.ErrStopped) {
+					return
+				}
 				if err != nil {
 					log.Warn("mining", "err", err)
 				}
@@ -642,45 +646,11 @@ func (s *Ethereum) StartMining(kv ethdb.RwKV, pendingBlocksCh chan *types.Block,
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- s.miningStep(kv, mining, tmpdir, quitCh) }()
+				go func() { errc <- stages2.MiningStep(kv, mining, quitCh) }()
 			}
 		}
 	}()
 
-	return nil
-}
-
-func (s *Ethereum) miningStep(kv ethdb.RwKV, mining *stagedsync.StagedSync, tmpdir string, quitCh chan struct{}) error {
-	tx, err := kv.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	miningState, err := mining.Prepare(
-		nil,
-		s.chainConfig,
-		s.engine,
-		&vm.Config{},
-		ethdb.NewObjectDatabase(kv),
-		tx,
-		"",
-		ethdb.DefaultStorageMode,
-		tmpdir,
-		0,
-		quitCh,
-		nil,
-		s.txPool,
-		false,
-		stagedsync.StageMiningCfg(true),
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx); err != nil {
-		return err
-	}
-	tx.Rollback()
 	return nil
 }
 
