@@ -49,10 +49,10 @@ type contract struct {
 	code []byte
 }
 
-func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.DbWithPendingMutations, cfg TranspileCfg, useExternalTx bool, quitCh <-chan struct{}) error {
+func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock uint64, tx ethdb.RwTx, batch ethdb.DbWithPendingMutations, cfg TranspileCfg, useExternalTx bool, quitCh <-chan struct{}) error {
 	done := make(chan struct{})
-	inContracts := make(chan contract, 32768)
-	outContracts := make(chan contract, 32768)
+	inContracts := make(chan contract, 8192)
+	outContracts := make(chan contract, 8192)
 
 	readWG := new(errgroup.Group)
 	numWorkers := runtime.NumCPU()
@@ -102,12 +102,6 @@ func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.
 				err = batch.Put(dbutils.ContractTEVMCodeBucket, tevmContract.hash, tevmContract.code)
 				if err != nil {
 					return tryError(fmt.Errorf("cannot store %q: %w", common.BytesToHash(tevmContract.hash), err), done)
-				}
-
-				err = batch.Delete(dbutils.ContractTEVMCodeStatusBucket, tevmContract.hash, nil)
-				if err != nil {
-					return tryError(fmt.Errorf("cannot reset translation status %q: %w",
-						common.BytesToHash(tevmContract.hash), err), done)
 				}
 
 				stageProgress++
@@ -162,31 +156,41 @@ func transpileBatch(logPrefix string, s *StageState, tx ethdb.RwTx, batch ethdb.
 	})
 
 	// read contracts pending for translation
-	c, err := tx.Cursor(dbutils.ContractTEVMCodeStatusBucket)
+	keyStart := dbutils.EncodeBlockNumber(fromBlock + 1)
+	c, err := tx.CursorDupSort(dbutils.ContractTEVMCodeStatusBucket)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 
-	if err := ethdb.ForEach(c, func(codeHash, _ []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
+	for k, hash, err := c.Seek(keyStart); k != nil; k, hash, err = c.Next() {
+		if err != nil {
+			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
 		}
-		if err := common.Stopped(done); err != nil {
+		if err = common.Stopped(quitCh); err != nil {
+			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
+		}
+		if err = common.Stopped(done); err != nil {
 			// return nil error to not overwrite error from errs channel
-			return false, nil
+			return nil
+		}
+
+		block, err := dbutils.DecodeBlockNumber(k)
+		if err != nil {
+			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
+		}
+
+		if block > toBlock {
+			return nil
 		}
 
 		// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
-		contractCode, err := tx.GetOne(dbutils.CodeBucket, codeHash)
+		contractCode, err := tx.GetOne(dbutils.CodeBucket, hash)
 		if err != nil {
-			return false, err
+			return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
 		}
 
-		inContracts <- contract{codeHash, contractCode}
-		return true, nil
-	}); err != nil {
-		return tryError(fmt.Errorf("can't read pending code translations: %w", err), done)
+		inContracts <- contract{hash, contractCode}
 	}
 
 	close(inContracts)
@@ -259,7 +263,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	}
 
 	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Blocks translation", logPrefix), "from", s.BlockNumber, "to", to)
+	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
 
 	batch := ethdb.NewBatch(tx)
 	defer batch.Rollback()
@@ -269,7 +273,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 		return err
 	}
 
-	if err = transpileBatch(logPrefix, s, tx, batch, cfg, useExternalTx, quit); err != nil {
+	if err = transpileBatch(logPrefix, s, s.BlockNumber, to, tx, batch, cfg, useExternalTx, quit); err != nil {
 		return err
 	}
 
@@ -303,7 +307,24 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan
 		defer tx.Rollback()
 	}
 
-	err := u.Done(tx)
+	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	c, err := tx.CursorDupSort(dbutils.ContractTEVMCodeStatusBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, hash, err := c.Seek(keyStart); k != nil; k, hash, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		if err = tx.Delete(dbutils.ContractTEVMCodeBucket, hash, nil); err != nil {
+			return err
+		}
+	}
+
+	err = u.Done(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
