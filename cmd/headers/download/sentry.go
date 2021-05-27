@@ -409,7 +409,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2pListenAddr string) (*SentryServerImpl, error) {
+func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2pListenAddr string, protocol uint) (*SentryServerImpl, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -451,7 +451,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	}
 	grpcServer = grpc.NewServer(opts...)
 
-	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, eth.ETH66)
+	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -570,10 +570,10 @@ func p2pServer(ctx context.Context,
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string) error {
+func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string, protocol uint) error {
 	ctx := rootContext()
 
-	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port))
+	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
 	if err != nil {
 		return err
 	}
