@@ -85,17 +85,19 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 		}
 
 		// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
-		evmContract, err := tx.GetOne(dbutils.CodeBucket, hash)
+		evmContract, err := batch.GetOne(dbutils.CodeBucket, hash)
 		if err != nil {
 			return fmt.Errorf("can't read pending code translations: %w", err)
 		}
 
+		// call a transpiler
 		transpiledCode, err := transpileCode(evmContract)
 		if err != nil {
 			return fmt.Errorf("contract %q cannot be translated: %w",
 				common.BytesToHash(hash).String(), err)
 		}
 
+		// store TEVM contract code
 		err = batch.Put(dbutils.ContractTEVMCodeBucket, hash, transpiledCode)
 		if err != nil {
 			return fmt.Errorf("cannot store TEVM code %q: %w", common.BytesToHash(hash), err)
