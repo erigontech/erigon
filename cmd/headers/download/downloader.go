@@ -36,7 +36,7 @@ import (
 
 // Methods of Core called by sentry
 
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (*SentryClientRemote, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 
@@ -53,7 +53,7 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
-	return proto_sentry.NewSentryClient(conn), nil
+	return NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
 
 func RecvUploadMessage(ctx context.Context, sentry proto_sentry.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error) {
@@ -140,7 +140,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 
 func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
 	for i := range sentries {
-		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), &grpc.EmptyCallOption{}); err != nil {
+		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true)); err != nil {
 			return err
 		}
 	}

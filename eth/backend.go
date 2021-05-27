@@ -110,7 +110,7 @@ type Ethereum struct {
 	downloadServer       *download.ControlServerImpl
 	sentryServers        map[uint]*download.SentryServerImpl
 	txPoolP2PServer      *eth.TxPoolServer
-	sentries             map[uint][]proto_sentry.SentryClient
+	sentries             []download.SentryClient
 	stagedSync2          *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
@@ -185,7 +185,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
 		sentryServers:        map[uint]*download.SentryServerImpl{},
-		sentries:             map[uint][]proto_sentry.SentryClient{},
+		sentries:             []download.SentryClient{},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -365,15 +365,24 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 			backend.sentryServers[eth.ETH66] = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)
 			backend.sentryServers[eth.ETH65] = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)
-			sentry := &download.SentryClientDirect{}
-			sentry.SetServer(backend.sentryServers)
-			backend.sentries = []proto_sentry.SentryClient{sentry}
+			backend.sentries = map[uint]proto_sentry.SentryClient{
+				eth.ETH66: download.NewSentryClientDirect(eth.ETH66, backend.sentryServers[eth.ETH66]),
+				eth.ETH65: download.NewSentryClientDirect(eth.ETH65, backend.sentryServers[eth.ETH65]),
+			}
 		}
 		blockDownloaderWindow := 65536
 		backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
+		go func() {
+			for i := range sentries {
+				if res, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true)); err != nil {
+					return err
+				}
+			}
+		}()
+
 		if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
 			return nil, err
 		}

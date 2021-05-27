@@ -11,6 +11,27 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type SentryClient interface {
+	proto_sentry.SentryClient
+	Protocol() uint
+}
+
+type SentryClientRemote struct {
+	proto_sentry.SentryClient
+	protocol uint
+}
+
+// NewSentryClientRemote - app code must use this class
+// to avoid concurrency - it accepts protocol (which received async by SetStatus) in constructor,
+// means app can't use client which protocol unknown yet
+func NewSentryClientRemote(protocol uint, client proto_sentry.SentryClient) *SentryClientRemote {
+	return &SentryClientRemote{SentryClient: client, protocol: protocol}
+}
+
+func (c *SentryClientRemote) Protocol() uint {
+	return c.protocol
+}
+
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
 // SentryClient is linked directly to the SentryServer, for example, so any function call on the instance of the SentryClient
 // cause invocations directly on the corresponding instance of the SentryServer. However, the link between SentryClient and
@@ -20,12 +41,12 @@ import (
 // SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
 // instance of SentryServer
 type SentryClientDirect struct {
-	server proto_sentry.SentryServer
+	protocol uint
+	server   proto_sentry.SentryServer
 }
 
-// SetServer injects a reference to the SentryServer into the client
-func (scd *SentryClientDirect) SetServer(sentryServer proto_sentry.SentryServer) {
-	scd.server = sentryServer
+func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer) *SentryClientDirect {
+	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
 func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {

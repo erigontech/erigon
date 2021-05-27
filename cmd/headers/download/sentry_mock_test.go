@@ -127,9 +127,9 @@ func mock(t *testing.T) *MockSentry {
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
 	txPool := core.NewTxPool(txPoolConfig, mock.chainConfig, ethdb.NewObjectDatabase(mock.db), txCacher)
-	txSentryClient := &SentryClientDirect{}
-	txSentryClient.SetServer(mock)
-	txPoolServer, err := eth.NewTxPoolServer(mock.ctx, []sentry.SentryClient{txSentryClient}, txPool)
+	txPoolServer, err := eth.NewTxPoolServer(mock.ctx, []sentry.SentryClient{
+		NewSentryClientDirect(eth.ETH66, mock),
+	}, txPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +157,7 @@ func mock(t *testing.T) *MockSentry {
 	//mock.genesis = gspec.MustCommit()
 	blockDownloaderWindow := 128
 	networkID := uint64(1)
-	mock.sentryClient = &SentryClientDirect{}
-	mock.sentryClient.SetServer(mock)
+	mock.sentryClient = NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []sentry.SentryClient{mock.sentryClient}
 	mock.downloader, err = NewControlServer(db, "mock", mock.chainConfig, mock.genesis.Hash(), mock.engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
