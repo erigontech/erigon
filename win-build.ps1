@@ -142,7 +142,7 @@ If(!$chocolateyHasCmake -or !$chocolateyHasMake -or !$chocolateyHasMingw) {
 # Enter MDBX directory and build libmdbx.dll
 Write-Host " Building libmdbx.dll ..."
 Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
-cmake -G "MinGW Makefiles" . -D CMAKE_MAKE_PROGRAM:PATH=$(Join-Path $chocolateyBinPath "make.exe") -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF
+cmake -G "MinGW Makefiles" . -D CMAKE_MAKE_PROGRAM:PATH=$(Join-Path $chocolateyBinPath "make.exe") -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D MDBX_FORCE_ASSERTIONS:INT=0
 if($LASTEXITCODE) {
     Write-Host "An error has occurred while configuring MDBX dll"
     return
@@ -175,6 +175,11 @@ $Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Build   = "go build -v -trimpath -tags=mdbx -ldflags ""-X main.gitCommit=$($Erigon.Commit) -X main.gitBranch=$($Erigon.Branch)"""
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
+
+# Remove previous 'tg.exe' executable (if present)
+if (Test-Path -Path (Join-Path $Erigon.BinPath "tg.exe") -PathType Leaf) {
+    Remove-Item -Path (Join-Path $Erigon.BinPath "tg.exe")
+}
 
 Write-Host " Building Erigon ..."
 $outExecutable = [string](Join-Path $Erigon.BinPath "erigon.exe")
