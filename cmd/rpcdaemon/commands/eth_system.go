@@ -126,9 +126,6 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %d", blockNum)
-	}
 	return block, nil
 }
 
