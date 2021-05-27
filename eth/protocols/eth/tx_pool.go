@@ -1,6 +1,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/ledgerwatch/erigon/cmd/headers/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -21,12 +23,12 @@ import (
 
 type TxPoolServer struct {
 	ctx       context.Context
-	Sentries  []proto_sentry.SentryClient
+	Sentries  []download.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(ctx context.Context, sentries []download.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		ctx:      ctx,
 		Sentries: sentries,
@@ -36,24 +38,45 @@ func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, 
 	return cs, nil
 }
 
-func (tp *TxPoolServer) newPooledTransactionHashes(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
 	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding NewPooledTransactionHashesPacket: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newPooledTransactionHashes66: %v, data: %x", err, inreq.Data)
 	}
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolServer) pooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	var query PooledTransactionsPacket66
+func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding PooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newPooledTransactionHashes65: %v, data: %x", err, inreq.Data)
 	}
-
-	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.PooledTransactionsPacket, true)
+	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+	txs := &PooledTransactionsPacket66{}
+	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
+		return fmt.Errorf("decoding pooledTransactions66: %v, data: %x", err, inreq.Data)
+	}
+
+	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), txs.PooledTransactionsPacket, true)
+}
+
+func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+	txs := &PooledTransactionsPacket{}
+	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
+		return fmt.Errorf("decoding pooledTransactions65: %v, data: %x", err, inreq.Data)
+	}
+
+	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), *txs, true)
+}
+
+func (tp *TxPoolServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+	return tp.transactions65(ctx, inreq, sentry)
+}
+
+func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -64,7 +87,7 @@ func (tp *TxPoolServer) transactions(ctx context.Context, inreq *proto_sentry.In
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
 
-func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -83,7 +106,32 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_PooledTransactions, Data: b},
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_66, Data: b},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send pooled transactions response: %v", err)
+	}
+	return nil
+}
+
+func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+	if tp.txPool == nil {
+		return nil
+	}
+	var query GetPooledTransactionsPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getPooledTransactions65: %v, data: %x", err, inreq.Data)
+	}
+	_, txs := AnswerGetPooledTransactions(tp.txPool, query)
+	b, err := rlp.EncodeToBytes(PooledTransactionsRLPPacket(txs))
+	if err != nil {
+		return fmt.Errorf("encode getPooledTransactions65 response: %v", err)
+	}
+	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_65, Data: b},
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
@@ -93,31 +141,65 @@ func (tp *TxPoolServer) getPooledTransactions(ctx context.Context, inreq *proto_
 }
 
 func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	bytes, err := rlp.EncodeToBytes(&GetPooledTransactionsPacket66{
-		RequestId:                   rand.Uint64(), //nolint:gosec
-		GetPooledTransactionsPacket: hashes,
-	})
-	if err != nil {
-		log.Error("Could not send transactions request", "err", err)
-		return nil
-	}
-
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GetPooledTransactions, Data: bytes},
-	}
+	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
-		sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send get pooled tx request", "err", err1)
+		protocol, ok := tp.sentries[i].Protocol()
+		if !ok {
 			continue
 		}
-		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			continue
+		if protocol == ETH65 {
+			if outreq65 == nil {
+				data65, err := rlp.EncodeToBytes(GetPooledTransactionsPacket(hashes))
+				if err != nil {
+					log.Error("Could not send transactions request", "err", err)
+					return nil
+				}
+
+				outreq65 = &proto_sentry.SendMessageByIdRequest{
+					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65, Data: data65},
+				}
+			}
+
+			sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
+			if err1 != nil {
+				log.Error("Could not send get pooled tx request", "err", err1)
+				continue
+			}
+			if sentPeers == nil || len(sentPeers.Peers) == 0 {
+				continue
+			}
+			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 		}
-		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+		if protocol == ETH66 {
+			if outreq66 == nil {
+				data66, err := rlp.EncodeToBytes(&GetPooledTransactionsPacket66{
+					RequestId:                   rand.Uint64(), //nolint:gosec
+					GetPooledTransactionsPacket: hashes,
+				})
+				if err != nil {
+					log.Error("Could not send transactions request", "err", err)
+					return nil
+				}
+
+				outreq66 = &proto_sentry.SendMessageByIdRequest{
+					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: data66},
+				}
+			}
+
+			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{})
+			if err1 != nil {
+				log.Error("Could not send get pooled tx request", "err", err1)
+				continue
+			}
+			if sentPeers == nil || len(sentPeers.Peers) == 0 {
+				continue
+			}
+			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+		}
 	}
 	return nil
 }
@@ -134,16 +216,28 @@ func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	}
 }
 
-func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
 	switch inreq.Id {
-	case proto_sentry.MessageId_NewPooledTransactionHashes:
-		return tp.newPooledTransactionHashes(ctx, inreq, sentry)
-	case proto_sentry.MessageId_PooledTransactions:
-		return tp.pooledTransactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_Transactions:
-		return tp.transactions(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GetPooledTransactions:
-		return tp.getPooledTransactions(ctx, inreq, sentry)
+
+	// ==== eth 65 ====
+	case proto_sentry.MessageId_TRANSACTIONS_65:
+		return tp.transactions65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
+		return tp.newPooledTransactionHashes65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		return tp.getPooledTransactions65(ctx, inreq, sentry)
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_65:
+		return tp.pooledTransactions65(ctx, inreq, sentry)
+
+	// ==== eth 66 ====
+	case proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
+		return tp.newPooledTransactionHashes66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66:
+		return tp.pooledTransactions66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_TRANSACTIONS_66:
+		return tp.transactions66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
+		return tp.getPooledTransactions66(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
@@ -152,8 +246,8 @@ func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_s
 // RecvTxMessage
 // wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
 func RecvTxMessage(ctx context.Context,
-	sentry proto_sentry.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error,
+	sentry download.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
 	streamCtx, cancel := context.WithCancel(ctx)
