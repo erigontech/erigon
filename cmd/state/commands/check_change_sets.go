@@ -117,7 +117,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		if err != nil {
 			return err
 		}
-		block := rawdb.ReadBlock(rwtx, blockHash, blockNum)
+		var block *types.Block
+		block, _, err = rawdb.ReadBlockWithSenders(rwtx, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
 		if block == nil {
 			break
 		}
