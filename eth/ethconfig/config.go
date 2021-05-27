@@ -45,6 +45,7 @@ import (
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
 	Blocks:     20,
+	Default:    big.NewInt(0),
 	Percentile: 60,
 	MaxPrice:   gasprice.DefaultMaxPrice,
 }

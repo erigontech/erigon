@@ -17,11 +17,12 @@
 package gasprice
 
 import (
+	"container/heap"
 	"context"
 	"math/big"
-	"sort"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
@@ -55,7 +56,6 @@ type Oracle struct {
 	lastPrice *big.Int
 	maxPrice  *big.Int
 	cacheLock sync.RWMutex
-	fetchLock sync.Mutex
 
 	checkBlocks int
 	percentile  int
@@ -105,8 +105,6 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	if headHash == lastHead {
 		return lastPrice, nil
 	}
-	gpo.fetchLock.Lock()
-	defer gpo.fetchLock.Unlock()
 
 	// Try checking the cache again, maybe the last fetch fetched what we need
 	gpo.cacheLock.RLock()
@@ -115,48 +113,24 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	if headHash == lastHead {
 		return lastPrice, nil
 	}
-	var (
-		sent, exp int
-		number    = head.Number.Uint64()
-		result    = make(chan getBlockPricesResult, gpo.checkBlocks)
-		quit      = make(chan struct{})
-		txPrices  []*big.Int
-	)
-	for sent < gpo.checkBlocks && number > 0 {
-		go gpo.getBlockPrices(ctx, types.MakeSigner(gpo.backend.ChainConfig(), number), number, sampleNumber, result, quit)
-		sent++
-		exp++
+	number := head.Number.Uint64()
+	txPrices := make(sortingHeap, 0, sampleNumber*gpo.checkBlocks)
+	for txPrices.Len() < sampleNumber*gpo.checkBlocks && number > 0 {
+		gpo.getBlockPrices(ctx, number, sampleNumber, &txPrices)
 		number--
 	}
-	for exp > 0 {
-		res := <-result
-		if res.err != nil {
-			close(quit)
-			return lastPrice, res.err
-		}
-		exp--
-		// Nothing returned. There are two special cases here:
-		// - The block is empty
-		// - All the transactions included are sent by the miner itself.
-		// In these cases, use the latest calculated price for samping.
-		if len(res.prices) == 0 && lastPrice != nil {
-			res.prices = []*big.Int{lastPrice}
-		}
-		// Besides, in order to collect enough data for sampling, if nothing
-		// meaningful returned, try to query more blocks. But the maximum
-		// is 2*checkBlocks.
-		if len(res.prices) == 1 && len(txPrices)+1+exp < gpo.checkBlocks*2 && number > 0 {
-			go gpo.getBlockPrices(ctx, types.MakeSigner(gpo.backend.ChainConfig(), number), number, sampleNumber, result, quit)
-			sent++
-			exp++
-			number--
-		}
-		txPrices = append(txPrices, res.prices...)
-	}
 	price := lastPrice
-	if len(txPrices) > 0 {
-		sort.Sort(bigIntArray(txPrices))
-		price = txPrices[(len(txPrices)-1)*gpo.percentile/100]
+	if txPrices.Len() > 0 {
+		// Item with this position needs to be extracted from the sorting heap
+		// so we pop all the items before it
+		percentilePosition := (txPrices.Len() - 1) * gpo.percentile / 100
+		for i := 0; i < percentilePosition; i++ {
+			heap.Pop(&txPrices)
+		}
+	}
+	if txPrices.Len() > 0 {
+		// Don't need to pop it, just take from the top of the heap
+		price = txPrices[0].ToBig()
 	}
 	if price.Cmp(gpo.maxPrice) > 0 {
 		price = new(big.Int).Set(gpo.maxPrice)
@@ -168,53 +142,74 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	return price, nil
 }
 
-type getBlockPricesResult struct {
-	prices []*big.Int
-	err    error
-}
-
 type transactionsByGasPrice []types.Transaction
 
 func (t transactionsByGasPrice) Len() int           { return len(t) }
 func (t transactionsByGasPrice) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func (t transactionsByGasPrice) Less(i, j int) bool { return t[i].GetPrice().Cmp(t[j].GetPrice()) < 0 }
 
+// Push (part of heap.Interface) places a new link onto the end of queue
+func (t *transactionsByGasPrice) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	l := x.(types.Transaction)
+	*t = append(*t, l)
+}
+
+// Pop (part of heap.Interface) removes the first link from the queue
+func (t *transactionsByGasPrice) Pop() interface{} {
+	old := *t
+	n := len(old)
+	x := old[n-1]
+	*t = old[0 : n-1]
+	return x
+}
+
 // getBlockPrices calculates the lowest transaction gas price in a given block
 // and sends it to the result channel. If the block is empty or all transactions
 // are sent by the miner itself(it doesn't make any sense to include this kind of
 // transaction prices for sampling), nil gasprice is returned.
-func (gpo *Oracle) getBlockPrices(ctx context.Context, signer *types.Signer, blockNum uint64, limit int, result chan getBlockPricesResult, quit chan struct{}) {
+func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int, s *sortingHeap) {
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if block == nil {
-		select {
-		case result <- getBlockPricesResult{nil, err}:
-		case <-quit:
-		}
 		return
 	}
 	blockTxs := block.Transactions()
-	txs := make([]types.Transaction, len(blockTxs))
+	txs := make(transactionsByGasPrice, len(blockTxs))
 	copy(txs, blockTxs)
-	sort.Sort(transactionsByGasPrice(txs))
+	heap.Init(&txs)
 
-	var prices []*big.Int
-	for _, tx := range txs {
-		sender, err := tx.Sender(*signer)
+	for txs.Len() > 0 {
+		tx := heap.Pop(&txs).(types.Transaction)
+		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
-			prices = append(prices, tx.GetPrice().ToBig())
-			if len(prices) >= limit {
+			heap.Push(s, tx.GetPrice())
+			if s.Len() >= limit {
 				break
 			}
 		}
 	}
-	select {
-	case result <- getBlockPricesResult{prices, nil}:
-	case <-quit:
-	}
 }
 
-type bigIntArray []*big.Int
+type sortingHeap []*uint256.Int
 
-func (s bigIntArray) Len() int           { return len(s) }
-func (s bigIntArray) Less(i, j int) bool { return s[i].Cmp(s[j]) < 0 }
-func (s bigIntArray) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s sortingHeap) Len() int           { return len(s) }
+func (s sortingHeap) Less(i, j int) bool { return s[i].Lt(s[j]) }
+func (s sortingHeap) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+// Push (part of heap.Interface) places a new link onto the end of queue
+func (s *sortingHeap) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	l := x.(*uint256.Int)
+	*s = append(*s, l)
+}
+
+// Pop (part of heap.Interface) removes the first link from the queue
+func (s *sortingHeap) Pop() interface{} {
+	old := *s
+	n := len(old)
+	x := old[n-1]
+	*s = old[0 : n-1]
+	return x
+}
