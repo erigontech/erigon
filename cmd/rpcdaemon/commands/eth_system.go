@@ -122,7 +122,7 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
