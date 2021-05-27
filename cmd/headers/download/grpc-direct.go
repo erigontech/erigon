@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
@@ -18,18 +19,29 @@ type SentryClient interface {
 
 type SentryClientRemote struct {
 	proto_sentry.SentryClient
+	sync.RWMutex
 	protocol uint
 }
 
 // NewSentryClientRemote - app code must use this class
 // to avoid concurrency - it accepts protocol (which received async by SetStatus) in constructor,
 // means app can't use client which protocol unknown yet
-func NewSentryClientRemote(protocol uint, client proto_sentry.SentryClient) *SentryClientRemote {
-	return &SentryClientRemote{SentryClient: client, protocol: protocol}
+func NewSentryClientRemote(client proto_sentry.SentryClient) *SentryClientRemote {
+	return &SentryClientRemote{SentryClient: client}
 }
 
-func (c *SentryClientRemote) Protocol() uint {
-	return c.protocol
+func (c *SentryClientRemote) Protocol() uint { return c.protocol }
+
+func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	reply, err := c.SentryClient.SetStatus(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Lock()
+	defer c.Unlock()
+	c.protocol = uint(reply.Protocol)
+	return reply, nil
 }
 
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
@@ -48,6 +60,8 @@ type SentryClientDirect struct {
 func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer) *SentryClientDirect {
 	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
+
+func (scd *SentryClientDirect) Protocol() uint { return scd.protocol }
 
 func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	return scd.server.PenalizePeer(ctx, in)
@@ -73,7 +87,7 @@ func (scd *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_s
 	return scd.server.SendMessageToAll(ctx, in)
 }
 
-func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
 	return scd.server.SetStatus(ctx, in)
 }
 

@@ -138,7 +138,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 	)
 }
 
-func SetSentryStatus(ctx context.Context, sentries []proto_sentry.SentryClient, controlServer *ControlServerImpl) error {
+func SetSentryStatus(ctx context.Context, sentries []SentryClient, controlServer *ControlServerImpl) error {
 	for i := range sentries {
 		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true)); err != nil {
 			return err
@@ -219,7 +219,7 @@ type ControlServerImpl struct {
 	hd              *headerdownload.HeaderDownload
 	bd              *bodydownload.BodyDownload
 	nodeName        string
-	sentries        []proto_sentry.SentryClient
+	sentries        []SentryClient
 	headHeight      uint64
 	headHash        common.Hash
 	headTd          *uint256.Int
@@ -232,7 +232,7 @@ type ControlServerImpl struct {
 	engine          consensus.Engine
 }
 
-func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */

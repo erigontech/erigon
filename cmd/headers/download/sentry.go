@@ -474,6 +474,10 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string, 
 		p2pListenAddr:   p2pListenAddr,
 	}
 
+	if protocol != eth.ETH65 && protocol != eth.ETH66 {
+		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
+	}
+
 	ss.Protocol = p2p.Protocol{
 		Name:           eth.ProtocolName,
 		Version:        protocol,
@@ -817,27 +821,35 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*emptypb.Empty, error) {
+func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
+	reply := &proto_sentry.SetStatusReply{}
+	switch ss.Protocol.Version {
+	case eth.ETH66:
+		reply.Protocol = proto_sentry.Protocol_ETH66
+	case eth.ETH65:
+		reply.Protocol = proto_sentry.Protocol_ETH65
+	}
+
 	init := ss.statusData == nil
 	if init {
 		var err error
 		ss.P2pServer, err = p2pServer(ss.ctx, ss.datadir, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
-			return &empty.Empty{}, err
+			return reply, err
 		}
 		// Add protocol
 		if err := ss.P2pServer.Start(); err != nil {
-			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
+			return reply, fmt.Errorf("could not start server: %w", err)
 		}
 	}
 	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
-	return &empty.Empty{}, nil
+	return reply, nil
 }
 
 func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {

@@ -9,6 +9,7 @@ import (
 	"math/rand"
 
 	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/ledgerwatch/erigon/cmd/headers/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -21,12 +22,12 @@ import (
 
 type TxPoolServer struct {
 	ctx       context.Context
-	sentries  []proto_sentry.SentryClient
+	sentries  []download.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(ctx context.Context, sentries []proto_sentry.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(ctx context.Context, sentries []download.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		ctx:      ctx,
 		sentries: sentries,

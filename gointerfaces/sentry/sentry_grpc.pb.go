@@ -3,12 +3,11 @@
 package sentry
 
 import (
-	"context"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -26,7 +25,7 @@ type SentryClient interface {
 	SendMessageById(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToRandomPeers(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error)
-	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveMessagesClient, error)
 	ReceiveUploadMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveUploadMessagesClient, error)
 	ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveTxMessagesClient, error)
@@ -94,8 +93,8 @@ func (c *sentryClient) SendMessageToAll(ctx context.Context, in *OutboundMessage
 	return out, nil
 }
 
-func (c *sentryClient) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
+func (c *sentryClient) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
+	out := new(SetStatusReply)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/SetStatus", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -209,7 +208,7 @@ type SentryServer interface {
 	SendMessageById(context.Context, *SendMessageByIdRequest) (*SentPeers, error)
 	SendMessageToRandomPeers(context.Context, *SendMessageToRandomPeersRequest) (*SentPeers, error)
 	SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error)
-	SetStatus(context.Context, *StatusData) (*emptypb.Empty, error)
+	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error
 	ReceiveUploadMessages(*emptypb.Empty, Sentry_ReceiveUploadMessagesServer) error
 	ReceiveTxMessages(*emptypb.Empty, Sentry_ReceiveTxMessagesServer) error
@@ -238,7 +237,7 @@ func (UnimplementedSentryServer) SendMessageToRandomPeers(context.Context, *Send
 func (UnimplementedSentryServer) SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessageToAll not implemented")
 }
-func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*emptypb.Empty, error) {
+func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*SetStatusReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
 }
 func (UnimplementedSentryServer) ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error {
