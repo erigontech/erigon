@@ -163,23 +163,23 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                         |         | newPendingTransaction                      |
 | eth_unsubscribe                         | Yes     | Websock Only                               |
 |                                         |         |                                            |
-| debug_accountRange                      | Yes     | Private Erigon debug module            |
-| debug_accountAt                         | Yes     | Private Erigon debug module            |
+| debug_accountRange                      | Yes     | Private Erigon debug module                |
+| debug_accountAt                         | Yes     | Private Erigon debug module                |
 | debug_getModifiedAccountsByNumber       | Yes     |                                            |
 | debug_getModifiedAccountsByHash         | Yes     |                                            |
 | debug_storageRangeAt                    | Yes     |                                            |
-| debug_traceTransaction                  | Yes     |                                            |
-| debug_traceCall                         | Yes     |                                            |
+| debug_traceTransaction                  | Yes     | Streaming (can handle huge results)        |
+| debug_traceCall                         | Yes     | Streaming (can handle huge results)        |
 |                                         |         |                                            |
 | trace_call                              | Yes     |                                            |
 | trace_callMany                          | Yes     |                                            |
 | trace_rawTransaction                    | -       | not yet implemented (come help!)           |
 | trace_replayBlockTransactions           | -       | not yet implemented (come help!)           |
 | trace_replayTransaction                 | -       | not yet implemented (come help!)           |
-| trace_block                             | Limited | working - has known issues                 |
-| trace_filter                            | Limited | working - has known issues                 |
-| trace_get                               | Limited | working - has known issues                 |
-| trace_transaction                       | Limited | working - has known issues                 |
+| trace_block                             | Yes     |                                            |
+| trace_filter                            | Yes     | no pagination, but streaming               |
+| trace_get                               | Yes     |                                            |
+| trace_transaction                       | Yes     |                                            |
 |                                         |         |                                            |
 | eth_getCompilers                        | No      | deprecated                                 |
 | eth_compileLLL                          | No      | deprecated                                 |
