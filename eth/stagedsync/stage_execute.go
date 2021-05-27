@@ -276,13 +276,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		defer traceCursor.Close()
 	}
 
-	var tevmCursor ethdb.RwCursorDupSort
+	var tevmStatusCursor ethdb.RwCursorDupSort
 	if cfg.writeTEVM {
 		var err error
-		if traceCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
-			return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
+		if tevmStatusCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
+			return fmt.Errorf("%s: failed to create cursor for TEVM status: %v", logPrefix, err)
 		}
-		defer tevmCursor.Close()
+		defer tevmStatusCursor.Close()
 	}
 
 	useSilkworm := cfg.silkwormExecutionFunc != nil
@@ -367,11 +367,11 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 					copy(h[:], hash[:])
 
 					if i == 0 {
-						if err = tevmCursor.Append(blockNumEnc[:], h[:]); err != nil {
+						if err = tevmStatusCursor.Append(blockNumEnc[:], h[:]); err != nil {
 							return err
 						}
 					} else {
-						if err = tevmCursor.AppendDup(blockNumEnc[:], h[:]); err != nil {
+						if err = tevmStatusCursor.AppendDup(blockNumEnc[:], h[:]); err != nil {
 							return err
 						}
 					}
@@ -413,7 +413,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 					}
 				}
 				if cfg.writeTEVM {
-					if tevmCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
+					if tevmStatusCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
 						return fmt.Errorf("%s: failed to create cursor for tevm statuses: %v", logPrefix, err)
 					}
 				}
@@ -676,17 +676,17 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 
 	if cfg.writeTEVM {
 		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-		c, err := tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket)
+		tevmStatusCursor, err := tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket)
 		if err != nil {
 			return err
 		}
-		defer c.Close()
+		defer tevmStatusCursor.Close()
 
-		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+		for k, _, err := tevmStatusCursor.Seek(keyStart); k != nil; k, _, err = tevmStatusCursor.NextNoDup() {
 			if err != nil {
 				return err
 			}
-			err = c.DeleteCurrentDuplicates()
+			err = tevmStatusCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return err
 			}
