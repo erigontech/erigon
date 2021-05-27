@@ -28,8 +28,8 @@ import (
 func analyzeBlock(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	contract := ctx.contract
 	blockInfo := NewBlockInfo(pc)
-	if (int64(pc) == -1) {
-		contract.preInfo = blockInfo
+	if (int64(pc) == -1) {				// before entry to first block
+		contract.initInfo = blockInfo	// set initial block
 		pc++
 	} else {
 		contract.opsInfo[pc] = blockInfo

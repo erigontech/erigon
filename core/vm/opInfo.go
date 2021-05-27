@@ -73,10 +73,10 @@ func getBlockInfo(ctx *callCtx, pc uint64) (*BlockInfo, error) {
 	if contract.opsInfo == nil {
         contract.opsInfo = make([]OpInfo, len(contract.Code), len(contract.Code))
 		info, err := analyzeBlock(ctx, 0)
-		contract.preInfo = info
+		contract.initInfo = info
 		return info, err
 	} else if (int64(pc) == -1) {
-		return contract.preInfo, nil
+		return contract.initInfo, nil
 	} else if contract.opsInfo[pc] != nil {
 		return contract.opsInfo[pc].(*BlockInfo), nil
 	}

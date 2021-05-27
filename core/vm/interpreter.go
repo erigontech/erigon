@@ -63,11 +63,11 @@ type Interpreter interface {
 // callCtx contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type callCtx struct {
-	code        []byte
 	memory		*Memory
 	stack		*stack.Stack
 	contract	*Contract
 	interpreter *EVMInterpreter
+	code        []byte
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -177,7 +177,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
     callContext.code = make([]byte, len(contract.Code)+32)
     copy(callContext.code, contract.Code)
-	 
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
@@ -196,12 +195,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		return nil, err
 	}
 	for {
-	    o := contract.Code[pc]
-		op := OpCode(o)
-	    if op == NOOP { continue }
+		op := OpCode(callContext.code[pc])
 
 		// none of these bare ops can resize memory or use dynamic gas
 		switch op {
+		case NOOP:
+		    for pc++; OpCode(callContext.code[pc]) == NOOP; pc++ {}
+		    continue
 		case ADD:
 			x, y := locStack.Pop(), locStack.Peek()
 			y.Add(&x, y)
@@ -379,9 +379,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil {
 				return nil, err
 			}
-			
-		case NOOP:
-            
+			            
 		default:
 			operation, err := runGasMemory(in, op, contract, locStack, mem)
 			if err != nil {
