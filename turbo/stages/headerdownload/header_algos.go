@@ -145,20 +145,8 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	// var prevLink *Link
 	for link != nil && !link.preverified {
 		link.preverified = true
-		// if prevLink != nil && len(link.next) > 1 {
-		// 	// Remove all non-canonical links
-		// 	var toRemove []*Link
-		// 	for _, n := range link.next {
-		// 		if n != prevLink {
-		// 			toRemove = append(toRemove, n)
-		// 		}
-		// 	}
-		// 	hd.removeUpwards(toRemove)
-		// 	link.next = append(link.next[:0], prevLink)
-		// }
 		link = hd.links[link.header.ParentHash]
 	}
 }
@@ -168,24 +156,23 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	// Find attachment link again
 	linkHeader := segment.Headers[end-1]
 	attachmentLink, attaching := hd.getLink(linkHeader.ParentHash)
-	if attaching {
-		if attachmentLink.preverified && len(attachmentLink.next) > 0 {
-			return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
-		}
-		// Iterate over headers backwards (from parents towards children)
-		prevLink := attachmentLink
-		for i := end - 1; i >= start; i-- {
-			header := segment.Headers[i]
-			link := hd.addHeaderAsLink(header, false /* persisted */)
-			prevLink.next = append(prevLink.next, link)
-			prevLink = link
-			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
-				hd.markPreverified(link)
-			}
-		}
-	} else {
+	if !attaching {
 		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
 	}
+	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
+		return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
+	}
+	// Iterate over headers backwards (from parents towards children)
+	prevLink := attachmentLink
+	for i := end - 1; i >= start; i-- {
+		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
+		prevLink.next = append(prevLink.next, link)
+		prevLink = link
+		if _, ok := hd.preverifiedHashes[link.hash]; ok {
+			hd.markPreverified(link)
+		}
+	}
+
 	if attachmentLink.persisted {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
@@ -226,8 +213,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 		// Add all headers in the segments as links to this anchor
 		var prevLink *Link
 		for i := end - 1; i >= start; i-- {
-			header := segment.Headers[i]
-			link := hd.addHeaderAsLink(header, false /* pesisted */)
+			link := hd.addHeaderAsLink(segment.Headers[i], false /* pesisted */)
 			if prevLink == nil {
 				newAnchor.links = append(newAnchor.links, link)
 			} else {
@@ -235,7 +221,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 			}
 			prevLink = link
 			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+				if _, ok := hd.preverifiedHashes[link.hash]; ok {
 					hd.markPreverified(link)
 				}
 			}
@@ -279,12 +265,11 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
-		header := segment.Headers[i]
-		link := hd.addHeaderAsLink(header, false /* persisted */)
+		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
 		if !anchorPreverified {
-			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+			if _, ok := hd.preverifiedHashes[link.hash]; ok {
 				hd.markPreverified(link)
 			}
 		}
@@ -335,7 +320,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerI
 			prevLink.next = append(prevLink.next, link)
 		}
 		prevLink = link
-		if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
+		if _, ok := hd.preverifiedHashes[link.hash]; ok {
 			hd.markPreverified(link)
 		}
 	}
@@ -594,6 +579,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			heap.Remove(hd.linkQueue, link.idx)
 		}
 		if skip {
+			delete(hd.links, link.hash)
 			continue
 		}
 		if err := hf(link.header, link.blockHeight); err != nil {
