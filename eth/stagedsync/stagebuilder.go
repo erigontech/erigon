@@ -55,7 +55,7 @@ type StageParameters struct {
 
 	snapshotsDir    string
 	btClient        *snapshotsync.Client
-	SnapshotBuilder *snapshotsync.SnapshotMigrator
+	SnapshotBuilder *snapshotsync.SnapshotMigrator2
 	Accumulator     *shards.Accumulator // State change accumulator
 }
 

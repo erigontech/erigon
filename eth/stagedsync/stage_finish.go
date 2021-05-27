@@ -24,7 +24,7 @@ func StageFinishCfg(db ethdb.RwKV, tmpDir string) FinishCfg {
 	}
 }
 
-func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator2) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -45,9 +45,18 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapsh
 		return nil
 	}
 
-	err = MigrateSnapshot(executionAt, tx, cfg.db, btClient, snBuilder)
-	if err != nil {
-		return err
+	if snBuilder!=nil && useExternalTx {
+		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
+		err= snBuilder.AsyncStages(snBlock, cfg.db, tx, btClient, true)
+		if err!=nil {
+			return err
+		}
+		if snBuilder.Replaced() {
+			err= snBuilder.SyncStages(snBlock, cfg.db, tx)
+			if err!=nil {
+				return err
+			}
+		}
 	}
 	err = s.DoneAndUpdate(tx, executionAt)
 	if err != nil {
@@ -110,13 +119,4 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync, unwindTo uint6
 		notifier.OnNewHeader(header)
 	}
 	return nil
-}
-
-func MigrateSnapshot(to uint64, tx ethdb.RwTx, db ethdb.RwKV, btClient *snapshotsync.Client, mg *snapshotsync.SnapshotMigrator) error {
-	if mg == nil {
-		return nil
-	}
-
-	snBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
-	return mg.Migrate(db, tx, snBlock, btClient)
 }
