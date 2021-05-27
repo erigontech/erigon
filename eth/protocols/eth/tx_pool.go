@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/ledgerwatch/erigon/cmd/headers/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -18,17 +17,18 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/remote"
 	"google.golang.org/grpc"
 )
 
 type TxPoolServer struct {
 	ctx       context.Context
-	Sentries  []download.SentryClient
+	Sentries  []remote.SentryClient
 	txPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
-func NewTxPoolServer(ctx context.Context, sentries []download.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
+func NewTxPoolServer(ctx context.Context, sentries []remote.SentryClient, txPool *core.TxPool) (*TxPoolServer, error) {
 	cs := &TxPoolServer{
 		ctx:      ctx,
 		Sentries: sentries,
@@ -38,7 +38,7 @@ func NewTxPoolServer(ctx context.Context, sentries []download.SentryClient, txPo
 	return cs, nil
 }
 
-func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding newPooledTransactionHashes66: %v, data: %x", err, inreq.Data)
@@ -46,7 +46,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes66(ctx context.Context, inreq 
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	var query NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding newPooledTransactionHashes65: %v, data: %x", err, inreq.Data)
@@ -54,7 +54,7 @@ func (tp *TxPoolServer) newPooledTransactionHashes65(ctx context.Context, inreq 
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
 
-func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	txs := &PooledTransactionsPacket66{}
 	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
 		return fmt.Errorf("decoding pooledTransactions66: %v, data: %x", err, inreq.Data)
@@ -63,7 +63,7 @@ func (tp *TxPoolServer) pooledTransactions66(ctx context.Context, inreq *proto_s
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), txs.PooledTransactionsPacket, true)
 }
 
-func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	txs := &PooledTransactionsPacket{}
 	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
 		return fmt.Errorf("decoding pooledTransactions65: %v, data: %x", err, inreq.Data)
@@ -72,11 +72,11 @@ func (tp *TxPoolServer) pooledTransactions65(ctx context.Context, inreq *proto_s
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), *txs, true)
 }
 
-func (tp *TxPoolServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	return tp.transactions65(ctx, inreq, sentry)
 }
 
-func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -87,7 +87,7 @@ func (tp *TxPoolServer) transactions65(ctx context.Context, inreq *proto_sentry.
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
 
-func (tp *TxPoolServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -115,7 +115,7 @@ func (tp *TxPoolServer) getPooledTransactions66(ctx context.Context, inreq *prot
 	return nil
 }
 
-func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	if tp.txPool == nil {
 		return nil
 	}
@@ -145,7 +145,7 @@ func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashe
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
-		protocol, ok := tp.sentries[i].Protocol()
+		protocol, ok := tp.Sentries[i].Protocol()
 		if !ok {
 			continue
 		}
@@ -163,7 +163,7 @@ func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashe
 				}
 			}
 
-			sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
+			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
 			if err1 != nil {
 				log.Error("Could not send get pooled tx request", "err", err1)
 				continue
@@ -216,7 +216,7 @@ func (tp *TxPoolServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	}
 }
 
-func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error {
+func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	switch inreq.Id {
 
 	// ==== eth 65 ====
@@ -246,8 +246,8 @@ func (tp *TxPoolServer) HandleInboundMessage(ctx context.Context, inreq *proto_s
 // RecvTxMessage
 // wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
 func RecvTxMessage(ctx context.Context,
-	sentry download.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry download.SentryClient) error,
+	sentry remote.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
 	streamCtx, cancel := context.WithCancel(ctx)

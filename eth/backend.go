@@ -60,6 +60,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
@@ -111,7 +112,7 @@ type Ethereum struct {
 	downloadServer       *download.ControlServerImpl
 	sentryServers        []*download.SentryServerImpl
 	txPoolP2PServer      *eth.TxPoolServer
-	sentries             []download.SentryClient
+	sentries             []remote.SentryClient
 	stagedSync2          *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
@@ -185,7 +186,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		sentries:             []download.SentryClient{},
+		sentries:             []remote.SentryClient{},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -385,9 +386,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66),
 				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65),
 			)
-			backend.sentries = []download.SentryClient{
-				download.NewSentryClientDirect(eth.ETH66, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)),
-				download.NewSentryClientDirect(eth.ETH65, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)),
+			backend.sentries = []remote.SentryClient{
+				remote.NewSentryClientDirect(eth.ETH66, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)),
+				remote.NewSentryClientDirect(eth.ETH65, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)),
 			}
 		}
 		blockDownloaderWindow := 65536
