@@ -95,12 +95,12 @@ const (
 	//TEVMCodeStatusBucket -
 	//key - encoded timestamp(block number)
 	//value - contract codes hashes: [code_hash1]+[code_hash2]
-	ContractTEVMCodeStatusBucket = "TEVM-code-status"
+	ContractTEVMCodeStatusBucket = "TEVMCodeStatus"
 
 	//TEVMCodeBucket -
 	//key - contract code hash
 	//value - contract EVTM code
-	ContractTEVMCodeBucket = "TEVM-code"
+	ContractTEVMCodeBucket = "TEVMCode"
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket
