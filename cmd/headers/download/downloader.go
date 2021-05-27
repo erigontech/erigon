@@ -227,21 +227,20 @@ func NewStagedSync(
 }
 
 type ControlServerImpl struct {
-	lock            sync.RWMutex
-	hd              *headerdownload.HeaderDownload
-	bd              *bodydownload.BodyDownload
-	nodeName        string
-	sentries        []remote.SentryClient
-	headHeight      uint64
-	headHash        common.Hash
-	headTd          *uint256.Int
-	chainConfig     *params.ChainConfig
-	forks           []uint64
-	genesisHash     common.Hash
-	protocolVersion uint32
-	networkId       uint64
-	db              ethdb.RwKV
-	engine          consensus.Engine
+	lock        sync.RWMutex
+	hd          *headerdownload.HeaderDownload
+	bd          *bodydownload.BodyDownload
+	nodeName    string
+	sentries    []remote.SentryClient
+	headHeight  uint64
+	headHash    common.Hash
+	headTd      *uint256.Int
+	chainConfig *params.ChainConfig
+	forks       []uint64
+	genesisHash common.Hash
+	networkId   uint64
+	db          ethdb.RwKV
+	engine      consensus.Engine
 }
 
 func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
@@ -269,7 +268,6 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = genesisHash
-	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = networkID
 	var err error
 	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
