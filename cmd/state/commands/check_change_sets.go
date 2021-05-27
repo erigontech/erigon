@@ -64,7 +64,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		interruptCh <- true
 	}()
 
-	chainDb := ethdb.MustOpen(chaindata)
+	kv, err := ethdb.NewMDBX().Path(chaindata).Open()
+	if err != nil {
+		return err
+	}
+	chainDb := ethdb.NewObjectDatabase(kv)
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
