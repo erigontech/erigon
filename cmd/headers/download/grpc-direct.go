@@ -67,7 +67,7 @@ func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer
 	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
-func (scd *SentryClientDirect) Protocol() uint { return scd.protocol, true }
+func (scd *SentryClientDirect) Protocol() (uint, bool) { return scd.protocol, true }
 
 func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	return scd.server.PenalizePeer(ctx, in)
