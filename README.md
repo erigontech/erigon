@@ -91,7 +91,7 @@ Support only remote-miners.
 
 ### Windows
 
-Windows users may run erigon in 3 possible ways:
+Windows users may run erigon in 2 possible ways:
 
 * Build executable binaries natively for Windows using provided `win-build.ps1` PowerShell script which has to be run with local Administrator privileges.
   The script creates `libmdbx.dll` (MDBX is current default database for Erigon) and copies it into Windows's `system32` folder (generally `C:\Windows\system32`).
@@ -99,20 +99,7 @@ Windows users may run erigon in 3 possible ways:
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
-* Use WSL (Windows Subsystem for Linux) : You can easily install WSL following [this quickstart guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10). Is also suggested the reading of [interoperability amongst Windows and Linux](https://docs.microsoft.com/en-us/windows/wsl/interop) work. Once your WSL environment is ready with your preferred Kernel distribution (for this document we assume you've choosen Ubuntu) proceed to install (in the linux subsystem) the required components:
-
-```sh
-> sudo apt install build-essential git golang golang-go
-```
-
-Once this last step is completed you can run erigon as if you were on Linux as described the [Usage](#usage) section.
-
-**Note** : WSL native filesystem is set to reside in the same partition of Windows' system partition (usually C:). Unless this is the only partition of your system is advisable to have Erigon store its data in a different partition. Say your Windows system has a secondary partition D: WSL environment _sees_ this partition as `/mnt/d`so to have Erigon store its data there you will have to launch Erigon as
-
-```sh
-> ./erigon --datadir /mnt/d/[<optional-subfolder>/]
-```
-
+Note that we used to have documentation about using WSL to build Erigon on Windows, which is now removed. This is because we do not consider WSL builds safe when interacting with our database backend - there is a chance of losing data and corrupting database.
 
 Key features
 ============ 
