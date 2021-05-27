@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -32,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/spf13/cobra"
 )
 
@@ -821,7 +821,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 		panic(err)
 	}
 
-	txPoolP2PServer, err := eth.NewTxPoolServer(context.Background(), nil, txPool)
+	txPoolP2PServer, err := txpool.NewP2PServer(context.Background(), nil, txPool)
 	if err != nil {
 		panic(err)
 	}

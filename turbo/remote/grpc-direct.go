@@ -2,9 +2,11 @@ package remote
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 
@@ -34,18 +36,30 @@ func NewSentryClientRemote(client proto_sentry.SentryClient) *SentryClientRemote
 func (c *SentryClientRemote) Protocol() (uint, bool) {
 	c.RLock()
 	defer c.RUnlock()
+	fmt.Printf("3?\n")
+
 	return c.protocol, c.protocolIsSet
 }
 
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	fmt.Printf("1?\n")
+
 	reply, err := c.SentryClient.SetStatus(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("2?\n")
 
 	c.Lock()
 	defer c.Unlock()
-	c.protocol = uint(reply.Protocol)
+	switch reply.Protocol {
+	case proto_sentry.Protocol_ETH65:
+		c.protocol = eth.ETH65
+	case proto_sentry.Protocol_ETH66:
+		c.protocol = eth.ETH66
+	default:
+		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
+	}
 	c.protocolIsSet = true
 	return reply, nil
 }

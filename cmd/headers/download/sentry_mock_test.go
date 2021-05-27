@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -150,7 +151,7 @@ func mock(t *testing.T) *MockSentry {
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
 	txPool := core.NewTxPool(txPoolConfig, mock.chainConfig, ethdb.NewObjectDatabase(mock.db), txCacher)
-	txPoolP2PServer, err := eth.NewTxPoolServer(mock.ctx, []remote.SentryClient{
+	txPoolP2PServer, err := txpool.NewP2PServer(mock.ctx, []remote.SentryClient{
 		remote.NewSentryClientDirect(eth.ETH66, mock),
 	}, txPool)
 	if err != nil {
@@ -231,7 +232,7 @@ func mock(t *testing.T) *MockSentry {
 		stagedsync.StageTxLookupCfg(db, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			mock.streamWg.Add(1)
-			go eth.RecvTxMessage(mock.ctx, mock.sentryClient, txPoolP2PServer.HandleInboundMessage, &mock.receiveWg)
+			go txpool.RecvTxMessage(mock.ctx, mock.sentryClient, txPoolP2PServer.HandleInboundMessage, &mock.receiveWg)
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),

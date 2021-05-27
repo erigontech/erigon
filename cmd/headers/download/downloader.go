@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
@@ -166,7 +167,7 @@ func NewStagedSync(
 	controlServer *ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	txPoolServer *eth.TxPoolServer,
+	txPoolServer *txpool.P2PServer,
 ) (*stagedsync.StagedSync, error) {
 	var pruningDistance uint64
 	if !sm.History {
@@ -218,7 +219,7 @@ func NewStagedSync(
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for _, s := range txPoolServer.Sentries {
-				go eth.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

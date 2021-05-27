@@ -63,6 +63,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -111,7 +112,7 @@ type Ethereum struct {
 	downloadV2Cancel     context.CancelFunc
 	downloadServer       *download.ControlServerImpl
 	sentryServers        []*download.SentryServerImpl
-	txPoolP2PServer      *eth.TxPoolServer
+	txPoolP2PServer      *txpool.P2PServer
 	sentries             []remote.SentryClient
 	stagedSync2          *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
@@ -390,11 +391,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err != nil {
 			return nil, err
 		}
-		backend.txPoolP2PServer, err = eth.NewTxPoolServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
+		backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
 		if err != nil {
 			return nil, err
 		}
-
 		go func() { //todo: 1 goroutine for each sentry to unblock others if first unavailable
 			if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
 				log.Error("set sentry status", "err", err)
