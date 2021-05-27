@@ -44,6 +44,7 @@ geth: mdbx
 
 erigon: go-version mdbx
 	@echo "Building Erigon"
+	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."

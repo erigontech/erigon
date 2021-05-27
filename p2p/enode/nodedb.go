@@ -63,7 +63,7 @@ const (
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 9
 
-	useMDBX = false
+	useMDBX = true
 )
 
 var (
