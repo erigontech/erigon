@@ -14,13 +14,14 @@ import (
 
 type SentryClient interface {
 	proto_sentry.SentryClient
-	Protocol() uint
+	Protocol() (uint, bool)
 }
 
 type SentryClientRemote struct {
 	proto_sentry.SentryClient
 	sync.RWMutex
-	protocol uint
+	protocol      uint
+	protocolIsSet bool
 }
 
 // NewSentryClientRemote - app code must use this class
@@ -30,7 +31,11 @@ func NewSentryClientRemote(client proto_sentry.SentryClient) *SentryClientRemote
 	return &SentryClientRemote{SentryClient: client}
 }
 
-func (c *SentryClientRemote) Protocol() uint { return c.protocol }
+func (c *SentryClientRemote) Protocol() (uint, bool) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.protocol, c.protocolIsSet
+}
 
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
 	reply, err := c.SentryClient.SetStatus(ctx, in)
@@ -41,6 +46,7 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 	c.Lock()
 	defer c.Unlock()
 	c.protocol = uint(reply.Protocol)
+	c.protocolIsSet = true
 	return reply, nil
 }
 
@@ -61,7 +67,7 @@ func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer
 	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
-func (scd *SentryClientDirect) Protocol() uint { return scd.protocol }
+func (scd *SentryClientDirect) Protocol() uint { return scd.protocol, true }
 
 func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	return scd.server.PenalizePeer(ctx, in)

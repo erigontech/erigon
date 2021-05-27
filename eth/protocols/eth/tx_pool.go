@@ -144,31 +144,65 @@ func (tp *TxPoolServer) getPooledTransactions65(ctx context.Context, inreq *prot
 }
 
 func (tp *TxPoolServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	bytes, err := rlp.EncodeToBytes(&GetPooledTransactionsPacket66{
-		RequestId:                   rand.Uint64(), //nolint:gosec
-		GetPooledTransactionsPacket: hashes,
-	})
-	if err != nil {
-		log.Error("Could not send transactions request", "err", err)
-		return nil
-	}
-
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-		Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: bytes},
-	}
+	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
-		sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send get pooled tx request", "err", err1)
+		protocol, ok := tp.sentries[i].Protocol()
+		if !ok {
 			continue
 		}
-		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			continue
+		if protocol == ETH65 {
+			if outreq65 == nil {
+				data65, err := rlp.EncodeToBytes(GetPooledTransactionsPacket(hashes))
+				if err != nil {
+					log.Error("Could not send transactions request", "err", err)
+					return nil
+				}
+
+				outreq65 = &proto_sentry.SendMessageByIdRequest{
+					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65, Data: data65},
+				}
+			}
+
+			sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
+			if err1 != nil {
+				log.Error("Could not send get pooled tx request", "err", err1)
+				continue
+			}
+			if sentPeers == nil || len(sentPeers.Peers) == 0 {
+				continue
+			}
+			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 		}
-		return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+		if protocol == ETH66 {
+			if outreq66 == nil {
+				data66, err := rlp.EncodeToBytes(&GetPooledTransactionsPacket66{
+					RequestId:                   rand.Uint64(), //nolint:gosec
+					GetPooledTransactionsPacket: hashes,
+				})
+				if err != nil {
+					log.Error("Could not send transactions request", "err", err)
+					return nil
+				}
+
+				outreq66 = &proto_sentry.SendMessageByIdRequest{
+					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: data66},
+				}
+			}
+
+			sentPeers, err1 := tp.sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{})
+			if err1 != nil {
+				log.Error("Could not send get pooled tx request", "err", err1)
+				continue
+			}
+			if sentPeers == nil || len(sentPeers.Peers) == 0 {
+				continue
+			}
+			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+		}
 	}
 	return nil
 }
