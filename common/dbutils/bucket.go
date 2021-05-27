@@ -95,12 +95,12 @@ const (
 	//TEVMCodeStatusBucket -
 	//key - encoded timestamp(block number)
 	//value - contract codes hashes: [code_hash1]+[code_hash2]
-	ContractTEVMCodeStatusBucket = "TEVM-code-status"
+	ContractTEVMCodeStatusBucket = "TEVMCodeStatus"
 
 	//TEVMCodeBucket -
 	//key - contract code hash
 	//value - contract EVTM code
-	ContractTEVMCodeBucket = "TEVM-code"
+	ContractTEVMCodeBucket = "TEVMCode"
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket
@@ -229,57 +229,55 @@ const (
 )
 
 var Rename = map[string]string{
-	PlainStateBucket:             "PlainState",
-	PlainContractCodeBucket:      "PlainCodeHash",
-	AccountChangeSetBucket:       "AccountChangeSet",
-	StorageChangeSetBucket:       "StorageChangeSet",
-	HashedAccountsBucket:         "HashedAccount",
-	HashedStorageBucket:          "HashedStorage",
-	AccountsHistoryBucket:        "AccountHistory",
-	StorageHistoryBucket:         "StorageHistory",
-	CodeBucket:                   "Code",
-	ContractCodeBucket:           "HashedCodeHash",
-	IncarnationMapBucket:         "IncarnationMap",
-	TrieOfAccountsBucket:         "TrieAccount",
-	TrieOfStorageBucket:          "TrieStorage",
-	DatabaseInfoBucket:           "DbInfo",
-	SnapshotInfoBucket:           "SnapshotInfo",
-	BittorrentInfoBucket:         "BittorrentInfo",
-	HeadersSnapshotInfoBucket:    "HeadersSnapshotInfo",
-	BodiesSnapshotInfoBucket:     "BodiesSnapshotInfo",
-	StateSnapshotInfoBucket:      "StateSnapshotInfo",
-	HeaderNumberBucket:           "HeaderNumber",
-	HeaderCanonicalBucket:        "CanonicalHeader",
-	HeadersBucket:                "Header",
-	HeaderTDBucket:               "HeadersTotalDifficulty",
-	BlockBodyPrefix:              "BlockBody",
-	EthTx:                        "BlockTransaction",
-	BlockReceiptsPrefix:          "Receipt",
-	Log:                          "TransactionLog",
-	LogTopicIndex:                "LogTopicIndex",
-	LogAddressIndex:              "LogAddressIndex",
-	CallTraceSet:                 "CallTraceSet",
-	CallFromIndex:                "CallFromIndex",
-	CallToIndex:                  "CallToIndex",
-	TxLookupPrefix:               "BlockTransactionLookup",
-	BloomBitsPrefix:              "BloomBits",
-	PreimagePrefix:               "Preimage",
-	ConfigPrefix:                 "Config",
-	BloomBitsIndexPrefix:         "BloomBitsIndex",
-	SyncStageProgress:            "SyncStage",
-	SyncStageUnwind:              "SyncStageUnwind",
-	CliqueBucket:                 "Clique",
-	CliqueSeparateBucket:         "CliqueSeparate",
-	CliqueSnapshotBucket:         "CliqueSnapshot",
-	CliqueLastSnapshotBucket:     "CliqueLastSnapshot",
-	InodesBucket:                 "Inode",
-	Senders:                      "TxSender",
-	HeadBlockKey:                 "LastBlock",
-	Migrations:                   "Migration",
-	Sequence:                     "Sequence",
-	HeadHeaderKey:                "LastHeader",
-	ContractTEVMCodeStatusBucket: "TEVMCodeStatus",
-	ContractTEVMCodeBucket:       "TEVMCode",
+	PlainStateBucket:          "PlainState",
+	PlainContractCodeBucket:   "PlainCodeHash",
+	AccountChangeSetBucket:    "AccountChangeSet",
+	StorageChangeSetBucket:    "StorageChangeSet",
+	HashedAccountsBucket:      "HashedAccount",
+	HashedStorageBucket:       "HashedStorage",
+	AccountsHistoryBucket:     "AccountHistory",
+	StorageHistoryBucket:      "StorageHistory",
+	CodeBucket:                "Code",
+	ContractCodeBucket:        "HashedCodeHash",
+	IncarnationMapBucket:      "IncarnationMap",
+	TrieOfAccountsBucket:      "TrieAccount",
+	TrieOfStorageBucket:       "TrieStorage",
+	DatabaseInfoBucket:        "DbInfo",
+	SnapshotInfoBucket:        "SnapshotInfo",
+	BittorrentInfoBucket:      "BittorrentInfo",
+	HeadersSnapshotInfoBucket: "HeadersSnapshotInfo",
+	BodiesSnapshotInfoBucket:  "BodiesSnapshotInfo",
+	StateSnapshotInfoBucket:   "StateSnapshotInfo",
+	HeaderNumberBucket:        "HeaderNumber",
+	HeaderCanonicalBucket:     "CanonicalHeader",
+	HeadersBucket:             "Header",
+	HeaderTDBucket:            "HeadersTotalDifficulty",
+	BlockBodyPrefix:           "BlockBody",
+	EthTx:                     "BlockTransaction",
+	BlockReceiptsPrefix:       "Receipt",
+	Log:                       "TransactionLog",
+	LogTopicIndex:             "LogTopicIndex",
+	LogAddressIndex:           "LogAddressIndex",
+	CallTraceSet:              "CallTraceSet",
+	CallFromIndex:             "CallFromIndex",
+	CallToIndex:               "CallToIndex",
+	TxLookupPrefix:            "BlockTransactionLookup",
+	BloomBitsPrefix:           "BloomBits",
+	PreimagePrefix:            "Preimage",
+	ConfigPrefix:              "Config",
+	BloomBitsIndexPrefix:      "BloomBitsIndex",
+	SyncStageProgress:         "SyncStage",
+	SyncStageUnwind:           "SyncStageUnwind",
+	CliqueBucket:              "Clique",
+	CliqueSeparateBucket:      "CliqueSeparate",
+	CliqueSnapshotBucket:      "CliqueSnapshot",
+	CliqueLastSnapshotBucket:  "CliqueLastSnapshot",
+	InodesBucket:              "Inode",
+	Senders:                   "TxSender",
+	HeadBlockKey:              "LastBlock",
+	Migrations:                "Migration",
+	Sequence:                  "Sequence",
+	HeadHeaderKey:             "LastHeader",
 }
 
 // Keys
@@ -455,6 +453,9 @@ var BucketsConfigs = BucketsCfg{
 		CustomDupComparator: DupCmpSuffix32,
 	},
 	CallTraceSet: {
+		Flags: DupSort,
+	},
+	ContractTEVMCodeStatusBucket: {
 		Flags: DupSort,
 	},
 }
