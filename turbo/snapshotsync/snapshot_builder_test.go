@@ -129,11 +129,11 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
-	wg:=sync.WaitGroup{}
+	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
-		so:=sync.Once{}
+		so := sync.Once{}
 		//this gorutine emulates staged sync.
 		for {
 			select {
@@ -257,7 +257,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	}
 	//just start snapshot transaction
 	// it can't be empty slice but shouldn't be in main db
-	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{112,3})
+	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{112, 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,17 +427,20 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 		panic(err)
 	}
 
-	writeStep:= func(currentSnapshotBlock uint64) {
-		tx, err := db.BeginRw(context.Background())
-		defer tx.Rollback()
-		err = sb.SyncStages(currentSnapshotBlock, db, tx)
-		if err != nil {
-			t.Fatal(err)
+	writeStep := func(currentSnapshotBlock uint64) {
+		writeTX, writeErr := db.BeginRw(context.Background())
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		defer writeTX.Rollback()
+		writeErr = sb.SyncStages(currentSnapshotBlock, db, writeTX)
+		if writeErr != nil {
+			t.Fatal(writeErr)
 		}
 
-		err = tx.Commit()
-		if err != nil {
-			t.Fatal(err)
+		writeErr = writeTX.Commit()
+		if writeErr != nil {
+			t.Fatal(writeErr)
 		}
 	}
 
@@ -462,7 +465,7 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 	}
 	writeStep(10)
 
-	for atomic.LoadUint64(&sb.started) >0 {
+	for atomic.LoadUint64(&sb.started) > 0 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -607,12 +610,9 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 			t.Error(err)
 		}
 		wg.Done()
-		select {
-		case <-c:
-			rollbacked = true
-			roTX.Rollback()
-		}
-
+		<-c
+		rollbacked = true
+		roTX.Rollback()
 	}()
 	//wait until read tx start
 	wg.Wait()

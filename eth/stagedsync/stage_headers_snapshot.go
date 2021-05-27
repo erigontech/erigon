@@ -25,7 +25,7 @@ func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapsh
 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, sm *snapshotsync.SnapshotMigrator2, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
-	if tx!=nil {
+	if tx != nil {
 		s.Done()
 		return nil
 	}
@@ -35,7 +35,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return err
 	}
 	defer readTX.Rollback()
-
 
 	to, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
@@ -54,7 +53,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 	}
 	snapshotBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
 
-
 	//Problem: we must inject this stage, because it's not possible to do compact mdbx after sync.
 	//So we have to move headers to snapshot right after headers stage.
 	//but we don't want to block not initial sync
@@ -63,7 +61,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return nil
 	}
 
-	err = sm.AsyncStages(snapshotBlock, cfg.db, tx, torrentClient,false)
+	err = sm.AsyncStages(snapshotBlock, cfg.db, tx, torrentClient, false)
 	if err != nil {
 		return err
 	}
@@ -74,14 +72,14 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		log.Info("Wait old snapshot to close")
 	}
 
-	tx,err= cfg.db.BeginRw(context.Background())
-	if err!=nil {
+	tx, err = cfg.db.BeginRw(context.Background())
+	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	err = sm.SyncStages(snapshotBlock, cfg.db, tx)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	err = s.DoneAndUpdate(tx, snapshotBlock)
@@ -90,11 +88,11 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 	}
 
 	err = tx.Commit()
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
-	final:=func() (bool,error) {
+	final := func() (bool, error) {
 		readTX, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return false, err
@@ -105,8 +103,8 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 	}
 
 	for {
-		ok,err:=final()
-		if err!=nil {
+		ok, err := final()
+		if err != nil {
 			return err
 		}
 		if ok {

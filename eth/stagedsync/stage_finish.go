@@ -45,15 +45,15 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapsh
 		return nil
 	}
 
-	if snBuilder!=nil && useExternalTx {
+	if snBuilder != nil && useExternalTx {
 		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
-		err= snBuilder.AsyncStages(snBlock, cfg.db, tx, btClient, true)
-		if err!=nil {
+		err = snBuilder.AsyncStages(snBlock, cfg.db, tx, btClient, true)
+		if err != nil {
 			return err
 		}
 		if snBuilder.Replaced() {
-			err= snBuilder.SyncStages(snBlock, cfg.db, tx)
-			if err!=nil {
+			err = snBuilder.SyncStages(snBlock, cfg.db, tx)
+			if err != nil {
 				return err
 			}
 		}
