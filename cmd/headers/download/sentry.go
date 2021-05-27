@@ -474,7 +474,7 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string, 
 		p2pListenAddr:   p2pListenAddr,
 	}
 
-	ss.protocol = p2p.Protocol{
+	ss.Protocol = p2p.Protocol{
 		Name:           eth.ProtocolName,
 		Version:        protocol,
 		Length:         17,
@@ -541,7 +541,7 @@ func p2pServer(ctx context.Context,
 		natSetting,
 		p2pListenAddr,
 		genesisHash,
-		sentryServer.protocol,
+		sentryServer.Protocol,
 	)
 	if err != nil {
 		return nil, err
@@ -589,7 +589,7 @@ type StreamMsg struct {
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx             context.Context
-	protocol        p2p.Protocol
+	Protocol        p2p.Protocol
 	datadir         string
 	natSetting      string
 	p2pListenAddr   string

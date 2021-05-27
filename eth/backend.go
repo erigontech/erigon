@@ -108,9 +108,9 @@ type Ethereum struct {
 	downloadV2Ctx        context.Context
 	downloadV2Cancel     context.CancelFunc
 	downloadServer       *download.ControlServerImpl
-	sentryServer         *download.SentryServerImpl
+	sentryServers        map[uint]*download.SentryServerImpl
 	txPoolP2PServer      *eth.TxPoolServer
-	sentries             []proto_sentry.SentryClient
+	sentries             map[uint][]proto_sentry.SentryClient
 	stagedSync2          *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
@@ -184,6 +184,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
+		sentryServers:        map[uint]*download.SentryServerImpl{},
+		sentries:             map[uint][]proto_sentry.SentryClient{},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -361,9 +363,10 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				return res
 			}
 
-			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)
+			backend.sentryServers[eth.ETH66] = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)
+			backend.sentryServers[eth.ETH65] = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)
 			sentry := &download.SentryClientDirect{}
-			sentry.SetServer(backend.sentryServer)
+			sentry.SetServer(backend.sentryServers)
 			backend.sentries = []proto_sentry.SentryClient{sentry}
 		}
 		blockDownloaderWindow := 65536
@@ -705,16 +708,9 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 		return res
 	}
 	if s.config.EnableDownloadV2 {
-		return download.MakeProtocols(
-			s.downloadV2Ctx,
-			readNodeInfo,
-			s.ethDialCandidates,
-			&s.sentryServer.Peers,
-			s.sentryServer.GetStatus,
-			s.sentryServer.ReceiveCh,
-			s.sentryServer.ReceiveUploadCh,
-			s.sentryServer.ReceiveTxCh,
-			&s.sentryServer.TxSubscribed)
+		var protocols []p2p.Protocol
+		protocols = append(protocols, s.sentryServers.Protocol)
+		return protocols
 	} else {
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}
