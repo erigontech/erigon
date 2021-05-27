@@ -34,6 +34,8 @@ var stateBuckets = []string{
 	dbutils.AccountsHistoryBucket,
 	dbutils.StorageHistoryBucket,
 	dbutils.TxLookupPrefix,
+	dbutils.ContractTEVMCodeBucket,
+	dbutils.ContractTEVMCodeStatusBucket,
 }
 
 var cmdCompareBucket = &cobra.Command{

@@ -201,7 +201,8 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase)
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase, checkTEVM)
 	context.GetHash = vmTestBlockHash
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 

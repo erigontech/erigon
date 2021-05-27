@@ -72,6 +72,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					world.DB.RwKV(),
 					world.storageMode.Receipts,
 					world.storageMode.CallTraces,
+					world.storageMode.TEVM,
 					0,
 					world.BatchSize,
 					world.stateReaderBuilder,
@@ -368,5 +369,11 @@ func UpdateMetrics(db ethdb.Getter) error {
 		return err
 	}
 	stageExecutionGauge.Update(int64(progress))
+
+	progress, err = stages.GetStageProgress(db, stages.Translation)
+	if err != nil {
+		return err
+	}
+	stageTranspileGauge.Update(int64(progress))
 	return nil
 }

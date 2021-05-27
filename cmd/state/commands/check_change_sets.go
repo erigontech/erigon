@@ -136,7 +136,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		}
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, block, vmConfig)
+		checkTEVM := ethdb.GetCheckTEVM(rwtx)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}

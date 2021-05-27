@@ -91,6 +91,16 @@ const (
 	//key - address
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
+
+	//TEVMCodeStatusBucket -
+	//key - encoded timestamp(block number)
+	//value - contract codes hashes: [code_hash1]+[code_hash2]
+	ContractTEVMCodeStatusBucket = "TEVM-code-status"
+
+	//TEVMCodeBucket -
+	//key - contract code hash
+	//value - contract EVTM code
+	ContractTEVMCodeBucket = "TEVM-code"
 )
 
 /*TrieOfAccountsBucket and TrieOfStorageBucket
@@ -280,6 +290,8 @@ var (
 	StorageModeTxIndex = []byte("smTxIndex")
 	//StorageModeCallTraces - does not build index of call traces
 	StorageModeCallTraces = []byte("smCallTraces")
+	//StorageModeTEVM - does not translate EVM to TEVM
+	StorageModeTEVM = []byte("smTEVM")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
@@ -311,6 +323,8 @@ var Buckets = []string{
 	BloomBitsIndexPrefix,
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
+	ContractTEVMCodeBucket,
+	ContractTEVMCodeStatusBucket,
 	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,

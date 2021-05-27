@@ -26,7 +26,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.ContractTEVMCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
@@ -47,7 +47,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.ContractTEVMCodeStatusBucket, dbutils.ContractTEVMCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
@@ -69,5 +69,5 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.ContractTEVMCodeStatusBucket, dbutils.ContractTEVMCodeBucket)
 }

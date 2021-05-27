@@ -2,11 +2,14 @@ package ethdb
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -134,4 +137,36 @@ func testKVPath() string {
 		panic(err)
 	}
 	return dir
+}
+
+// todo: return TEVM code and use it
+func GetCheckTEVM(db KVGetter) func(codeHash common.Hash) (bool, error) {
+	checked := map[common.Hash]struct{}{}
+	var ok bool
+
+	return func(codeHash common.Hash) (bool, error) {
+		if _, ok = checked[codeHash]; ok {
+			return true, nil
+		}
+
+		ok, err := db.Has(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes())
+		if !errors.Is(err, ErrKeyNotFound) {
+			return false, err
+		}
+
+		if ok {
+			return false, ErrKeyNotFound
+		}
+
+		ok, err = db.Has(dbutils.ContractTEVMCodeBucket, codeHash.Bytes())
+		if !errors.Is(err, ErrKeyNotFound) {
+			return false, err
+		}
+
+		if !ok {
+			checked[codeHash] = struct{}{}
+		}
+
+		return ok, nil
+	}
 }

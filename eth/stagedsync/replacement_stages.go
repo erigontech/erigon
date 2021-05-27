@@ -14,6 +14,7 @@ func ReplacementStages(ctx context.Context,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
+	trans TranspileCfg,
 	hashState HashStateCfg,
 	trieCfg TrieCfg,
 	history HistoryCfg,
@@ -168,6 +169,23 @@ func ReplacementStages(ctx context.Context,
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.Accumulator)
+					},
+				}
+			},
+		},
+		{
+			ID: stages.Translation,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.Translation,
+					Description:         "Transpile marked EVM contracts to TEVM",
+					Disabled:            !sm.TEVM,
+					DisabledDescription: "Enable by adding `e` to --storage-mode",
+					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
+						return SpawnTranspileStage(s, tx, 0, ctx.Done(), trans)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+						return UnwindTranspileStage(u, s, tx, ctx.Done(), trans)
 					},
 				}
 			},
@@ -343,13 +361,13 @@ func ReplacementUnwindOrder() UnwindOrder {
 		0, 1, 2, 3, 4, // download headers/bodies + haders&body snapshots
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		15,
-		5, 6, 7, // senders, exec, state snapshot
-		9, 8, // Unwinding of IHashes needs to happen after unwinding HashState
-		10,     // call traces
-		11, 12, // history
-		13, // log index
-		14, // tx lookup
-		16, // finish
+		16,
+		5, 6, 7, 8, // senders, exec, state snapshot
+		10, 9, // Unwinding of IHashes needs to happen after unwinding HashState
+		11,     // call traces
+		12, 13, // history
+		14, // log index
+		15, // tx lookup
+		17, // finish
 	}
 }

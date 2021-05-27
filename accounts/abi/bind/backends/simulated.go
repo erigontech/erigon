@@ -69,6 +69,7 @@ type SimulatedBackend struct {
 	database  *ethdb.ObjectDatabase // In memory database to store our testing data
 	engine    consensus.Engine
 	getHeader func(hash common.Hash, number uint64) *types.Header
+	checkTEVM func(hash common.Hash) (bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -102,7 +103,8 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		getHeader: func(hash common.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(database, hash, number)
 		},
-		config: genesis.Config,
+		checkTEVM: ethdb.GetCheckTEVM(database),
+		config:    genesis.Config,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -125,6 +127,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		getHeader: func(hash common.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(database, hash, number)
 		},
+		checkTEVM: ethdb.GetCheckTEVM(database),
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -620,7 +623,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil, b.checkTEVM)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
@@ -653,7 +656,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}, b.checkTEVM); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))

@@ -212,7 +212,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 	if config.StorageMode.Initialised {
-		// If storage mode is not explicitely specified, we take whatever is in the database
+		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(sm, config.StorageMode) {
 			return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
 		}

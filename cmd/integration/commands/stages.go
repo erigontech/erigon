@@ -330,7 +330,7 @@ func init() {
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDatadir(cmdSetStorageMode)
-	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htr", "Storage mode to override database")
+	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htre", "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetStorageMode)
 }
 
@@ -450,7 +450,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	stage4 := stage(sync, tx, stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
-	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, 0, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		err = stagedsync.UnwindExecutionStage(u, stage4, tx, ch, cfg, nil)

@@ -35,6 +35,7 @@ var (
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
 	Execution           SyncStage = "Execution"           // Executing each block w/o buildinf a trie
+	Translation         SyncStage = "Translation"         // Translation each marked for translation contract (from EVM to TEVM)
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
@@ -60,6 +61,7 @@ var AllStages = []SyncStage{
 	Bodies,
 	Senders,
 	Execution,
+	Translation,
 	IntermediateHashes,
 	HashState,
 	AccountHistoryIndex,
