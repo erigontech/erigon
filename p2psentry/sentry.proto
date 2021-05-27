@@ -31,24 +31,25 @@ enum MessageId {
   // ======= eth 66 protocol ===========
 
   // eth64 announcement messages (no id)
-  NEW_BLOCK_HASHES_66 = 16;
-  NEW_BLOCK_66 = 17;
-  TRANSACTIONS_66 = 18;
+  STATUS_66 = 17;
+  NEW_BLOCK_HASHES_66 = 18;
+  NEW_BLOCK_66 = 19;
+  TRANSACTIONS_66 = 20;
 
   // eth65 announcement messages (no id)
-  NEW_POOLED_TRANSACTION_HASHES_66 = 19;
+  NEW_POOLED_TRANSACTION_HASHES_66 = 21;
 
   // eth66 messages with request-id
-  GET_BLOCK_HEADERS_66 = 20;
-  GET_BLOCK_BODIES_66 = 21;
-  GET_NODE_DATA_66 = 22;
-  GET_RECEIPTS_66 = 23;
-  GET_POOLED_TRANSACTIONS_66 = 24;
-  BLOCK_HEADERS_66 = 25;
-  BLOCK_BODIES_66 = 26;
-  NODE_DATA_66 = 27;
-  RECEIPTS_66 = 28;
-  POOLED_TRANSACTIONS_66 = 29;
+  GET_BLOCK_HEADERS_66 = 22;
+  GET_BLOCK_BODIES_66 = 23;
+  GET_NODE_DATA_66 = 24;
+  GET_RECEIPTS_66 = 25;
+  GET_POOLED_TRANSACTIONS_66 = 26;
+  BLOCK_HEADERS_66 = 27;
+  BLOCK_BODIES_66 = 28;
+  NODE_DATA_66 = 29;
+  RECEIPTS_66 = 30;
+  POOLED_TRANSACTIONS_66 = 31;
 
 
 
@@ -109,6 +110,15 @@ message StatusData {
   uint64 max_block = 5;
 }
 
+enum Protocol {
+  ETH65 = 0;
+  ETH66 = 1;
+}
+
+message SetStatusReply {
+  Protocol protocol = 1;
+}
+
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
   rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
@@ -117,7 +127,7 @@ service Sentry {
   rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
       returns (SentPeers);
   rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
-  rpc SetStatus(StatusData) returns (google.protobuf.Empty);
+  rpc SetStatus(StatusData) returns (SetStatusReply);
   rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
   rpc ReceiveUploadMessages(google.protobuf.Empty)
       returns (stream InboundMessage);
