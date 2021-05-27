@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
@@ -81,6 +82,7 @@ func New(
 	ethConfig.StagedSync = sync
 
 	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
+	enode.UseMDBX = nodeConfig.MDBX
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
