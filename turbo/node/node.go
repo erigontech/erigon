@@ -77,12 +77,12 @@ func New(
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
 	node := makeConfigNode(nodeConfig)
+	enode.UseMDBX = nodeConfig.MDBX
 	ethConfig := makeEthConfig(ctx, node)
 
 	ethConfig.StagedSync = sync
 
 	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
-	enode.UseMDBX = nodeConfig.MDBX
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
