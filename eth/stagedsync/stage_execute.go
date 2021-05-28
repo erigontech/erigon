@@ -301,6 +301,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
+	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
 
 	var stoppedErr error
@@ -323,6 +324,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
+			lastLogTx += uint64(block.Transactions().Len())
 
 			writeChangesets := true
 			if cfg.pruningDistance > 0 && to-blockNum > cfg.pruningDistance {
@@ -426,7 +428,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, batch)
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
 			}
@@ -509,15 +511,17 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 	return nil
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
+	speedTx := uint64(float64(currentTx-prevTx) / float64(interval/time.Second))
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
 		"blk/second", speed,
+		"tx/second", fmt.Sprintf("%dK", int(speedTx)/1000),
 	}
 	if batch != nil {
 		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
@@ -525,7 +529,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
-	return currentBlock, currentTime
+	return currentBlock, currentTx, currentTime
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
