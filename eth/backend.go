@@ -231,8 +231,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
-	stagedSync := config.StagedSync
-
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
@@ -245,19 +243,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)
-		}
-	}
-	if stagedSync == nil {
-		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{SnapshotDir: snapshotsDir, TorrnetClient: torrentClient, SnapshotMigrator: mg})
-	} else {
-		// otherwise we add one if needed
-		if stagedSync.Notifier == nil {
-			stagedSync.Notifier = backend.events
-		}
-		if config.SnapshotLayout {
-			stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
-			log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 		}
 	}
 
