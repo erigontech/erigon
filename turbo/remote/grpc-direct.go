@@ -16,7 +16,8 @@ import (
 
 type SentryClient interface {
 	proto_sentry.SentryClient
-	Protocol() (uint, bool)
+	Protocol() uint
+	Ready() bool
 }
 
 type SentryClientRemote struct {
@@ -33,22 +34,23 @@ func NewSentryClientRemote(client proto_sentry.SentryClient) *SentryClientRemote
 	return &SentryClientRemote{SentryClient: client}
 }
 
-func (c *SentryClientRemote) Protocol() (uint, bool) {
+func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
-	fmt.Printf("3?\n")
+	return c.protocol
+}
 
-	return c.protocol, c.protocolIsSet
+func (c *SentryClientRemote) Ready() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.protocolIsSet
 }
 
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
-	fmt.Printf("1?\n")
-
-	reply, err := c.SentryClient.SetStatus(ctx, in)
+	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("2?\n")
 
 	c.Lock()
 	defer c.Unlock()
@@ -81,7 +83,8 @@ func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer
 	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
-func (scd *SentryClientDirect) Protocol() (uint, bool) { return scd.protocol, true }
+func (scd *SentryClientDirect) Protocol() uint { return scd.protocol }
+func (scd *SentryClientDirect) Ready() bool    { return true }
 
 func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	return scd.server.PenalizePeer(ctx, in)

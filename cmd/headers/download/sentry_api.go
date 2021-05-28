@@ -26,6 +26,10 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 	cs.headTd = td
 	statusMsg := makeStatusData(cs)
 	for _, sentry := range cs.sentries {
+		if !sentry.Ready() {
+			continue
+		}
+
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 			log.Error("Update status message for the sentry", "error", err)
 		}
@@ -35,12 +39,12 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		protocol, ok := cs.sentries[i].Protocol()
-		if !ok {
-			log.Error("protocol not set yet")
+		if !cs.sentries[i].Ready() {
 			continue
 		}
-		if protocol == eth.ETH66 {
+
+		switch cs.sentries[i].Protocol() {
+		case eth.ETH66:
 			//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 			var bytes []byte
 			var err error
@@ -69,8 +73,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 				continue
 			}
 			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-		}
-		if protocol == eth.ETH65 {
+		case eth.ETH65:
 			//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 			var bytes []byte
 			var err error
@@ -104,12 +107,11 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		protocol, ok := cs.sentries[i].Protocol()
-		if !ok {
-			log.Error("protocol not set yet")
+		if !cs.sentries[i].Ready() {
 			continue
 		}
-		if protocol == eth.ETH66 {
+		switch cs.sentries[i].Protocol() {
+		case eth.ETH66:
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket66{
 				RequestId: rand.Uint64(),
@@ -149,7 +151,7 @@ func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerd
 				continue
 			}
 			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-		} else if protocol == eth.ETH65 {
+		case eth.ETH65:
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket{
 				Amount:  req.Length,
@@ -211,6 +213,10 @@ func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdow
 			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
+			if !cs.sentries[i].Ready() {
+				continue
+			}
+
 			if _, err1 := cs.sentries[i].PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
 			}

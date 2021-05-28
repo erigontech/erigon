@@ -66,7 +66,7 @@ func RecvUploadMessage(ctx context.Context,
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveUploadClient, err3 := sentry.ReceiveUploadMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	receiveUploadClient, err3 := sentry.ReceiveUploadMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
 	if err3 != nil {
 		log.Error("Receive upload messages failed", "error", err3)
 		return
@@ -106,7 +106,7 @@ func RecvMessage(
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
 	if err2 != nil {
 		log.Error("Receive messages failed", "error", err2)
 		return
@@ -149,13 +149,20 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 	)
 }
 
-func SetSentryStatus(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) error {
+func SetSentryStatus(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
 	for i := range sentries {
-		if _, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true)); err != nil {
-			return err
-		}
+		go func(i int) {
+			for {
+				_, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
+				if err != nil {
+					log.Error("sentry not ready yet", "err", err)
+					time.Sleep(time.Second)
+					continue
+				}
+				break
+			}
+		}(i)
 	}
-	return nil
 }
 
 func NewStagedSync(
@@ -544,6 +551,9 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			for _, sentry := range cs.sentries {
+				if !sentry.Ready() {
+					continue
+				}
 				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 					log.Error("Could not send penalty", "err", err1)
 				}

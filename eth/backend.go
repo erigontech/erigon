@@ -398,11 +398,9 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		if err != nil {
 			return nil, err
 		}
-		go func() { //todo: 1 goroutine for each sentry to unblock others if first unavailable
-			if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
-				log.Error("set sentry status", "err", err)
-			}
-		}()
+		if len(stack.Config().P2P.SentryAddr) > 0 {
+			download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
+		}
 
 		fetchTx := func(peerID string, hashes []common.Hash) error {
 			backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)

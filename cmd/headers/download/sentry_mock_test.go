@@ -245,9 +245,7 @@ func mock(t *testing.T) *MockSentry {
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),
 	)
-	if err = SetSentryStatus(mock.ctx, sentries, mock.downloader); err != nil {
-		t.Fatal(err)
-	}
+	SetSentryStatus(mock.ctx, sentries, mock.downloader)
 
 	miningConfig := ethconfig.Defaults.Miner
 	miningConfig.Enabled = true

@@ -64,6 +64,10 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 	initialCycle := true
+	//ToDO: wait for at least 1 sentry availability
+	//if len(stack.Config().P2P.SentryAddr) > 0 {
+	//	download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
+	//}
 
 	for {
 		select {

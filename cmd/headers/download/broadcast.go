@@ -30,11 +30,12 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 	}
 	var req66, req65 *proto_sentry.OutboundMessageData
 	for _, sentry := range cs.sentries {
-		protocol, ok := sentry.Protocol()
-		if !ok {
+		if !sentry.Ready() {
 			continue
 		}
-		if protocol == eth.ETH65 {
+
+		switch sentry.Protocol() {
+		case eth.ETH65:
 			if req65 == nil {
 				req65 = &proto_sentry.OutboundMessageData{
 					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
@@ -46,10 +47,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 			if err != nil {
 				log.Error("propagateNewBlockHashes", "error", err)
 			}
-
-			continue
-		}
-		if protocol == eth.ETH65 {
+		case eth.ETH66:
 			if req66 == nil {
 				req66 = &proto_sentry.OutboundMessageData{
 					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
@@ -61,7 +59,8 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 					log.Error("propagateNewBlockHashes", "error", err)
 				}
 			}
-			continue
+		default:
+			//??
 		}
 	}
 }
@@ -78,11 +77,12 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	}
 	var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
 	for _, sentry := range cs.sentries {
-		protocol, ok := sentry.Protocol()
-		if !ok {
+		if !sentry.Ready() {
 			continue
 		}
-		if protocol == eth.ETH65 {
+
+		switch sentry.Protocol() {
+		case eth.ETH65:
 			if req65 == nil {
 				req65 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
@@ -97,9 +97,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 				log.Error("broadcastNewBlock", "error", err)
 			}
 
-			continue
-		}
-		if protocol == eth.ETH66 {
+		case eth.ETH66:
 			if req66 == nil {
 				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
