@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY dfe0671435fed2948a861ec25f1adbf99a470c88be69bcc27b32ca9a7ffc6787_v0_10_0_27_g2b161db6
+#define MDBX_BUILD_SOURCERY 70a2b520f39efb5ffb11dd97c2eef3750a14f311a08a4382f87dd6e307ed6105_v0_10_0_34_ga6c8c20b
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -7565,7 +7565,7 @@ static MDBX_page *mdbx_page_malloc(MDBX_txn *txn, unsigned num) {
 static void mdbx_dpage_free(MDBX_env *env, MDBX_page *dp, unsigned npages) {
   VALGRIND_MAKE_MEM_UNDEFINED(dp, pgno2bytes(env, npages));
   ASAN_UNPOISON_MEMORY_REGION(dp, pgno2bytes(env, npages));
-  if (MDBX_DEBUG || unlikely(env->me_flags & MDBX_PAGEPERTURB))
+  if (MDBX_DEBUG != 0 || unlikely(env->me_flags & MDBX_PAGEPERTURB))
     memset(dp, -1, pgno2bytes(env, npages));
   if (npages == 1 &&
       env->me_dp_reserve_len < env->me_options.dp_reserve_limit) {
@@ -8152,7 +8152,7 @@ status_done:
                                     ? pgno + 2
                                     : txn->tw.loose_refund_wl;
 #endif /* MDBX_ENABLE_REFUND */
-      if (MDBX_DEBUG || unlikely(txn->mt_env->me_flags & MDBX_PAGEPERTURB))
+      if (MDBX_DEBUG != 0 || unlikely(txn->mt_env->me_flags & MDBX_PAGEPERTURB))
         memset(page_data(mp), -1, txn->mt_env->me_psize - PAGEHDRSZ);
       VALGRIND_MAKE_MEM_NOACCESS(page_data(mp),
                                  txn->mt_env->me_psize - PAGEHDRSZ);
@@ -8180,7 +8180,7 @@ status_done:
       }
 
 #if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
-      if (MDBX_DEBUG || unlikely(txn->mt_env->me_flags & MDBX_PAGEPERTURB))
+      if (MDBX_DEBUG != 0 || unlikely(txn->mt_env->me_flags & MDBX_PAGEPERTURB))
 #endif
         mdbx_kill_page(txn, mp, pgno, npages);
       if (!(txn->mt_flags & MDBX_WRITEMAP)) {
@@ -26950,6 +26950,7 @@ static int mdbx_check_fs_local(mdbx_filehandle_t handle, int flags) {
          strncasecmp("cifs", name, name_len) == 0 ||
          strncasecmp("ncpfs", name, name_len) == 0 ||
          strncasecmp("smbfs", name, name_len) == 0 ||
+         strcasecmp("9P" /* WSL2 */, name) == 0 ||
          ((name_len > 3 && strncasecmp("fuse", name, 4) == 0) &&
           strncasecmp("fuseblk", name, name_len) != 0)) &&
         !(flags & MDBX_EXCLUSIVE))
@@ -28169,9 +28170,9 @@ __dll_export
         0,
         10,
         0,
-        27,
-        {"2021-05-21T00:12:55+03:00", "41721da296c828dd3f7116a97f2ead5ccc38a107", "2b161db6d8acf3fd5112972b09d5a1988a59ad8c",
-         "v0.10.0-27-g2b161db6"},
+        34,
+        {"2021-05-28T01:46:24+03:00", "da23506440bf341f805ee4ff2dc69320b7a40e48", "a6c8c20bd96a9ddb0f6594e8098392e8833eeeb5",
+         "v0.10.0-34-ga6c8c20b"},
         sourcery};
 
 __dll_export
@@ -29036,7 +29037,11 @@ static __cold uint8_t probe_for_WSL(const char *tag) {
   const char *const wsl = strstr(tag, "wsl");
   if (wsl && wsl[3] >= '2' && wsl[3] <= '9')
     return wsl[3] - '0';
-  return (WSL || wsl || strcasestr(tag, "Microsoft")) ? 1 : 0;
+  if (WSL || wsl || strcasestr(tag, "Microsoft"))
+    /* Expecting no new kernel within WSL1, either it will explicitly
+     * marked by an appropriate WSL-version hint. */
+    return (mdbx_linux_kernel_version < /* 4.19.x */ 0x04130000) ? 1 : 2;
+  return 0;
 }
 
 #endif /* Linux */
@@ -29046,16 +29051,6 @@ mdbx_global_constructor(void) {
 #if defined(__linux__) || defined(__gnu_linux__)
   struct utsname buffer;
   if (uname(&buffer) == 0) {
-    /* "Official" way of detecting WSL1 but not WSL2
-     * https://github.com/Microsoft/WSL/issues/423#issuecomment-221627364
-     *
-     * WARNING: False negative detection of WSL1 will result in DATA LOSS!
-     * So, the REQUIREMENTS for this code:
-     *  1. MUST detect WSL1 without false-negatives.
-     *  2. DESIRABLE detect WSL2 but without the risk of violating the first. */
-    mdbx_RunningOnWSL1 = probe_for_WSL(buffer.version) == 1 ||
-                         probe_for_WSL(buffer.sysname) == 1 ||
-                         probe_for_WSL(buffer.release) == 1;
     int i = 0;
     char *p = buffer.release;
     while (*p && i < 4) {
@@ -29071,6 +29066,16 @@ mdbx_global_constructor(void) {
         ++p;
       }
     }
+    /* "Official" way of detecting WSL1 but not WSL2
+     * https://github.com/Microsoft/WSL/issues/423#issuecomment-221627364
+     *
+     * WARNING: False negative detection of WSL1 will result in DATA LOSS!
+     * So, the REQUIREMENTS for this code:
+     *  1. MUST detect WSL1 without false-negatives.
+     *  2. DESIRABLE detect WSL2 but without the risk of violating the first. */
+    mdbx_RunningOnWSL1 = probe_for_WSL(buffer.version) == 1 ||
+                         probe_for_WSL(buffer.sysname) == 1 ||
+                         probe_for_WSL(buffer.release) == 1;
   }
 #endif /* Linux */
 
@@ -29194,6 +29199,22 @@ static int lck_op(mdbx_filehandle_t fd, int cmd, int lck, off_t offset,
       return MDBX_SUCCESS;
     }
     rc = errno;
+#if MDBX_USE_OFDLOCKS
+    if (rc == EINVAL &&
+        (cmd == F_OFD_SETLK || cmd == F_OFD_SETLKW || cmd == F_OFD_GETLK)) {
+      /* fallback to non-OFD locks */
+      if (cmd == F_OFD_SETLK)
+        cmd = F_SETLK;
+      else if (cmd == F_OFD_SETLKW)
+        cmd = F_SETLKW;
+      else
+        cmd = F_GETLK;
+      op_setlk = F_SETLK;
+      op_setlkw = F_SETLKW;
+      op_getlk = F_GETLK;
+      continue;
+    }
+#endif /* MDBX_USE_OFDLOCKS */
     if (rc != EINTR || cmd == op_setlkw) {
       mdbx_assert(nullptr, MDBX_IS_ERROR(rc));
       return rc;
