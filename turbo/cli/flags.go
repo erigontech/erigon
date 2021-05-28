@@ -50,11 +50,6 @@ var (
 		Value: 500,
 	}
 
-	DownloadV2Flag = cli.BoolTFlag{
-		Name:  "download.v2",
-		Usage: "enable experimental downloader v2",
-	}
-
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -129,8 +124,6 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
-
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -230,7 +223,6 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 			}
 		}
 	}
-	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
 	cfg.P2P.MDBX = cfg.MDBX
 	cfg.P2P.LMDB = cfg.LMDB
 }

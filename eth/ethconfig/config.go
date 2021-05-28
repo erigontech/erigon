@@ -119,8 +119,7 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	EnableDownloadV2 bool
-	P2PEnabled       bool
+	P2PEnabled bool
 
 	StorageMode     ethdb.StorageMode
 	BatchSize       datasize.ByteSize // Batch size for execution stage
