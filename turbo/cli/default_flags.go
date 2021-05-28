@@ -69,6 +69,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerEtherbaseFlag,
 	utils.MinerExtraDataFlag,
 	utils.MinerNoVerfiyFlag,
-	DownloadV2Flag,
 	utils.SentryAddrFlag,
 }

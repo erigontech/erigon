@@ -70,9 +70,6 @@ type Config struct {
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
 
-	// EnableDownloadV2 is a temporary flag to turn on new downloader mechanism
-	EnableDownloadV2 bool
-
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
 	// pipe path on Windows), whereas if it's a resolvable path name (absolute or
