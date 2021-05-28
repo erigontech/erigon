@@ -28,14 +28,40 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 		log.Error("propagateNewBlockHashes", "error", err)
 		return
 	}
-	req := &proto_sentry.OutboundMessageData{
-		Id:   proto_sentry.MessageId_NewBlockHashes,
-		Data: data,
-	}
+	var req66, req65 *proto_sentry.OutboundMessageData
 	for _, sentry := range cs.sentries {
-		_, err = sentry.SendMessageToAll(ctx, req, &grpc.EmptyCallOption{})
-		if err != nil {
-			log.Error("propagateNewBlockHashes", "error", err)
+		protocol, ok := sentry.Protocol()
+		if !ok {
+			continue
+		}
+		if protocol == eth.ETH65 {
+			if req65 == nil {
+				req65 = &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
+					Data: data,
+				}
+			}
+
+			_, err = sentry.SendMessageToAll(ctx, req65, &grpc.EmptyCallOption{})
+			if err != nil {
+				log.Error("propagateNewBlockHashes", "error", err)
+			}
+
+			continue
+		}
+		if protocol == eth.ETH65 {
+			if req66 == nil {
+				req66 = &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+					Data: data,
+				}
+
+				_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
+				if err != nil {
+					log.Error("propagateNewBlockHashes", "error", err)
+				}
+			}
+			continue
 		}
 	}
 }
@@ -50,16 +76,43 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	if err != nil {
 		log.Error("broadcastNewBlock", "error", err)
 	}
-	req := proto_sentry.SendMessageToRandomPeersRequest{
-		MaxPeers: 1024,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_NewBlock,
-			Data: data,
-		},
-	}
+	var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
 	for _, sentry := range cs.sentries {
-		if _, err = sentry.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{}); err != nil {
-			log.Error("broadcastNewBlock", "error", err)
+		protocol, ok := sentry.Protocol()
+		if !ok {
+			continue
+		}
+		if protocol == eth.ETH65 {
+			if req65 == nil {
+				req65 = &proto_sentry.SendMessageToRandomPeersRequest{
+					MaxPeers: 1024,
+					Data: &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+						Data: data,
+					},
+				}
+			}
+
+			if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("broadcastNewBlock", "error", err)
+			}
+
+			continue
+		}
+		if protocol == eth.ETH66 {
+			if req66 == nil {
+				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
+					MaxPeers: 1024,
+					Data: &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+						Data: data,
+					},
+				}
+			}
+			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("broadcastNewBlock", "error", err)
+			}
+			continue
 		}
 	}
 }

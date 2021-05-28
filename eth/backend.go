@@ -54,15 +54,16 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -110,9 +111,9 @@ type Ethereum struct {
 	downloadV2Ctx        context.Context
 	downloadV2Cancel     context.CancelFunc
 	downloadServer       *download.ControlServerImpl
-	sentryServer         *download.SentryServerImpl
-	txPoolP2PServer      *eth.TxPoolServer
-	sentries             []proto_sentry.SentryClient
+	sentryServers        []*download.SentryServerImpl
+	txPoolP2PServer      *txpool.P2PServer
+	sentries             []remote.SentryClient
 	stagedSync2          *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
@@ -186,6 +187,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
+		sentries:             []remote.SentryClient{},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -348,6 +350,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
+	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
+	if err != nil {
+		return nil, err
+	}
+
 	checkpoint := config.Checkpoint
 	if backend.config.EnableDownloadV2 {
 		backend.downloadV2Ctx, backend.downloadV2Cancel = context.WithCancel(context.Background())
@@ -360,23 +367,39 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				backend.sentries = append(backend.sentries, sentry)
 			}
 		} else {
-			backend.sentryServer = download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr)
-			sentry := &download.SentryClientDirect{}
-			sentry.SetServer(backend.sentryServer)
-			backend.sentries = []proto_sentry.SentryClient{sentry}
+			var readNodeInfo = func() *eth.NodeInfo {
+				var res *eth.NodeInfo
+				_ = backend.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+					res = eth.ReadNodeInfo(tx, backend.chainConfig, backend.genesisHash, backend.networkID)
+					return nil
+				})
+
+				return res
+			}
+
+			backend.sentryServers = append(backend.sentryServers,
+				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66),
+				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65),
+			)
+			backend.sentries = []remote.SentryClient{
+				remote.NewSentryClientDirect(eth.ETH66, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)),
+				remote.NewSentryClientDirect(eth.ETH65, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)),
+			}
 		}
 		blockDownloaderWindow := 65536
 		backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
 		if err != nil {
 			return nil, err
 		}
-		if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
-			return nil, err
-		}
-		backend.txPoolP2PServer, err = eth.NewTxPoolServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
+		backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
 		if err != nil {
 			return nil, err
 		}
+		go func() { //todo: 1 goroutine for each sentry to unblock others if first unavailable
+			if err = download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer); err != nil {
+				log.Error("set sentry status", "err", err)
+			}
+		}()
 
 		fetchTx := func(peerID string, hashes []common.Hash) error {
 			backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
@@ -461,15 +484,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
-	if err != nil {
-		return nil, err
-	}
-
-	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
-	if err != nil {
-		return nil, err
-	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
@@ -663,34 +677,29 @@ func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
-	var headHeight uint64
-	_ = s.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
-		headHeight, _ = stages.GetStageProgress(tx, stages.Finish)
-		return nil
-	})
-	var readNodeInfo = func() *eth.NodeInfo {
-		var res *eth.NodeInfo
+	if !s.config.EnableDownloadV2 {
+		var headHeight uint64
 		_ = s.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
-			res = eth.ReadNodeInfo(tx, s.chainConfig, s.genesisHash, s.networkID)
+			headHeight, _ = stages.GetStageProgress(tx, stages.Finish)
 			return nil
 		})
+		var readNodeInfo = func() *eth.NodeInfo {
+			var res *eth.NodeInfo
+			_ = s.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+				res = eth.ReadNodeInfo(tx, s.chainConfig, s.genesisHash, s.networkID)
+				return nil
+			})
 
-		return res
-	}
-	if s.config.EnableDownloadV2 {
-		return download.MakeProtocols(
-			s.downloadV2Ctx,
-			readNodeInfo,
-			s.ethDialCandidates,
-			&s.sentryServer.Peers,
-			s.sentryServer.GetStatus,
-			s.sentryServer.ReceiveCh,
-			s.sentryServer.ReceiveUploadCh,
-			s.sentryServer.ReceiveTxCh,
-			&s.sentryServer.TxSubscribed)
-	} else {
+			return res
+		}
 		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
 	}
+
+	var protocols []p2p.Protocol
+	for i := range s.sentryServers {
+		protocols = append(protocols, s.sentryServers[i].Protocol)
+	}
+	return protocols
 }
 
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
