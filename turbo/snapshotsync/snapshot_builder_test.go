@@ -30,8 +30,8 @@ import (
 //After 3 seconds, we rollback Ro tx, and migration must continue without any errors.
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
-func TestSnapshotMigratorStage2(t *testing.T) {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+func TestSnapshotMigratorStage(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -65,6 +65,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	sb := &SnapshotMigrator2{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
+		useMdbx: true,
 	}
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
@@ -372,7 +373,7 @@ func TestSnapshotMigratorStage2(t *testing.T) {
 	}
 }
 
-func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
+func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
@@ -407,6 +408,7 @@ func TestSnapshotMigratorStage2SyncMode(t *testing.T) {
 	sb := &SnapshotMigrator2{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
+		useMdbx: true,
 	}
 
 	tx, err := db.BeginRw(context.Background())
