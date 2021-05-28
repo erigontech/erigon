@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -78,6 +79,7 @@ func New(
 
 	node := makeConfigNode(nodeConfig)
 	enode.UseMDBX = nodeConfig.MDBX
+	core.UseMDBX = nodeConfig.MDBX
 	ethConfig := makeEthConfig(ctx, node)
 
 	ethConfig.StagedSync = sync

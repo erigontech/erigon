@@ -48,6 +48,8 @@ import (
 //go:embed allocs
 var allocs embed.FS
 
+var UseMDBX = true
+
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
@@ -262,7 +264,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
-	tmpDB := ethdb.NewLMDB().InMem().MustOpen()
+	var tmpDB ethdb.RwKV
+	if UseMDBX {
+		tmpDB = ethdb.NewMDBX().InMem().MustOpen()
+	} else {
+		tmpDB = ethdb.NewLMDB().InMem().MustOpen()
+	}
 	defer tmpDB.Close()
 	tx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
