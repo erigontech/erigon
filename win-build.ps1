@@ -75,17 +75,37 @@ if (!($myWindowsPrincipal.IsInRole($adminRole))) {
    return
 }
 
-
 # Test GO is installed and is at least 1.16
-$goInstalled = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object {$_.DisplayName -imatch "^Go\ Programming\ Language"})
-if(!$goInstalled) {
-    Write-Host $goErrorText
-    return
+# Trying to get the enumerable of all installed programs may cause an exception due to possible
+# garbage values insterted into the registry by installers. Specifically an invalid cast exception
+# throws when registry keys contain invalid DWORD data. 
+# See https://github.com/PowerShell/PowerShell/issues/9552
+# Due to this all items must be parsed one by one
+
+$regUninstallPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\"
+$goInstalled      = $false
+Get-ChildItem -Path $regUninstallPath | ForEach-Object {
+    if (-not $goInstalled) {
+        try {
+            $item = Get-ItemProperty -Path $_.pspath
+            if ($item.DisplayName -imatch "^Go\ Programming\ Language") {
+                $goVersionMajor = [int]$item.VersionMajor
+                $goVersionMinor = [int]$item.VersionMinor
+                if (-not ($goVersionMajor -lt 1 -or $goVersionMinor -lt 16)) {
+                    Write-Host " Found GO version $($item.DisplayVersion)"
+                    $goInstalled = $true
+                    # Don't use break here as it seems to stop
+                    # the whole script
+                }
+            }
+        }
+        catch {
+            # Actually we don't take any action and simply skip the item
+            # Nevertheless the user has some garbage in his registry keys
+        }
+    }
 }
-Write-Host " Found GO version $($goInstalled.DisplayVersion)"
-$goVersionMajor = [int]$goInstalled.VersionMajor
-$goVersionMinor = [int]$goInstalled.VersionMinor
-if($goVersionMajor -lt 1 -or $goVersionMinor -lt 16) {
+if(-not $goInstalled) {
     Write-Host $goErrorText
     return
 }
@@ -142,12 +162,12 @@ If(!$chocolateyHasCmake -or !$chocolateyHasMake -or !$chocolateyHasMingw) {
 # Enter MDBX directory and build libmdbx.dll
 Write-Host " Building libmdbx.dll ..."
 Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
-cmake -G "MinGW Makefiles" . -D CMAKE_MAKE_PROGRAM:PATH=$(Join-Path $chocolateyBinPath "make.exe") -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D MDBX_FORCE_ASSERTIONS:INT=0
+& 'C:\Program Files\Cmake\bin\cmake.exe' -G "MinGW Makefiles" . -D CMAKE_MAKE_PROGRAM:PATH=$(Join-Path $chocolateyBinPath "make.exe") -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D MDBX_FORCE_ASSERTIONS:INT=0
 if($LASTEXITCODE) {
     Write-Host "An error has occurred while configuring MDBX dll"
     return
 }
-cmake --build .
+& 'C:\Program Files\Cmake\bin\cmake.exe' --build .
 if($LASTEXITCODE -or !(Test-Path "libmdbx.dll" -PathType leaf)) {
     Write-Host "An error has occurred while building MDBX dll or libmdbx.dll cannot be found"
     return
