@@ -436,6 +436,8 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	return backend, nil
 }
 
+const txChanSize int = 4096
+
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
 	if notifier == nil {
 		return
