@@ -262,7 +262,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
-	tmpDB := ethdb.NewMemKV()
+	tmpDB := ethdb.NewLMDB().InMem().MustOpen()
 	defer tmpDB.Close()
 	tx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
