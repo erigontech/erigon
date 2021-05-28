@@ -75,10 +75,7 @@ func (sm *SnapshotMigrator2) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, 
 			//todo headers infohash
 			var infohash []byte
 			var err error
-			err = db.View(context.Background(), func(innerTX ethdb.Tx) error {
-				infohash, err = innerTX.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
-				return err
-			})
+			infohash, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				log.Error("Get infohash", "err", err, "block", toBlock)
 				return err

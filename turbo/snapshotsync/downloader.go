@@ -302,7 +302,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[Snapsh
 }
 
 func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error) {
-	info, err := BuildInfoBytesForSnapshot(path, LmdbFilename)
+	info, err := BuildInfoBytesForSnapshot(path, MdbxFilename)
 	if err != nil {
 		return [20]byte{}, err
 	}

@@ -36,7 +36,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 	}
 	defer readTX.Rollback()
 
-	to, err := stages.GetStageProgress(tx, stages.Headers)
+	to, err := stages.GetStageProgress(readTX, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
@@ -47,7 +47,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return nil
 	}
 
-	currentSnapshotBlock, err := stages.GetStageProgress(tx, stages.CreateHeadersSnapshot)
+	currentSnapshotBlock, err := stages.GetStageProgress(readTX, stages.CreateHeadersSnapshot)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
@@ -61,7 +61,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return nil
 	}
 
-	err = sm.AsyncStages(snapshotBlock, cfg.db, tx, torrentClient, false)
+	err = sm.AsyncStages(snapshotBlock, cfg.db, readTX, torrentClient, false)
 	if err != nil {
 		return err
 	}

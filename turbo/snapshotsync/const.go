@@ -11,7 +11,7 @@ const (
 	DefaultChunkSize = 1024 * 1024
 	LmdbFilename     = "data.mdb"
 	MdbxFilename     = "mdbx.dat"
-	EpochSize        = 500_000
+	EpochSize        = 1000
 
 	//todo It'll be changed after enabling new snapshot generation mechanism
 	HeadersSnapshotHash = "0000000000000000000000000000000000000000"
