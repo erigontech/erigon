@@ -74,7 +74,7 @@ const (
 )
 
 //nolint
-var ToString = map[uint64]string{
+var ToString = map[uint]string{
 	StatusMsg:                     "StatusMsg",
 	NewBlockHashesMsg:             "NewBlockHashesMsg",
 	TransactionsMsg:               "TransactionsMsg",

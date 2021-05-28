@@ -50,8 +50,7 @@ const (
 	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
 )
 
-func nodeKey(datadir string) *ecdsa.PrivateKey {
-	keyfile := path.Join(datadir, "erigon", "nodekey")
+func nodeKey(keyfile string) *ecdsa.PrivateKey {
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key
 	}
@@ -119,14 +118,15 @@ func (pi *PeerInfo) Removed() bool {
 
 func makeP2PServer(
 	ctx context.Context,
-	datadir string,
+	nodeKeyFile string,
+	dbPath string,
 	nodeName string,
 	natSetting string,
 	p2pListenAddr string,
 	genesisHash common.Hash,
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
-	serverKey := nodeKey(datadir)
+	serverKey := nodeKey(nodeKeyFile)
 	p2pConfig := p2p.Config{}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
@@ -139,7 +139,7 @@ func makeP2PServer(
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = path.Join(datadir, "erigon", "nodes")
+	p2pConfig.NodeDatabase = dbPath
 	p2pConfig.ListenAddr = p2pListenAddr
 	var urls []string
 	switch genesisHash {
@@ -450,8 +450,16 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-
-	sentryServer := NewSentryServer(ctx, datadir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
+	var dbDir string
+	switch protocol {
+	case eth.ETH65:
+		dbDir = path.Join(datadir, "nodes", "eth65")
+	case eth.ETH66:
+		dbDir = path.Join(datadir, "nodes", "eth66")
+	default:
+		return nil, fmt.Errorf("unknown protocol: %d", protocol)
+	}
+	sentryServer := NewSentryServer(ctx, path.Join(datadir, "erigon", "nodekey"), dbDir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -464,10 +472,11 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	return sentryServer, nil
 }
 
-func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
+func NewSentryServer(ctx context.Context, nodeKeyFile, dbPath, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
 	ss := &SentryServerImpl{
 		ctx:             ctx,
-		datadir:         datadir,
+		nodeKeyFile:     nodeKeyFile,
+		dbPath:          dbPath,
 		ReceiveCh:       make(chan StreamMsg, 1024),
 		ReceiveUploadCh: make(chan StreamMsg, 1024),
 		ReceiveTxCh:     make(chan StreamMsg, 1024),
@@ -535,7 +544,8 @@ func NewSentryServer(ctx context.Context, datadir string, p2pListenAddr string, 
 }
 
 func p2pServer(ctx context.Context,
-	datadir string,
+	nodeKeyFile string,
+	dbPath string,
 	nodeName string,
 	sentryServer *SentryServerImpl,
 	natSetting string, p2pListenAddr string, staticPeers []string, discovery bool, netRestrict string,
@@ -543,7 +553,8 @@ func p2pServer(ctx context.Context,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
-		datadir,
+		nodeKeyFile,
+		dbPath,
 		nodeName,
 		natSetting,
 		p2pListenAddr,
@@ -597,7 +608,8 @@ type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx             context.Context
 	Protocol        p2p.Protocol
-	datadir         string
+	nodeKeyFile     string
+	dbPath          string
 	natSetting      string
 	p2pListenAddr   string
 	staticPeers     []string
@@ -840,7 +852,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.P2pServer, err = p2pServer(ss.ctx, ss.datadir, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeKeyFile, ss.dbPath, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
 		if err != nil {
 			return reply, err
 		}

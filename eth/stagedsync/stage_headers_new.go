@@ -107,13 +107,10 @@ func HeadersForward(
 
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
-		fmt.Printf("8:9\n")
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			fmt.Printf("8:10\n")
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
-				fmt.Printf("8:11\n")
 				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
 				log.Debug("Sent request", "height", req.Number)
 			}
@@ -217,7 +214,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		if ancestor == nil {
 			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		} else {
-			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
+			log.Debug("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--

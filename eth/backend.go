@@ -57,7 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/remote"
@@ -79,8 +78,7 @@ type Ethereum struct {
 	// Handlers
 	txPool *core.TxPool
 
-	handler           *handler
-	ethDialCandidates enode.Iterator
+	handler *handler
 
 	// DB interfaces
 	chainDB    ethdb.Database // Same as chainDb, but different interface
@@ -350,11 +348,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	backend.ethDialCandidates, err = setupDiscovery(backend.config.EthDiscoveryURLs)
-	if err != nil {
-		return nil, err
-	}
-
 	checkpoint := config.Checkpoint
 	if backend.config.EnableDownloadV2 {
 		backend.downloadV2Ctx, backend.downloadV2Cancel = context.WithCancel(context.Background())
@@ -377,13 +370,23 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 				return res
 			}
 
-			backend.sentryServers = append(backend.sentryServers,
-				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66),
-				download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65),
-			)
+			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				return nil, err
+			}
+
+			d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				return nil, err
+			}
+
+			server65 := download.NewSentryServer(backend.downloadV2Ctx, path.Join(stack.Config().DataDir, "erigon", "nodekey"), path.Join(stack.Config().DataDir, "nodes", "eth66"), stack.Config().P2P.ListenAddr, d66, readNodeInfo, eth.ETH66)
+			server66 := download.NewSentryServer(backend.downloadV2Ctx, path.Join(stack.Config().DataDir, "erigon", "nodekey"), path.Join(stack.Config().DataDir, "nodes", "eth65"), ":30304", d65, readNodeInfo, eth.ETH65)
+
+			backend.sentryServers = append(backend.sentryServers, server65, server66)
 			backend.sentries = []remote.SentryClient{
-				remote.NewSentryClientDirect(eth.ETH66, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH66)),
-				remote.NewSentryClientDirect(eth.ETH65, download.NewSentryServer(backend.downloadV2Ctx, stack.Config().DataDir, stack.Config().P2P.ListenAddr, backend.ethDialCandidates, readNodeInfo, eth.ETH65)),
+				remote.NewSentryClientDirect(eth.ETH66, server65),
+				remote.NewSentryClientDirect(eth.ETH65, server66),
 			}
 		}
 		blockDownloaderWindow := 65536
@@ -487,7 +490,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
-	if backend.config.P2PEnabled {
+	if !backend.config.EnableDownloadV2 {
 		stack.RegisterProtocols(backend.Protocols())
 	}
 
@@ -692,7 +695,11 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 			return res
 		}
-		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, s.ethDialCandidates, s.chainConfig, s.genesisHash, headHeight)
+		d, err := setupDiscovery(s.config.EthDiscoveryURLs)
+		if err != nil {
+			panic(err)
+		}
+		return eth.MakeProtocols((*ethHandler)(s.handler), readNodeInfo, d, s.chainConfig, s.genesisHash, headHeight)
 	}
 
 	var protocols []p2p.Protocol
