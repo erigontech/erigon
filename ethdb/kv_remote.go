@@ -27,9 +27,6 @@ import (
 )
 
 // generate the messages and services
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
 type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
