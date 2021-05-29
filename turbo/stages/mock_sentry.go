@@ -230,6 +230,7 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, Key *ecdsa.PrivateKey) *
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
+		true, /* test */
 	)
 	if err = download.SetSentryStatus(mock.Ctx, sentries, mock.downloader); err != nil {
 		t.Fatal(err)

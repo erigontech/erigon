@@ -55,6 +55,7 @@ func HeadersForward(
 	tx ethdb.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	var headerProgress uint64
 	var err error
@@ -156,6 +157,9 @@ func HeadersForward(
 			if inSync {
 				break
 			}
+		}
+		if test {
+			return fmt.Errorf("%s: did not complete", logPrefix)
 		}
 		timer := time.NewTimer(1 * time.Second)
 		select {

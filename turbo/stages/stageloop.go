@@ -45,9 +45,10 @@ func NewStagedSync(
 	txLookup stagedsync.TxLookupCfg,
 	txPool stagedsync.TxPoolCfg,
 	finish stagedsync.FinishCfg,
+	test bool,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -336,5 +337,6 @@ func NewStagedSync2(
 			txPoolServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(db, tmpdir),
+		false, /* test */
 	), nil
 }
