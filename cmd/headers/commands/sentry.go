@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	natSetting  string   // NAT setting
-	port        int      // Listening port
-	staticPeers []string // static peers
-	discovery   bool     // enable sentry's discovery mechanism
-	protocol    string
-	netRestrict string // CIDR to restrict peering to
+	natSetting   string   // NAT setting
+	port         int      // Listening port
+	staticPeers  []string // static peers
+	discoveryDNS []string
+	nodiscover   bool // disable sentry's discovery mechanism
+	protocol     string
+	netRestrict  string // CIDR to restrict peering to
 )
 
 func init() {
@@ -31,8 +32,9 @@ func init() {
 	sentryCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
 	sentryCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	sentryCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth65|eth66")
-	sentryCmd.Flags().StringArrayVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
-	sentryCmd.Flags().BoolVar(&discovery, "discovery", true, "discovery mode")
+	sentryCmd.Flags().StringSliceVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
+	sentryCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
+	sentryCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
 	sentryCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
 	sentryCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := sentryCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
@@ -50,6 +52,7 @@ var sentryCmd = &cobra.Command{
 		case "eth65":
 			p = eth.ETH65
 		}
-		return download.Sentry(datadir, natSetting, port, sentryAddr, staticPeers, discovery, netRestrict, uint(p))
+
+		return download.Sentry(datadir, natSetting, port, sentryAddr, staticPeers, discoveryDNS, nodiscover, netRestrict, uint(p))
 	},
 }

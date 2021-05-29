@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
@@ -459,6 +460,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	default:
 		return nil, fmt.Errorf("unknown protocol: %d", protocol)
 	}
+
 	sentryServer := NewSentryServer(ctx, path.Join(datadir, "erigon", "nodekey"), dbDir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
@@ -548,7 +550,7 @@ func p2pServer(ctx context.Context,
 	dbPath string,
 	nodeName string,
 	sentryServer *SentryServerImpl,
-	natSetting string, p2pListenAddr string, staticPeers []string, discovery bool, netRestrict string,
+	natSetting string, p2pListenAddr string, staticPeers []string, nodiscover bool, netRestrict string,
 	genesisHash common.Hash,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
@@ -571,7 +573,7 @@ func p2pServer(ctx context.Context,
 	}
 
 	server.StaticNodes = enodes
-	server.NoDiscovery = discovery
+	server.NoDiscovery = nodiscover
 
 	if netRestrict != "" {
 		server.NetRestrict = new(netutil.Netlist)
@@ -581,7 +583,7 @@ func p2pServer(ctx context.Context,
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string, protocol uint) error {
+func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discoveryDNS []string, nodiscover bool, netRestrict string, protocol uint) error {
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
@@ -595,7 +597,8 @@ func Sentry(datadir string, natSetting string, port int, sentryAddr string, stat
 	sentryServer.natSetting = natSetting
 	sentryServer.p2pListenAddr = fmt.Sprintf(":%d", port)
 	sentryServer.staticPeers = staticPeers
-	sentryServer.discovery = discovery
+	sentryServer.discoveryDNS = discoveryDNS
+	sentryServer.nodiscover = nodiscover
 	sentryServer.netRestrict = netRestrict
 
 	<-ctx.Done()
@@ -617,7 +620,8 @@ type SentryServerImpl struct {
 	natSetting      string
 	p2pListenAddr   string
 	staticPeers     []string
-	discovery       bool
+	discoveryDNS    []string
+	nodiscover      bool
 	netRestrict     string
 	Peers           sync.Map
 	statusData      *proto_sentry.StatusData
@@ -857,7 +861,19 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeKeyFile, ss.dbPath, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.discovery, ss.netRestrict, genesisHash)
+		if !ss.nodiscover {
+			if len(ss.discoveryDNS) == 0 {
+				if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
+					ss.discoveryDNS = []string{url}
+				}
+			}
+			ss.Protocol.DialCandidates, err = setupDiscovery(ss.discoveryDNS)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeKeyFile, ss.dbPath, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.nodiscover, ss.netRestrict, genesisHash)
 		if err != nil {
 			return reply, err
 		}
@@ -870,6 +886,16 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return reply, nil
+}
+
+// setupDiscovery creates the node discovery source for the `eth` and `snap`
+// protocols.
+func setupDiscovery(urls []string) (enode.Iterator, error) {
+	if len(urls) == 0 {
+		return nil, nil
+	}
+	client := dnsdisc.NewClient(dnsdisc.Config{})
+	return client.NewIterator(urls...)
 }
 
 func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
