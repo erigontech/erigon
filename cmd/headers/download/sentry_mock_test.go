@@ -245,7 +245,6 @@ func mock(t *testing.T) *MockSentry {
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),
 	)
-	SentriesHandshake(mock.ctx, sentries, mock.downloader)
 
 	miningConfig := ethconfig.Defaults.Miner
 	miningConfig.Enabled = true
@@ -270,7 +269,7 @@ func mock(t *testing.T) *MockSentry {
 
 	mock.peerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	mock.streamWg.Add(1)
-	go RecvMessage(mock.ctx, mock.sentryClient, mock.downloader.HandleInboundMessage, &mock.receiveWg)
+	go RecvMessageLoop(mock.ctx, mock.sentryClient, mock.downloader, &mock.receiveWg)
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
