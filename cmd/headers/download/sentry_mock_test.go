@@ -99,7 +99,7 @@ func (ms *MockSentry) SendMessageToAll(context.Context, *sentry.OutboundMessageD
 	return nil, nil
 }
 func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
-	return nil, nil
+	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
 }
 func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveMessagesServer) error {
 	ms.stream = stream
@@ -693,7 +693,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.receiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_GET_BLOCK_HEADERS_66, Data: b, PeerId: m.peerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.peerId})
 	require.NoError(t, err)
 
 	// Create anchor from the short chain suffix
