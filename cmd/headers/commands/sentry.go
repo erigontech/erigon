@@ -18,7 +18,7 @@ var (
 )
 
 func init() {
-	sentryCmd.Flags().StringVar(&natSetting, "nat", "any", "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
+	sentryCmd.Flags().StringVar(&natSetting, "nat", "", "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
 	sentryCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
 	sentryCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	sentryCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth65|eth66")

@@ -107,16 +107,14 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 }
 
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
-	fmt.Printf("sendHeaderRequest\n")
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
-		fmt.Printf("ready? %d, %t\n", i, cs.sentries[i].Ready())
 		if !cs.sentries[i].Ready() {
 			continue
 		}
-		fmt.Printf("ready!%d\n", cs.sentries[i].Protocol())
 		switch cs.sentries[i].Protocol() {
 		case eth.ETH66:
+			// if sentry not found peers to send such message, try next one. stop if found.
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket66{
 				RequestId: rand.Uint64(),
