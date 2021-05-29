@@ -117,6 +117,7 @@ func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.S
 // implements proto_sentry.Sentry_ReceiveMessagesServer
 type SentryReceiveServerDirect struct {
 	messageCh chan *proto_sentry.InboundMessage
+	ctx       context.Context
 	grpc.ServerStream
 }
 
@@ -124,15 +125,22 @@ func (s *SentryReceiveServerDirect) Send(m *proto_sentry.InboundMessage) error {
 	s.messageCh <- m
 	return nil
 }
+func (s *SentryReceiveServerDirect) Context() context.Context {
+	return s.ctx
+}
 
 type SentryReceiveClientDirect struct {
 	messageCh chan *proto_sentry.InboundMessage
+	ctx       context.Context
 	grpc.ClientStream
 }
 
 func (c *SentryReceiveClientDirect) Recv() (*proto_sentry.InboundMessage, error) {
 	m := <-c.messageCh
 	return m, nil
+}
+func (c *SentryReceiveClientDirect) Context() context.Context {
+	return c.ctx
 }
 
 func (scd *SentryClientDirect) ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveMessagesClient, error) {
