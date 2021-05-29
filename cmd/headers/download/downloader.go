@@ -127,6 +127,7 @@ func RecvMessage(
 ) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer sentry.MarkDisconnected()
 
 	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
 	if err2 != nil {
