@@ -587,7 +587,6 @@ func Sentry(datadir string, natSetting string, port int, sentryAddr string, stat
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
-
 	ctx := rootContext()
 
 	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
