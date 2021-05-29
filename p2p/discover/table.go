@@ -235,28 +235,23 @@ loop:
 	for {
 		select {
 		case <-refresh.C:
-			fmt.Printf("1111111\n")
-
 			tab.seedRand()
 			if refreshDone == nil {
 				refreshDone = make(chan struct{})
 				go tab.doRefresh(refreshDone)
 			}
 		case req := <-tab.refreshReq:
-			fmt.Printf("22222\n")
 			waiting = append(waiting, req)
 			if refreshDone == nil {
 				refreshDone = make(chan struct{})
 				go tab.doRefresh(refreshDone)
 			}
 		case <-refreshDone:
-			fmt.Printf("333\n")
 			for _, ch := range waiting {
 				close(ch)
 			}
 			waiting, refreshDone = nil, nil
 		case <-revalidate.C:
-			fmt.Printf("444\n")
 			revalidateDone = make(chan struct{})
 			go tab.doRevalidate(revalidateDone)
 		case <-revalidateDone:
