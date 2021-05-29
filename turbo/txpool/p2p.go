@@ -147,11 +147,12 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
-		protocol, ok := tp.Sentries[i].Protocol()
-		if !ok {
+		if !tp.Sentries[i].Ready() {
 			continue
 		}
-		if protocol == eth.ETH65 {
+
+		switch tp.Sentries[i].Protocol() {
+		case eth.ETH65:
 			if outreq65 == nil {
 				data65, err := rlp.EncodeToBytes(eth.GetPooledTransactionsPacket(hashes))
 				if err != nil {
@@ -174,8 +175,7 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 				continue
 			}
 			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-		}
-		if protocol == eth.ETH66 {
+		case eth.ETH66:
 			if outreq66 == nil {
 				data66, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
 					RequestId:                   rand.Uint64(), //nolint:gosec
