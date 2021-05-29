@@ -150,7 +150,9 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 	)
 }
 
-func SetSentryStatus(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
+// SentriesHandshake - doesn't block - starting process of basic metadata exchange
+// use WaitForOneSentryReady before use sentries
+func SentriesHandshake(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
 	for i := range sentries {
 		go func(i int) {
 			for {
@@ -166,6 +168,7 @@ func SetSentryStatus(ctx context.Context, sentries []remote.SentryClient, contro
 	}
 }
 
+// WaitForOneSentryReady - blocks until at least one sentry.Ready() returns true
 func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []remote.SentryClient) {
 	log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
 	logEvery := time.NewTicker(30 * time.Second)

@@ -245,7 +245,7 @@ func mock(t *testing.T) *MockSentry {
 		}),
 		stagedsync.StageFinishCfg(db, mock.tmpdir),
 	)
-	SetSentryStatus(mock.ctx, sentries, mock.downloader)
+	SentriesHandshake(mock.ctx, sentries, mock.downloader)
 
 	miningConfig := ethconfig.Defaults.Miner
 	miningConfig.Enabled = true
