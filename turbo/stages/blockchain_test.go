@@ -82,6 +82,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	canonicalDb := ethdb.NewObjectDatabase(canonicalMock.DB)
+	defer canonicalDb.Close()
 	db := ethdb.NewObjectDatabase(m.DB)
 	var err error
 	// Assert the chains have the same header/block at #i
@@ -142,6 +143,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 func TestLastBlock(t *testing.T) {
 	m := newCanonical(t, 0)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	var err error
 
 	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 1, m, 0)
@@ -237,6 +239,7 @@ func testBrokenChain(t *testing.T) {
 	// Make chain starting from genesis
 	m := newCanonical(t, 10)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// Create a forked chain, and try to insert with a missing link
 	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 5, m, forkSeed)
@@ -283,6 +286,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// Insert an easy and a difficult chain afterwards
 	easyChain, err := core.GenerateChain(m.ChainConfig, rawdb.ReadCurrentBlockDeprecated(db), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
@@ -339,6 +343,7 @@ func testBadHashes(t *testing.T) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	var err error
 	// Create a chain, ban a hash and try to import
 	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 3, m, 10)
@@ -374,7 +379,10 @@ func TestChainTxReorgs(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key1)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	m2 := stages.MockWithGenesis(t, gspec, key1)
+	defer m2.DB.Close()
 
 	// Create two transactions shared between the chains:
 	//  - postponed: transaction included at a later block in the forked chain
@@ -448,30 +456,30 @@ func TestChainTxReorgs(t *testing.T) {
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn != nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt != nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn == nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt == nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt == nil {
 			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn == nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt == nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt == nil {
 			t.Errorf("share %d: expected receipt to be found", i)
 		}
 	}
@@ -481,6 +489,7 @@ func TestChainTxReorgs(t *testing.T) {
 func TestCanonicalBlockRetrieval(t *testing.T) {
 	m := newCanonical(t, 0)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	chain, err2 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err2 != nil {
@@ -516,8 +525,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 }
 
 func TestEIP155Transition(t *testing.T) {
-	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
+	// Configure and generate a sample block chai
 
 	var (
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -528,10 +536,12 @@ func TestEIP155Transition(t *testing.T) {
 			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
-		genesis = gspec.MustCommit(db)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	chain, chainErr := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -576,7 +586,7 @@ func TestEIP155Transition(t *testing.T) {
 		t.Fatalf("generate chain: %v", chainErr)
 	}
 
-	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); chainErr != nil {
+	if chainErr = m.InsertChain(chain); chainErr != nil {
 		t.Fatal(chainErr)
 	}
 	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
@@ -597,7 +607,7 @@ func TestEIP155Transition(t *testing.T) {
 
 	// generate an invalid chain id transaction
 	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
-	chain, chainErr = core.GenerateChain(config, chain.TopBlock, ethash.NewFaker(), db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, chainErr = core.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
 				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
@@ -614,7 +624,7 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr != nil {
 		t.Fatalf("generate blocks: %v", chainErr)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); !errors.Is(err, types.ErrInvalidChainId) {
+	if err := m.InsertChain(chain); !errors.Is(err, types.ErrInvalidChainId) {
 		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
 	}
 }
@@ -627,11 +637,9 @@ func TestModes(t *testing.T) {
 	)
 }
 
-func doModesTest(t *testing.T, history, preimages, receipts, txlookup bool) error {
-	fmt.Printf("h=%v, p=%v, r=%v, t=%v\n", history, preimages, receipts, txlookup)
+func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
+	fmt.Printf("h=%v, r=%v, t=%v\n", history, receipts, txlookup)
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
-	defer db.Close()
 	var (
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address    = crypto.PubkeyToAddress(key.PublicKey)
@@ -641,10 +649,12 @@ func doModesTest(t *testing.T, history, preimages, receipts, txlookup bool) erro
 			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
-		genesis, _, _ = gspec.Commit(db, history)
 	)
+	m := stages.MockWithGenesisStorageMode(t, gspec, key, ethdb.StorageMode{Initialised: true, History: history, Receipts: receipts, TxIndex: txlookup})
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -689,13 +699,12 @@ func doModesTest(t *testing.T, history, preimages, receipts, txlookup bool) erro
 		return fmt.Errorf("generate blocks: %v", err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.StorageMode{History: history, Receipts: receipts, TxIndex: txlookup}, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		return err
 	}
 
 	for bucketName, shouldBeEmpty := range map[string]bool{
 		dbutils.AccountsHistoryBucket: !history,
-		dbutils.PreimagePrefix:        !preimages,
 		dbutils.BlockReceiptsPrefix:   !receipts,
 		dbutils.TxLookupPrefix:        !txlookup,
 	} {
@@ -736,34 +745,32 @@ func doModesTest(t *testing.T, history, preimages, receipts, txlookup bool) erro
 	return nil
 }
 
-func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, bool, bool, bool, bool) error) {
-	err := runPermutation(t, testFunc, 0, true, true, true, true)
+func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error) {
+	err := runPermutation(t, testFunc, 0, true, true, true)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
 }
 
-func runPermutation(t *testing.T, testFunc func(*testing.T, bool, bool, bool, bool) error, current int, history, preimages, receipts, txlookup bool) error {
-	if current == 4 {
-		return testFunc(t, history, preimages, receipts, txlookup)
+func runPermutation(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error, current int, history, receipts, txlookup bool) error {
+	if current == 3 {
+		return testFunc(t, history, receipts, txlookup)
 	}
-	if err := runPermutation(t, testFunc, current+1, history, preimages, receipts, txlookup); err != nil {
+	if err := runPermutation(t, testFunc, current+1, history, receipts, txlookup); err != nil {
 		return err
 	}
 	switch current {
 	case 0:
 		history = !history
 	case 1:
-		preimages = !preimages
-	case 2:
 		receipts = !receipts
-	case 3:
+	case 2:
 		txlookup = !txlookup
 	default:
 		panic("unexpected current item")
 	}
 
-	return runPermutation(t, testFunc, current+1, history, preimages, receipts, txlookup)
+	return runPermutation(t, testFunc, current+1, history, receipts, txlookup)
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {
