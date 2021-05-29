@@ -464,17 +464,6 @@ func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Eve
 		}
 	}
 }
-
-func BlockchainRuntimeConfig(config *ethconfig.Config) vm.Config {
-	var (
-		vmConfig = vm.Config{
-			EnablePreimageRecording: config.EnablePreimageRecording,
-			NoReceipts:              !config.StorageMode.Receipts,
-		}
-	)
-	return vmConfig
-}
-
 func (s *Ethereum) APIs() []rpc.API {
 	return []rpc.API{}
 }

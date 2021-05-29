@@ -145,6 +145,7 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		notifier,
 		stateStream,
 		controlServer.updateHead,
+		func() { WaitForOneSentryReady(ctx, "stage loop", controlServer.sentries) },
 		waitForDone,
 	)
 }
@@ -162,6 +163,33 @@ func SetSentryStatus(ctx context.Context, sentries []remote.SentryClient, contro
 				break
 			}
 		}(i)
+	}
+}
+
+func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []remote.SentryClient) {
+	log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	count := 0
+	for {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
+		case <-ctx.Done():
+			return
+		}
+
+		for i := range sentries {
+			if sentries[i].Ready() {
+				if count > 0 {
+					log.Info(fmt.Sprintf("[%s] %s", logPrefix, "sentry ready"))
+				}
+				return
+			}
+		}
+		count++
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

@@ -60,14 +60,12 @@ func StageLoop(
 	notifier stagedsync.ChainEventNotifier,
 	stateStream bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	waitForOneSentryReady func(),
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
 	initialCycle := true
-	//ToDO: wait for at least 1 sentry availability
-	//if len(stack.Config().P2P.SentryAddr) > 0 {
-	//	download.SetSentryStatus(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
-	//}
+	waitForOneSentryReady()
 
 	for {
 		select {
