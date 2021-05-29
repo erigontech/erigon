@@ -132,7 +132,6 @@ func HeadersForward(
 
 		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
-		fmt.Printf("2: %+v\n", req)
 		if req != nil {
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
