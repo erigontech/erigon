@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
   + [Team](#team)
 - [Known issues](#known-issues)
-  + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage)
+  + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage-when-using-lmdb)
 <!--te-->
 
 
@@ -105,7 +105,7 @@ Windows users may run erigon in 3 possible ways:
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
-* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact those mount points use `DrvFS` which is a network file system and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data. This has consequences on the running of `rpcdaemon` which has to be configured as **Remote DB** even if it is executed on the very same computer.
+* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives) and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data. This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if it is executed on the very same computer.
 If instead your data is hosted on the native Linux filesystem non limitations apply.
 
 Key features
@@ -267,7 +267,7 @@ Happy testing! 🥤
 Known issues
 ============
 
-### `htop` shows incorrect memory usage
+### `htop` shows incorrect memory usage when using LMDB
 
 Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
@@ -284,7 +284,7 @@ Next tools show correct memory usage of Erigon:
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-Erigon uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory.
+Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently,
 it impacts performance - one of main Erigon optimisations: "reduce Disk random access".
