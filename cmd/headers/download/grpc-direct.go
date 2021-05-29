@@ -59,6 +59,7 @@ func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.S
 // implements proto_sentry.Sentry_ReceiveMessagesServer
 type SentryReceiveServerDirect struct {
 	messageCh chan *proto_sentry.InboundMessage
+	ctx       context.Context
 	grpc.ServerStream
 }
 
@@ -66,9 +67,13 @@ func (s *SentryReceiveServerDirect) Send(m *proto_sentry.InboundMessage) error {
 	s.messageCh <- m
 	return nil
 }
+func (s *SentryReceiveServerDirect) Context() context.Context {
+	return s.ctx
+}
 
 type SentryReceiveClientDirect struct {
 	messageCh chan *proto_sentry.InboundMessage
+	ctx       context.Context
 	grpc.ClientStream
 }
 
@@ -76,39 +81,42 @@ func (c *SentryReceiveClientDirect) Recv() (*proto_sentry.InboundMessage, error)
 	m := <-c.messageCh
 	return m, nil
 }
+func (c *SentryReceiveClientDirect) Context() context.Context {
+	return c.ctx
+}
 
 func (scd *SentryClientDirect) ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveMessagesClient, error) {
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh}
+	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
 		if err := scd.server.ReceiveMessages(&empty.Empty{}, streamServer); err != nil {
 			log.Error("ReceiveMessages returned", "error", err)
 		}
 		close(messageCh)
 	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh}, nil
+	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
 }
 
 func (scd *SentryClientDirect) ReceiveUploadMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveUploadMessagesClient, error) {
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh}
+	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
 		if err := scd.server.ReceiveUploadMessages(&empty.Empty{}, streamServer); err != nil {
 			log.Error("ReceiveUploadMessages returned", "error", err)
 		}
 		close(messageCh)
 	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh}, nil
+	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
 }
 
 func (scd *SentryClientDirect) ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveTxMessagesClient, error) {
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh}
+	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
 		if err := scd.server.ReceiveTxMessages(&empty.Empty{}, streamServer); err != nil {
 			log.Error("ReceiveTxMessages returned", "error", err)
 		}
 		close(messageCh)
 	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh}, nil
+	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
 }
