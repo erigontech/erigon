@@ -390,7 +390,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 	bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
-	backend.stagedSync2, err = download.NewStagedSync(
+	backend.stagedSync2, err = stages2.NewStagedSync2(
 		backend.downloadV2Ctx,
 		backend.chainKV,
 		sm,
@@ -626,7 +626,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
 	}
 	go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil)
-	go download.Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
+	go Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil
 }
 
@@ -664,4 +664,19 @@ func (s *Ethereum) Stop() error {
 		<-s.waitForMiningStop
 	}
 	return nil
+}
+
+//Deprecated - use stages.StageLoop
+func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+	stages2.StageLoop(
+		ctx,
+		db,
+		sync,
+		controlServer.Hd,
+		controlServer.ChainConfig,
+		notifier,
+		stateStream,
+		controlServer.UpdateHead,
+		waitForDone,
+	)
 }

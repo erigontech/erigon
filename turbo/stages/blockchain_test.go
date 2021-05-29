@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package stages
+package stages_test
 
 import (
 	"context"
@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // So we can deterministically seed different blockchains
@@ -506,7 +507,6 @@ func testBadHashes(t *testing.T, full bool) {
 
 // Tests that chain reorganisations handle transaction removals and reinsertions.
 func TestChainTxReorgs(t *testing.T) {
-	db, db2 := ethdb.NewTestDB(t), ethdb.NewTestDB(t)
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -523,10 +523,11 @@ func TestChainTxReorgs(t *testing.T) {
 				addr3: {Balance: big.NewInt(1000000)},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		_       = gspec.MustCommit(db2)
-		signer  = types.LatestSigner(gspec.Config)
+		signer = types.LatestSigner(gspec.Config)
 	)
+
+	m := stages.MockWithGenesis(t, gspec, key1)
+	m2 := stages.MockWithGenesis(t, gspec, key1)
 
 	// Create two transactions shared between the chains:
 	//  - postponed: transaction included at a later block in the forked chain
@@ -545,7 +546,7 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd types.Transaction
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 3, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, m.Genesis, ethash.NewFaker(), m.DB, 3, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key2)
@@ -566,12 +567,12 @@ func TestChainTxReorgs(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain. This runs all block validation rules.
-	if _, err1 := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err1 != nil {
+	if err1 := m.InsertChain(chain); err1 != nil {
 		t.Fatalf("failed to insert original chain: %v", err1)
 	}
 
 	// overwrite the old chain
-	chain, err = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db2.RwKV(), 5, func(i int, gen *core.BlockGen) {
+	chain, err = core.GenerateChain(gspec.Config, m.Genesis, ethash.NewFaker(), m2.DB, 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			pastAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key3)
@@ -592,37 +593,38 @@ func TestChainTxReorgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
+
+	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn != nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt != nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt == nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt == nil {
 			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
+		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(ethdb.NewObjectDatabase(m.DB), tx.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(db, tx.Hash()); rcpt == nil {
+		if rcpt, _, _, _ := rawdb.ReadReceipt(ethdb.NewObjectDatabase(m.DB), tx.Hash()); rcpt == nil {
 			t.Errorf("share %d: expected receipt to be found", i)
 		}
 	}

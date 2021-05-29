@@ -15,11 +15,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
@@ -27,10 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
@@ -160,21 +155,6 @@ func RecvMessage(
 	}
 }
 
-//Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
-	stages.StageLoop(
-		ctx,
-		db,
-		sync,
-		controlServer.hd,
-		controlServer.chainConfig,
-		notifier,
-		stateStream,
-		controlServer.updateHead,
-		waitForDone,
-	)
-}
-
 func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	if err != nil {
@@ -219,98 +199,21 @@ func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []rem
 	}
 }
 
-func NewStagedSync(
-	ctx context.Context,
-	db ethdb.RwKV,
-	sm ethdb.StorageMode,
-	batchSize datasize.ByteSize,
-	bodyDownloadTimeout int,
-	controlServer *ControlServerImpl,
-	tmpdir string,
-	txPool *core.TxPool,
-	txPoolServer *txpool.P2PServer,
-) (*stagedsync.StagedSync, error) {
-	var pruningDistance uint64
-	if !sm.History {
-		pruningDistance = params.FullImmutabilityThreshold
-	}
-
-	return stages.NewStagedSync(ctx, sm,
-		stagedsync.StageHeadersCfg(
-			db,
-			controlServer.hd,
-			*controlServer.chainConfig,
-			controlServer.sendHeaderRequest,
-			controlServer.PropagateNewBlockHashes,
-			controlServer.penalize,
-			batchSize,
-		),
-		stagedsync.StageBlockHashesCfg(db, tmpdir),
-		stagedsync.StageBodiesCfg(
-			db,
-			controlServer.bd,
-			controlServer.sendBodyRequest,
-			controlServer.penalize,
-			controlServer.BroadcastNewBlock,
-			bodyDownloadTimeout,
-			*controlServer.chainConfig,
-			batchSize,
-		),
-		stagedsync.StageSendersCfg(db, controlServer.chainConfig, tmpdir),
-		stagedsync.StageExecuteBlocksCfg(
-			db,
-			sm.Receipts,
-			sm.CallTraces,
-			sm.TEVM,
-			pruningDistance,
-			batchSize,
-			nil,
-			nil,
-			nil,
-			nil,
-			controlServer.chainConfig,
-			controlServer.engine,
-			&vm.Config{NoReceipts: !sm.Receipts},
-			tmpdir,
-		),
-		stagedsync.StageTranspileCfg(
-			db,
-			batchSize,
-			nil,
-			nil,
-			controlServer.chainConfig,
-		),
-		stagedsync.StageHashStateCfg(db, tmpdir),
-		stagedsync.StageTrieCfg(db, true, true, tmpdir),
-		stagedsync.StageHistoryCfg(db, tmpdir),
-		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.chainConfig, controlServer.engine),
-		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
-			}
-			txPoolServer.TxFetcher.Start()
-		}),
-		stagedsync.StageFinishCfg(db, tmpdir),
-	), nil
-}
-
 type ControlServerImpl struct {
 	lock        sync.RWMutex
-	hd          *headerdownload.HeaderDownload
-	bd          *bodydownload.BodyDownload
+	Hd          *headerdownload.HeaderDownload
+	Bd          *bodydownload.BodyDownload
 	nodeName    string
 	sentries    []remote.SentryClient
 	headHeight  uint64
 	headHash    common.Hash
 	headTd      *uint256.Int
-	chainConfig *params.ChainConfig
+	ChainConfig *params.ChainConfig
 	forks       []uint64
 	genesisHash common.Hash
 	networkId   uint64
 	db          ethdb.RwKV
-	engine      consensus.Engine
+	Engine      consensus.Engine
 }
 
 func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
@@ -329,14 +232,14 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 
 	cs := &ControlServerImpl{
 		nodeName: nodeName,
-		hd:       hd,
-		bd:       bd,
+		Hd:       hd,
+		Bd:       bd,
 		sentries: sentries,
 		db:       db,
-		engine:   engine,
+		Engine:   engine,
 	}
-	cs.chainConfig = chainConfig
-	cs.forks = forkid.GatherForks(cs.chainConfig)
+	cs.ChainConfig = chainConfig
+	cs.forks = forkid.GatherForks(cs.ChainConfig)
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
@@ -354,8 +257,8 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 		return fmt.Errorf("decode NewBlockHashes66: %v", err)
 	}
 	for _, announce := range request {
-		cs.hd.SaveExternalAnnounce(announce.Hash)
-		if cs.hd.HasLink(announce.Hash) {
+		cs.Hd.SaveExternalAnnounce(announce.Hash)
+		if cs.Hd.HasLink(announce.Hash) {
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
@@ -393,8 +296,8 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 		return fmt.Errorf("decode newBlockHashes65: %v", err)
 	}
 	for _, announce := range request {
-		cs.hd.SaveExternalAnnounce(announce.Hash)
-		if cs.hd.HasLink(announce.Hash) {
+		cs.Hd.SaveExternalAnnounce(announce.Hash)
+		if cs.Hd.HasLink(announce.Hash) {
 			continue
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
@@ -459,24 +362,24 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 		}
 	}
 
-	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
+	if segments, penalty, err := cs.Hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
 			}
 
 			if canRequestMore {
 				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.hd.RequestMoreHeaders(currentTime)
+				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
-					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
-						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
+					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
+						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
 						log.Debug("Sent request", "height", req.Number)
 					}
 				}
-				cs.penalize(ctx, penalties)
+				cs.Penalize(ctx, penalties)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -531,24 +434,24 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 		}
 	}
 
-	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
+	if segments, penalty, err := cs.Hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
 			}
 
 			if canRequestMore {
 				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.hd.RequestMoreHeaders(currentTime)
+				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
-					if peer := cs.sendHeaderRequest(ctx, req); peer != nil {
-						cs.hd.SentRequest(req, currentTime, 5 /* timeout */)
+					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
+						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
 						log.Debug("Sent request", "height", req.Number)
 					}
 				}
-				cs.penalize(ctx, penalties)
+				cs.Penalize(ctx, penalties)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -596,9 +499,9 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode 4 NewBlockMsg: %v", err)
 	}
-	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
+	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
+			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -616,7 +519,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
-	cs.bd.AddToPrefetch(request.Block)
+	cs.Bd.AddToPrefetch(request.Block)
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
@@ -634,7 +537,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 
@@ -644,7 +547,7 @@ func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode blockBodies65: %v", err)
 	}
 	txs, uncles := request.Unpack()
-	cs.bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 
