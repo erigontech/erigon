@@ -50,7 +50,7 @@ func (c *SentryClientRemote) Ready() bool {
 func (c *SentryClientRemote) MarkDisconnected() {
 	c.Lock()
 	defer c.Unlock()
-	c.ready = true
+	c.ready = false
 }
 
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
