@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
   + [Team](#team)
 - [Known issues](#known-issues)
-  + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage-when-using-lmdb)
+  + [`htop` shows incorrect memory usage on LMDB](#htop-shows-incorrect-memory-usage-when-using-lmdb)
 <!--te-->
 
 
