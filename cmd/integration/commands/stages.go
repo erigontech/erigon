@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/spf13/cobra"
 )
 
@@ -831,7 +832,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 	}
 
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
-	st, err := download.NewStagedSync(context.Background(), db, sm, batchSize,
+	st, err := stages2.NewStagedSync2(context.Background(), db, sm, batchSize,
 		bodyDownloadTimeoutSeconds,
 		downloadServer,
 		path.Join(datadir, etl.TmpDirName),

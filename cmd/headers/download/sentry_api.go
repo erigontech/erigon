@@ -18,7 +18,7 @@ import (
 
 // Methods of sentry called by Core
 
-func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
+func (cs *ControlServerImpl) UpdateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
@@ -32,7 +32,7 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 	}
 }
 
-func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
+func (cs *ControlServerImpl) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 	var bytes []byte
 	var err error
@@ -68,7 +68,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	return nil
 }
 
-func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
+func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 	reqData := &eth.GetBlockHeadersPacket66{
 		RequestId: rand.Uint64(),
@@ -127,7 +127,7 @@ func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
 }
 
 // sending list of penalties to all sentries
-func (cs *ControlServerImpl) penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
+func (cs *ControlServerImpl) Penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
 	for i := range penalties {
 		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId:  gointerfaces.ConvertBytesToH512([]byte(penalties[i].PeerID)),
