@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY dfe0671435fed2948a861ec25f1adbf99a470c88be69bcc27b32ca9a7ffc6787_v0_10_0_27_g2b161db6
+#define MDBX_BUILD_SOURCERY 70a2b520f39efb5ffb11dd97c2eef3750a14f311a08a4382f87dd6e307ed6105_v0_10_0_34_ga6c8c20b
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -4609,7 +4609,6 @@ int main(int argc, char *argv[]) {
       quiet = true;
       break;
     case 'n':
-      envflags |= MDBX_NOSUBDIR;
       break;
     case 'w':
       envflags &= ~MDBX_RDONLY;

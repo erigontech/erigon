@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
   + [Team](#team)
 - [Known issues](#known-issues)
-  + [`htop` shows incorrect memory usage](#-htop--shows-incorrect-memory-usage)
+  + [`htop` shows incorrect memory usage on LMDB](#htop-shows-incorrect-memory-usage-when-using-lmdb)
 <!--te-->
 
 
@@ -91,15 +91,23 @@ Support only remote-miners.
 
 ### Windows
 
-Windows users may run erigon in 2 possible ways:
+Windows users may run erigon in 3 possible ways:
 
 * Build executable binaries natively for Windows using provided `win-build.ps1` PowerShell script which has to be run with local Administrator privileges.
   The script creates `libmdbx.dll` (MDBX is current default database for Erigon) and copies it into Windows's `system32` folder (generally `C:\Windows\system32`).
-  Though is still possible to run erigon with LMDB database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`
+  There are some requirements for a successful native build on windows :
+  * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very likely you already have it
+  * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
+  * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+
+  Though is still possible to run erigon with LMDB database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`.
+  Please be advised Erigon will completely remove LMDB support in future releases thus we warmly suggest to resync using the default MDBX database.
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
-Note that we used to have documentation about using WSL to build Erigon on Windows, which is now removed. This is because we do not consider WSL builds safe when interacting with our database backend - there is a chance of losing data and corrupting database.
+* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives) and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data. This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if it is executed on the very same computer.
+If instead your data is hosted on the native Linux filesystem non limitations apply.
+**Please also note the default WSL2 environment has its own IP address which does not match the one of the network interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
 Key features
 ============ 
@@ -164,7 +172,7 @@ it can run from a snapshot of a database for read-only calls.
 
 <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
-**For local DB**
+#### **For local DB**
 
 This is only possible if RPC daemon runs on the same computer as Erigon. This mode of operation uses shared memory access to the database of Erigon, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
 ```
@@ -174,7 +182,7 @@ This is only possible if RPC daemon runs on the same computer as Erigon. This mo
 
 In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
 
-**For remote DB**
+#### **For remote DB**
 
 This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
@@ -260,7 +268,7 @@ Happy testing! 🥤
 Known issues
 ============
 
-### `htop` shows incorrect memory usage
+### `htop` shows incorrect memory usage when using LMDB
 
 Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
@@ -277,7 +285,7 @@ Next tools show correct memory usage of Erigon:
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-Erigon uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS pages cache can utilize unlimited amount of memory.
+Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently,
 it impacts performance - one of main Erigon optimisations: "reduce Disk random access".

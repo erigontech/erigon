@@ -14,6 +14,16 @@
    limitations under the License.
 #>
 
+$gitErrorText = @"
+
+ Requirement Error.
+ You need to have Git installed
+ Please visit https://git-scm.com/downloads and download the appropriate
+ installer.
+
+"@
+
+
 $goErrorText = @"
 
  Requirement Error.
@@ -66,36 +76,153 @@ $MyContext.StartDir   = (Get-Location -PSProvider FileSystem).ProviderPath
 $MyContext.WinVer     = (Get-WmiObject Win32_OperatingSystem).Version.Split(".")
 $MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
 
-# Test we have ADMIN Privileges
-$myWindowsID = [System.Security.Principal.WindowsIdentity]::GetCurrent();
-$myWindowsPrincipal = New-Object System.Security.Principal.WindowsPrincipal($myWindowsID);
-$adminRole = [System.Security.Principal.WindowsBuiltInRole]::Administrator;
-if (!($myWindowsPrincipal.IsInRole($adminRole))) {
-   Write-Host $privilegeErrorText
-   return
+# -----------------------------------------------------------------------------
+# Function 		: Test-Administrator
+# -----------------------------------------------------------------------------
+# Description	: Checks the script is running with Administrator privileges
+# Returns       : $true / $false
+# -----------------------------------------------------------------------------
+function Test-Administrator {
+
+    $myWindowsID = [System.Security.Principal.WindowsIdentity]::GetCurrent();
+    $myWindowsPrincipal = New-Object System.Security.Principal.WindowsPrincipal($myWindowsID);
+    $adminRole = [System.Security.Principal.WindowsBuiltInRole]::Administrator;
+    Write-Output ($myWindowsPrincipal.IsInRole($adminRole))
+} 
+
+# -----------------------------------------------------------------------------
+# Function 		: Test-Valid-Env
+# -----------------------------------------------------------------------------
+# Description	: Checks the named variable provided is present in env:
+# Returns       : $true / $false
+# -----------------------------------------------------------------------------
+function Get-Env {
+    param ([string]$varName = $(throw "A variable name must be provided"))
+    $result = Get-ChildItem env: | Where-Object {$_.Name -ieq $varName}
+    if (-not $result) {
+        Write-Output $null
+    } else {
+        Write-Output $result.Value
+    }
 }
 
+# -----------------------------------------------------------------------------
+# Function 		: Get-Uninstall-Item
+# -----------------------------------------------------------------------------
+# Description	: Try get uninstall key for given item pattern
+# Returns       : object
+# -----------------------------------------------------------------------------
+function Get-Uninstall-Item {
+    param ([string]$pattern = $(throw "A search pattern must be provided"))    
+    
+    # Trying to get the enumerable of all installed programs using Get-ItemProperty may cause 
+    # exceptions due to possible garbage values insterted into the registry by installers.
+    # Specifically an invalid cast exception throws when registry keys contain invalid DWORD data. 
+    # See https://github.com/PowerShell/PowerShell/issues/9552
+    # Due to this all items must be parsed one by one
 
-# Test GO is installed and is at least 1.16
-$goInstalled = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object {$_.DisplayName -imatch "^Go\ Programming\ Language"})
-if(!$goInstalled) {
+    $Private:regUninstallPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\"
+    $Private:result = $null
+    Get-ChildItem -Path $regUninstallPath | ForEach-Object {
+        if(-not $result) {
+            $item = Get-ItemProperty -Path $_.pspath
+            if ($item.DisplayName -imatch $pattern) {
+                $result = $item
+                # DO NOT use break
+            }
+        }
+    }
+    Write-Output $result
+}
+
+# -----------------------------------------------------------------------------
+# Function 		: Test-GO-Installed
+# -----------------------------------------------------------------------------
+# Description	: Checks whether or not GO language is installed
+# Returns       : $true / $false
+# -----------------------------------------------------------------------------
+function Test-GO-Installed {
+
+    $Private:item   = Get-Uninstall-Item "^Go\ Programming\ Language"
+    $Private:result = $false
+
+    if ($Private:item) {
+        $Private:versionMajor = [int]$item.VersionMajor
+        $Private:versionMinor = [int]$item.VersionMinor
+        if ($Private:versionMajor -ge 1 -and $Private:versionMinor -ge 16) {
+            Write-Host " Found GO version $($Private:item.DisplayVersion)"
+            $Private:result = $true
+        }
+    }
+
+    Write-Output $Private:result
+}
+
+# -----------------------------------------------------------------------------
+# Function 		: Test-Git-Installed
+# -----------------------------------------------------------------------------
+# Description	: Checks whether or not Git is installed
+# Returns       : $true / $false
+# -----------------------------------------------------------------------------
+function Test-Git-Installed {
+
+    $Private:item   = Get-Uninstall-Item "^Git\ "
+    $Private:result = $false
+
+    if ($Private:item) {
+        Write-Host " Found Git version $($Private:item.DisplayVersion)"
+        $Private:result = $true
+    }
+
+    Write-Output $Private:result
+}
+
+# Test requirements
+
+## Test Git is installed
+if(!(Test-Git-Installed)) {
+    Write-Host $gitErrorText
+    return
+}
+Get-Command git.exe | Out-Null
+if (!($?)) {
+    Write-Host @"
+    
+ Error !
+ Though Git installation is found I could not get
+ the Git binary executable. Ensure Git installation
+ directory is properly inserted into your PATH
+ environment variable.
+
+"@
+    return
+}
+
+## GO language is installed
+if(!(Test-GO-Installed)) {
     Write-Host $goErrorText
     return
 }
-Write-Host " Found GO version $($goInstalled.DisplayVersion)"
-$goVersionMajor = [int]$goInstalled.VersionMajor
-$goVersionMinor = [int]$goInstalled.VersionMinor
-if($goVersionMajor -lt 1 -or $goVersionMinor -lt 16) {
-    Write-Host $goErrorText
+Get-Command go.exe | Out-Null
+if (!($?)) {
+    Write-Host @"
+    
+ Error !
+ Though GO installation is found I could not get
+ the GO binary executable. Ensure GO installation
+ directory is properly inserted into your PATH
+ environment variable.
+
+"@
     return
 }
 
-# Test Chocolatey Install
-if(!(Test-Path env:chocolateyInstall)) {
+## Test Chocolatey Install
+$chocolateyPath = Get-Env "chocolateyInstall"
+if(-not $chocolateyPath) {
     Write-Host $chocolateyErrorText
     return
 }
-$chocolateyPath = $env:ChocolateyInstall
 
 # Test Chocolatey bin directory is actually in %PATH%
 $chocolateyBinPath = (Join-Path $chocolateyPath "bin")
@@ -114,7 +241,7 @@ if(!$chocolateyBinPathInPath) {
     return
 }
 
-# Test Chocolatey Components
+## Test Chocolatey Components
 $chocolateyHasCmake = $false
 $chocolateyHasMake = $false
 $chocolateyHasMingw = $false
@@ -137,6 +264,27 @@ for($i=0; $i -lt $chocolateyComponents.Count; $i++){
 If(!$chocolateyHasCmake -or !$chocolateyHasMake -or !$chocolateyHasMingw) {
     Write-Host $chocolateyErrorText
     return
+}
+
+Get-Command cmake.exe | Out-Null
+if (!($?)) {
+    Write-Host @"
+
+ Error !
+ Though chocolatey cmake installation is found I could not get
+ the cmake binary executable. Ensure cmake installation
+ directory is properly inserted into your PATH
+ environment variable.
+ (Usually $(Join-Path $env:ProgramFiles "Cmake\bin"))
+
+"@
+    return
+}
+
+## Administrator Privileges
+if (!(Test-Administrator)) {
+   Write-Host $privilegeErrorText
+   return
 }
 
 # Enter MDBX directory and build libmdbx.dll
