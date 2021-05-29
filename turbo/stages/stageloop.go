@@ -60,12 +60,10 @@ func StageLoop(
 	notifier stagedsync.ChainEventNotifier,
 	stateStream bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
-	waitForOneSentryReady func(),
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
 	initialCycle := true
-	waitForOneSentryReady()
 
 	for {
 		select {

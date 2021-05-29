@@ -33,7 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
 
 // Methods of Core called by sentry
@@ -74,10 +76,13 @@ func RecvUploadMessage(ctx context.Context,
 
 	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Error("Receive upload loop terminated", "error", err)
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Error("Receive upload loop terminated", "error", err)
 			return
 		}
 		if req == nil {
@@ -91,6 +96,23 @@ func RecvUploadMessage(ctx context.Context,
 			wg.Done()
 		}
 
+	}
+}
+
+func RecvMessageLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *ControlServerImpl,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		SentryHandshake(ctx, sentry, cs)
+		RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg)
 	}
 }
 
@@ -114,10 +136,13 @@ func RecvMessage(
 
 	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Error("Receive loop terminated", "error", err)
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Error("Receive loop terminated", "error", err)
 			return
 		}
 		if req == nil {
@@ -145,26 +170,23 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		notifier,
 		stateStream,
 		controlServer.updateHead,
-		func() { WaitForOneSentryReady(ctx, "stage loop", controlServer.sentries) },
 		waitForDone,
 	)
+}
+
+func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) {
+	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
+	if err != nil {
+		log.Error("sentry not ready yet", "err", err)
+	}
+	fmt.Printf("Sentry Handshake\n")
 }
 
 // SentriesHandshake - doesn't block - starting process of basic metadata exchange
 // use WaitForOneSentryReady before use sentries
 func SentriesHandshake(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
 	for i := range sentries {
-		go func(i int) {
-			for {
-				_, err := sentries[i].SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
-				if err != nil {
-					log.Error("sentry not ready yet", "err", err)
-					time.Sleep(time.Second)
-					continue
-				}
-				break
-			}
-		}(i)
+		go SentryHandshake(ctx, sentries[i], controlServer)
 	}
 }
 

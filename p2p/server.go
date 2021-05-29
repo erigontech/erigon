@@ -515,8 +515,8 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	fmt.Printf("%s\n", srv.Config.ListenAddr)
-	// Create the local node.
-	db, err := enode.OpenDB(srv.Config.NodeDatabase + fmt.Sprintf("%d", srv.Protocols[0].Version))
+	// Create the local node
+	db, err := enode.OpenDB(srv.Config.NodeDatabase)
 	if err != nil {
 		return err
 	}

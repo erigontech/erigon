@@ -375,7 +375,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	if err != nil {
 		return nil, err
 	}
-	download.SentriesHandshake(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
 
 	fetchTx := func(peerID string, hashes []common.Hash) error {
 		backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
@@ -617,7 +616,9 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	go download.RecvMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil /* waitGroup */)
+	for i := range s.sentries {
+		go download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+	}
 	go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil)
 	go download.Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil

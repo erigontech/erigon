@@ -582,6 +582,10 @@ func p2pServer(ctx context.Context,
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discovery bool, netRestrict string, protocol uint) error {
+	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
+		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
+	}
+
 	ctx := rootContext()
 
 	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
@@ -837,6 +841,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 }
 
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+	fmt.Printf("SetStatus\n")
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.lock.Lock()
@@ -891,6 +896,9 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	for {
 		select {
 		case <-ss.stopCh:
+			log.Warn("Finished receive messages")
+			return nil
+		case <-server.Context().Done():
 			log.Warn("Finished receive messages")
 			return nil
 		case streamMsg := <-ss.ReceiveCh:

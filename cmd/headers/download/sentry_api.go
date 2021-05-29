@@ -2,7 +2,6 @@ package download
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 
 	"github.com/holiman/uint256"
@@ -20,7 +19,6 @@ import (
 // Methods of sentry called by Core
 
 func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
-	fmt.Printf("updateHead\n")
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
