@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -40,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -969,22 +971,23 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	// Generate the original common chain segment and the two competing forks
-	engine := ethash.NewFaker()
 
-	diskdb := ethdb.NewTestDB(t)
-	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
+	m2 := stages.Mock(t)
+	defer m2.DB.Close()
 
-	db := ethdb.NewTestDB(t)
-	genesis := (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
+	m := stages.Mock(t)
+	defer m.DB.Close()
 
-	shared, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 64, func(i int, b *core.BlockGen) {
+	shared, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
-	original, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 64+2*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	original, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory, func(i int, b *core.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -994,7 +997,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 64+2*core.TriesInMemory+1, func(i int, b *core.BlockGen) {
+	competitor, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*core.TriesInMemory+1, func(i int, b *core.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1007,20 +1010,20 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 
 	// Import the shared chain and the original canonical one
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, shared.Blocks, true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(shared); err != nil {
 		t.Fatalf("failed to insert shared chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, original.Blocks, true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(original); err != nil {
 		t.Fatalf("failed to insert original chain: %v", err)
 	}
 	// Import the competitor chain without exceeding the canonical's TD and ensure
 	// we have not processed any of the blocks (protection against malicious blocks)
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, competitor.Blocks[:competitor.Length-2], true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(competitor.Slice(0, competitor.Length-2)); err != nil {
 		t.Fatalf("failed to insert competitor chain: %v", err)
 	}
 	// Import the head of the competitor chain, triggering the reorg and ensure we
 	// successfully reprocess all the stashed away blocks.
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, competitor.Blocks[competitor.Length-2:], true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(competitor.Slice(competitor.Length-2, competitor.Length)); err != nil {
 		t.Fatalf("failed to finalize competitor chain: %v", err)
 	}
 }
@@ -1033,14 +1036,15 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/issues/18977
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	// Generate a canonical chain to act as the main dataset
-	engine := ethash.NewFaker()
-	db := ethdb.NewTestDB(t)
-	genesis := new(core.Genesis).MustCommit(db)
+	m := stages.Mock(t)
+	defer m.DB.Close()
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 6*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*core.TriesInMemory, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
 	}, false /* intermediateHashes */)
@@ -1048,7 +1052,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 11+8*core.TriesInMemory, func(i int, b *core.BlockGen) {
+	fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*core.TriesInMemory, func(i int, b *core.BlockGen) {
 		if i < 11 {
 			b.SetCoinbase(common.Address{1})
 			b.OffsetTime(-9)
@@ -1061,30 +1065,31 @@ func TestLowDiffLongChain(t *testing.T) {
 	}
 
 	// Import the canonical chain
-	diskDB := ethdb.NewTestDB(t)
-	new(core.Genesis).MustCommit(diskDB)
+	m2 := stages.Mock(t)
+	db2 := ethdb.NewObjectDatabase(m2.DB)
+	defer db2.Close()
 
-	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	// And now import the fork
-	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, fork.Blocks, true /* checkRoot */); err != nil {
+	if err := m2.InsertChain(fork); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	head := rawdb.ReadCurrentBlockDeprecated(diskDB)
+	head := rawdb.ReadCurrentBlockDeprecated(db2)
 	if got := fork.TopBlock.Hash(); got != head.Hash() {
 		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 	}
 	// Sanity check that all the canonical numbers are present
-	header := rawdb.ReadCurrentHeader(diskDB)
+	header := rawdb.ReadCurrentHeader(db2)
 	for number := head.NumberU64(); number > 0; number-- {
-		if hash := rawdb.ReadHeaderByNumber(diskDB, number).Hash(); hash != header.Hash() {
+		if hash := rawdb.ReadHeaderByNumber(db2, number).Hash(); hash != header.Hash() {
 			t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
 		}
 
-		header = rawdb.ReadHeader(diskDB, header.ParentHash, number-1)
+		header = rawdb.ReadHeader(db2, header.ParentHash, number-1)
 	}
 }
 
