@@ -844,7 +844,6 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 }
 
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	fmt.Printf("SetStatus\n")
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.lock.Lock()
