@@ -708,7 +708,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		if err1 != nil {
 			return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err1)
 		}
-		if ch == (common.Hash{}) || ch == header.ParentHash {
+		if ch == header.ParentHash {
 			forkingPoint = blockHeight - 1
 		} else {
 			// Going further back
