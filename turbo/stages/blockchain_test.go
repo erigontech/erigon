@@ -243,12 +243,7 @@ func testBrokenChain(t *testing.T) {
 
 	// Create a forked chain, and try to insert with a missing link
 	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 5, m, forkSeed)
-	brokenChain := &core.ChainPack{
-		Blocks:   chain.Blocks[1:],
-		Headers:  chain.Headers[1:],
-		TopBlock: chain.TopBlock,
-		Length:   chain.Length - 1,
-	}
+	brokenChain := chain.Slice(1, chain.Length)
 
 	if err := m.InsertChain(brokenChain); err == nil {
 		t.Errorf("broken block chain not reported")
@@ -775,7 +770,6 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, bool, bool, bool) er
 
 func TestEIP161AccountRemoval(t *testing.T) {
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -791,10 +785,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 			},
 			Alloc: core.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = gspec.MustCommit(db)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
 			txn    types.Transaction
 			err    error
@@ -817,7 +812,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// account must exist pre eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewPlainStateReader(db)); !st.Exist(theAddr) {
@@ -825,7 +820,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	}
 
 	// account needs to be deleted post eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
@@ -833,7 +828,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	}
 
 	// account mustn't be created post eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
