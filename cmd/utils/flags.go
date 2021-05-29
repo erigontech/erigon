@@ -425,7 +425,7 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	SentryAddrFlag = cli.StringSliceFlag{
+	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
@@ -683,7 +683,7 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
-		cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
+		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
 	}
 }
 
