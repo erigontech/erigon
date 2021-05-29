@@ -448,9 +448,16 @@ var (
 		Usage: "P2P node key as hex (for testing)",
 	}
 	NATFlag = cli.StringFlag{
-		Name:  "nat",
-		Usage: "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)",
-		Value: "any",
+		Name: "nat",
+		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)
+	     "" or "none"         default - do not nat
+	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+	     "any"                uses the first auto-detected mechanism
+	     "upnp"               uses the Universal Plug and Play protocol
+	     "pmp"                uses NAT-PMP with an auto-detected gateway address
+	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+`,
+		Value: "",
 	}
 	NoDiscoverFlag = cli.BoolFlag{
 		Name:  "nodiscover",

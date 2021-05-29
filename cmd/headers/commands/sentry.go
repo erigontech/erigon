@@ -14,7 +14,14 @@ var (
 )
 
 func init() {
-	sentryCmd.Flags().StringVar(&natSetting, "nat", "any", "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
+	sentryCmd.Flags().StringVar(&natSetting, "nat", "", `NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)
+	     "" or "none"         default - do not nat
+	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+	     "any"                uses the first auto-detected mechanism
+	     "upnp"               uses the Universal Plug and Play protocol
+	     "pmp"                uses NAT-PMP with an auto-detected gateway address
+	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+`)
 	sentryCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
 	sentryCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	sentryCmd.Flags().StringArrayVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
