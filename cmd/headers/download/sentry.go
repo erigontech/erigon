@@ -574,7 +574,6 @@ func p2pServer(ctx context.Context,
 
 	server.StaticNodes = enodes
 	server.NoDiscovery = nodiscover
-	server.DiscoveryV5 = true
 
 	if netRestrict != "" {
 		server.NetRestrict = new(netutil.Netlist)
