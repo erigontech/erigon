@@ -23,6 +23,7 @@ func ReplacementStages(ctx context.Context,
 	txLookup TxLookupCfg,
 	txPool TxPoolCfg,
 	finish FinishCfg,
+	test bool,
 ) StageBuilders {
 	return []StageBuilder{
 		{
@@ -32,7 +33,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return HeadersForward(s, u, ctx, tx, headers, world.InitialCycle)
+						return HeadersForward(s, u, ctx, tx, headers, world.InitialCycle, test)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return HeadersUnwind(u, s, tx, headers)

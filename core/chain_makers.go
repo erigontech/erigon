@@ -201,6 +201,18 @@ type ChainPack struct {
 	TopBlock *types.Block // Convinience field to access the last block
 }
 
+// OneBlock returns a ChainPack which contains just one
+// block with given index
+func (cp ChainPack) Slice(i, j int) *ChainPack {
+	return &ChainPack{
+		Length:   j + 1 - i,
+		Headers:  cp.Headers[i:j],
+		Blocks:   cp.Blocks[i:j],
+		Receipts: cp.Receipts[i:j],
+		TopBlock: cp.Blocks[j-1],
+	}
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.

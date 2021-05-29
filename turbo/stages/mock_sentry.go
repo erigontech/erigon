@@ -114,17 +114,20 @@ func (ms *MockSentry) ReceiveTxMessages(_ *emptypb.Empty, stream sentry.Sentry_R
 	return nil
 }
 
-func MockWithGenesis(t *testing.T, gspec *core.Genesis, Key *ecdsa.PrivateKey) *MockSentry {
+func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
+	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultStorageMode)
+}
+
+func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
 	mock := &MockSentry{}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.DB = ethdb.NewTestKV(t)
 	var err error
 	mock.tmpdir = t.TempDir()
-	sm := ethdb.DefaultStorageMode
 	mock.Engine = ethash.NewFaker()
 	mock.ChainConfig = gspec.Config
-	mock.Key = Key
-	mock.Address = crypto.PubkeyToAddress(Key.PublicKey)
+	mock.Key = key
+	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte {
 		return nil
 	}
@@ -230,6 +233,7 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, Key *ecdsa.PrivateKey) *
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
+		true, /* test */
 	)
 	if err = download.SetSentryStatus(mock.Ctx, sentries, mock.downloader); err != nil {
 		t.Fatal(err)
@@ -239,7 +243,7 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, Key *ecdsa.PrivateKey) *
 	miningConfig.Enabled = true
 	miningConfig.Noverify = false
 	miningConfig.Etherbase = mock.Address
-	miningConfig.SigKey = Key
+	miningConfig.SigKey = mock.Key
 
 	mock.PendingBlocks = make(chan *types.Block, 1)
 	mock.MinedBlocks = make(chan *types.Block, 1)
