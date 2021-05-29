@@ -788,6 +788,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
 	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
@@ -837,7 +838,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -850,12 +850,14 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			Config: params.AllEthashProtocolChanges,
 			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
-		genesis = gspec.MustCommit(db)
 	)
+	m := stages.MockWithGenesis(t, gspec, bankKey)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	var theAddr common.Address
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -882,7 +884,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */)
+	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
 	st := state.New(state.NewDbStateReader(db))
@@ -914,23 +916,22 @@ func TestDoubleAccountRemoval(t *testing.T) {
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
-	engine := ethash.NewFaker()
+	m := stages.Mock(t)
+	defer m.DB.Close()
 
-	db := ethdb.NewTestDB(t)
-	genesis := (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
+	m2 := stages.Mock(t)
+	db2 := ethdb.NewObjectDatabase(m2.DB)
+	defer db2.Close()
 
-	diskdb := ethdb.NewTestDB(t)
-	(&core.Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
-
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
-	forks := make([]*types.Block, chain.Length)
+	forks := make([]*core.ChainPack, chain.Length)
 	for i := 0; i < len(forks); i++ {
-		fork, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), i+1, func(j int, b *core.BlockGen) {
+		fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *core.BlockGen) {
 			//nolint:scopelint
 			if j == i {
 				b.SetCoinbase(common.Address{2})
@@ -942,23 +943,23 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate fork %d: %v", i, err)
 		}
-		forks[i] = fork.TopBlock
+		forks[i] = fork.Slice(i, i+1)
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
 	for i := 0; i < chain.Length; i++ {
-		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks[i:i+1], true /* checkRoot */); err != nil {
+		if err := m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 
-		b, h := rawdb.ReadCurrentBlockDeprecated(diskdb), rawdb.ReadCurrentHeader(diskdb)
+		b, h := rawdb.ReadCurrentBlockDeprecated(db2), rawdb.ReadCurrentHeader(db2)
 		if b.Hash() != h.Hash() {
 			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
-		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, forks[i:i+1], true /* checkRoot */); err != nil {
+		if err := m2.InsertChain(forks[i]); err != nil {
 			t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 		}
-		b, h = rawdb.ReadCurrentBlockDeprecated(diskdb), rawdb.ReadCurrentHeader(diskdb)
+		b, h = rawdb.ReadCurrentBlockDeprecated(db2), rawdb.ReadCurrentHeader(db2)
 		if b.Hash() != h.Hash() {
 			t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 		}
