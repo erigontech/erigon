@@ -31,7 +31,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
 
 // Methods of Core called by sentry
@@ -72,10 +74,13 @@ func RecvUploadMessage(ctx context.Context,
 
 	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Error("Receive upload loop terminated", "error", err)
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Error("Receive upload loop terminated", "error", err)
 			return
 		}
 		if req == nil {
@@ -112,10 +117,13 @@ func RecvMessage(
 
 	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Error("Receive loop terminated", "error", err)
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Error("Receive loop terminated", "error", err)
 			return
 		}
 		if req == nil {

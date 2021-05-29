@@ -903,6 +903,9 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 		case <-ss.stopCh:
 			log.Warn("Finished receive messages")
 			return nil
+		case <-server.Context().Done():
+			log.Warn("Finished receive messages")
+			return nil
 		case streamMsg := <-ss.ReceiveCh:
 			// Compute checksum
 			blake3hasher.Reset()

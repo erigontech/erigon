@@ -17,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type TxPoolServer struct {
@@ -167,10 +169,13 @@ func RecvTxMessage(ctx context.Context,
 
 	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Error("ReceiveTx loop terminated", "error", err)
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Error("ReceiveTx loop terminated", "error", err)
 			return
 		}
 		if req == nil {
