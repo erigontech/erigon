@@ -514,7 +514,7 @@ func NewSentryServer(ctx context.Context, nodeKeyFile, dbPath, p2pListenAddr str
 			if err := runPeer(
 				ctx,
 				peerID,
-				eth.ProtocolVersions[0],
+				protocol,
 				rw,
 				peerInfo,
 				ss.ReceiveCh,
