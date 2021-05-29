@@ -180,7 +180,6 @@ func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlSer
 	if err != nil {
 		log.Error("sentry not ready yet", "err", err)
 	}
-	fmt.Printf("Sentry Handshake\n")
 }
 
 // SentriesHandshake - doesn't block - starting process of basic metadata exchange
