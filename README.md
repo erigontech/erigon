@@ -107,6 +107,7 @@ Windows users may run erigon in 3 possible ways:
 
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives) and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data. This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if it is executed on the very same computer.
 If instead your data is hosted on the native Linux filesystem non limitations apply.
+**Please also note the default WSL2 environment has its own IP address which does not match the one of the network interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
 Key features
 ============ 
