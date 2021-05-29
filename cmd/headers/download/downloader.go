@@ -181,6 +181,7 @@ func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []rem
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
 		case <-ctx.Done():
 			return
+		default:
 		}
 
 		for i := range sentries {

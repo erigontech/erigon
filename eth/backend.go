@@ -375,9 +375,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	if err != nil {
 		return nil, err
 	}
-	if len(stack.Config().P2P.SentryAddr) > 0 {
-		download.SentriesHandshake(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
-	}
+	download.SentriesHandshake(backend.downloadV2Ctx, backend.sentries, backend.downloadServer)
 
 	fetchTx := func(peerID string, hashes []common.Hash) error {
 		backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
