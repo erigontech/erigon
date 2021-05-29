@@ -2,6 +2,8 @@ package commands
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/headers/download"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +29,10 @@ func init() {
 	sentryCmd.Flags().StringArrayVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
 	sentryCmd.Flags().BoolVar(&discovery, "discovery", true, "discovery mode")
 	sentryCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
+	sentryCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	if err := sentryCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
 	rootCmd.AddCommand(sentryCmd)
 }
 
@@ -34,6 +40,6 @@ var sentryCmd = &cobra.Command{
 	Use:   "sentry",
 	Short: "Run p2p sentry for the downloader",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return download.Sentry("" /* datadir */, natSetting, port, sentryAddr, staticPeers, discovery, netRestrict)
+		return download.Sentry(datadir, natSetting, port, sentryAddr, staticPeers, discovery, netRestrict)
 	},
 }
