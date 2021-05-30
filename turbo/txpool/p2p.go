@@ -146,6 +146,7 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 
 func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
 	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
+	var lastErr error
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
@@ -158,7 +159,7 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 			if outreq65 == nil {
 				data65, err := rlp.EncodeToBytes(eth.GetPooledTransactionsPacket(hashes))
 				if err != nil {
-					log.Error("Could not send transactions request", "err", err)
+					log.Error("Could not encode transactions request", "err", err)
 					return nil
 				}
 
@@ -168,15 +169,11 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 				}
 			}
 
-			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
-			if err1 != nil {
-				log.Error("Could not send get pooled tx request", "err", err1)
-				continue
+			if sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{}); err1 != nil {
+				lastErr = err1
+			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
+				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 			}
-			if sentPeers == nil || len(sentPeers.Peers) == 0 {
-				continue
-			}
-			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 		case eth.ETH66:
 			if outreq66 == nil {
 				data66, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
@@ -184,7 +181,7 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 					GetPooledTransactionsPacket: hashes,
 				})
 				if err != nil {
-					log.Error("Could not send transactions request", "err", err)
+					log.Error("Could not encode transactions request", "err", err)
 					return nil
 				}
 
@@ -194,16 +191,15 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 				}
 			}
 
-			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{})
-			if err1 != nil {
-				log.Error("Could not send get pooled tx request", "err", err1)
-				continue
+			if sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{}); err1 != nil {
+				lastErr = err1
+			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
+				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 			}
-			if sentPeers == nil || len(sentPeers.Peers) == 0 {
-				continue
-			}
-			return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 		}
+	}
+	if lastErr != nil {
+		log.Error("Could not sent get pooled txs request to any sentry", "error", lastErr)
 	}
 	return nil
 }
@@ -211,7 +207,7 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 func (tp *P2PServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
 	if len(tp.Sentries) > 1 {
-		i = rand.Intn(len(tp.Sentries) - 1)
+		i = rand.Intn(len(tp.Sentries))
 	}
 	to := i
 	return i, true, func() (int, bool) {

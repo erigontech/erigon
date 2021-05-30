@@ -705,6 +705,8 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		msgcode = eth.GetBlockHeadersMsg
 	case proto_sentry.MessageId_GET_BLOCK_BODIES_66, proto_sentry.MessageId_GET_BLOCK_BODIES_65:
 		msgcode = eth.GetBlockBodiesMsg
+	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		msgcode = eth.GetPooledTransactionsMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
