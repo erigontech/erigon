@@ -1103,12 +1103,10 @@ func TestLowDiffLongChain(t *testing.T) {
 // each transaction, so this works ok. The rework accumulated writes in memory
 // first, but the journal wiped the entire state object on create-revert.
 func TestDeleteCreateRevert(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		bb = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
 
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1142,10 +1140,11 @@ func TestDeleteCreateRevert(t *testing.T) {
 				},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
+	defer m.DB.Close()
 
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 1, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
@@ -1160,11 +1159,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	// Import the canonical chain
-	diskdb := ethdb.NewTestDB(t)
-	gspec.MustCommit(diskdb)
-
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 }
@@ -1177,11 +1172,8 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
-	db := ethdb.NewTestDB(t)
-
 	var (
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
 		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address   = crypto.PubkeyToAddress(key.PublicKey)
@@ -1256,8 +1248,10 @@ func TestDeleteRecreateSlots(t *testing.T) {
 			},
 		},
 	}
-	genesis := gspec.MustCommit(db)
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 1, func(i int, b *core.BlockGen) {
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
@@ -1272,7 +1266,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -1307,10 +1301,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 // regular value-transfer
 // Expected outcome is that _all_ slots are cleared from A
 func TestDeleteRecreateAccount(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	var (
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -1338,9 +1330,11 @@ func TestDeleteRecreateAccount(t *testing.T) {
 			},
 		},
 	}
-	genesis := gspec.MustCommit(db)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 1, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
@@ -1355,7 +1349,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -1382,10 +1376,8 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	var (
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
 		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address   = crypto.PubkeyToAddress(key.PublicKey)
@@ -1394,6 +1386,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
+
 	// Populate two slots
 	aaStorage[common.HexToHash("01")] = common.HexToHash("01")
 	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
@@ -1461,7 +1454,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			},
 		},
 	}
-	genesis := gspec.MustCommit(db)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	var nonce uint64
 
 	type expectation struct {
@@ -1498,7 +1493,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		return tx
 	}
 
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 150, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 150, func(i int, b *core.BlockGen) {
 		var exp = new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
@@ -1530,9 +1525,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	var asHash = func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
-	for i, block := range chain.Blocks {
+	for i := range chain.Blocks {
 		blockNum := i + 1
-		if _, err := stagedsync.InsertBlockInStages(db, params.TestChainConfig, &vm.Config{}, engine, block, true /* checkRoot */); err != nil {
+		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		statedb := state.New(state.NewDbStateReader(db))
@@ -1586,10 +1581,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 // in the first place.
 //
 func TestInitThenFailCreateContract(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	var (
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -1648,10 +1641,12 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			},
 		},
 	}
-	genesis := gspec.MustCommit(db)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	nonce := uint64(0)
 
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 4, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
@@ -1664,26 +1659,24 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	// Import the canonical chain
-	diskdb := ethdb.NewTestDB(t)
-	gspec.MustCommit(diskdb)
-	statedb := state.New(state.NewPlainStateReader(diskdb))
+	statedb := state.New(state.NewPlainStateReader(db))
 	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 		t.Fatalf("Genesis err, got %v exp %v", got, exp)
 	}
 	// First block tries to create, but fails
 	{
 		block := chain.Blocks[0]
-		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+		if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
-		statedb = state.New(state.NewPlainStateReader(diskdb))
+		statedb = state.New(state.NewPlainStateReader(db))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 		}
 	}
 	// Import the rest of the blocks
-	for _, block := range chain.Blocks[1:] {
-		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+	for i, block := range chain.Blocks[1:] {
+		if err := m.InsertChain(chain.Slice(1+i, 2+i)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
 	}
@@ -1699,8 +1692,6 @@ func TestEIP2718Transition(t *testing.T) {
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
-		db     = ethdb.NewTestDB(t)
 
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1723,10 +1714,12 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	chain, _ := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 1, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
 		chainID, _ := uint256.FromBig(gspec.Config.ChainID)
@@ -1750,16 +1743,17 @@ func TestEIP2718Transition(t *testing.T) {
 		})
 		b.AddTx(tx)
 	}, false /*intermediateHashes*/)
+	if err != nil {
+		t.Fatalf("generate chain: %v", err)
+	}
 
 	// Import the canonical chain
-	diskdb := ethdb.NewTestDB(t)
-	gspec.MustCommit(diskdb)
 
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block, _ := rawdb.ReadBlockByNumberDeprecated(diskdb, 1)
+	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
 	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
@@ -1785,8 +1779,6 @@ func TestEIP1559Transition(t *testing.T) {
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
 		// Generate a canonical chain to act as the main dataset
-		engine = ethash.NewFaker()
-		db     = ethdb.NewTestDB(t)
 
 		// A sender who makes transactions, has some funds
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1812,11 +1804,13 @@ func TestEIP1559Transition(t *testing.T) {
 				},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		signer  = types.LatestSigner(gspec.Config)
+		signer = types.LatestSigner(gspec.Config)
 	)
+	m := stages.MockWithGenesis(t, gspec, key1)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 501, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {
 		if i == 500 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1852,10 +1846,8 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	diskdb := ethdb.NewTestDB(t)
-	gspec.MustCommit(diskdb)
 
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
@@ -1867,7 +1859,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	statedb := state.New(state.NewPlainStateReader(diskdb))
+	statedb := state.New(state.NewPlainStateReader(db))
 
 	// 3: Ensure that miner received only the tx's tip.
 	actual := statedb.GetBalance(block.Coinbase())
@@ -1886,7 +1878,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
 	}
 
-	chain, err = core.GenerateChain(gspec.Config, block, engine, diskdb.RwKV(), 1, func(i int, b *core.BlockGen) {
+	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
 		var tx types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
@@ -1898,12 +1890,12 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	block = chain.Blocks[0]
-	statedb = state.New(state.NewPlainStateReader(diskdb))
+	statedb = state.New(state.NewPlainStateReader(db))
 	effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 	// 6+5: Ensure that miner received only the tx's effective tip.
