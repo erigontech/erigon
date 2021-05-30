@@ -87,7 +87,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 				req65 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
 					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+						Id:   proto_sentry.MessageId_NEW_BLOCK_65,
 						Data: data,
 					},
 				}
