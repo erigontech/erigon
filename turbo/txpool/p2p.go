@@ -207,7 +207,7 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 func (tp *P2PServer) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
 	if len(tp.Sentries) > 1 {
-		i = rand.Intn(len(tp.Sentries) - 1)
+		i = rand.Intn(len(tp.Sentries))
 	}
 	to := i
 	return i, true, func() (int, bool) {
