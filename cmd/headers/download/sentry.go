@@ -988,7 +988,7 @@ var toProto = map[uint]map[uint64]proto_sentry.MessageId{
 		eth.TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
 		eth.NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		eth.GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
-		eth.PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_65,
+		eth.PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
 }
 
