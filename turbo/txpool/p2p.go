@@ -145,7 +145,7 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 }
 
 func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
+	var outreq65, outreq66 *proto_sentry.SendMessageByMinBlockRequest
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
@@ -162,13 +162,13 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 					return nil
 				}
 
-				outreq65 = &proto_sentry.SendMessageByIdRequest{
-					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65, Data: data65},
+				outreq65 = &proto_sentry.SendMessageByMinBlockRequest{
+					MinBlock: 0,
+					Data:     &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65, Data: data65},
 				}
 			}
 
-			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{})
+			sentPeers, err1 := tp.Sentries[i].SendMessageByMinBlock(ctx, outreq65, &grpc.EmptyCallOption{})
 			if err1 != nil {
 				log.Error("Could not send get pooled tx request", "err", err1)
 				continue
@@ -188,13 +188,13 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 					return nil
 				}
 
-				outreq66 = &proto_sentry.SendMessageByIdRequest{
-					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: data66},
+				outreq66 = &proto_sentry.SendMessageByMinBlockRequest{
+					MinBlock: 0,
+					Data:     &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: data66},
 				}
 			}
 
-			sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{})
+			sentPeers, err1 := tp.Sentries[i].SendMessageByMinBlock(ctx, outreq66, &grpc.EmptyCallOption{})
 			if err1 != nil {
 				log.Error("Could not send get pooled tx request", "err", err1)
 				continue

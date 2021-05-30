@@ -894,6 +894,24 @@ func (hd *HeaderDownload) EnableRequestChaining() {
 	hd.requestChaining = true
 }
 
+func (hd *HeaderDownload) SetFetching(fetching bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.fetching = fetching
+}
+
+func (hd *HeaderDownload) RequestChaining() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.requestChaining
+}
+
+func (hd *HeaderDownload) Fetching() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.fetching
+}
+
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
 

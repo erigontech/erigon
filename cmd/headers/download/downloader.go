@@ -251,6 +251,9 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 }
 
 func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
+		return nil
+	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
@@ -290,6 +293,9 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 }
 
 func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
+		return nil
+	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
