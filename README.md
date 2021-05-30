@@ -100,7 +100,13 @@ Windows users may run erigon in 3 possible ways:
   * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
   * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
 
-  Though is still possible to run erigon with LMDB database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`.
+  **Important note about Anti-Viruses**
+  During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's been reported some anti-virus programs detect
+  those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or a variant of it). Although those are false positives we have no control over 100+ vendors of
+  security products for Windows and their respective detection algorythms and we understand this might make your experience with Windows builds uncomfortable. To
+  workaround the issue you might either set exlusions for your antivirus specifically for `ethdb\mdbx\dist\CMakeFiles` folder or you can run erigon on Docker or WSL
+
+  Though is still possible to run erigon with **LMDB** database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`.
   Please be advised Erigon will completely remove LMDB support in future releases thus we warmly suggest to resync using the default MDBX database.
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
@@ -125,13 +131,11 @@ a simple way.
 inserting it into the main DB. That reduces write amplification and
 DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](/common/etl/).</code>
+<code> 🔬 See our detailed ETL explanation [here](/common/etl/README.md).</code>
 
 **Plain state**.
 
-**Single accounts/state trie**. Erigon uses a single Merkle trie for both
-accounts and the storage.
-
+**Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
 ### Faster Initial Sync
 
@@ -139,7 +143,7 @@ Erigon uses a rearchitected full sync algorithm from
 [Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
 "stages".
 
-<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/)</code>
+<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/README.md)</code>
 
 It uses the same network primitives and is compatible with regular go-ethereum
 nodes that are using full sync, you do not need any special sync capabilities
