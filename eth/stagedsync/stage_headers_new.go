@@ -218,7 +218,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		if ancestor == nil {
 			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		} else {
-			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
+			log.Debug("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--

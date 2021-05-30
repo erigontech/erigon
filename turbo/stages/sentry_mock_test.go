@@ -42,7 +42,7 @@ func TestHeaderStep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -51,7 +51,7 @@ func TestHeaderStep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -81,7 +81,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		})
 		require.NoError(err)
 		m.ReceiveWg.Add(1)
-		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 		require.NoError(err)
 		// Send all the headers
 		b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -90,7 +90,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		})
 		require.NoError(err)
 		m.ReceiveWg.Add(1)
-		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+		err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 		require.NoError(err)
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -114,7 +114,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	b, err := rlp.EncodeToBytes(chain.TopBlock.Transactions())
 	require.NoError(err)
 	m.ReceiveWg.Add(1)
-	err = m.TxStream().Send(&sentry.InboundMessage{Id: sentry.MessageId_Transactions, Data: b, PeerId: m.PeerId})
+	err = m.TxStream().Send(&sentry.InboundMessage{Id: sentry.MessageId_TRANSACTIONS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -147,7 +147,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send all the headers
@@ -159,7 +159,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -200,7 +200,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the short branch
@@ -212,7 +212,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -231,7 +231,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the long2 branch
@@ -243,7 +243,7 @@ func TestReorg(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the long1 branch
@@ -253,7 +253,7 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -279,7 +279,7 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the short branch
@@ -289,7 +289,7 @@ func TestReorg(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -338,7 +338,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the long suffix
@@ -348,7 +348,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Create anchor from the short chain suffix
@@ -358,7 +358,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the short suffix
@@ -368,7 +368,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
@@ -380,7 +380,7 @@ func TestAnchorReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
@@ -430,7 +430,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the long suffix
@@ -440,7 +440,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Create anchor from the short chain suffix
@@ -450,7 +450,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NewBlock, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the short suffix (far end)
@@ -460,7 +460,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	// Send headers of the short suffix (near end)
@@ -470,7 +470,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
@@ -482,7 +482,7 @@ func TestAnchorReplace2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	m.ReceiveWg.Add(1)
-	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BlockHeaders, Data: b, PeerId: m.PeerId})
+	err = m.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId})
 	require.NoError(t, err)
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed

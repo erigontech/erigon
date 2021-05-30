@@ -25,3 +25,7 @@ git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/inte
 
 Unfortunately `git subtree pull` does not work if we use Squash-Merge for pull requests in this repository
 and also automatically delete merged branches.
+
+# Style guide 
+
+[https://developers.google.com/protocol-buffers/docs/style](https://developers.google.com/protocol-buffers/docs/style)

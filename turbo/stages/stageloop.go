@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -26,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 )
 
 func NewStagedSync(
@@ -272,7 +272,7 @@ func NewStagedSync2(
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	txPoolServer *eth.TxPoolServer,
+	txPoolServer *txpool.P2PServer,
 ) (*stagedsync.StagedSync, error) {
 	var pruningDistance uint64
 	if !sm.History {
@@ -332,7 +332,7 @@ func NewStagedSync2(
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for _, s := range txPoolServer.Sentries {
-				go eth.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),
