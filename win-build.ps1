@@ -288,9 +288,28 @@ if (!(Test-Administrator)) {
 }
 
 # Enter MDBX directory and build libmdbx.dll
-Write-Host " Building libmdbx.dll ..."
 Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
-cmake -G "MinGW Makefiles" . -D CMAKE_MAKE_PROGRAM:PATH=$(Join-Path $chocolateyBinPath "make.exe") -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D MDBX_FORCE_ASSERTIONS:INT=0
+
+# Delete CMakeCache.txt and CMakeFiles directory if they exist
+if (Test-Path "CMakeCache.txt" -PathType Leaf) {
+    Write-Host " Removing MDBX CMakeCache.txt ..."
+    Remove-Item -Path "CMakeCache.txt"
+}
+if (Test-Path "CMakeFiles") {
+    Write-Host " Removing MDBX CMakeFiles ..."
+    Remove-Item -Path "CMakeFiles" -Recurse -Force
+}
+
+Write-Host " Building libmdbx.dll ..."
+cmake -G "MinGW Makefiles" . `
+-D CMAKE_MAKE_PROGRAM:PATH=""$(Join-Path $chocolateyBinPath "make.exe")"" `
+-D CMAKE_C_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "gcc.exe")"" `
+-D CMAKE_CXX_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "g++.exe")"" `
+-D CMAKE_BUILD_TYPE:STRING="Release" `
+-D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON `
+-D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF `
+-D MDBX_FORCE_ASSERTIONS:INT=0
+
 if($LASTEXITCODE) {
     Write-Host "An error has occurred while configuring MDBX dll"
     return
@@ -305,11 +324,15 @@ if($LASTEXITCODE -or !(Test-Path "libmdbx.dll" -PathType leaf)) {
 # Note! default behavior is to overwrite
 Copy-Item libmdbx.dll (Join-Path $env:SystemRoot system32)
 if(!$?) {
-   Write-Host " Error ! Could not copy libmdbx.dll to $(Join-Path $env:SystemRoot system32)"
-   Write-Host " What can you do : "
-   Write-Host " - Check your permissions to directory "
-   Write-Host " - Check there's an already existing libmdbx.dll file "
-   Write-Host " - Check no instance of Erigon with mdbx is currently running "
+   Write-Host @" 
+
+  Error ! Could not copy libmdbx.dll to $(Join-Path $env:SystemRoot system32)
+  What you can try : 
+  - Check your permissions to directory
+  - Check there's an already existing libmdbx.dll file
+  - Check no instance of Erigon with mdbx is currently running
+
+"@
    return
 }
 
