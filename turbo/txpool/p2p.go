@@ -271,6 +271,7 @@ func RecvTxMessage(ctx context.Context,
 			if errors.Is(err, io.EOF) {
 				return
 			}
+			log.Error("[RecvTxMessage] Sentry disconnected", "error", err)
 			return
 		}
 		if req == nil {

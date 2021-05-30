@@ -77,7 +77,7 @@ func RecvUploadMessage(ctx context.Context,
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Error("Receive upload loop terminated", "error", err)
+			log.Error("[RecvUploadMessage] Sentry disconnected", "error", err)
 			return
 		}
 		if req == nil {
@@ -138,7 +138,7 @@ func RecvMessage(
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Error("Receive loop terminated", "error", err)
+			log.Error("[RecvMessage] Sentry disconnected", "error", err)
 			return
 		}
 		if req == nil {
