@@ -205,9 +205,9 @@ func StageLoopStep(
 		return err
 	}
 
-	if canRunCycleInOneTransaction && snapshotMigratorFinal!=nil {
-		err=snapshotMigratorFinal(rotx)
-		if err!=nil {
+	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
+		err = snapshotMigratorFinal(rotx)
+		if err != nil {
 			return err
 		}
 	}
