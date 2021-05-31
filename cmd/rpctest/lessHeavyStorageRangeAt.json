@@ -1,12 +1,1 @@
-{
-  "jsonrpc": "2.0",
-  "method": "debug_storageRangeAt",
-  "params": [
-    "0x4ced0bc30041f7f4e11ba9f341b54404770c7695dfdba6bb64b6ffeee2074177",
-    99,
-    "0x33990122638b9132ca29c723bdf037f1a891a70c",
-    "0x0000000000000000000000000000000000000000000000000000000000000000",
-    1024
-  ],
-  "id": 537758
-}
+{"method":"eth_call","params":[{"to":"0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b","data":"0x1d7b33d70000000000000000000000006c8c6b02e7b2be14d4fa6022dfd6d75921d90e4e"},"0xb70bf7"],"id":3892,"jsonrpc":"2.0"}
