@@ -39,6 +39,7 @@ type httpConfig struct {
 	Modules            []string
 	CorsAllowedOrigins []string
 	Vhosts             []string
+	Compression        bool
 	prefix             string // path prefix on which to mount http handler
 }
 
@@ -288,7 +289,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression),
 		server:  srv,
 	})
 	return nil
@@ -366,11 +367,14 @@ func isWebsocket(r *http.Request) bool {
 }
 
 // NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool) http.Handler {
 	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
-	return newGzipHandler(handler)
+	if compression {
+		handler = newGzipHandler(handler)
+	}
+	return handler
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
