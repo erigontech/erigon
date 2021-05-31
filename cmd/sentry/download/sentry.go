@@ -261,9 +261,7 @@ func runPeer(
 	protocol uint,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
-	receiveCh chan<- StreamMsg,
-	receiveUploadCh chan<- StreamMsg,
-	receiveTxCh chan<- StreamMsg,
+	send func(StreamMsg),
 	txSubscribed *uint32,
 ) error {
 	printTime := time.Now().Add(time.Minute)
@@ -306,28 +304,27 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveUploadCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
-
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.BlockHeadersMsg:
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.GetBlockBodiesMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveUploadCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.BlockBodiesMsg:
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.GetNodeDataMsg:
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -339,13 +336,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.NewBlockMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			trySend(receiveCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+			send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 		case eth.NewPooledTransactionHashesMsg:
 			// Drop message if not ready
 			if atomic.LoadUint32(txSubscribed) > 0 {
@@ -353,7 +350,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+				send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 			}
 		case eth.GetPooledTransactionsMsg:
 			// Drop message if not ready
@@ -362,7 +359,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+				send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 			}
 		case eth.TransactionsMsg:
 			// Drop message if not ready
@@ -371,7 +368,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+				send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 			}
 		case eth.PooledTransactionsMsg:
 			// Drop message if not ready
@@ -380,7 +377,7 @@ func runPeer(
 				if _, err := io.ReadFull(msg.Payload, b); err != nil {
 					log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 				}
-				trySend(receiveTxCh, &StreamMsg{b, peerID, toProto[protocol][msg.Code]})
+				send(StreamMsg{b, peerID, toProto[protocol][msg.Code]})
 			}
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
@@ -517,9 +514,7 @@ func NewSentryServer(ctx context.Context, nodeKeyFile, dbPath, p2pListenAddr str
 				protocol,
 				rw,
 				peerInfo,
-				ss.ReceiveCh,
-				ss.ReceiveUploadCh,
-				ss.ReceiveTxCh,
+				ss.send,
 				&ss.TxSubscribed,
 			); err != nil {
 				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
@@ -632,7 +627,7 @@ type SentryServerImpl struct {
 	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	TxSubscribed    uint32        // Set to non-zero if downloader is subscribed to transaction messages
 	lock            sync.RWMutex
-	streams         map[proto_sentry.MessageId]map[int]proto_sentry.Sentry_MessagesServer
+	streams         map[proto_sentry.MessageId]*StreamsSet
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
@@ -903,45 +898,60 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *SentryServerImpl) restartReceive() {
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
-	// Close previous channel and recreate
-	close(ss.stopCh)
-	ss.stopCh = make(chan struct{})
+func (ss *SentryServerImpl) send(streamMsg StreamMsg) {
+	ss.streams[streamMsg.msgId].Broadcast(&proto_sentry.InboundMessage{
+		PeerId: gointerfaces.ConvertBytesToH512([]byte(streamMsg.peerID)),
+		Id:     streamMsg.msgId,
+		Data:   streamMsg.b,
+	})
+	//if err = ss.streams[streamMsg.msgId].Broadcast(outreq); err != nil {
+	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
+	//	return err
+	//}
 }
 
-func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
+func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 	if ss.streams == nil {
-		ss.streams = map[proto_sentry.MessageId]map[int]proto_sentry.Sentry_MessagesServer{}
+		ss.streams = map[proto_sentry.MessageId]*StreamsSet{}
 	}
 
-	for _, id := range req.Ids {
+	checksumCache, err := lru.New(1024)
+	if err != nil {
+		panic(err)
+	}
+
+	cleanStack := make([]func(), len(ids))
+	for i, id := range ids {
 		m, ok := ss.streams[id]
 		if !ok {
-			m = map[int]proto_sentry.Sentry_MessagesServer{}
+			m = NewStreamsSet()
 			ss.streams[id] = m
 		}
 
-		m[len(m)] = server
+		cleanStack[i] = m.Add(checksumCache, server)
 	}
+	return func() {
+		for i := range cleanStack {
+			cleanStack[i]()
+		}
+	}
+}
 
-	switch req.Ids {
-	case proto_sentry.MessageType_DownloadBlocks:
-		return ss.receiveMessages(server)
-	case proto_sentry.MessageType_UploadBlocks:
-		return ss.receiveUploadMessages(server)
-	case proto_sentry.MessageType_Tx:
-		return ss.receiveTxMessages(server)
-	default:
-		return fmt.Errorf("unimplemented type: %s", req.Type)
+func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
+	clean := ss.addStream(req.Ids, server)
+	defer clean()
+	<-server.Context().Done()
+	select {
+	case <-ss.stopCh:
+		return nil
+	case <-server.Context().Done():
+		return nil
 	}
 }
 
 func (ss *SentryServerImpl) receiveMessages(server proto_sentry.Sentry_MessagesServer) error {
-	ss.restartReceive()
 	checksumCache, err := lru.New(1024)
 	if err != nil {
 		return err
@@ -1084,4 +1094,71 @@ func (ss *SentryServerImpl) receiveTxMessages(server proto_sentry.Sentry_Message
 			}
 		}
 	}
+}
+
+type Stream struct {
+	checksumCache *lru.Cache // to avoid send same messages to same subscriber
+	stream        proto_sentry.Sentry_MessagesServer
+}
+
+// StreamsSet - it's safe to use this class as non-pointer
+type StreamsSet struct {
+	sync.Mutex
+	hasher  *blake3.Hasher
+	id      uint
+	streams map[uint]Stream
+}
+
+func NewStreamsSet() *StreamsSet {
+	return &StreamsSet{hasher: blake3.New(32, nil)}
+}
+
+func (s *StreamsSet) Add(checksumCache *lru.Cache, stream proto_sentry.Sentry_MessagesServer) (remove func()) {
+	s.Lock()
+	defer s.Unlock()
+	if s.streams == nil {
+		s.streams = make(map[uint]Stream)
+	}
+	s.id++
+	id := s.id
+	s.streams[id] = Stream{checksumCache: checksumCache, stream: stream}
+	return func() { s.remove(id) }
+}
+
+func (s *StreamsSet) Broadcast(reply *proto_sentry.InboundMessage) {
+	s.Lock()
+	defer s.Unlock()
+	// Compute checksum
+	s.hasher.Reset()
+	s.hasher.Write(reply.Data)
+	var checksum [32]byte
+	s.hasher.Sum(checksum[:0])
+
+	for id, stream := range s.streams {
+		if _, ok := stream.checksumCache.Get(checksum); ok {
+			// This message has already been seen recently, skip
+			continue
+		}
+		stream.checksumCache.Add(checksum, struct{}{})
+
+		err := stream.stream.Send(reply)
+		if err != nil {
+			select {
+			case <-stream.stream.Context().Done():
+				delete(s.streams, id)
+			default:
+			}
+			log.Debug("failed send to mined block stream", "err", err)
+		}
+	}
+}
+
+func (s *StreamsSet) remove(id uint) {
+	s.Lock()
+	defer s.Unlock()
+	_, ok := s.streams[id]
+	if !ok { // double-unsubscribe support
+		return
+	}
+	delete(s.streams, id)
 }

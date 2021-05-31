@@ -7,12 +7,13 @@
 package sentry
 
 import (
-	types "github.com/ledgerwatch/erigon/gointerfaces/types"
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
-	reflect "reflect"
-	sync "sync"
+	"reflect"
+	"sync"
+
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/runtime/protoimpl"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
