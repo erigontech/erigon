@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -63,7 +62,7 @@ func RecvUploadMessage(ctx context.Context,
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveUploadClient, err3 := sentry.ReceiveUploadMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
+	receiveUploadClient, err3 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_UploadBlocks}, grpc.WaitForReady(true))
 	if err3 != nil {
 		log.Error("Receive upload messages failed", "error", err3)
 		return
@@ -124,7 +123,7 @@ func RecvMessage(
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
-	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
+	receiveClient, err2 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_DownloadBlocks}, grpc.WaitForReady(true))
 	if err2 != nil {
 		log.Error("Receive messages failed", "error", err2)
 		return
@@ -159,43 +158,6 @@ func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlSer
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	if err != nil {
 		log.Error("sentry not ready yet", "err", err)
-	}
-}
-
-// SentriesHandshake - doesn't block - starting process of basic metadata exchange
-// use WaitForOneSentryReady before use sentries
-func SentriesHandshake(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
-	for i := range sentries {
-		go SentryHandshake(ctx, sentries[i], controlServer)
-	}
-}
-
-// WaitForOneSentryReady - blocks until at least one sentry.Ready() returns true
-func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []remote.SentryClient) {
-	log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	count := 0
-	for {
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		for i := range sentries {
-			if sentries[i].Ready() {
-				if count > 0 {
-					log.Info(fmt.Sprintf("[%s] %s", logPrefix, "sentry ready"))
-				}
-				return
-			}
-		}
-		count++
-		time.Sleep(500 * time.Millisecond)
 	}
 }
 

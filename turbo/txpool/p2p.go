@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -253,7 +252,7 @@ func RecvTxMessage(ctx context.Context,
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveClient, err2 := sentry.ReceiveTxMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	receiveClient, err2 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_Tx}, &grpc.EmptyCallOption{})
 	if err2 != nil {
 		log.Error("ReceiveTx messages failed", "error", err2)
 		return

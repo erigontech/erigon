@@ -56,22 +56,22 @@ type MockSentry struct {
 	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 
-	stream       sentry.Sentry_ReceiveMessagesServer // Stream of annoucements and download responses
-	txStream     sentry.Sentry_ReceiveTxMessagesServer
-	uploadStream sentry.Sentry_ReceiveUploadMessagesServer
+	stream       sentry.Sentry_MessagesServer // Stream of annoucements and download responses
+	txStream     sentry.Sentry_MessagesServer
+	uploadStream sentry.Sentry_MessagesServer
 	streamWg     sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *MockSentry) Stream() sentry.Sentry_ReceiveMessagesServer {
+func (ms *MockSentry) Stream() sentry.Sentry_MessagesServer {
 	ms.streamWg.Wait()
 	return ms.stream
 }
-func (ms *MockSentry) TxStream() sentry.Sentry_ReceiveTxMessagesServer {
+func (ms *MockSentry) TxStream() sentry.Sentry_MessagesServer {
 	ms.streamWg.Wait()
 	return ms.txStream
 }
-func (ms *MockSentry) UploadStream() sentry.Sentry_ReceiveUploadMessagesServer {
+func (ms *MockSentry) UploadStream() sentry.Sentry_MessagesServer {
 	ms.streamWg.Wait()
 	return ms.uploadStream
 }
@@ -97,20 +97,15 @@ func (ms *MockSentry) SendMessageToAll(context.Context, *sentry.OutboundMessageD
 func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
 	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
 }
-func (ms *MockSentry) ReceiveMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveMessagesServer) error {
-	ms.stream = stream
-	ms.streamWg.Done()
-	<-ms.Ctx.Done()
-	return nil
-}
-func (ms *MockSentry) ReceiveUploadMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveUploadMessagesServer) error {
-	ms.uploadStream = stream
-	ms.streamWg.Done()
-	<-ms.Ctx.Done()
-	return nil
-}
-func (ms *MockSentry) ReceiveTxMessages(_ *emptypb.Empty, stream sentry.Sentry_ReceiveTxMessagesServer) error {
-	ms.txStream = stream
+func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
+	switch req.Type {
+	case sentry.MessageType_DownloadBlocks:
+		ms.stream = stream
+	case sentry.MessageType_UploadBlocks:
+		ms.uploadStream = stream
+	case sentry.MessageType_Tx:
+		ms.txStream = stream
+	}
 	ms.streamWg.Done()
 	<-ms.Ctx.Done()
 	return nil

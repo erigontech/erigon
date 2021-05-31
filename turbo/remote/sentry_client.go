@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type SentryClient interface {
@@ -151,36 +150,12 @@ func (c *SentryReceiveClientDirect) Context() context.Context {
 	return c.ctx
 }
 
-func (scd *SentryClientDirect) ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveMessagesClient, error) {
+func (scd *SentryClientDirect) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
 	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
-		if err := scd.server.ReceiveMessages(&empty.Empty{}, streamServer); err != nil {
+		if err := scd.server.Messages(in, streamServer); err != nil {
 			log.Error("ReceiveMessages returned", "error", err)
-		}
-		close(messageCh)
-	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
-}
-
-func (scd *SentryClientDirect) ReceiveUploadMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveUploadMessagesClient, error) {
-	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
-	go func() {
-		if err := scd.server.ReceiveUploadMessages(&empty.Empty{}, streamServer); err != nil {
-			log.Error("ReceiveUploadMessages returned", "error", err)
-		}
-		close(messageCh)
-	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
-}
-
-func (scd *SentryClientDirect) ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveTxMessagesClient, error) {
-	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
-	go func() {
-		if err := scd.server.ReceiveTxMessages(&empty.Empty{}, streamServer); err != nil {
-			log.Error("ReceiveTxMessages returned", "error", err)
 		}
 		close(messageCh)
 	}()

@@ -39,8 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"lukechampine.com/blake3"
 )
 
@@ -912,7 +910,20 @@ func (ss *SentryServerImpl) restartReceive() {
 	ss.stopCh = make(chan struct{})
 }
 
-func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveMessagesServer) error {
+func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
+	switch req.Type {
+	case proto_sentry.MessageType_DownloadBlocks:
+		return ss.receiveMessages(server)
+	case proto_sentry.MessageType_UploadBlocks:
+		return ss.receiveUploadMessages(server)
+	case proto_sentry.MessageType_Tx:
+		return ss.receiveTxMessages(server)
+	default:
+		return fmt.Errorf("unimplemented type: %s", req.Type)
+	}
+}
+
+func (ss *SentryServerImpl) receiveMessages(server proto_sentry.Sentry_MessagesServer) error {
 	ss.restartReceive()
 	checksumCache, err := lru.New(1024)
 	if err != nil {
@@ -1010,7 +1021,7 @@ func (ss *SentryServerImpl) restartTxs() {
 	ss.txStopCh = make(chan struct{})
 }
 
-func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
+func (ss *SentryServerImpl) receiveUploadMessages(server proto_sentry.Sentry_MessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartUpload()
 	for {
@@ -1032,7 +1043,7 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 	}
 }
 
-func (ss *SentryServerImpl) ReceiveTxMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveTxMessagesServer) error {
+func (ss *SentryServerImpl) receiveTxMessages(server proto_sentry.Sentry_MessagesServer) error {
 	// Close previous channel and recreate
 	ss.restartTxs()
 	if atomic.LoadUint32(&ss.TxSubscribed) == 0 {
