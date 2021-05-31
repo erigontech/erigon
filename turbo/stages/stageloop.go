@@ -208,7 +208,7 @@ func StageLoopStep(
 	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
 		err = snapshotMigratorFinal(rotx)
 		if err != nil {
-			return err
+			log.Error("snapshot migration failed", "err", err)
 		}
 	}
 	rotx.Rollback()
