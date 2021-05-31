@@ -213,6 +213,12 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
+	if h == nil {
+		return fmt.Errorf("validateHeader: h == nil")
+	}
+	if h2 == nil {
+		return fmt.Errorf("validateHeader: h2 == nil")
+	}
 	if h.Bloom != h2.Bloom {
 		return fmt.Errorf("bloom: want: %x have: %x", h.Bloom, h2.Bloom)
 	}

@@ -51,7 +51,9 @@ func BodiesForward(
 	s *StageState,
 	ctx context.Context,
 	tx ethdb.RwTx,
-	cfg BodiesCfg) error {
+	cfg BodiesCfg,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 
@@ -95,7 +97,6 @@ func BodiesForward(
 	var req *bodydownload.BodyRequest
 	var peer []byte
 	stopped := false
-	var headHash common.Hash
 	for !stopped {
 		// TODO: this is incorrect use
 		if req == nil {
@@ -172,14 +173,15 @@ func BodiesForward(
 				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
 					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
 				}
-				headHash = header.Hash()
-				rawdb.WriteHeadBlockHash(tx, headHash)
 			}
 		}
 		d5 += time.Since(start)
 		start = time.Now()
 		if bodyProgress == headerProgress {
 			break
+		}
+		if test {
+			return fmt.Errorf("%s: did not complete", logPrefix)
 		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
@@ -199,6 +201,9 @@ func BodiesForward(
 		}
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
+	}
+	if !stopped {
+		rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	}
 	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
 		return err
