@@ -528,7 +528,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 
 		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
 		if n.config.MDBX {
-			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
+			log.Info("Opening Database (MDBX)")
 			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
 				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
 				if exclusive {
