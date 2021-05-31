@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -28,7 +27,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	header := rawdb.ReadHeaderByNumber(ethdb.NewRoTxDb(tx), uint64(blockNumber.Int64()))
+	header := rawdb.ReadHeaderByNumber(tx, uint64(blockNumber.Int64()))
 	if header == nil {
 		return nil, fmt.Errorf("block header not found: %d", blockNumber.Int64())
 	}
@@ -44,7 +43,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	}
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(ethdb.NewRoTxDb(tx), hash)
+	header, err := rawdb.ReadHeaderByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
