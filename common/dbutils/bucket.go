@@ -18,8 +18,8 @@ var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 0, Patch: 0}
 // "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
 // "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
-/*PlainStateBucket
-Logical layout:
+/*
+PlainStateBucket logical layout:
 	Contains Accounts:
 	  key - address (unhashed)
 	  value - account encoded for storage
@@ -55,12 +55,14 @@ AccountChangeSetBucket and StorageChangeSetBucket store PlainStateBucket changes
 	key - blockNum_u64 + key_in_plain_state
 	value - value_in_plain_state_before_blockNum_changes
 
-Example: If at block N account A was changed value from X to Y. Then:
+Example: If block N changed account A from value X to Y. Then:
 	AccountChangeSetBucket has record: bigEndian(N) + A -> X
 	PlainStateBucket has record: A -> Y
 
+See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
+
 As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
-MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/indices.md`).
+MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 Both buckets are DupSort-ed and have physical format:
 AccountChangeSetBucket:
 	key - blockNum_u64
@@ -86,8 +88,8 @@ const (
 	CurrentStateBucketOld2 = "CST2"
 )
 
-/*AccountsHistoryBucket and StorageHistoryBucket
-History index designed to serve next 2 type of requests:
+/*
+AccountsHistoryBucket and StorageHistoryBucket - indices designed to serve next 2 type of requests:
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
@@ -108,6 +110,8 @@ If `db.Seek(A+bigEndian(X))` returns non-last shard -
 		and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
 If `db.Seek(A+bigEndian(X))` returns last shard -
 		then we go to PlainState: db.Get(PlainState, A)
+
+see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 AccountsHistoryBucket:
 	key - address + shard_id_u64
