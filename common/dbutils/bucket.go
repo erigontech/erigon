@@ -45,21 +45,35 @@ Physical layout:
 const PlainStateBucket = "PLAIN-CST2"
 const PlainStateBucketOld1 = "PLAIN-CST"
 
+//PlainContractCodeBucket -
+//key - address+incarnation
+//value - code hash
+var PlainContractCodeBucket = "PLAIN-contractCode"
+
+/*
+AccountChangeSetBucket and StorageChangeSetBucket store PlainStateBucket changes in logical format:
+	key - blockNum_u64 + key_in_plain_state
+	value - value_in_plain_state_before_blockNum_changes
+
+Example: If at block N account A was changed value from X to Y. Then:
+	AccountChangeSetBucket has record: bigEndian(N) + A -> X
+	PlainStateBucket has record: A -> Y
+
+As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
+MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/indices.md`).
+Both buckets are DupSort-ed and have physical format:
+AccountChangeSetBucket:
+	key - blockNum_u64
+	value - address + account(encoded)
+
+StorageChangeSetBucket:
+	key - blockNum_u64 + address + incarnation_u64
+	value - plain_storage_key + value
+*/
+var AccountChangeSetBucket = "PLAIN-ACS"
+var StorageChangeSetBucket = "PLAIN-SCS"
+
 const (
-	//PlainContractCodeBucket -
-	//key - address+incarnation
-	//value - code hash
-	PlainContractCodeBucket = "PLAIN-contractCode"
-
-	// AccountChangeSetBucket keeps changesets of accounts ("plain state")
-	// key - encoded timestamp(block number)
-	// value - encoded ChangeSet{k - address v - account(encoded).
-	AccountChangeSetBucket = "PLAIN-ACS"
-
-	// StorageChangeSetBucket keeps changesets of storage ("plain state")
-	// key - encoded timestamp(block number)
-	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket = "PLAIN-SCS"
 
 	//HashedAccountsBucket
 	// key - address hash
