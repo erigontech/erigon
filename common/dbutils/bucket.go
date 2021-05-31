@@ -70,14 +70,42 @@ const (
 	HashedAccountsBucket   = "hashed_accounts"
 	HashedStorageBucket    = "hashed_storage"
 	CurrentStateBucketOld2 = "CST2"
+)
 
-	//key - address + shard_id_u64
-	//value - roaring bitmap  - list of block where it changed
-	AccountsHistoryBucket = "hAT"
+/*AccountsHistoryBucket and StorageHistoryBucket
+History index designed to serve next 2 type of requests:
+1. what is smallest block number >= X where account A changed
+2. get last shard of A - to append there new block numbers
 
-	//key - address + storage_key + shard_id_u64
-	//value - roaring bitmap - list of block where it changed
-	StorageHistoryBucket = "hST"
+Format:
+	- index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
+			(to avoid performance degradation of popular accounts or look deep into history.
+				Also 2Kb allows avoid Overflow pages inside DB.)
+	- if shard is not last - then key has suffix 8 bytes = bigEndian(max_block_num_in_this_shard)
+	- if shard is last - then key has suffix 8 bytes = 0xFF
+
+It allows:
+	- server task 1. by 1 db operation db.Seek(A+bigEndian(X))
+	- server task 2. by 1 db operation db.Get(A+0xFF)
+
+Task 1. is part of `core/state:GetAsOf` operation - which serving state values as of block X.
+If `db.Seek(A+bigEndian(X))` returns non-last shard -
+		then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
+		and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
+If `db.Seek(A+bigEndian(X))` returns last shard -
+		then we go to PlainState: db.Get(PlainState, A)
+
+AccountsHistoryBucket:
+	key - address + shard_id_u64
+	value - roaring bitmap  - list of block where it changed
+StorageHistoryBucket
+	key - address + storage_key + shard_id_u64
+	value - roaring bitmap - list of block where it changed
+*/
+var AccountsHistoryBucket = "hAT"
+var StorageHistoryBucket = "hST"
+
+var (
 
 	//key - contract code hash
 	//value - contract code
