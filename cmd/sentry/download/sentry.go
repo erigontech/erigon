@@ -632,6 +632,7 @@ type SentryServerImpl struct {
 	txStopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
 	TxSubscribed    uint32        // Set to non-zero if downloader is subscribed to transaction messages
 	lock            sync.RWMutex
+	streams         map[proto_sentry.MessageId]map[int]proto_sentry.Sentry_MessagesServer
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
@@ -911,7 +912,23 @@ func (ss *SentryServerImpl) restartReceive() {
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	switch req.Type {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	if ss.streams == nil {
+		ss.streams = map[proto_sentry.MessageId]map[int]proto_sentry.Sentry_MessagesServer{}
+	}
+
+	for _, id := range req.Ids {
+		m, ok := ss.streams[id]
+		if !ok {
+			m = map[int]proto_sentry.Sentry_MessagesServer{}
+			ss.streams[id] = m
+		}
+
+		m[len(m)] = server
+	}
+
+	switch req.Ids {
 	case proto_sentry.MessageType_DownloadBlocks:
 		return ss.receiveMessages(server)
 	case proto_sentry.MessageType_UploadBlocks:
