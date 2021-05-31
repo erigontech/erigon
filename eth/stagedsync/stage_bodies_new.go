@@ -80,6 +80,9 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
+	if bodyProgress == headerProgress {
+		return nil
+	}
 	logPrefix := s.LogPrefix()
 	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker

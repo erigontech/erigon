@@ -86,6 +86,7 @@ type btHeader struct {
 	GasLimit         uint64
 	GasUsed          uint64
 	Timestamp        uint64
+	BaseFee          *big.Int
 }
 
 type btHeaderMarshaling struct {
@@ -95,6 +96,7 @@ type btHeaderMarshaling struct {
 	GasLimit   math.HexOrDecimal64
 	GasUsed    math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
+	BaseFee    *math.HexOrDecimal256
 }
 
 func (t *BlockTest) Run(tst *testing.T, _ bool) error {
@@ -162,6 +164,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 		Mixhash:    t.json.Genesis.MixHash,
 		Coinbase:   t.json.Genesis.Coinbase,
 		Alloc:      t.json.Pre,
+		BaseFee:    t.json.Genesis.BaseFee,
 	}
 }
 
