@@ -74,8 +74,8 @@ StorageChangeSetBucket:
 	key - blockNum_u64 + address + incarnation_u64
 	value - plain_storage_key + value
 */
-var AccountChangeSetBucket = "PLAIN-ACS"
-var StorageChangeSetBucket = "PLAIN-SCS"
+const AccountChangeSetBucket = "PLAIN-ACS"
+const StorageChangeSetBucket = "PLAIN-SCS"
 
 const (
 
