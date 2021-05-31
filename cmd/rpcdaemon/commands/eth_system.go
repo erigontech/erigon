@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -102,7 +101,7 @@ func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) 
 		return nil, err
 	}
 
-	header := rawdb.ReadHeaderByNumber(ethdb.NewRoTxDb(tx), blockNum)
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
 	if header == nil {
 		return nil, fmt.Errorf("header not found: %d", blockNum)
 	}
