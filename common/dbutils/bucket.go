@@ -51,7 +51,9 @@ const PlainStateBucketOld1 = "PLAIN-CST"
 var PlainContractCodeBucket = "PLAIN-contractCode"
 
 /*
-AccountChangeSetBucket and StorageChangeSetBucket store PlainStateBucket changes in logical format:
+AccountChangeSetBucket and StorageChangeSetBucket - of block N store values of state before block N changed them.
+Because values "after" change stored in PlainState.
+Logical format:
 	key - blockNum_u64 + key_in_plain_state
 	value - value_in_plain_state_before_blockNum_changes
 
@@ -93,6 +95,13 @@ AccountsHistoryBucket and StorageHistoryBucket - indices designed to serve next 
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
+Task 1. is part of "get historical state" operation (see `core/state:GetAsOf`):
+If `db.Seek(A+bigEndian(X))` returns non-last shard -
+		then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
+		and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
+If `db.Seek(A+bigEndian(X))` returns last shard -
+		then we go to PlainState: db.Get(PlainState, A)
+
 Format:
 	- index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
 			(to avoid performance degradation of popular accounts or look deep into history.
@@ -103,13 +112,6 @@ Format:
 It allows:
 	- server task 1. by 1 db operation db.Seek(A+bigEndian(X))
 	- server task 2. by 1 db operation db.Get(A+0xFF)
-
-Task 1. is part of `core/state:GetAsOf` operation - which serving state values as of block X.
-If `db.Seek(A+bigEndian(X))` returns non-last shard -
-		then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
-		and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
-If `db.Seek(A+bigEndian(X))` returns last shard -
-		then we go to PlainState: db.Get(PlainState, A)
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
