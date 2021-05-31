@@ -62,7 +62,7 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp.json.*`, "Needs to be fixed for TG (Berlin)")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(false)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
 			t.Error(err)
 		}
 	})

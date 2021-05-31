@@ -24,21 +24,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -97,30 +97,27 @@ type btHeaderMarshaling struct {
 	Timestamp  math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run(_ bool) error {
+func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
 	}
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := stages.MockWithGenesis(tst, t.genesis(config), key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// import pre accounts & construct test genesis block & state root
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
-	if err != nil {
-		return err
+	if m.Genesis.Hash() != t.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
 	}
-	if gblock.Hash() != t.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", gblock.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
+	if m.Genesis.Root() != t.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
-	if gblock.Root() != t.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", gblock.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
-	}
-	var engine consensus.Engine
 	if t.json.SealEngine == "NoProof" {
-		engine = ethash.NewFaker()
+		m.Engine = ethash.NewFaker()
 	} else {
-		engine = ethash.NewShared()
+		m.Engine = ethash.NewShared()
 	}
 
 	/*
@@ -130,7 +127,7 @@ func (t *BlockTest) Run(_ bool) error {
 			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
 		}
 	*/
-	validBlocks, err := t.insertBlocks(db, config, engine)
+	validBlocks, err := t.insertBlocks(m)
 	if err != nil {
 		return err
 	}
@@ -180,7 +177,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
    expected we are expected to ignore it and continue processing and then validate the
    post state.
 */
-func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine) ([]btBlock, error) {
+func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for _, b := range t.json.Blocks {
@@ -193,13 +190,14 @@ func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, 
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if newCanonical, err1 := stagedsync.InsertBlockInStages(db, config, &vm.Config{}, engine, cb, true /* checkRoot */); err1 != nil {
+		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, Length: 1}
+		if err1 := m.InsertChain(chain); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
-		} else if newCanonical && b.BlockHeader == nil {
+		} else if b.BlockHeader == nil {
 			return nil, fmt.Errorf("block insertion should have failed")
 		}
 		if b.BlockHeader == nil {
