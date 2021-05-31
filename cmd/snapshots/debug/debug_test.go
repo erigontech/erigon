@@ -111,7 +111,9 @@ func TestMatreshkaStream(t *testing.T) {
 			t.Fatal(err, currentBlock)
 		}
 
-		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter)
+		checkTEVM := ethdb.GetCheckTEVM(tx)
+
+		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter, checkTEVM)
 		if err != nil {
 			t.Fatal(err, currentBlock)
 		}

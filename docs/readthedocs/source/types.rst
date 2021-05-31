@@ -1,14 +1,14 @@
 ================
-Turbo Geth Types
+Erigon Types
 ================
 
-This document will list each major types defined and used by Turbo-Geth.
-They are found in `github.com/ledgerwatch/turbo-geth/core/types` and `github.com/ledgerwatch/turbo-geth/common`
+This document will list each major types defined and used by Erigon.
+They are found in `github.com/ledgerwatch/erigon/core/types` and `github.com/ledgerwatch/erigon/common`
 
 Address and Hash
 ================
 
-package: `github.com/ledgerwatch/turbo-geth/common`
+package: `github.com/ledgerwatch/erigon/common`
 
 .. code-block:: go
 
@@ -130,7 +130,7 @@ repressent an Ethereum Transaction.
 Block Header
 ============
 
-package: `github.com/ledgerwatch/turbo-geth/core/types`
+package: `github.com/ledgerwatch/erigon/core/types`
 
 .. code-block:: go
 
@@ -239,7 +239,7 @@ total difficulty accumulated up to the block. sum of all prev blocks difficultie
 Account
 =======
 
-package: `github.com/ledgerwatch/turbo-geth/core/types/accounts`
+package: `github.com/ledgerwatch/erigon/core/types/accounts`
 
 .. code-block:: go
 

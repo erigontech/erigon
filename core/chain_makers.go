@@ -107,7 +107,8 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
 	if err != nil {
 		panic(err)
 	}
@@ -198,6 +199,18 @@ type ChainPack struct {
 	Blocks   []*types.Block
 	Receipts []types.Receipts
 	TopBlock *types.Block // Convinience field to access the last block
+}
+
+// OneBlock returns a ChainPack which contains just one
+// block with given index
+func (cp ChainPack) Slice(i, j int) *ChainPack {
+	return &ChainPack{
+		Length:   j + 1 - i,
+		Headers:  cp.Headers[i:j],
+		Blocks:   cp.Blocks[i:j],
+		Receipts: cp.Receipts[i:j],
+		TopBlock: cp.Blocks[j-1],
+	}
 }
 
 // GenerateChain creates a chain of n blocks. The first block's

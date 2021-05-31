@@ -33,7 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
-	turbocli "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
 var stateStags = &cobra.Command{
@@ -53,10 +53,10 @@ Examples:
 		cfg := &node.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		turbocli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
+		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db := openDatabase2(path.Join(cfg.DataDir, "tg", "chaindata"), true, "", ethConfig.SnapshotMode)
+		db := openDatabase2(path.Join(cfg.DataDir, "erigon", "chaindata"), true, "", ethConfig.SnapshotMode)
 		defer db.Close()
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -137,7 +137,7 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx context.Context) error {
-	sm, engine, chainConfig, vmConfig, txPool, st, mining := newSync(db)
+	sm, engine, chainConfig, vmConfig, txPool, st, mining, _, miningResultCh := newSync(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -181,7 +181,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		stages.TxPool, // TODO: enable TxPool stage
 		stages.Finish)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, 0, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, nil, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
@@ -232,8 +232,6 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
-	miningResultCh := make(chan *types.Block, 1)
-	defer close(miningResultCh)
 
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
@@ -309,7 +307,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		if miningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miningWorld := stagedsync.StageMiningCfg(miningConfig, true, nil, miningResultCh, quit)
+			miningWorld := stagedsync.StageMiningCfg(true)
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
@@ -320,14 +318,13 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			// Use all non-mining fields from nextBlock
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(s *stagedsync.StageState, u stagedsync.Unwinder, tx ethdb.RwTx) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
+					stagedsync.StageMiningCreateBlockCfg(db,
+						miningConfig,
+						*chainConfig,
+						engine,
+						txPool,
+						tmpDir),
 					miningWorld.Block,
-					*chainConfig,
-					engine,
-					miningWorld.ExtraData,
-					miningWorld.GasFloor,
-					miningWorld.GasCeil,
-					miningWorld.Etherbase,
-					txPool,
 					quit)
 				miningWorld.Block.Uncles = nextBlock.Uncles()
 				miningWorld.Block.Header.Time = nextBlock.Header().Time
@@ -418,7 +415,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 
 func loopIh(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync(db)
+	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -432,7 +429,7 @@ func loopIh(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	}
 
 	_ = clearUnwindStack(tx, context.Background())
-	sync.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
+	sync.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.Translation, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
 	if err = sync.Run(ethdb.NewObjectDatabase(db), tx); err != nil {
 		return err
 	}
@@ -493,7 +490,7 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	ch := ctx.Done()
-	sm, engine, chainConfig, vmConfig, _, st, _ := newSync(db)
+	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -517,7 +514,7 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 
 	from := progress(tx, stages.Execution)
 	to := from + unwind
-	cfg := stagedsync.StageExecuteBlocksCfg(db, true, false, 0, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, true, false, false, 0, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {

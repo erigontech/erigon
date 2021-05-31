@@ -10,13 +10,13 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-// Compares response of TurboGeth with Geth
+// Compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with OpenEthereum
 // parameters:
-// needCompare - if false - doesn't call TurboGeth and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
-func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, oeURL)
+// needCompare - if false - doesn't call Erigon and doesn't compare responses
+// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -44,7 +44,7 @@ func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, bl
 
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -57,14 +57,14 @@ func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, bl
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
-		res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
 		if res.Err != nil {
-			fmt.Printf("Could not retrieve block (turbo-geth) %d: %v\n", bn, res.Err)
+			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 			return
 		}
 
 		if b.Error != nil {
-			fmt.Printf("Error retrieving block (turbo-geth): %d %s\n", b.Error.Code, b.Error.Message)
+			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 			return
 		}
 
@@ -88,13 +88,13 @@ func BenchTraceBlock(tgURL, oeURL string, needCompare bool, blockFrom uint64, bl
 		recording := rec != nil // This flag will be set to false if recording is not to be performed
 		reqGen.reqID++
 		request := reqGen.traceBlock(bn)
-		res = reqGen.TurboGeth2("trace_block", request)
+		res = reqGen.Erigon2("trace_block", request)
 		if res.Err != nil {
-			fmt.Printf("Could not trace block (turbo-geth) %d: %v\n", bn, res.Err)
+			fmt.Printf("Could not trace block (Erigon) %d: %v\n", bn, res.Err)
 			return
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
-			fmt.Printf("Error tracing block (turbo-geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+			fmt.Printf("Error tracing block (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 			return
 		}
 		if needCompare {

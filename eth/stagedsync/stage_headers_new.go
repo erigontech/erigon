@@ -55,6 +55,7 @@ func HeadersForward(
 	tx ethdb.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	var headerProgress uint64
 	var err error
@@ -69,6 +70,8 @@ func HeadersForward(
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
+	cfg.hd.SetFetching(true)
+	defer cfg.hd.SetFetching(false)
 	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
@@ -91,8 +94,6 @@ func HeadersForward(
 	}
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
-	batch := ethdb.NewBatch(tx)
-	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -101,7 +102,7 @@ func HeadersForward(
 		return err
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
 
 	var peer []byte
 	stopped := false
@@ -142,38 +143,25 @@ func HeadersForward(
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(batch), logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), logPrefix, logEvery.C); err != nil {
 			return err
-		}
-		if batch.BatchSize() >= int(cfg.batchSize) {
-			if err = batch.Commit(); err != nil {
-				return err
-			}
-			if !useExternalTx {
-				if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
-					return err
-				}
-				if err = tx.Commit(); err != nil {
-					return err
-				}
-				tx, err = cfg.db.BeginRw(ctx)
-				if err != nil {
-					return err
-				}
-			}
-			batch = ethdb.NewBatch(tx)
-			cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, batch: batch})
 		}
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
-		if !initialCycle && headerInserter.AnythingDone() {
-			// if this is not an initial cycle, we need to react quickly when new headers are coming in
-			break
+		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
+			if !initialCycle {
+				// if this is not an initial cycle, we need to react quickly when new headers are coming in
+				break
+			}
+			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
+			if inSync {
+				break
+			}
 		}
-		if initialCycle && inSync {
-			break
+		if test {
+			return fmt.Errorf("%s: did not complete", logPrefix)
 		}
 		timer := time.NewTimer(1 * time.Second)
 		select {
@@ -181,7 +169,7 @@ func HeadersForward(
 			stopped = true
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
-			logProgressHeaders(logPrefix, prevProgress, progress, batch)
+			logProgressHeaders(logPrefix, prevProgress, progress)
 			prevProgress = progress
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
@@ -190,36 +178,29 @@ func HeadersForward(
 		}
 		timer.Stop()
 	}
-	if headerInserter.AnythingDone() {
-		if err := s.Update(batch, headerInserter.GetHighest()); err != nil {
-			return err
-		}
-	}
 	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), batch); err != nil {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
-		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), batch); err != nil {
+		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 		if !stopped {
 			s.Done()
 		}
 	}
-	if err := batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	if stopped {
 		return common.ErrStopped
 	}
-	stageHeadersGauge.Update(int64(headerInserter.GetHighest()))
+	// We do not print the followin line if the stage was interrupted
+	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
 	return nil
 }
 
@@ -239,7 +220,7 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		if ancestor == nil {
 			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		} else {
-			log.Debug("ancestor", "height", ancestorHeight, "hash", ancestorHash)
+			log.Debug("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
@@ -282,14 +263,13 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 	return nil
 }
 
-func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
-		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
@@ -299,15 +279,15 @@ func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPe
 
 type chainReader struct {
 	config *params.ChainConfig
-	batch  ethdb.DbWithPendingMutations
+	tx     ethdb.RwTx
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
 func (cr chainReader) CurrentHeader() *types.Header { panic("") }
 func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(cr.batch, hash, number)
+	return rawdb.ReadHeader(cr.tx, hash, number)
 }
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
-	return rawdb.ReadHeaderByNumber(cr.batch, number)
+	return rawdb.ReadHeaderByNumber(cr.tx, number)
 }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }

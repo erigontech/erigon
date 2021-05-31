@@ -1,9 +1,9 @@
-This document attempts to explain how Turbo-Geth organises its persistent data in its database and how this organisation is
+This document attempts to explain how Erigon organises its persistent data in its database and how this organisation is
 different from go-ethereum, the project from which it is derived. We start from a very simple genesis block and then
 apply one block containing an ETH transfer. For each step, we show visualisations produced by the code available in
-Turbo-Geth and code added to a fork of go-ethereum.
+Erigon and code added to a fork of go-ethereum.
 
-Genesis in Turbo-Geth
+Genesis in Erigon
 ====================
 For the genesis block, we generate 3 different private keys and construct Ethereum addresses from them.
 Then, we endow one of the accounts with 9 ETH, and two others with 0.2 and 0.3 ETH, respectively.
@@ -22,11 +22,11 @@ to bottom, up to any of the account leaves you will get 64. Since each nibble oc
 in the state trie 32 bytes long. However, account addresses are only 20 bytes long. The reason we get 32 and not 20 is
 that all the keys (in our case account addresses) are processed by the `Keccak256` hash function (which has 32 byte
 output) before they are inserted into the trie. If we wanted to see what the corresponding account addresses were, we
-will have to look into the database. Here is what Turbo-Geth would persist after generating such a genesis block:
+will have to look into the database. Here is what Erigon would persist after generating such a genesis block:
 
 ![genesis_db](changes_0.png)
 
-The Turbo-Geth database is a key-value store organised in tables (also commonly referred to as "buckets"). This is the list
+The Erigon database is a key-value store organised in tables (also commonly referred to as "buckets"). This is the list
 of the __main__ tables in the database:
 
 - __Headers__
@@ -100,7 +100,7 @@ in RLP "some number of sub-structures with the total length of 3 bytes".
 Next three tables, "Last Header", "Last Fast", and "Last Block", always contain just one record each, and their
 keys are always the same, the ASCII-encodings of the strings `LastHeader`, `LastFast`, and `LastBlock`, respectively.
 The values record the block/header hash of the last header, receipt or block chains that the node has managed to sync
-from its peers in the network. The value in "Last Fast" bucket is not really used at the moment, because turbo-geth
+from its peers in the network. The value in "Last Fast" bucket is not really used at the moment, because Erigon
 does not support Fast Sync.
 
 Table "Header Numbers"
@@ -156,9 +156,9 @@ Type "help", "copyright", "credits" or "license" for more information.
 
 Which is 9 followed by 18 zeros, which is 9 ETH (1 ETH = 10^18 wei).
 
-The third bit of the field set represent the Incarnation. The Incarnation is a turbo-geth specific attribute, which is
+The third bit of the field set represent the Incarnation. The Incarnation is a Erigon specific attribute, which is
 used to make removal and revival of contract accounts (now possible with `CREATE2` since Constantinopole) efficient
-with turbo-geth's database layout. For now it will suffice to say that all non-contract accounts will have 
+with Erigon's database layout. For now it will suffice to say that all non-contract accounts will have 
 incarnation 0 (not set), and all contract accounts will start their existence with incarnation 1.
 
 Contract accounts may also contain a contract code hash and storage root. These two pieces of information would make
@@ -211,7 +211,7 @@ Tables "HashedState" and "IntermediateTrieHashes"
 These tables are used to calculate Merkle Trie root hash of whole current state. For Genesis block, these tables
 are not populated, because the root hash is known in advance.
 
-Block with 1 Ethereum transaction in Turbo-Geth
+Block with 1 Ethereum transaction in Erigon
 ===============================================
 The first block contains transaction that transfers 0.001 ETH from the account holding 9 ETH to
 a new account with the address `0x0100000000000000000000000000000000000000` (this is what one gets
@@ -226,7 +226,7 @@ a transaction from that address has been executed and the amount of ETH of that 
 be paid, but in our simplified example, we set gas price to 0, therefore no fees are deducted.
 A new account has been added to the state trie, the recipient of the transaction.
 In fact, it has 0.001 ETH (the value of the transaction) and its nonce is set to 0.
-What follows are excerpts from the turbo-geth database after block 1 has been inserted. 
+What follows are excerpts from the Erigon database after block 1 has been inserted. 
 These excerpts only show the records that have changed, and
 omit the records that are the same as before the insertion of the block.
 
@@ -258,7 +258,7 @@ would be here. But since our transaction did not emit anything, the list is empt
 Table "Senders"
 ---------------
 ![block1_db_senders](changes_1_Senders.png)
-The reason turbo-geth keeps the list of transaction sender addresses for each transaction has to do with the fact that
+The reason Erigon keeps the list of transaction sender addresses for each transaction has to do with the fact that
 transactions themselves do not contain this information directly. Sender's address can be "recovered" from the digital
 signature, but this recovery can be computationally intensive, therefore we "memoise" it.
 
@@ -342,7 +342,7 @@ Which is 0.001 ETH that is exactly how much has been sent to the recipient addre
 
 
 
-Because TurboGeth does it completely different from go-ethereum, 
+Because Erigon does it completely different from go-ethereum, 
 we created [dedicated article](guide.md#organising-ethereum-state-into-a-merkle-tree) for it. 
 
 Genesis in go-ethereum
@@ -352,19 +352,19 @@ Now we will create the same Genesis state and block in go-ethereum (in archive m
 Here is how the database looks like. Since go-ethereum uses LevelDB, and LevelDB does not have a concept of "buckets" (or
 "tables"), go-ethereum emulates them by adding table-specific prefixes to all the keys, with the exception of the keys that
 describe the state trie (bucket "Hashes" in our example). In the illustration, these prefixes are mostly removed for better
-comparison with turbo-geth. They were not removed only for the buckets "LastBlock", "LastHeader" and "LastFast", because
+comparison with Erigon. They were not removed only for the buckets "LastBlock", "LastHeader" and "LastFast", because
 othewise they key would be empty.
 
 ![geth_genesis_db](geth_changes_0.png)
 
 The buckets "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
-to those in the turbo-geth database. We will walk through the ones that are different.
+to those in the Erigon database. We will walk through the ones that are different.
 
 In the bucket "Block Bodies", the value is slightly different:
 
 ![geth_genesis_block_bodies](geth_changes_0_b_5.png)
 
-The difference is that the block body has 2 elements instead of 3 in turbo-geth. The missing element is the list
+The difference is that the block body has 2 elements instead of 3 in Erigon. The missing element is the list
 of the sender addresses that go-ethereum does not store, but recomputes after loading or caches in memory.
 
 The buckets "Accounts", "History Of Accounts", and "Change Sets" are missing, because go-ethereum uses a very
@@ -400,13 +400,13 @@ Now we will create the same Transaction for go-ethereum.
 ![geth_block1_db](geth_changes_1.png)
 
 The buckets "Receipts", "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
-to those in the turbo-geth database. We will walk through the ones that are different.
+to those in the Erigon database. We will walk through the ones that are different.
 
 In the bucket "Block Bodies", the value is slightly different:
 
 ![geth_block1_block_bodies](geth_changes_1_b_4.png)
 
-The difference is that the block body is missing the sender address since the send in go-ethereum is computed and in turbo-geth is stored. 
+The difference is that the block body is missing the sender address since the send in go-ethereum is computed and in Erigon is stored. 
 For the rest in this case the same changes occurs in terms of block number and block hash.
 
 ![geth_block1_hashes](geth_changes_1_hashes_5.png)

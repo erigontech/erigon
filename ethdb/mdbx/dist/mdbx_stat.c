@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY dfe0671435fed2948a861ec25f1adbf99a470c88be69bcc27b32ca9a7ffc6787_v0_10_0_27_g2b161db6
+#define MDBX_BUILD_SOURCERY 70a2b520f39efb5ffb11dd97c2eef3750a14f311a08a4382f87dd6e307ed6105_v0_10_0_34_ga6c8c20b
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -3601,7 +3601,7 @@ int main(int argc, char *argv[]) {
   prog = argv[0];
   char *envname;
   char *subname = nullptr;
-  bool alldbs = false, envinfo = false, envflags = false, pgop = false;
+  bool alldbs = false, envinfo = false, pgop = false;
   int freinfo = 0, rdrinfo = 0;
 
   if (argc < 2)
@@ -3650,7 +3650,6 @@ int main(int argc, char *argv[]) {
       freinfo += 1;
       break;
     case 'n':
-      envflags |= MDBX_NOSUBDIR;
       break;
     case 'r':
       rdrinfo += 1;
@@ -3704,7 +3703,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  rc = mdbx_env_open(env, envname, envflags | MDBX_RDONLY, 0);
+  rc = mdbx_env_open(env, envname, MDBX_RDONLY, 0);
   if (unlikely(rc != MDBX_SUCCESS)) {
     error("mdbx_env_open", rc);
     goto env_close;

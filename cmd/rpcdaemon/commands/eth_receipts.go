@@ -38,7 +38,8 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, ethash.NewFaker(), tx, hash, 0)
+	checkTEVM := ethdb.GetCheckTEVM(tx)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{})
+		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, checkTEVM)
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +211,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	// Retrieve the transaction and assemble its EVM context
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
 	cc, err := api.chainConfig(tx)

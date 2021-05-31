@@ -50,7 +50,7 @@ require (
 	github.com/prometheus/client_golang v1.9.0
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v1.7.0
-	github.com/shirou/gopsutil/v3 v3.21.1
+	github.com/shirou/gopsutil/v3 v3.21.4
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
@@ -70,5 +70,6 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	lukechampine.com/blake3 v1.1.5
 	pgregory.net/rapid v0.4.6
 )

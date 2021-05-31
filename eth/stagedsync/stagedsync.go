@@ -33,9 +33,6 @@ type OptionalParameters struct {
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
 
-	// Notifier allows sending some data when new headers or new blocks are added
-	Notifier ChainEventNotifier
-
 	SilkwormExecutionFunc unsafe.Pointer
 
 	SnapshotDir      string
@@ -78,10 +75,6 @@ func (stagedSync *StagedSync) Prepare(
 	var writerBuilder StateWriterBuilder
 	if stagedSync.params.StateWriterBuilder != nil {
 		writerBuilder = stagedSync.params.StateWriterBuilder
-	}
-
-	if stagedSync.params.Notifier != nil {
-		stagedSync.Notifier = stagedSync.params.Notifier
 	}
 
 	stages := stagedSync.stageBuilders.Build(

@@ -147,9 +147,14 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
+	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
-		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
+		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
 		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
 		//	return nil, err
@@ -160,7 +165,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		if err = env.SetOption(mdbx.OptDpReverseLimit, 16*1024); err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, defaultDirtyPagesLimit*2); err != nil { // default is RAM/42
 			return nil, err
 		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
@@ -304,8 +309,9 @@ func (db *MdbxKV) Close() {
 		if err := os.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
+	} else {
+		db.log.Info("database closed (MDBX)")
 	}
-	db.log.Info("database closed (MDBX)")
 }
 
 func (db *MdbxKV) CollectMetrics() {

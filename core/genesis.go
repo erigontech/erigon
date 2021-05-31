@@ -48,6 +48,8 @@ import (
 //go:embed allocs
 var allocs embed.FS
 
+var UseMDBX = true
+
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
@@ -250,8 +252,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.TurboMineGenesisHash:
-		return params.TurboMineChainConfig
+	case ghash == params.ErigonGenesisHash:
+		return params.ErigonChainConfig
 	case ghash == params.BaikalGenesisHash:
 		return params.BaikalChainConfig
 	default:
@@ -262,7 +264,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
-	tmpDB := ethdb.NewMemKV()
+	var tmpDB ethdb.RwKV
+	if UseMDBX {
+		tmpDB = ethdb.NewMDBX().InMem().MustOpen()
+	} else {
+		tmpDB = ethdb.NewLMDB().InMem().MustOpen()
+	}
 	defer tmpDB.Close()
 	tx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
@@ -493,14 +500,14 @@ func DefaultGoerliGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultTurboMineGenesisBlock() *Genesis {
+func DefaultErigonGenesisBlock() *Genesis {
 	return &Genesis{
-		Config:     params.TurboMineChainConfig,
+		Config:     params.ErigonChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
 		GasLimit:   1000000000,
 		Difficulty: big.NewInt(1048576),
-		Alloc:      readPrealloc("allocs/turbomine.json"),
+		Alloc:      readPrealloc("allocs/erigonmine.json"),
 	}
 }
 

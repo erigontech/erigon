@@ -13,16 +13,20 @@ ChangeLog
  - [Engage new terminology](https://github.com/erthink/libmdbx/issues/137).
  - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), Fedora/RHEL, Debian/Ubuntu.
 
-## v0.10.1 (in development)
+## v0.10.1 (scheduled for 2020-06-01)
 
 Acknowledgements:
 
  - [Alexey Akhunov](https://github.com/AlexeyAkhunov) and [Alex Sharov](https://github.com/AskAlexSharov) for bug reporting and testing.
+ - [Andrea Lanfranchi](https://github.com/AndreaLanfranchi) for bug reporting and testing related to WSL2.
 
 New features:
 
  - Added `-p` option to `mdbx_stat` utility for printing page operations statistic.
  - Added explicit checking for and warning about using unfit github's archives.
+ - Added fallback from [OFD locking](https://bit.ly/3yFRtYC) to legacy non-OFD POSIX file locks on an `EINVAL` error.
+ - Added [Plan 9](https://en.wikipedia.org/wiki/9P_(protocol)) network file system to the whitelist for an ability to open a DB in exclusive mode.
+ - Support for opening from WSL2 environment a DB hosted on Windows drive and mounted via [DrvFs](https://docs.microsoft.com/it-it/archive/blogs/wsl/wsl-file-system-support#drvfs) (i.e by Plan 9 noted above).
 
 Fixes:
 
@@ -30,6 +34,7 @@ Fixes:
  - Fixed confusing/messy errors when build library from unfit github's archives (https://github.com/erthink/libmdbx/issues/197).
  - Fixed `#​e​l​s​i​f` typo.
  - Fixed rare unexpected `MDBX_PROBLEM` error during altering data in huge transactions due to wrong spilling/oust of dirty pages (https://github.com/erthink/libmdbx/issues/195).
+ - Re-Fixed WSL1/WSL2 detection with distinguishing (https://github.com/erthink/libmdbx/issues/97).
 
 
 ## v0.10.0 at 2021-05-09

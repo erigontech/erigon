@@ -5,13 +5,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/cmd/headers/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -20,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 )
 
 func NewStagedSync(
@@ -30,6 +36,7 @@ func NewStagedSync(
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
+	trans stagedsync.TranspileCfg,
 	hashState stagedsync.HashStateCfg,
 	trieCfg stagedsync.TrieCfg,
 	history stagedsync.HistoryCfg,
@@ -38,9 +45,10 @@ func NewStagedSync(
 	txLookup stagedsync.TxLookupCfg,
 	txPool stagedsync.TxPoolCfg,
 	finish stagedsync.FinishCfg,
+	test bool,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -55,6 +63,7 @@ func StageLoop(
 	chainConfig *params.ChainConfig,
 	notifier stagedsync.ChainEventNotifier,
 	stateStream bool,
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 ) {
 	defer close(waitForDone)
@@ -73,7 +82,7 @@ func StageLoop(
 		if !initialCycle && stateStream {
 			accumulator = &shards.Accumulator{}
 		}
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -99,8 +108,9 @@ func StageLoopStep(
 	notifier stagedsync.ChainEventNotifier,
 	initialCycle bool,
 	accumulator *shards.Accumulator,
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 ) (err error) {
-	// avoid crash because TG's core does many things -
+	// avoid crash because Erigon's core does many things -
 	defer func() {
 		if r := recover(); r != nil { // just log is enough
 			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
@@ -174,10 +184,159 @@ func StageLoopStep(
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
+	var rotx ethdb.Tx
+	if rotx, err = db.BeginRo(ctx); err != nil {
+		return err
+	}
+	defer rotx.Rollback()
+
+	// Update sentry status for peers to see our sync status
+	var headTd *big.Int
+	var head uint64
+	var headHash common.Hash
+	if head, err = stages.GetStageProgress(rotx, stages.Finish); err != nil {
+		return err
+	}
+	if headHash, err = rawdb.ReadCanonicalHash(rotx, head); err != nil {
+		return err
+	}
+	if headTd, err = rawdb.ReadTd(rotx, headHash, head); err != nil {
+		return err
+	}
+	rotx.Rollback()
+	headTd256 := new(uint256.Int)
+	headTd256.SetFromBig(headTd)
+	updateHead(ctx, head, headHash, headTd256)
 
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+	// avoid crash because TG's core does many things -
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				err = fmt.Errorf("%w, trace: %s", typed, stack)
+			default:
+				err = fmt.Errorf("%+v, trace: %s", typed, stack)
+			}
+		}
+	}()
+
+	tx, err := kv.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	miningState, err := mining.Prepare(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		tx,
+		"",
+		ethdb.DefaultStorageMode,
+		".",
+		0,
+		ctx.Done(),
+		nil,
+		nil,
+		false,
+		stagedsync.StageMiningCfg(true),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if err = miningState.Run(nil, tx); err != nil {
+		return err
+	}
+	tx.Rollback()
+	return nil
+}
+
+func NewStagedSync2(
+	ctx context.Context,
+	db ethdb.RwKV,
+	sm ethdb.StorageMode,
+	batchSize datasize.ByteSize,
+	bodyDownloadTimeout int,
+	controlServer *download.ControlServerImpl,
+	tmpdir string,
+	txPool *core.TxPool,
+	txPoolServer *txpool.P2PServer,
+) (*stagedsync.StagedSync, error) {
+	var pruningDistance uint64
+	if !sm.History {
+		pruningDistance = params.FullImmutabilityThreshold
+	}
+
+	return NewStagedSync(ctx, sm,
+		stagedsync.StageHeadersCfg(
+			db,
+			controlServer.Hd,
+			*controlServer.ChainConfig,
+			controlServer.SendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
+			controlServer.Penalize,
+			batchSize,
+		),
+		stagedsync.StageBlockHashesCfg(db, tmpdir),
+		stagedsync.StageBodiesCfg(
+			db,
+			controlServer.Bd,
+			controlServer.SendBodyRequest,
+			controlServer.Penalize,
+			controlServer.BroadcastNewBlock,
+			bodyDownloadTimeout,
+			*controlServer.ChainConfig,
+			batchSize,
+		),
+		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
+		stagedsync.StageExecuteBlocksCfg(
+			db,
+			sm.Receipts,
+			sm.CallTraces,
+			sm.TEVM,
+			pruningDistance,
+			batchSize,
+			nil,
+			nil,
+			nil,
+			nil,
+			controlServer.ChainConfig,
+			controlServer.Engine,
+			&vm.Config{NoReceipts: !sm.Receipts},
+			tmpdir,
+		),
+		stagedsync.StageTranspileCfg(
+			db,
+			batchSize,
+			nil,
+			nil,
+			controlServer.ChainConfig,
+		),
+		stagedsync.StageHashStateCfg(db, tmpdir),
+		stagedsync.StageTrieCfg(db, true, true, tmpdir),
+		stagedsync.StageHistoryCfg(db, tmpdir),
+		stagedsync.StageLogIndexCfg(db, tmpdir),
+		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
+		stagedsync.StageTxLookupCfg(db, tmpdir),
+		stagedsync.StageTxPoolCfg(db, txPool, func() {
+			for _, s := range txPoolServer.Sentries {
+				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+			}
+			txPoolServer.TxFetcher.Start()
+		}),
+		stagedsync.StageFinishCfg(db, tmpdir),
+		false, /* test */
+	), nil
 }

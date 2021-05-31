@@ -65,7 +65,7 @@ type Filter struct {
 // NewRangeFilter creates a new filter which uses a bloom filter on blocks to
 // figure out whether a particular block is interesting or not.
 func NewRangeFilter(backend Backend, begin, end int64, addresses []common.Address, topics [][]common.Hash) *Filter {
-	log.Error("Log filter not used in turbo-get, please see implementation of eth_getLogs in RPCDaemon for more details")
+	log.Error("Log filter not used in Erigon, please see implementation of eth_getLogs in RPCDaemon for more details")
 	// Flatten the address and topic filter clauses into a single bloombits filter
 	// system. Since the bloombits are not positional, nil topics are permitted,
 	// which get flattened into a nil byte slice.

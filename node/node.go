@@ -97,9 +97,6 @@ func New(conf *Config) (*Node, error) {
 		stop:          make(chan struct{}),
 		databases:     make([]ethdb.Closer, 0),
 	}
-	if !conf.EnableDownloadV2 {
-		node.server = &p2p.Server{Config: conf.P2P}
-	}
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
 
@@ -110,29 +107,6 @@ func New(conf *Config) (*Node, error) {
 
 	var err error
 	// Initialize the p2p server. This creates the node key and discovery databases.
-	if !conf.EnableDownloadV2 {
-		node.server.Config.PrivateKey, err = node.config.NodeKey()
-		if err != nil {
-			return nil, err
-		}
-		node.server.Config.Name = node.Config().NodeName()
-		node.server.Config.Logger = node.log
-		if node.server.Config.StaticNodes == nil {
-			node.server.Config.StaticNodes, err = node.config.StaticNodes()
-			if err != nil {
-				return nil, err
-			}
-		}
-		if node.server.Config.TrustedNodes == nil {
-			node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
-			if err != nil {
-				return nil, err
-			}
-		}
-		if node.server.Config.NodeDatabase == "" {
-			node.server.Config.NodeDatabase = node.config.NodeDB()
-		}
-	}
 
 	// Check HTTP/WS prefixes are valid.
 	if err = validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
@@ -151,9 +125,6 @@ func New(conf *Config) (*Node, error) {
 }
 
 func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	if !n.config.EnableDownloadV2 {
-		n.server.SetP2PListenFunc(listenFunc)
-	}
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
@@ -257,21 +228,10 @@ func (n *Node) doClose(errs []error) error {
 
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
-	// start networking endpoints
-	if !n.config.EnableDownloadV2 {
-		n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-		if err := n.server.Start(); err != nil {
-			return convertFileLockError(err)
-		}
-	}
-
 	// start RPC endpoints
 	err := n.startRPC()
 	if err != nil {
 		n.stopRPC()
-		if !n.config.EnableDownloadV2 {
-			n.server.Stop()
-		}
 	}
 	return err
 }
@@ -297,11 +257,6 @@ func (n *Node) stopServices(running []Lifecycle) error {
 		if err := running[i].Stop(); err != nil {
 			failure.Services[reflect.TypeOf(running[i])] = err
 		}
-	}
-
-	if !n.config.EnableDownloadV2 {
-		// Stop p2p networking.
-		n.server.Stop()
 	}
 
 	if len(failure.Services) > 0 {
@@ -453,9 +408,6 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	if n.state != initializingState {
 		panic("can't register protocols on running/stopped node")
 	}
-	if !n.config.EnableDownloadV2 {
-		n.server.Protocols = append(n.server.Protocols, protocols...)
-	}
 }
 
 // RegisterAPIs registers the APIs a service provides on the node.
@@ -558,7 +510,7 @@ func (n *Node) OpenDatabase(name string, datadir string) (*ethdb.ObjectDatabase,
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-// NOTE: kept for compatibility and for easier rebases (turbo-geth)
+// NOTE: kept for compatibility and for easier rebases (erigon)
 func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -576,7 +528,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 
 		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
 		if n.config.MDBX {
-			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
+			log.Info("Opening Database (MDBX)")
 			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
 				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
 				if exclusive {

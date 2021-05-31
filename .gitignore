@@ -24,6 +24,14 @@ docs/readthedocs/build
 .project
 .settings
 
+# Used by mdbx Makefile
+/ethdb/mdbx/dist/CMakeFiles/*
+/ethdb/mdbx/dist/CMakeCache*
+/ethdb/mdbx/dist/*.cmake
+/ethdb/mdbx/dist/*.dll
+/ethdb/mdbx/dist/*.exe
+/ethdb/mdbx/dist/Makefile
+
 # used by the Makefile
 /build/_workspace/
 /build/cache/

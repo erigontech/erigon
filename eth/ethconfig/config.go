@@ -45,6 +45,7 @@ import (
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
 	Blocks:     20,
+	Default:    big.NewInt(0),
 	Percentile: 60,
 	MaxPrice:   gasprice.DefaultMaxPrice,
 }
@@ -87,19 +88,19 @@ func init() {
 		}
 	}
 	if runtime.GOOS == "darwin" {
-		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "tg-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
 	} else if runtime.GOOS == "windows" {
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "tg-thash")
+			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
-			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "tg-ethash")
+			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
 		}
 	} else {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "tg-ethash")
+			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/tg-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash")
 	}
 }
 
@@ -118,8 +119,7 @@ type Config struct {
 	// for nodes to connect to.
 	EthDiscoveryURLs []string
 
-	EnableDownloadV2 bool
-	P2PEnabled       bool
+	P2PEnabled bool
 
 	StorageMode     ethdb.StorageMode
 	BatchSize       datasize.ByteSize // Batch size for execution stage

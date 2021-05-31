@@ -34,6 +34,8 @@ var stateBuckets = []string{
 	dbutils.AccountsHistoryBucket,
 	dbutils.StorageHistoryBucket,
 	dbutils.TxLookupPrefix,
+	dbutils.ContractTEVMCodeBucket,
+	dbutils.ContractTEVMCodeStatusBucket,
 }
 
 var cmdCompareBucket = &cobra.Command{
@@ -403,7 +405,7 @@ MainLoop:
 
 func lmdbToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
+	src := ethdb.NewLMDB().Path(from).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }

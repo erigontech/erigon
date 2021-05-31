@@ -50,7 +50,7 @@ func Seed(ctx context.Context, datadir string) error {
 		i := i
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
-			CreatedBy:    "turbogeth",
+			CreatedBy:    "erigon",
 			AnnounceList: trnt.Trackers,
 		}
 

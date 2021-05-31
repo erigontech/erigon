@@ -9,7 +9,7 @@ import (
 )
 
 const Geth = "geth"
-const TurboGeth = "turbo_geth"
+const Erigon = "erigon"
 
 type EthError struct {
 	Code    int    `json:"code"`

@@ -8,7 +8,7 @@ Staged Sync, as its name suggests, consists of 10 stages that are executed in or
 
 ## How The Sync Works
 
-For each peer Turbo-Geth learns what the HEAD blocks is and it executes each stage in order for the missing blocks between the local HEAD block and the peer's head blocks.
+For each peer Erigon learns what the HEAD blocks is and it executes each stage in order for the missing blocks between the local HEAD block and the peer's head blocks.
 
 The first stage (downloading headers) sets the local HEAD block.
 
@@ -122,7 +122,7 @@ This stage doesn't use a network connection.
 
 ### Stage 7: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
 
-Turbo-Geth during execution uses Plain state storage.
+Erigon during execution uses Plain state storage.
 
 > Plain State: Instead of the normal (we call it "Hashed State") where accounts and storage items are addressed as `keccak256(address)`, in the plain state them are addressed by the `address` itself.
 

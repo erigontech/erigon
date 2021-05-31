@@ -24,6 +24,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		true,
 		true,
 		true,
+		false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +41,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		true,
 		true,
 		true,
+		false,
 	}) {
 		spew.Dump(sm)
 		t.Fatal("not equal")

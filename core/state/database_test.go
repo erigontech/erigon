@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,10 +50,8 @@ import (
 
 // Create revival problem
 func TestCreate2Revive(t *testing.T) {
-	t.Skip("switch to TG state readers/writers")
 
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -71,11 +70,12 @@ func TestCreate2Revive(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		signer  = types.LatestSignerForChainID(nil)
+		signer = types.LatestSignerForChainID(nil)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -95,7 +95,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -143,17 +143,17 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.ReviveDeployEventIterator
@@ -167,7 +167,7 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
@@ -180,16 +180,16 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if st.Exist(create2address) {
 		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[3], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
@@ -202,7 +202,7 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}

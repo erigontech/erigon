@@ -106,7 +106,7 @@ func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
 
 func TestSuggestPrice(t *testing.T) {
 	config := Config{
-		Blocks:     3,
+		Blocks:     2,
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),
 	}

@@ -31,6 +31,7 @@ var (
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
 	storageMode        string
+	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
 func must(err error) {
@@ -125,10 +126,14 @@ func withMigration(cmd *cobra.Command) {
 }
 
 func withSilkworm(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
+	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_erigon_api.so")
 	must(cmd.MarkFlagFilename("silkworm"))
 }
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withChain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
 }

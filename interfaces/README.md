@@ -1,7 +1,7 @@
 # Interfaces
-Interfaces for turbo-geth components. Currently it is a collection of `.proto` files describing gRPC interfaces between components, but later documentation about each interface, its components, as well as required version of gRPC will be added
+Interfaces for Erigon components. Currently, it is a collection of `.proto` files describing gRPC interfaces between components, but later documentation about each interface, its components, as well as required version of gRPC will be added
 
-<img src="turbo-geth-architecture.png">
+<img src="erigon-architecture.png">
 
 # What's in this repo
 - Protobuf definitions
@@ -25,3 +25,7 @@ git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/inte
 
 Unfortunately `git subtree pull` does not work if we use Squash-Merge for pull requests in this repository
 and also automatically delete merged branches.
+
+# Style guide 
+
+[https://developers.google.com/protocol-buffers/docs/style](https://developers.google.com/protocol-buffers/docs/style)

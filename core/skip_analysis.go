@@ -1,4 +1,4 @@
-// Copyright 2020 The turbo-geth Authors
+// Copyright 2020 The erigon Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -21,7 +21,7 @@ import (
 )
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 12470400
+const MainnetNotCheckedFrom uint64 = 12514800
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
 // for the historical blocks (on mainnet now but perhaps on the testsnets

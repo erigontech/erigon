@@ -443,6 +443,11 @@ func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err err
 func (s *sharedUDPConn) Close() error {
 	return nil
 }
+func (srv *Server) Running() bool {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
+	return srv.running
+}
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
@@ -509,8 +514,7 @@ func (srv *Server) setupLocalNode() error {
 		srv.ourHandshake.Caps = append(srv.ourHandshake.Caps, p.cap())
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
-
-	// Create the local node.
+	// Create the local node
 	db, err := enode.OpenDB(srv.Config.NodeDatabase)
 	if err != nil {
 		return err

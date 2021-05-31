@@ -50,18 +50,14 @@ var (
 		Value: 500,
 	}
 
-	DownloadV2Flag = cli.BoolTFlag{
-		Name:  "download.v2",
-		Usage: "enable experimental downloader v2",
-	}
-
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
 * h - write history to the DB
 * r - write receipts to the DB
 * t - write tx lookup index to the DB
-* c - write call traces index to the DB`,
+* c - write call traces index to the DB,
+* e - write TEVM translated code to the DB`,
 		Value: "default",
 	}
 	SnapshotModeFlag = cli.StringFlag{
@@ -118,7 +114,7 @@ var (
 	}
 	SilkwormFlag = cli.StringFlag{
 		Name:  "silkworm",
-		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
+		Usage: "File path of libsilkworm_erigon_api dynamic library (default = do not use Silkworm)",
 		Value: "",
 	}
 	StateStreamFlag = cli.BoolFlag{
@@ -128,8 +124,6 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
-
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -229,7 +223,6 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 			}
 		}
 	}
-	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
 	cfg.P2P.MDBX = cfg.MDBX
 	cfg.P2P.LMDB = cfg.LMDB
 }

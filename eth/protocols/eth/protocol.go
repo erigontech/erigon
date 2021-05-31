@@ -73,6 +73,25 @@ const (
 	PooledTransactionsMsg         = 0x0a
 )
 
+//nolint
+var ToString = map[uint]string{
+	StatusMsg:                     "StatusMsg",
+	NewBlockHashesMsg:             "NewBlockHashesMsg",
+	TransactionsMsg:               "TransactionsMsg",
+	GetBlockHeadersMsg:            "GetBlockHeadersMsg",
+	BlockHeadersMsg:               "BlockHeadersMsg",
+	GetBlockBodiesMsg:             "GetBlockBodiesMsg",
+	BlockBodiesMsg:                "BlockBodiesMsg",
+	NewBlockMsg:                   "NewBlockMsg",
+	GetNodeDataMsg:                "GetNodeDataMsg",
+	NodeDataMsg:                   "NodeDataMsg",
+	GetReceiptsMsg:                "GetReceiptsMsg",
+	ReceiptsMsg:                   "ReceiptsMsg",
+	NewPooledTransactionHashesMsg: "NewPooledTransactionHashesMsg",
+	GetPooledTransactionsMsg:      "GetPooledTransactionsMsg",
+	PooledTransactionsMsg:         "PooledTransactionsMsg",
+}
+
 var (
 	errNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")

@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack rpctest state pics rpcdaemon integration db-tools
+all: erigon hack rpctest state pics rpcdaemon integration db-tools
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -38,15 +38,16 @@ dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 geth: mdbx
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
-tg: go-version mdbx
-	@echo "Building tg"
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
+erigon: go-version mdbx
+	@echo "Building Erigon"
+	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
@@ -157,7 +158,7 @@ lintci: mdbx
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.40.0
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.40.1
 
 clean:
 	env GO111MODULE=on go clean -cache

@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"sort"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -985,39 +984,6 @@ func WriteBlock(db ethdb.RwTx, block *types.Block) error {
 	return nil
 }
 
-// WriteAncientBlock writes entire block data into ancient store and returns the total written size.
-/*
-func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {
-	// Encode all block components to RLP format.
-	headerBlob, err := rlp.EncodeToBytes(block.Header())
-	if err != nil {
-		log.Crit("Failed to RLP encode block header", "err", err)
-	}
-	bodyBlob, err := rlp.EncodeToBytes(block.Body())
-	if err != nil {
-		log.Crit("Failed to RLP encode body", "err", err)
-	}
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-	receiptBlob, err := rlp.EncodeToBytes(storageReceipts)
-	if err != nil {
-		log.Crit("Failed to RLP encode block receipts", "err", err)
-	}
-	tdBlob, err := rlp.EncodeToBytes(td)
-	if err != nil {
-		log.Crit("Failed to RLP encode block total difficulty", "err", err)
-	}
-	// Write all blob to flatten files.
-	err = db.AppendAncient(block.NumberU64(), block.Hash().Bytes(), headerBlob, bodyBlob, receiptBlob, tdBlob)
-	if err != nil {
-		log.Crit("Failed to write block data to ancient store", "err", err)
-	}
-	return len(headerBlob) + len(bodyBlob) + len(receiptBlob) + len(tdBlob) + common.HashLength
-}
-*/
-
 // DeleteBlock removes all block data associated with a hash.
 func DeleteBlock(db ethdb.RwTx, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
@@ -1029,130 +995,6 @@ func DeleteBlock(db ethdb.RwTx, hash common.Hash, number uint64) error {
 		return err
 	}
 	return nil
-}
-
-const badBlockToKeep = 10
-
-type badBlock struct {
-	Header *types.Header
-	Body   *types.Body
-}
-
-// badBlockList implements the sort interface to allow sorting a list of
-// bad blocks by their number in the reverse order.
-type badBlockList []*badBlock
-
-func (s badBlockList) Len() int { return len(s) }
-func (s badBlockList) Less(i, j int) bool {
-	return s[i].Header.Number.Uint64() < s[j].Header.Number.Uint64()
-}
-func (s badBlockList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-
-// ReadBadBlock retrieves the bad block with the corresponding block hash.
-func ReadBadBlock(db ethdb.Database, hash common.Hash) *types.Block {
-	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
-	if err != nil {
-		return nil
-	}
-	var badBlocks badBlockList
-	if err := rlp.DecodeBytes(blob, &badBlocks); err != nil {
-		return nil
-	}
-	for _, bad := range badBlocks {
-		if bad.Header.Hash() == hash {
-			return types.NewBlockWithHeader(bad.Header).WithBody(bad.Body.Transactions, bad.Body.Uncles)
-		}
-	}
-	return nil
-}
-
-// ReadAllBadBlocks retrieves all the bad blocks in the database.
-// All returned blocks are sorted in reverse order by number.
-func ReadAllBadBlocks(db ethdb.Database) []*types.Block {
-	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
-	if err != nil {
-		return nil
-	}
-	var badBlocks badBlockList
-	if err := rlp.DecodeBytes(blob, &badBlocks); err != nil {
-		return nil
-	}
-	var blocks []*types.Block //nolint:prealloc
-	for _, bad := range badBlocks {
-		blocks = append(blocks, types.NewBlockWithHeader(bad.Header).WithBody(bad.Body.Transactions, bad.Body.Uncles))
-	}
-	return blocks
-}
-
-// WriteBadBlock serializes the bad block into the database. If the cumulated
-// bad blocks exceeds the limitation, the oldest will be dropped.
-func WriteBadBlock(db ethdb.Database, block *types.Block) {
-	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
-	if err != nil {
-		log.Warn("Failed to load old bad blocks", "error", err)
-	}
-	var badBlocks badBlockList
-	if len(blob) > 0 {
-		if err = rlp.DecodeBytes(blob, &badBlocks); err != nil {
-			log.Crit("Failed to decode old bad blocks", "error", err)
-		}
-	}
-	for _, b := range badBlocks {
-		if b.Header.Number.Uint64() == block.NumberU64() && b.Header.Hash() == block.Hash() {
-			log.Info("Skip duplicated bad block", "number", block.NumberU64(), "hash", block.Hash())
-			return
-		}
-	}
-	badBlocks = append(badBlocks, &badBlock{
-		Header: block.Header(),
-		Body:   block.Body(),
-	})
-	sort.Sort(sort.Reverse(badBlocks))
-	if len(badBlocks) > badBlockToKeep {
-		badBlocks = badBlocks[:badBlockToKeep]
-	}
-	data, err := rlp.EncodeToBytes(badBlocks)
-	if err != nil {
-		log.Crit("Failed to encode bad blocks", "err", err)
-	}
-	if err := db.Put(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock), data); err != nil {
-		log.Crit("Failed to write bad blocks", "err", err)
-	}
-}
-
-// DeleteBadBlocks deletes all the bad blocks from the database
-//nolint:interfacer
-func DeleteBadBlocks(db ethdb.Database) {
-	if err := db.Delete(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock), nil); err != nil {
-		log.Crit("Failed to delete bad blocks", "err", err)
-	}
-}
-
-// FindCommonAncestor returns the last common ancestor of two block headers
-func FindCommonAncestor(db ethdb.DatabaseReader, a, b *types.Header) *types.Header {
-	for bn := b.Number.Uint64(); a.Number.Uint64() > bn; {
-		a = ReadHeader(db, a.ParentHash, a.Number.Uint64()-1)
-		if a == nil {
-			return nil
-		}
-	}
-	for an := a.Number.Uint64(); an < b.Number.Uint64(); {
-		b = ReadHeader(db, b.ParentHash, b.Number.Uint64()-1)
-		if b == nil {
-			return nil
-		}
-	}
-	for a.Hash() != b.Hash() {
-		a = ReadHeader(db, a.ParentHash, a.Number.Uint64()-1)
-		if a == nil {
-			return nil
-		}
-		b = ReadHeader(db, b.ParentHash, b.Number.Uint64()-1)
-		if b == nil {
-			return nil
-		}
-	}
-	return a
 }
 
 func ReadBlockByNumberDeprecated(db ethdb.Getter, number uint64) (*types.Block, error) {

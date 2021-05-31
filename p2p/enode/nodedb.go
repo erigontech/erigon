@@ -62,9 +62,9 @@ const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 9
-
-	useMDBX = false
 )
+
+var UseMDBX = true
 
 var (
 	errInvalidIP = errors.New("invalid IP")
@@ -99,7 +99,7 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 func newMemoryDB() (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	if useMDBX {
+	if UseMDBX {
 		db.kv, err = ethdb.NewMDBX().InMem().WithBucketsConfig(bucketsConfig).Open()
 		if err != nil {
 			return nil, err
@@ -118,7 +118,7 @@ func newMemoryDB() (*DB, error) {
 func newPersistentDB(path string) (*DB, error) {
 	var kv ethdb.RwKV
 	var err error
-	if useMDBX {
+	if UseMDBX {
 		kv, err = ethdb.NewMDBX().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 		if err != nil {
 			return nil, err
