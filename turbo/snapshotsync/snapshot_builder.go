@@ -196,7 +196,7 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rw
 	return nil
 }
 
-func (sm *SnapshotMigrator) Final(tx ethdb.Tx) (error) {
+func (sm *SnapshotMigrator) Final(tx ethdb.Tx) error {
 	if atomic.LoadUint64(&sm.started) < 3 {
 		return nil
 	}

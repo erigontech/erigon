@@ -65,7 +65,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx: true,
+		useMdbx:      true,
 	}
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
@@ -408,7 +408,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx: true,
+		useMdbx:      true,
 	}
 
 	tx, err := db.BeginRw(context.Background())
