@@ -454,13 +454,13 @@ const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
-	dbtx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer dbtx.Rollback()
+	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -469,19 +469,19 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainKvState(dbtx, blockNumber)
+		stateReader = state.NewPlainKvState(tx, blockNumber)
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	header := rawdb.ReadHeader(tx, hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -522,7 +522,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 	//blockCtx.BlockNumber++
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})

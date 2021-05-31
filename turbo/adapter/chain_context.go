@@ -72,7 +72,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(ethdb.NewRoTxDb(c.tx), hash, number)
+	return rawdb.ReadHeader(c.tx, hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {

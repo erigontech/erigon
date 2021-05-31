@@ -44,7 +44,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	}
 	state := state.New(stateReader)
 
-	header := rawdb.ReadHeader(ethdb.NewRoTxDb(tx), hash, blockNumber)
+	header := rawdb.ReadHeader(tx, hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}

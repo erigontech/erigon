@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: erigon hack rpctest state pics rpcdaemon integration db-tools
+all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -37,10 +37,7 @@ docker-compose:
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth: mdbx
-	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
+geth: erigon
 
 erigon: go-version mdbx
 	@echo "Building Erigon"
@@ -80,8 +77,8 @@ integration:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
-headers:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
+sentry:
+	$(GOBUILD) -o $(GOBIN)/headers ./cmd/sentry
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 

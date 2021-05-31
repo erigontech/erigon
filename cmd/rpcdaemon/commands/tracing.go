@@ -73,7 +73,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	} else {
 		stateReader = state.NewPlainKvState(dbtx, blockNumber)
 	}
-	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
