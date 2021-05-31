@@ -48,7 +48,7 @@ const PlainStateBucketOld1 = "PLAIN-CST"
 //PlainContractCodeBucket -
 //key - address+incarnation
 //value - code hash
-var PlainContractCodeBucket = "PLAIN-contractCode"
+const PlainContractCodeBucket = "PLAIN-contractCode"
 
 /*
 AccountChangeSetBucket and StorageChangeSetBucket - of block N store values of state before block N changed them.
@@ -74,8 +74,8 @@ StorageChangeSetBucket:
 	key - blockNum_u64 + address + incarnation_u64
 	value - plain_storage_key + value
 */
-var AccountChangeSetBucket = "PLAIN-ACS"
-var StorageChangeSetBucket = "PLAIN-SCS"
+const AccountChangeSetBucket = "PLAIN-ACS"
+const StorageChangeSetBucket = "PLAIN-SCS"
 
 const (
 
