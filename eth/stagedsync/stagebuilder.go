@@ -268,7 +268,6 @@ func DefaultStages() StageBuilders {
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,
-					world.silkwormExecutionFunc,
 					nil,
 					world.ChainConfig,
 					world.Engine,

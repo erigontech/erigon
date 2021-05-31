@@ -77,7 +77,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					world.BatchSize,
 					world.stateReaderBuilder,
 					world.stateWriterBuilder,
-					world.silkwormExecutionFunc,
 					nil,
 					world.ChainConfig,
 					world.Engine,

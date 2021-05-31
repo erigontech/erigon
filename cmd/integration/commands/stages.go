@@ -6,7 +6,6 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -29,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
@@ -407,18 +405,6 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func silkwormExecutionFunc() unsafe.Pointer {
-	if silkwormPath == "" {
-		return nil
-	}
-
-	funcPtr, err := silkworm.LoadExecutionFunctionPointer(silkwormPath)
-	if err != nil {
-		panic(fmt.Errorf("failed to load Silkworm dynamic library: %v", err))
-	}
-	return funcPtr
-}
-
 func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
 	tx, err := db.BeginRw(ctx)
@@ -451,7 +437,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	stage4 := stage(sync, tx, stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
-	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, silkwormExecutionFunc(), nil, chainConfig, engine, vmConfig, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		err = stagedsync.UnwindExecutionStage(u, stage4, tx, ch, cfg, nil)
@@ -854,7 +840,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, pendingResultCh, miningResultCh, nil),
 		),
 		stagedsync.MiningUnwindOrder(),
-		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
+		stagedsync.OptionalParameters{},
 	)
 	return sm, engine, chainConfig, vmConfig, txPool, st, stMining, pendingResultCh, miningResultCh
 }
