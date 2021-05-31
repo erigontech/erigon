@@ -311,7 +311,6 @@ func NewStagedSync2(
 			nil,
 			nil,
 			nil,
-			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
