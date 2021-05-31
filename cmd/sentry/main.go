@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/headers/commands"
+	"github.com/ledgerwatch/erigon/cmd/sentry/commands"
 )
 
 // generate the messages
