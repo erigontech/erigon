@@ -24,8 +24,8 @@ import (
 //maxReorgDepth max reorg depth. We should create snapshot after it
 const maxReorgDepth = 90000
 
-func NewMigrator2(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator2 {
-	return &SnapshotMigrator2{
+func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
+	return &SnapshotMigrator{
 		snapshotsDir:               snapshotDir,
 		HeadersCurrentSnapshot:     currentSnapshotBlock,
 		HeadersNewSnapshotInfohash: currentSnapshotInfohash,
@@ -34,7 +34,7 @@ func NewMigrator2(snapshotDir string, currentSnapshotBlock uint64, currentSnapsh
 	}
 }
 
-type SnapshotMigrator2 struct {
+type SnapshotMigrator struct {
 	snapshotsDir               string
 	HeadersCurrentSnapshot     uint64
 	HeadersNewSnapshot         uint64
@@ -45,7 +45,7 @@ type SnapshotMigrator2 struct {
 	replaced                   uint64
 }
 
-func (sm *SnapshotMigrator2) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.Tx, bittorrent *Client, async bool) error {
+func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.Tx, bittorrent *Client, async bool) error {
 	if sm.HeadersCurrentSnapshot >= migrateToBlock || atomic.LoadUint64(&sm.HeadersNewSnapshot) >= migrateToBlock || atomic.LoadUint64(&sm.started) > 0 {
 		return nil
 	}
@@ -149,7 +149,7 @@ func (sm *SnapshotMigrator2) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, 
 	return nil
 }
 
-func (sm *SnapshotMigrator2) Replaced() bool {
+func (sm *SnapshotMigrator) Replaced() bool {
 	select {
 	case <-sm.replaceChan:
 		log.Info("Snapshot replaced")
@@ -160,7 +160,7 @@ func (sm *SnapshotMigrator2) Replaced() bool {
 	return atomic.LoadUint64(&sm.replaced) == 1
 }
 
-func (sm *SnapshotMigrator2) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.RwTx) error {
+func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.RwTx) error {
 	log.Info("SyncStages", "started", atomic.LoadUint64(&sm.started))
 
 	if atomic.LoadUint64(&sm.started) == 2 && sm.Replaced() {
@@ -196,22 +196,22 @@ func (sm *SnapshotMigrator2) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	return nil
 }
 
-func (sm *SnapshotMigrator2) Final(tx ethdb.Tx) (bool, error) {
+func (sm *SnapshotMigrator) Final(tx ethdb.Tx) (error) {
 	if atomic.LoadUint64(&sm.started) < 3 {
-		return false, nil
+		return nil
 	}
 
 	v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
 	if errors.Is(err, ethdb.ErrKeyNotFound) {
-		return false, nil
+		return nil
 	}
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	if len(v) != 8 {
 		log.Error("Incorrect length", "ln", len(v))
-		return false, nil
+		return nil
 	}
 
 	if sm.HeadersCurrentSnapshot < atomic.LoadUint64(&sm.HeadersNewSnapshot) && sm.HeadersCurrentSnapshot != 0 {
@@ -221,7 +221,7 @@ func (sm *SnapshotMigrator2) Final(tx ethdb.Tx) (bool, error) {
 		err = os.RemoveAll(oldSnapshotPath)
 		if err != nil {
 			log.Error("Remove snapshot", "err", err)
-			return false, err
+			return err
 		}
 		log.Info("Removed old snapshot", "path", oldSnapshotPath, "t", time.Since(tt))
 	}
@@ -231,12 +231,12 @@ func (sm *SnapshotMigrator2) Final(tx ethdb.Tx) (bool, error) {
 		atomic.StoreUint64(&sm.started, 0)
 		atomic.StoreUint64(&sm.replaced, 0)
 		log.Info("CurrentHeadersSnapshotBlock commited", "block", binary.BigEndian.Uint64(v))
-		return true, nil
+		return nil
 	}
-	return false, nil
+	return nil
 }
 
-func (sm *SnapshotMigrator2) RemoveNonCurrentSnapshots() error {
+func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 	files, err := ioutil.ReadDir(sm.snapshotsDir)
 	if err != nil {
 		return err

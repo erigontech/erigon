@@ -62,7 +62,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		close(quit)
 	}()
 
-	sb := &SnapshotMigrator2{
+	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
 		useMdbx: true,
@@ -117,7 +117,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 			panic(err)
 		}
 
-		_, err = sb.Final(tx)
+		err = sb.Final(tx)
 		if err != nil {
 			t.Error(err)
 			panic(err)
@@ -405,7 +405,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		close(quit)
 	}()
 
-	sb := &SnapshotMigrator2{
+	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
 		useMdbx: true,
@@ -473,7 +473,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = sb.Final(roTx)
+		err = sb.Final(roTx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -630,7 +630,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = sb.Final(roTx)
+		err = sb.Final(roTx)
 		if err != nil {
 			t.Fatal(err)
 		}

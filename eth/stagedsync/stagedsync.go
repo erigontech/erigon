@@ -37,7 +37,7 @@ type OptionalParameters struct {
 
 	SnapshotDir      string
 	TorrnetClient    *snapshotsync.Client
-	SnapshotMigrator *snapshotsync.SnapshotMigrator2
+	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -124,8 +124,14 @@ func (stagedSync *StagedSync) Prepare(
 	return state, nil
 }
 
-func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator2) {
+func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
 	stagedSync.params.TorrnetClient = client
 	stagedSync.params.SnapshotDir = snapshotsDir
 	stagedSync.params.SnapshotMigrator = snapshotMigrator
+}
+func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) (error) {
+	if stagedSync.params.SnapshotMigrator!=nil {
+		return stagedSync.params.SnapshotMigrator.Final
+	}
+	return nil
 }

@@ -232,13 +232,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
-	var mg *snapshotsync.SnapshotMigrator2
+	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
 		if err != nil {
 			return nil, err
 		}
-		mg = snapshotsync.NewMigrator2(snapshotsDir, currentSnapshotBlock, currentInfohash, stack.Config().MDBX)
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash, stack.Config().MDBX)
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)

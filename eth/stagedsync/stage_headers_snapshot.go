@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -23,7 +24,7 @@ func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapsh
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, sm *snapshotsync.SnapshotMigrator2, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
 	if tx != nil {
 		s.Done()
@@ -98,8 +99,9 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 			return false, err
 		}
 		defer readTX.Rollback()
+		err = sm.Final(readTX)
 
-		return sm.Final(readTX)
+		return atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == snapshotBlock, err
 	}
 
 	for {

@@ -24,7 +24,7 @@ func StageFinishCfg(db ethdb.RwKV, tmpDir string) FinishCfg {
 	}
 }
 
-func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator2) error {
+func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
