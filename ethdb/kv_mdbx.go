@@ -471,6 +471,13 @@ func (tx *MdbxTx) CollectMetrics() {
 	gcLeafMetric.Update(int64(gc.LeafPages))
 	gcOverflowMetric.Update(int64(gc.OverflowPages))
 	gcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
+
+	state, err := tx.BucketStat(dbutils.PlainStateBucket)
+	if err != nil {
+		return
+	}
+	stateLeafMetric.Update(int64(state.LeafPages))
+	stateBranchesMetric.Update(int64(state.BranchPages))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {

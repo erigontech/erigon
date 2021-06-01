@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -326,7 +327,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	}
 	syncState.DisableStages(stages.Finish)
 	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
+		if err = syncState.UnwindTo(forkblocknumber, tx, common.Hash{}); err != nil {
 			return false, err
 		}
 	}

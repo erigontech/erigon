@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
@@ -8,7 +9,7 @@ import (
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.
-	UnwindTo(uint64, TxOrDb) error
+	UnwindTo(unwindPoint uint64, tx TxOrDb, badBlock common.Hash) error
 }
 
 // UnwindState contains the information about unwind.
@@ -17,6 +18,8 @@ type UnwindState struct {
 	Stage stages.SyncStage
 	// UnwindPoint is the block to unwind to.
 	UnwindPoint uint64
+	// If unwind is caused by a bad block, this hash is not empty
+	BadBlock common.Hash
 }
 
 // Done() updates the DB state of the stage.
@@ -60,7 +63,7 @@ func (s *PersistentUnwindStack) LoadFromDB(db ethdb.KVGetter, stageID stages.Syn
 		return nil, err
 	}
 	if unwindPoint > 0 {
-		return &UnwindState{stageID, unwindPoint}, nil
+		return &UnwindState{stageID, unwindPoint, common.Hash{}}, nil
 	}
 	return nil, nil
 }

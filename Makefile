@@ -78,9 +78,9 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 sentry:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/sentry
+	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
+	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
 cons:
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
@@ -126,6 +126,9 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
+		&& mv config.h config2.h \
+		&& tail -n +2 config2.h > config.h  \
+		&& cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 mdbx-dbg:

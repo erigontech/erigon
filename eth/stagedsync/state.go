@@ -72,13 +72,13 @@ func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 	return state.BlockNumber, err
 }
 
-func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb) error {
+func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb, badBlock common.Hash) error {
 	log.Info("UnwindTo", "block", blockNumber)
 	for _, stage := range s.unwindOrder {
 		if stage.Disabled {
 			continue
 		}
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, tx); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, badBlock}, tx); err != nil {
 			return err
 		}
 	}

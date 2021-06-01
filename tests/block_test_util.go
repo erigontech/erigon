@@ -113,7 +113,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
 	db := ethdb.NewObjectDatabase(m.DB)
 	defer db.Close()
-	fmt.Printf("Genesis hash: %x\n", m.Genesis.Hash())
+	//fmt.Printf("Genesis hash: %x\n", m.Genesis.Hash())
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
@@ -142,7 +142,6 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(t.json.BestBlock) != cmlast {
-		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
 	newDB := state.New(state.NewPlainStateReader(tx))

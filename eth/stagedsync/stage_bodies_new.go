@@ -9,7 +9,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -53,7 +52,6 @@ func BodiesForward(
 	ctx context.Context,
 	tx ethdb.RwTx,
 	cfg BodiesCfg,
-	badHeaders map[common.Hash]struct{},
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 
@@ -146,22 +144,7 @@ func BodiesForward(
 			}
 		}
 		start := time.Now()
-		// can't use same transaction from another goroutine
-		var verifyUncles = func(peerID string, header *types.Header, uncles []*types.Header) error {
-			/* TODO: it always fail now, because parent block is not in db yet
-			cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
-			if err != nil {
-				if penalty != headerdownload.NoPenalty {
-					log.Debug("penalize", "peer", peerID, "reason", err)
-					cfg.penalise(ctx, []headerdownload.PenaltyItem{{PeerID: peerID, Penalty: penalty}})
-				}
-				return err
-			}
-			*/
-			return nil
-		}
-		headers, rawBodies, err := cfg.bd.GetDeliveries(verifyUncles)
+		headers, rawBodies, err := cfg.bd.GetDeliveries()
 		if err != nil {
 			return err
 		}
@@ -173,11 +156,10 @@ func BodiesForward(
 			blockHeight := header.Number.Uint64()
 			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
 			if err != nil {
-				if unwindErr := u.UnwindTo(blockHeight-1, tx); unwindErr != nil {
+				if unwindErr := u.UnwindTo(blockHeight-1, tx, header.Hash()); unwindErr != nil {
 					return unwindErr
 				}
-				badHeaders[header.Hash()] = struct{}{}
-				fmt.Printf("Uncle verification failed for %d %x: %v\n", blockHeight, header.Hash(), err)
+				//fmt.Printf("Uncle verification failed for %d %x: %v\n", blockHeight, header.Hash(), err)
 				return nil
 			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {

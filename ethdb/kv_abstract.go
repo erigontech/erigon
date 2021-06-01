@@ -40,6 +40,9 @@ var (
 	gcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
 	gcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
 	gcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
+
+	stateLeafMetric     = metrics.GetOrRegisterGauge("db/state/leaf", metrics.DefaultRegistry)   //nolint
+	stateBranchesMetric = metrics.GetOrRegisterGauge("db/state/branch", metrics.DefaultRegistry) //nolint
 )
 
 type DBVerbosityLvl int8
