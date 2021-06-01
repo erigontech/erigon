@@ -361,7 +361,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		to := execAtBlock - unwind
-		if err := stateStages.UnwindTo(to, tx); err != nil {
+		if err := stateStages.UnwindTo(to, tx, common.Hash{}); err != nil {
 			return err
 		}
 
