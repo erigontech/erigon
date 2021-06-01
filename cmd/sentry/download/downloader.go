@@ -162,7 +162,6 @@ func RecvMessage(
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvMessage: Handling incoming message", "error", err)
 		}
-		fmt.Printf("3: %#v,%s\n", wg, req.Id)
 
 		if wg != nil {
 			wg.Done()
