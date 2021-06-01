@@ -83,57 +83,68 @@ func newCanonical(t *testing.T, n int) *stages.MockSentry {
 func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
-	canonicalDb := ethdb.NewObjectDatabase(canonicalMock.DB)
-	defer canonicalDb.Close()
-	db := ethdb.NewObjectDatabase(m.DB)
 	var err error
-	// Assert the chains have the same header/block at #i
-	var hash1, hash2 common.Hash
-	if hash1, err = rawdb.ReadCanonicalHash(db, uint64(i)); err != nil {
-		t.Fatalf("Failed to read canonical hash: %v", err)
-	}
-	if hash2, err = rawdb.ReadCanonicalHash(canonicalDb, uint64(i)); err != nil {
-		t.Fatalf("Failed to read canonical hash 2: %v", err)
-	}
-	if block1 := rawdb.ReadBlockDeprecated(db, hash1, uint64(i)); block1 == nil {
-		t.Fatalf("Did not find canonical block")
-	}
-	if block2 := rawdb.ReadBlockDeprecated(canonicalDb, hash2, uint64(i)); block2 == nil {
-		t.Fatalf("Did not find canonical block 2")
-	}
-	if hash1 != hash2 {
-		t.Errorf("chain content mismatch at %d: have hash %v, want hash %v", i, hash2, hash1)
-	}
 	// Extend the newly created chain
 	var blockChainB *core.ChainPack
 	var tdPre, tdPost *big.Int
 
-	currentBlockHash := rawdb.ReadHeadBlockHash(db)
-	currentBlock, err1 := rawdb.ReadBlockByHashDeprecated(db, currentBlockHash)
-	if err1 != nil {
-		t.Fatalf("Failed to read current bock: %v", err1)
-	}
-	currentBlockB, err2 := rawdb.ReadBlockByHashDeprecated(canonicalDb, rawdb.ReadHeadBlockHash(canonicalDb))
-	if err2 != nil {
-		t.Fatalf("Failed to read current bock: %v", err2)
-	}
-	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
-	tdPre, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
-	if err != nil {
-		t.Fatalf("Failed to read TD for current block: %v", err)
-	}
+	err = canonicalMock.DB.View(canonicalMock.Ctx, func(canonicalTx ethdb.Tx) error {
+		return m.DB.View(canonicalMock.Ctx, func(tx ethdb.Tx) error {
+			// Assert the chains have the same header/block at #i
+			var hash1, hash2 common.Hash
+			if hash1, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
+				t.Fatalf("Failed to read canonical hash: %v", err)
+			}
+			if hash2, err = rawdb.ReadCanonicalHash(canonicalTx, uint64(i)); err != nil {
+				t.Fatalf("Failed to read canonical hash 2: %v", err)
+			}
+			if block1 := rawdb.ReadBlock(tx, hash1, uint64(i)); block1 == nil {
+				t.Fatalf("Did not find canonical block")
+			}
+			if block2 := rawdb.ReadBlock(canonicalTx, hash2, uint64(i)); block2 == nil {
+				t.Fatalf("Did not find canonical block 2")
+			}
+			if hash1 != hash2 {
+				t.Errorf("chain content mismatch at %d: have hash %v, want hash %v", i, hash2, hash1)
+			}
+
+			currentBlockHash := rawdb.ReadHeadBlockHash(tx)
+			currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
+			if err1 != nil {
+				t.Fatalf("Failed to read current bock: %v", err1)
+			}
+			currentBlockB, err2 := rawdb.ReadBlockByHash(canonicalTx, rawdb.ReadHeadBlockHash(canonicalTx))
+			if err2 != nil {
+				t.Fatalf("Failed to read current bock: %v", err2)
+			}
+
+			blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
+			tdPre, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+			if err != nil {
+				t.Fatalf("Failed to read TD for current block: %v", err)
+			}
+			return nil
+		})
+	})
+	require.NoError(t, err)
+
 	if err = m.InsertChain(blockChainB); err != nil {
 		t.Fatalf("failed to insert forking chain: %v", err)
 	}
-	currentBlockHash = blockChainB.TopBlock.Hash()
-	currentBlock, err1 = rawdb.ReadBlockByHashDeprecated(db, currentBlockHash)
-	if err1 != nil {
-		t.Fatalf("Failed to read last header: %v", err1)
-	}
-	tdPost, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
-	if err != nil {
-		t.Fatalf("Failed to read TD for current header: %v", err)
-	}
+	err = m.DB.View(canonicalMock.Ctx, func(tx ethdb.Tx) error {
+		currentBlockHash := blockChainB.TopBlock.Hash()
+		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
+		if err1 != nil {
+			t.Fatalf("Failed to read last header: %v", err1)
+		}
+		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		if err != nil {
+			t.Fatalf("Failed to read TD for current header: %v", err)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	// Sanity check that the forked chain can be imported into the original
 	if err := canonicalMock.InsertChain(blockChainB); err != nil {
 		t.Fatalf("failed to import forked block chain: %v", err)
@@ -144,17 +155,25 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 
 func TestLastBlock(t *testing.T) {
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
-	var err error
+	var b *types.Block
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		b = rawdb.ReadCurrentBlock(tx)
+		return nil
+	})
+	require.NoError(t, err)
 
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 1, m, 0)
+	chain := makeBlockChain(b, 1, m, 0)
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
-	if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(db) {
-		t.Fatalf("Write/Get HeadBlockHash failed")
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(tx) {
+			t.Fatalf("Write/Get HeadBlockHash failed")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 // Tests that given a starting canonical chain of a given size, it can be extended
@@ -240,11 +259,16 @@ func TestBrokenBlockChain(t *testing.T) { testBrokenChain(t) }
 func testBrokenChain(t *testing.T) {
 	// Make chain starting from genesis
 	m := newCanonical(t, 10)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
+
+	var b *types.Block
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		b = rawdb.ReadCurrentBlock(tx)
+		return nil
+	})
+	require.NoError(t, err)
 
 	// Create a forked chain, and try to insert with a missing link
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 5, m, forkSeed)
+	chain := makeBlockChain(b, 5, m, forkSeed)
 	brokenChain := chain.Slice(1, chain.Length)
 
 	if err := m.InsertChain(brokenChain); err == nil {
@@ -339,11 +363,14 @@ func testBadHashes(t *testing.T) {
 	t.Skip("to support this error in Erigon")
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
-	var err error
+	var b *types.Block
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		b = rawdb.ReadCurrentBlock(tx)
+		return nil
+	})
+	require.NoError(t, err)
 	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 3, m, 10)
+	chain := makeBlockChain(b, 3, m, 10)
 
 	core.BadHashes[chain.Headers[2].Hash()] = true
 	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
@@ -485,8 +512,6 @@ func TestChainTxReorgs(t *testing.T) {
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err2 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err2 != nil {
@@ -495,30 +520,34 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	err := m.InsertChain(chain)
 	require.NoError(t, err)
 
-	for _, block := range chain.Blocks {
-		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := rawdb.ReadCanonicalHash(db, block.NumberU64())
-		require.NoError(t, err)
-		if err != nil {
-			panic(err)
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		for _, block := range chain.Blocks {
+			// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
+			ch, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
+			require.NoError(t, err)
+			if err != nil {
+				panic(err)
+			}
+			if ch == (common.Hash{}) {
+				continue // busy wait for canonical hash to be written
+			}
+			if ch != block.Hash() {
+				t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
+				return nil
+			}
+			fb := rawdb.ReadBlock(nil, ch, block.NumberU64())
+			if fb == nil {
+				t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
+				return nil
+			}
+			if fb.Hash() != block.Hash() {
+				t.Errorf("invalid block hash for block %d, want %s, got %s", block.NumberU64(), block.Hash().Hex(), fb.Hash().Hex())
+				return nil
+			}
 		}
-		if ch == (common.Hash{}) {
-			continue // busy wait for canonical hash to be written
-		}
-		if ch != block.Hash() {
-			t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
-			return
-		}
-		fb := rawdb.ReadBlockDeprecated(db, ch, block.NumberU64())
-		if fb == nil {
-			t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
-			return
-		}
-		if fb.Hash() != block.Hash() {
-			t.Errorf("invalid block hash for block %d, want %s, got %s", block.NumberU64(), block.Hash().Hex(), fb.Hash().Hex())
-			return
-		}
-	}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 func TestEIP155Transition(t *testing.T) {
@@ -535,8 +564,6 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
@@ -586,19 +613,24 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr = m.InsertChain(chain); chainErr != nil {
 		t.Fatal(chainErr)
 	}
-	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
-	if block.Transactions()[0].Protected() {
-		t.Error("Expected block[0].txs[0] to not be replay protected")
-	}
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		block, _ := rawdb.ReadBlockByNumber(tx, 1)
+		if block.Transactions()[0].Protected() {
+			t.Error("Expected block[0].txs[0] to not be replay protected")
+		}
 
-	block, _ = rawdb.ReadBlockByNumberDeprecated(db, 3)
-	if block.Transactions()[0].Protected() {
-		t.Error("Expected block[3].txs[0] to not be replay protected")
-	}
-	if !block.Transactions()[1].Protected() {
-		t.Error("Expected block[3].txs[1] to be replay protected")
-	}
-	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[4:], true /* checkRoot */); chainErr != nil {
+		block, _ = rawdb.ReadBlockByNumber(tx, 3)
+		if block.Transactions()[0].Protected() {
+			t.Error("Expected block[3].txs[0] to not be replay protected")
+		}
+		if !block.Transactions()[1].Protected() {
+			t.Error("Expected block[3].txs[1] to be replay protected")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	if _, chainErr = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(m.DB), ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[4:], true /* checkRoot */); chainErr != nil {
 		t.Fatal(chainErr)
 	}
 
@@ -648,8 +680,6 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 		}
 	)
 	m := stages.MockWithGenesisStorageMode(t, gspec, key, ethdb.StorageMode{Initialised: true, History: history, Receipts: receipts, TxIndex: txlookup})
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
@@ -700,44 +730,48 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 		return err
 	}
 
-	for bucketName, shouldBeEmpty := range map[string]bool{
-		dbutils.AccountsHistoryBucket: !history,
-		dbutils.BlockReceiptsPrefix:   !receipts,
-		dbutils.TxLookupPrefix:        !txlookup,
-	} {
-		numberOfEntries := 0
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		for bucketName, shouldBeEmpty := range map[string]bool{
+			dbutils.AccountsHistoryBucket: !history,
+			dbutils.BlockReceiptsPrefix:   !receipts,
+			dbutils.TxLookupPrefix:        !txlookup,
+		} {
+			numberOfEntries := 0
 
-		err := db.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
-			// we ignore empty account history
-			//nolint:scopelint
-			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
-				return true, nil
+			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
+				// we ignore empty account history
+				//nolint:scopelint
+				if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
+					return nil
+				}
+
+				numberOfEntries++
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 
-			numberOfEntries++
-			return true, nil
-		})
-		if err != nil {
-			return err
-		}
+			if bucketName == dbutils.BlockReceiptsPrefix {
+				// we will always have a receipt for genesis
+				numberOfEntries--
+			}
 
-		if bucketName == dbutils.BlockReceiptsPrefix {
-			// we will always have a receipt for genesis
-			numberOfEntries--
-		}
+			if bucketName == dbutils.PreimagePrefix {
+				// we will always have 2 preimages because core.GenerateChain interface does not
+				// allow us to set it to ignore them
+				// but if the preimages are enabled in BlockChain, we will have more than 2.
+				// TODO: with a better interface to core.GenerateChain allow to check preimages
+				numberOfEntries -= 2
+			}
 
-		if bucketName == dbutils.PreimagePrefix {
-			// we will always have 2 preimages because core.GenerateChain interface does not
-			// allow us to set it to ignore them
-			// but if the preimages are enabled in BlockChain, we will have more than 2.
-			// TODO: with a better interface to core.GenerateChain allow to check preimages
-			numberOfEntries -= 2
+			if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
+				return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
+			}
 		}
-
-		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
-			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
-		}
-	}
+		return nil
+	})
+	require.NoError(t, err)
 
 	return nil
 }
@@ -789,8 +823,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
@@ -818,25 +850,37 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); !st.Exist(theAddr) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); !st.Exist(theAddr) {
+			t.Error("expected account to exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account needs to be deleted post eip 161
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account mustn't be created post eip 161
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
@@ -854,8 +898,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	var theAddr common.Address
 
@@ -889,24 +931,24 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
-	st := state.New(state.NewDbStateReader(db))
-	assert.NoError(t, err)
-	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
-
-	dbTx, err := db.RwKV().BeginRo(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
-	defer dbTx.Rollback()
-	st = state.New(state.NewPlainKvState(dbTx, 0))
+	defer tx.Rollback()
+	st := state.New(state.NewDbStateReader(tx))
+	assert.NoError(t, err)
+	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+
+	st = state.New(state.NewPlainKvState(tx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainKvState(dbTx, 1))
+	st = state.New(state.NewPlainKvState(tx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainKvState(dbTx, 2))
+	st = state.New(state.NewPlainKvState(tx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -1067,8 +1109,6 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// Import the canonical chain
 	m2 := stages.Mock(t)
-	db2 := ethdb.NewObjectDatabase(m2.DB)
-	defer db2.Close()
 
 	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
@@ -1079,19 +1119,23 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	head := rawdb.ReadCurrentBlockDeprecated(db2)
-	if got := fork.TopBlock.Hash(); got != head.Hash() {
-		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
-	}
-	// Sanity check that all the canonical numbers are present
-	header := rawdb.ReadCurrentHeader(db2)
-	for number := head.NumberU64(); number > 0; number-- {
-		if hash := rawdb.ReadHeaderByNumber(db2, number).Hash(); hash != header.Hash() {
-			t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
+	err = m2.DB.View(m2.Ctx, func(tx ethdb.Tx) error {
+		head := rawdb.ReadCurrentBlock(tx)
+		if got := fork.TopBlock.Hash(); got != head.Hash() {
+			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 		}
+		// Sanity check that all the canonical numbers are present
+		header := rawdb.ReadCurrentHeader(tx)
+		for number := head.NumberU64(); number > 0; number-- {
+			if hash := rawdb.ReadHeaderByNumber(tx, number).Hash(); hash != header.Hash() {
+				t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
+			}
 
-		header = rawdb.ReadHeader(db2, header.ParentHash, number-1)
-	}
+			header = rawdb.ReadHeader(tx, header.ParentHash, number-1)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestDeleteCreateRevert tests a weird state transition corner case that we hit
@@ -1249,8 +1293,6 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
@@ -1269,31 +1311,36 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	statedb := state.New(state.NewDbStateReader(db))
 
-	// If all is correct, then slot 1 and 2 are zero
-	key1 := common.HexToHash("01")
-	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
-	if !got.IsZero() {
-		t.Errorf("got %d exp %d", got.Uint64(), 0)
-	}
-	key2 := common.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
-	if !got.IsZero() {
-		t.Errorf("got %d exp %d", got.Uint64(), 0)
-	}
-	// Also, 3 and 4 should be set
-	key3 := common.HexToHash("03")
-	statedb.GetState(aa, &key3, &got)
-	if got.Uint64() != 3 {
-		t.Errorf("got %d exp %d", got.Uint64(), 3)
-	}
-	key4 := common.HexToHash("04")
-	statedb.GetState(aa, &key4, &got)
-	if got.Uint64() != 4 {
-		t.Errorf("got %d exp %d", got.Uint64(), 4)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewDbStateReader(tx))
+
+		// If all is correct, then slot 1 and 2 are zero
+		key1 := common.HexToHash("01")
+		var got uint256.Int
+		st.GetState(aa, &key1, &got)
+		if !got.IsZero() {
+			t.Errorf("got %d exp %d", got.Uint64(), 0)
+		}
+		key2 := common.HexToHash("02")
+		st.GetState(aa, &key2, &got)
+		if !got.IsZero() {
+			t.Errorf("got %d exp %d", got.Uint64(), 0)
+		}
+		// Also, 3 and 4 should be set
+		key3 := common.HexToHash("03")
+		st.GetState(aa, &key3, &got)
+		if got.Uint64() != 3 {
+			t.Errorf("got %d exp %d", got.Uint64(), 3)
+		}
+		key4 := common.HexToHash("04")
+		st.GetState(aa, &key4, &got)
+		if got.Uint64() != 4 {
+			t.Errorf("got %d exp %d", got.Uint64(), 4)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestDeleteRecreateAccount tests a state-transition that contains deletion of a
@@ -1331,8 +1378,6 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1352,20 +1397,25 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	statedb := state.New(state.NewDbStateReader(db))
 
-	// If all is correct, then both slots are zero
-	key1 := common.HexToHash("01")
-	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
-	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
-	}
-	key2 := common.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
-	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewDbStateReader(tx))
+
+		// If all is correct, then both slots are zero
+		key1 := common.HexToHash("01")
+		var got uint256.Int
+		st.GetState(aa, &key1, &got)
+		if !got.IsZero() {
+			t.Errorf("got %x exp %x", got, 0)
+		}
+		key2 := common.HexToHash("02")
+		st.GetState(aa, &key2, &got)
+		if !got.IsZero() {
+			t.Errorf("got %x exp %x", got, 0)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestDeleteRecreateSlotsAcrossManyBlocks tests multiple state-transition that contains both deletion
@@ -1455,8 +1505,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	var nonce uint64
 
 	type expectation struct {
@@ -1525,43 +1573,48 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	var asHash = func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
-	for i := range chain.Blocks {
-		blockNum := i + 1
-		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
-			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
-		}
-		statedb := state.New(state.NewDbStateReader(db))
-		// If all is correct, then slot 1 and 2 are zero
-		key1 := common.HexToHash("01")
-		var got uint256.Int
-		statedb.GetState(aa, &key1, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		key2 := common.HexToHash("02")
-		statedb.GetState(aa, &key2, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		exp := expectations[i]
-		if exp.exist {
-			if !statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		for i := range chain.Blocks {
+			blockNum := i + 1
+			if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
+				t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 			}
-			for slot, val := range exp.values {
-				key := asHash(slot)
-				var gotValue uint256.Int
-				statedb.GetState(aa, &key, &gotValue)
-				if gotValue.Uint64() != uint64(val) {
-					t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+			statedb := state.New(state.NewDbStateReader(tx))
+			// If all is correct, then slot 1 and 2 are zero
+			key1 := common.HexToHash("01")
+			var got uint256.Int
+			statedb.GetState(aa, &key1, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
+			}
+			key2 := common.HexToHash("02")
+			statedb.GetState(aa, &key2, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
+			}
+			exp := expectations[i]
+			if exp.exist {
+				if !statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+				}
+				for slot, val := range exp.values {
+					key := asHash(slot)
+					var gotValue uint256.Int
+					statedb.GetState(aa, &key, &gotValue)
+					if gotValue.Uint64() != uint64(val) {
+						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+					}
+				}
+			} else {
+				if statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 				}
 			}
-		} else {
-			if statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
-			}
 		}
-	}
+
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestInitThenFailCreateContract tests a pretty notorious case that happened
@@ -1642,8 +1695,6 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	nonce := uint64(0)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *core.BlockGen) {
@@ -1659,20 +1710,29 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	// Import the canonical chain
-	statedb := state.New(state.NewPlainStateReader(db))
-	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
-		t.Fatalf("Genesis err, got %v exp %v", got, exp)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainStateReader(tx))
+		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
+			t.Fatalf("Genesis err, got %v exp %v", got, exp)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	// First block tries to create, but fails
 	{
 		block := chain.Blocks[0]
 		if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
-		statedb = state.New(state.NewPlainStateReader(db))
-		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
-			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
-		}
+		err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+			statedb := state.New(state.NewPlainStateReader(tx))
+			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
+				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
+			}
+			return nil
+		})
+		require.NoError(t, err)
 	}
 	// Import the rest of the blocks
 	for i, block := range chain.Blocks[1:] {
@@ -1716,8 +1776,6 @@ func TestEIP2718Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1753,15 +1811,19 @@ func TestEIP2718Transition(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		block, _ := rawdb.ReadBlockByNumber(tx, 1)
 
-	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
-	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
-		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
-	if block.GasUsed() != expected {
-		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
+		// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
+		expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
+			vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
+		if block.GasUsed() != expected {
+			t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
 
-	}
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestEIP1559Transition tests the following:
@@ -1807,8 +1869,6 @@ func TestEIP1559Transition(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 	m := stages.MockWithGenesis(t, gspec, key1)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {
 		if i == 500 {
@@ -1858,25 +1918,28 @@ func TestEIP1559Transition(t *testing.T) {
 	if block.GasUsed() != expectedGas {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainStateReader(tx))
 
-	statedb := state.New(state.NewPlainStateReader(db))
+		// 3: Ensure that miner received only the tx's tip.
+		actual := statedb.GetBalance(block.Coinbase())
+		expected := new(uint256.Int).Add(
+			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
+			ethash.ConstantinopleBlockReward,
+		)
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
+		}
 
-	// 3: Ensure that miner received only the tx's tip.
-	actual := statedb.GetBalance(block.Coinbase())
-	expected := new(uint256.Int).Add(
-		new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
-		ethash.ConstantinopleBlockReward,
-	)
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
-	}
-
-	// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
-	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
-	expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
-	}
+		// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
+		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2})
@@ -1895,23 +1958,28 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	block = chain.Blocks[0]
-	statedb = state.New(state.NewPlainStateReader(db))
-	effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainStateReader(tx))
+		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
-	// 6+5: Ensure that miner received only the tx's effective tip.
-	actual = statedb.GetBalance(block.Coinbase())
-	expected = new(uint256.Int).Add(
-		new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
-		ethash.ConstantinopleBlockReward,
-	)
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
-	}
+		// 6+5: Ensure that miner received only the tx's effective tip.
+		actual := statedb.GetBalance(block.Coinbase())
+		expected := new(uint256.Int).Add(
+			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
+			ethash.ConstantinopleBlockReward,
+		)
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
+		}
 
-	// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
-	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
-	expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
-	}
+		// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
+		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }

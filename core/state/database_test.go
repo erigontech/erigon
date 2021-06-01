@@ -71,8 +71,6 @@ func TestCreate2Revive(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -131,23 +129,32 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
@@ -164,26 +171,35 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(create2address) {
-		t.Error("expected create2address to exist at the block 2", create2address.String())
-	}
-	// We expect number 0x42 in the position [2], because it is the block number 2
-	key2 := common.BigToHash(big.NewInt(2))
 	var check2 uint256.Int
-	st.GetState(create2address, &key2, &check2)
-	if check2.Uint64() != 0x42 {
-		t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
-	}
+	var key2 common.Hash
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(create2address) {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+		// We expect number 0x42 in the position [2], because it is the block number 2
+		key2 = common.BigToHash(big.NewInt(2))
+		st.GetState(create2address, &key2, &check2)
+		if check2.Uint64() != 0x42 {
+			t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 3
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if st.Exist(create2address) {
-		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if st.Exist(create2address) {
+			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 4
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
@@ -199,22 +215,27 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(create2address) {
-		t.Error("expected create2address to exist at the block 2", create2address.String())
-	}
-	// We expect number 0x42 in the position [4], because it is the block number 4
-	key4 := common.BigToHash(big.NewInt(4))
-	var check4 uint256.Int
-	st.GetState(create2address, &key4, &check4)
-	if check4.Uint64() != 0x42 {
-		t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
-	}
-	// We expect number 0x0 in the position [2], because it is the block number 4
-	st.GetState(create2address, &key2, &check2)
-	if !check2.IsZero() {
-		t.Errorf("expected 0x0 in position 2, got: %x", check2)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(create2address) {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+
+		// We expect number 0x42 in the position [4], because it is the block number 4
+		key4 := common.BigToHash(big.NewInt(4))
+		var check4 uint256.Int
+		st.GetState(create2address, &key4, &check4)
+		if check4.Uint64() != 0x42 {
+			t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
+		}
+		// We expect number 0x0 in the position [2], because it is the block number 4
+		st.GetState(create2address, &key2, &check2)
+		if !check2.IsZero() {
+			t.Errorf("expected 0x0 in position 2, got: %x", check2)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // Polymorthic contracts via CREATE2
@@ -242,8 +263,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -335,24 +354,31 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
-
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
@@ -369,25 +395,34 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(create2address) {
-		t.Error("expected create2address to exist at the block 2", create2address.String())
-	}
-	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
-		t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
-	}
-	if st.GetIncarnation(create2address) != 1 {
-		t.Errorf("expected incarnation 1, got %d", st.GetIncarnation(create2address))
-	}
+
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(create2address) {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
+		}
+		if st.GetIncarnation(create2address) != 1 {
+			t.Errorf("expected incarnation 1, got %d", st.GetIncarnation(create2address))
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 3
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if st.Exist(create2address) {
-		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if st.Exist(create2address) {
+			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 4
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
@@ -403,16 +438,20 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(create2address) {
-		t.Error("expected create2address to exist at the block 4", create2address.String())
-	}
-	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
-		t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
-	}
-	if st.GetIncarnation(create2address) != 2 {
-		t.Errorf("expected incarnation 2, got %d", st.GetIncarnation(create2address))
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(create2address) {
+			t.Error("expected create2address to exist at the block 4", create2address.String())
+		}
+		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
+		}
+		if st.GetIncarnation(create2address) != 2 {
+			t.Errorf("expected incarnation 2, got %d", st.GetIncarnation(create2address))
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 5
 	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
@@ -428,16 +467,21 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(create2address) {
-		t.Error("expected create2address to exist at the block 5", create2address.String())
-	}
-	if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
-		t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
-	}
-	if st.GetIncarnation(create2address) != 4 {
-		t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", st.GetIncarnation(create2address))
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(create2address) {
+			t.Error("expected create2address to exist at the block 5", create2address.String())
+		}
+		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
+		}
+		if st.GetIncarnation(create2address) != 4 {
+			t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", st.GetIncarnation(create2address))
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 func TestReorgOverSelfDestruct(t *testing.T) {
@@ -463,8 +507,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -527,55 +569,69 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate long blocks")
 	}
-
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
-
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
-
-	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
 	var key0 common.Hash
 	var correctValueX uint256.Int
-	st.GetState(contractAddress, &key0, &correctValueX)
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+		st.GetState(contractAddress, &key0, &correctValueX)
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCKS 2 + 3
 	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+		}
 
-	st = state.New(state.NewPlainStateReader(db))
-	var valueX uint256.Int
-	st.GetState(contractAddress, &key0, &valueX)
-	if valueX != correctValueX {
-		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
-	}
+		var valueX uint256.Int
+		st.GetState(contractAddress, &key0, &valueX)
+		if valueX != correctValueX {
+			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 func TestReorgOverStateChange(t *testing.T) {
@@ -601,8 +657,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -658,29 +712,37 @@ func TestReorgOverStateChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
-
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
-
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
 	var key0 common.Hash
 	var correctValueX uint256.Int
-	st.GetState(contractAddress, &key0, &correctValueX)
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		st.GetState(contractAddress, &key0, &correctValueX)
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
@@ -691,18 +753,22 @@ func TestReorgOverStateChange(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+		}
 
-	// Reload blockchain from the database
-	st = state.New(state.NewPlainStateReader(db))
-	var valueX uint256.Int
-	st.GetState(contractAddress, &key0, &valueX)
-	if valueX != correctValueX {
-		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
-	}
+		// Reload blockchain from the database
+		var valueX uint256.Int
+		st.GetState(contractAddress, &key0, &valueX)
+		if valueX != correctValueX {
+			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 type BucketsStats struct {
@@ -745,8 +811,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	var err error
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -779,31 +843,39 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if contractAddress != contractAddr {
-		t.Errorf("expected contract address to be %x, got: %x", contractAddr, contractAddress)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if contractAddress != contractAddr {
+			t.Errorf("expected contract address to be %x, got: %x", contractAddr, contractAddress)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
+		var key0 common.Hash
+		var check0 uint256.Int
+		st.GetState(contractAddress, &key0, &check0)
+		fmt.Printf("c:%t,%x\n", check0.IsZero(), check0.Bytes())
+		if !check0.IsZero() {
+			t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
-	var key0 common.Hash
-	var check0 uint256.Int
-	st.GetState(contractAddress, &key0, &check0)
-	fmt.Printf("c:%t,%x\n", check0.IsZero(), check0.Bytes())
-	if !check0.IsZero() {
-		t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
-	}
 }
 
 func TestReproduceCrash(t *testing.T) {
@@ -873,8 +945,6 @@ func TestEip2200Gas(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -911,30 +981,38 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
-	balanceBefore := st.GetBalance(address)
+	var balanceBefore *uint256.Int
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		balanceBefore = st.GetBalance(address)
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
-	balanceAfter := st.GetBalance(address)
-	gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
-	expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
-	if gasSpent.Cmp(expectedGasSpent) != 0 {
-		t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		balanceAfter := st.GetBalance(address)
+		gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
+		expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
+		if gasSpent.Cmp(expectedGasSpent) != 0 {
+			t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 //Create contract, drop trie, reload trie from disk and add block with contract call
@@ -959,8 +1037,6 @@ func TestWrongIncarnation(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -994,14 +1070,17 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
-
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
@@ -1009,48 +1088,46 @@ func TestWrongIncarnation(t *testing.T) {
 
 	addrHash := crypto.Keccak256(contractAddress[:])
 	var acc accounts.Account
-	ok, err := rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal(errors.New("acc not found"))
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		ok, err := rawdb.ReadAccount(tx, common.BytesToHash(addrHash), &acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal(errors.New("acc not found"))
+		}
 
-	if acc.Incarnation != state.FirstContractIncarnation {
-		t.Fatal("Incorrect incarnation", acc.Incarnation)
-	}
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("Incorrect incarnation", acc.Incarnation)
+		}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCKS 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
-	ok, err = rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal(errors.New("acc not found"))
-	}
-	if acc.Incarnation != state.FirstContractIncarnation {
-		t.Fatal("Incorrect incarnation", acc.Incarnation)
-	}
-
-	var startKey [common.HashLength + 8 + common.HashLength]byte
-	copy(startKey[:], addrHash)
-	err = db.Walk(dbutils.HashedStorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
-		fmt.Printf("%x: %x\n", k, v)
-		return true, nil
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		ok, err := rawdb.ReadAccount(tx, common.BytesToHash(addrHash), &acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("Incorrect incarnation", acc.Incarnation)
+		}
+		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 }
 
 //create acc, deploy to it contract, reorg to state without contract
@@ -1078,8 +1155,6 @@ func TestWrongIncarnation2(t *testing.T) {
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -1145,10 +1220,14 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(address) {
+			t.Error("expected account to exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
@@ -1159,47 +1238,55 @@ func TestWrongIncarnation2(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
-
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
-	}
-
-	addrHash := crypto.Keccak256(contractAddress[:])
 	var acc accounts.Account
-	ok, err := rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal(errors.New("acc not found"))
-	}
-	if acc.Incarnation != state.FirstContractIncarnation {
-		t.Fatal("wrong incarnation")
-	}
+	var addrHash []byte
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		addrHash = crypto.Keccak256(contractAddress[:])
+		ok, err := rawdb.ReadAccount(tx, common.BytesToHash(addrHash), &acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("wrong incarnation")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if err = m.InsertChain(longerChain.Slice(1, longerChain.Length)); err != nil {
 		t.Fatal(err)
 	}
-
-	ok, err = rawdb.ReadAccountDeprecated(db, common.BytesToHash(addrHash), &acc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal(errors.New("acc not found"))
-	}
-	if acc.Incarnation != state.NonContractIncarnation {
-		t.Fatal("wrong incarnation", acc.Incarnation)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		ok, err := rawdb.ReadAccount(tx, common.BytesToHash(addrHash), &acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.NonContractIncarnation {
+			t.Fatal("wrong incarnation", acc.Incarnation)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	db := ethdb.NewTestDB(t)
-	r, tsw := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := ethdb.NewTestTx(t)
+	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1212,10 +1299,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
-	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		_, err := trie.CalcRoot("test", tx)
-		return err
-	})
+	_, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
@@ -1240,8 +1324,8 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewTestDB(t)
-	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := ethdb.NewTestTx(t)
+	r, w := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1274,8 +1358,8 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewTestDB(t)
-	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := ethdb.NewTestTx(t)
+	r, w := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1292,32 +1376,24 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		r2, err := trie.CalcRoot("test", tx)
-		require.NoError(t, err)
-		require.Equal(t, root, r2)
-		return nil
-	})
+	r2, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
+	require.Equal(t, root, r2)
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
+	assert.NoError(t, tx.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	err = db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		r2, err := trie.CalcRoot("test", tx)
-		require.NoError(t, err)
-		require.Equal(t, root, r2)
-		return nil
-	})
+	r2, err = trie.CalcRoot("test", tx)
 	require.NoError(t, err)
+	require.Equal(t, root, r2)
 }
 
 func TestRecreateAndRewind(t *testing.T) {
@@ -1335,8 +1411,6 @@ func TestRecreateAndRewind(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
@@ -1468,45 +1542,56 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(phoenixAddress) {
-		t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
-	}
-
 	var key0 common.Hash
 	var check0 uint256.Int
-	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
-		t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(phoenixAddress) {
+			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
+		}
+
+		st.GetState(phoenixAddress, &key0, &check0)
+		if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
+			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// Block 3 and 4
 	if err = m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(phoenixAddress) {
+			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+		}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(phoenixAddress) {
-		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
-	}
-
-	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
-		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
-	}
+		st.GetState(phoenixAddress, &key0, &check0)
+		if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
+			t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// Reorg
 	if err = m.InsertChain(longerChain); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(phoenixAddress) {
-		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
-	}
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(phoenixAddress) {
+			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+		}
 
-	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
-		t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
-	}
+		st.GetState(phoenixAddress, &key0, &check0)
+		if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
+			t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }

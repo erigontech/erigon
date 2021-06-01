@@ -90,11 +90,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		bNrOrHash = *blockNrOrHash
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer dbtx.Rollback()
+	defer tx.Rollback()
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
@@ -112,7 +112,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		h, err := HeaderByNumberOrHash(ctx, tx, bNrOrHash)
 		if err != nil {
 			return 0, err
 		}
@@ -121,7 +121,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		stateReader := state.NewPlainStateReader(dbtx)
+		stateReader := state.NewPlainStateReader(tx)
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the current state")
@@ -154,7 +154,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 	cap = hi
 	var lastBlockNum = rpc.LatestBlockNumber
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -163,7 +163,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters)
+		result, err := transactions.DoCall(ctx, args, tx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

@@ -156,6 +156,12 @@ type StatelessRwTx interface {
 	StatelessWriteTx
 }
 
+type CRUD interface {
+	KVGetter
+	Putter
+	Deleter
+}
+
 type Tx interface {
 	StatelessReadTx
 
