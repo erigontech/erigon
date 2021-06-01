@@ -878,6 +878,7 @@ func TestBlocks(t *testing.T) {
 		if err!=nil {
 			t.Fatal(err)
 		}
+		fmt.Println("i:", i)
 		for _,tr:=range body.Transactions {
 			fmt.Println(tr.GetTo())
 		}
@@ -922,10 +923,10 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			genTx:= func(i, j uint64) ([]byte, error) {
-				return rlp.EncodeToBytes(types.NewTransaction(i, common.Address{uint8(i), uint8(j)}, uint256.NewInt(), i, uint256.NewInt(), nil))
+			genTx:= func(a common.Address) ([]byte, error) {
+				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(), 1, uint256.NewInt(), nil))
 			}
-			txBytes,err:=genTx(i,1)
+			txBytes,err:=genTx(common.Address{uint8(i), uint8(blockNum), 1})
 			if err!=nil {
 				return err
 			}
@@ -934,7 +935,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 			if err!=nil {
 				return err
 			}
-			txBytes,err=genTx(i,2)
+			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 2})
 			if err!=nil {
 				return err
 			}
@@ -944,7 +945,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			txBytes,err=genTx(i,3)
+			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 3})
 			if err!=nil {
 				return err
 			}
