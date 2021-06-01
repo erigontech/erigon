@@ -49,9 +49,11 @@ func StageBodiesCfg(
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
 	s *StageState,
+	u Unwinder,
 	ctx context.Context,
 	tx ethdb.RwTx,
 	cfg BodiesCfg,
+	badHeaders map[common.Hash]struct{},
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 
@@ -165,9 +167,19 @@ func BodiesForward(
 		}
 		d4 += time.Since(start)
 		start = time.Now()
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: ethdb.WrapIntoTxDB(tx)}
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
+			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
+			if err != nil {
+				if unwindErr := u.UnwindTo(blockHeight-1, tx); unwindErr != nil {
+					return unwindErr
+				}
+				badHeaders[header.Hash()] = struct{}{}
+				fmt.Printf("Uncle verification failed for %d %x: %v\n", blockHeight, header.Hash(), err)
+				return nil
+			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}

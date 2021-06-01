@@ -113,6 +113,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
 	db := ethdb.NewObjectDatabase(m.DB)
 	defer db.Close()
+	fmt.Printf("Genesis hash: %x\n", m.Genesis.Hash())
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
@@ -201,7 +202,14 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			return nil, fmt.Errorf("block insertion should have failed")
+			canonical, cErr := rawdb.ReadCanonicalHash(ethdb.NewObjectDatabase(m.DB), cb.NumberU64())
+			if cErr != nil {
+				return nil, cErr
+			}
+			fmt.Printf("canonical for header %d is %x\n", cb.NumberU64(), canonical)
+			if canonical == cb.Hash() {
+				return nil, fmt.Errorf("block insertion should have failed")
+			}
 		}
 		if b.BlockHeader == nil {
 			continue

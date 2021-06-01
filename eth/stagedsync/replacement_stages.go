@@ -100,7 +100,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return BodiesForward(s, ctx, tx, bodies, test)
+						return BodiesForward(s, u, ctx, tx, bodies, headers.hd.BadHeaders, test)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindBodiesStage(u, s, tx, bodies)
