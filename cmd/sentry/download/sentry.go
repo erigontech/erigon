@@ -894,7 +894,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 	ss.lock.RLock()
 	defer ss.lock.RUnlock()
-	return ss.streams[msgID].Len() > 0
+	return ss.streams[msgID] != nil && ss.streams[msgID].Len() > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
 }
 
