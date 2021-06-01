@@ -496,7 +496,6 @@ func NewSentryServer(ctx context.Context, nodeKeyFile, dbPath, p2pListenAddr str
 		ctx:           ctx,
 		nodeKeyFile:   nodeKeyFile,
 		dbPath:        dbPath,
-		stopCh:        make(chan struct{}),
 		p2pListenAddr: p2pListenAddr,
 	}
 
@@ -630,9 +629,7 @@ type SentryServerImpl struct {
 	statusData    *proto_sentry.StatusData
 	P2pServer     *p2p.Server
 	nodeName      string
-	stopCh        chan struct{} // Channel used to signal (by closing) to the receiver on `receiveCh` to stop reading
-	txStopCh      chan struct{} // Channel used to signal (by closing) to the receiver on `receiveTxCh` to stop reading
-	TxSubscribed  uint32        // Set to non-zero if downloader is subscribed to transaction messages
+	TxSubscribed  uint32 // Set to non-zero if downloader is subscribed to transaction messages
 	lock          sync.RWMutex
 	streams       map[proto_sentry.MessageId]*StreamsList
 }
@@ -981,7 +978,6 @@ func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []erro
 
 	for id, stream := range s.streams {
 		if _, ok := stream.checksumCache.Get(checksum); ok {
-			panic("del")
 			// This message has already been seen recently, skip
 			continue
 		}
