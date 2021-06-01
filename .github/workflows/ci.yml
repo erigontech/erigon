@@ -34,8 +34,10 @@ jobs:
       - run: | # reproducible build test
           erigon1.sha256=$(shasum -a256 ./build/bin/erigon)
           make erigon
-          erigon2.sha256=$(shasum -a256 ./build/bin/erigon)
-          [[ "$erigon1.sha256" -ne "$erigon2.sha256" ]] || { echo >&2 "Reproducible build broken"; exit 1; }
+          erigon2.sha256=$(s  hasum -a256 ./build/bin/erigon)
+          if [ "$erigon1.sha256" != "$erigon2.sha256" ]; then
+            echo >&2 "Reproducible build broken"; exit 1
+          fi
       - run: shasum -a256 ./build/bin/erigon > erigon2.sum
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
