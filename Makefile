@@ -78,9 +78,9 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 sentry:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/sentry
+	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
+	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
 cons:
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
