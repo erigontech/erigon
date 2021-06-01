@@ -298,6 +298,12 @@ func RecvTxMessage(ctx context.Context,
 		eth.ToProto[eth.ETH66][eth.PooledTransactionsMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
 		log.Error("ReceiveTx messages failed", "error", err)
 		return
 	}
