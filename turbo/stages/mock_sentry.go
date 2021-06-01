@@ -203,7 +203,6 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 			nil,
 			nil,
 			nil,
-			nil,
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
