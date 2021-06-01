@@ -124,8 +124,6 @@ func RecvMessage(
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
-	fmt.Printf("1\n")
-
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
@@ -146,7 +144,6 @@ func RecvMessage(
 		return
 	}
 
-	fmt.Printf("2\n")
 	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
