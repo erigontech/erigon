@@ -163,7 +163,6 @@ func HeadersForward(
 		if test {
 			stopped = true
 			break
-			//return fmt.Errorf("%s: did not complete", logPrefix)
 		}
 		timer := time.NewTimer(1 * time.Second)
 		select {

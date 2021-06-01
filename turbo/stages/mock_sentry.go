@@ -341,9 +341,13 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead); err != nil {
 		if errors.Is(err, common.ErrStopped) {
 			if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) != nil {
+				for _, block := range chain.Blocks {
+					ms.downloader.Bd.AddToPrefetch(block)
+				}
 				return nil
 			}
 		}
+		//fmt.Printf("StageLoop error: %v\n", err)
 		return err
 	}
 	return nil

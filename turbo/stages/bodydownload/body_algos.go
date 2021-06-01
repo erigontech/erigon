@@ -139,10 +139,17 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 			} else {
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-					var doubleHash DoubleHash
-					copy(doubleHash[:], header.UncleHash.Bytes())
-					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-					bd.requestedMap[doubleHash] = blockNum
+					// Perhaps we already have this block
+					block = rawdb.ReadBlock(db, hash, blockNum)
+					if block == nil {
+						var doubleHash DoubleHash
+						copy(doubleHash[:], header.UncleHash.Bytes())
+						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+						bd.requestedMap[doubleHash] = blockNum
+					} else {
+						bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
+						request = false
+					}
 				} else {
 					bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{}
 					request = false
