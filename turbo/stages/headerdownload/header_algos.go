@@ -749,7 +749,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		// This makes sure we end up chosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 		//fmt.Printf("header %x %d had higher diff\n", hash, blockHeight)
-	} else {
+		//} else {
 		//fmt.Printf("header %x %d had lower diff\n", hash, blockHeight)
 	}
 	data, err2 := rlp.EncodeToBytes(header)
