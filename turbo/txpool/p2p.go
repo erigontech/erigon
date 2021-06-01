@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"runtime/debug"
+	"strings"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -268,6 +270,19 @@ func RecvTxMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
+	// avoid crash because Erigon's core does many things
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			default:
+				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			}
+		}
+	}()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
