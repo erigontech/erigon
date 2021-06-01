@@ -72,19 +72,8 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 	return reply, nil
 }
 
-func (c *SentryClientRemote) filterIds(in []proto_sentry.MessageId) (filtered []proto_sentry.MessageId) {
-	c.RLock()
-	defer c.RUnlock()
-	for _, id := range in {
-		if _, ok := eth.FromProto[c.protocol][id]; ok {
-			filtered = append(filtered, id)
-		}
-	}
-	return filtered
-}
-
 func (c *SentryClientRemote) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
-	in.Ids = c.filterIds(in.Ids)
+	in.Ids = filterIds(in.Ids, c.Protocol())
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
 
@@ -105,36 +94,36 @@ func NewSentryClientDirect(protocol uint, sentryServer proto_sentry.SentryServer
 	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
-func (scd *SentryClientDirect) Protocol() uint    { return scd.protocol }
-func (scd *SentryClientDirect) Ready() bool       { return true }
-func (scd *SentryClientDirect) MarkDisconnected() {}
+func (c *SentryClientDirect) Protocol() uint    { return c.protocol }
+func (c *SentryClientDirect) Ready() bool       { return true }
+func (c *SentryClientDirect) MarkDisconnected() {}
 
-func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
-	return scd.server.PenalizePeer(ctx, in)
+func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
+	return c.server.PenalizePeer(ctx, in)
 }
 
-func (scd *SentryClientDirect) PeerMinBlock(ctx context.Context, in *proto_sentry.PeerMinBlockRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
-	return scd.server.PeerMinBlock(ctx, in)
+func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *proto_sentry.PeerMinBlockRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
+	return c.server.PeerMinBlock(ctx, in)
 }
 
-func (scd *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *proto_sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-	return scd.server.SendMessageByMinBlock(ctx, in)
+func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *proto_sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+	return c.server.SendMessageByMinBlock(ctx, in)
 }
 
-func (scd *SentryClientDirect) SendMessageById(ctx context.Context, in *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-	return scd.server.SendMessageById(ctx, in)
+func (c *SentryClientDirect) SendMessageById(ctx context.Context, in *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+	return c.server.SendMessageById(ctx, in)
 }
 
-func (scd *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *proto_sentry.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-	return scd.server.SendMessageToRandomPeers(ctx, in)
+func (c *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *proto_sentry.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+	return c.server.SendMessageToRandomPeers(ctx, in)
 }
 
-func (scd *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-	return scd.server.SendMessageToAll(ctx, in)
+func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+	return c.server.SendMessageToAll(ctx, in)
 }
 
-func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
-	return scd.server.SetStatus(ctx, in)
+func (c *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	return c.server.SetStatus(ctx, in)
 }
 
 // implements proto_sentry.Sentry_ReceiveMessagesServer
@@ -166,14 +155,24 @@ func (c *SentryReceiveClientDirect) Context() context.Context {
 	return c.ctx
 }
 
-func (scd *SentryClientDirect) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+func (c *SentryClientDirect) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+	in.Ids = filterIds(in.Ids, c.Protocol())
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
 	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
-		if err := scd.server.Messages(in, streamServer); err != nil {
+		if err := c.server.Messages(in, streamServer); err != nil {
 			log.Error("ReceiveMessages returned", "error", err)
 		}
 		close(messageCh)
 	}()
 	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
+}
+
+func filterIds(in []proto_sentry.MessageId, protocol uint) (filtered []proto_sentry.MessageId) {
+	for _, id := range in {
+		if _, ok := eth.FromProto[protocol][id]; ok {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
 }
