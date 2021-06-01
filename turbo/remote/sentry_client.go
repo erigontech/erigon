@@ -85,7 +85,7 @@ func (c *SentryClientRemote) filterIds(in []proto_sentry.MessageId) (filtered []
 
 func (c *SentryClientRemote) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
 	in.Ids = c.filterIds(in.Ids)
-	return c.Messages(ctx, in, opts...)
+	return c.SentryClient.Messages(ctx, in, opts...)
 }
 
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
