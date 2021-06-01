@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"os"
 	"testing"
 	"time"
