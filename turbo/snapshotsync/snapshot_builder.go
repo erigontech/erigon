@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/params"
 	"io/ioutil"
 	"os"
 	"path"
@@ -20,9 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
-
-//maxReorgDepth max reorg depth. We should create snapshot after it
-const maxReorgDepth = 90000
 
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
 	return &SnapshotMigrator{
@@ -265,7 +263,7 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 
 //CalculateEpoch - returns latest available snapshot block that possible to create.
 func CalculateEpoch(block, epochSize uint64) uint64 {
-	return block - (block+maxReorgDepth)%epochSize
+	return block - (block+params.FullImmutabilityThreshold)%epochSize
 }
 
 func SnapshotName(baseDir, name string, blockNum uint64) string {

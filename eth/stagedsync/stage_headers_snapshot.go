@@ -24,14 +24,14 @@ func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapsh
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, initial bool, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
-	if tx != nil {
+	if !initial {
 		s.Done()
 		return nil
 	}
 
-	readTX, err := cfg.db.BeginRw(context.Background())
+	readTX, err := cfg.db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -73,13 +73,13 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		log.Info("Wait old snapshot to close")
 	}
 
-	tx, err = cfg.db.BeginRw(context.Background())
+	writeTX, err := cfg.db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer writeTX.Rollback()
 
-	err = sm.SyncStages(snapshotBlock, cfg.db, tx)
+	err = sm.SyncStages(snapshotBlock, cfg.db, writeTX)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return err
 	}
 
-	err = tx.Commit()
+	err = writeTX.Commit()
 	if err != nil {
 		return err
 	}
