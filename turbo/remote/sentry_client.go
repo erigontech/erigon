@@ -75,13 +75,11 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 func (c *SentryClientRemote) filterIds(in []proto_sentry.MessageId) (filtered []proto_sentry.MessageId) {
 	c.RLock()
 	defer c.RUnlock()
-	fmt.Printf("be: %s\n", in)
 	for _, id := range in {
-		if _, ok := eth.FromProto[c.protocol]; ok {
+		if _, ok := eth.FromProto[c.protocol][id]; ok {
 			filtered = append(filtered, id)
 		}
 	}
-	fmt.Printf("af: %s\n", filtered)
 	return filtered
 }
 
