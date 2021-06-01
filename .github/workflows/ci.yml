@@ -36,7 +36,7 @@ jobs:
           shasum -a256 ./build/bin/erigon > erigon1.sha256
           make erigon
           shasum -a256 ./build/bin/erigon > erigon2.sha256
-          if cmp -s erigon1.sha256 erigon2.sha256; then
+          if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; exit 1
           fi
       - name: Lint
