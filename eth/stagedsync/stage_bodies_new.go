@@ -184,7 +184,6 @@ func BodiesForward(
 			break
 		}
 		if test {
-			stopped = true
 			break
 		}
 		timer.Stop()
