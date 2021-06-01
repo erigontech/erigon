@@ -20,7 +20,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -38,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-	"lukechampine.com/blake3"
 )
 
 const (
@@ -905,11 +903,6 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 		ss.streams = map[proto_sentry.MessageId]*StreamsList{}
 	}
 
-	checksumCache, err := lru.New(1024)
-	if err != nil {
-		panic(err)
-	}
-
 	cleanStack := make([]func(), len(ids))
 	for i, id := range ids {
 		m, ok := ss.streams[id]
@@ -918,7 +911,7 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 			ss.streams[id] = m
 		}
 
-		cleanStack[i] = m.Add(checksumCache, server)
+		cleanStack[i] = m.Add(server)
 	}
 	return func() {
 		for i := range cleanStack {
@@ -939,55 +932,37 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 	}
 }
 
-type Stream struct {
-	checksumCache *lru.Cache // to avoid send same messages to same subscriber
-	stream        proto_sentry.Sentry_MessagesServer
-}
-
 // StreamsList - it's safe to use this class as non-pointer
 type StreamsList struct {
 	sync.Mutex
-	hasher  *blake3.Hasher
 	id      uint
-	streams map[uint]Stream
+	streams map[uint]proto_sentry.Sentry_MessagesServer
 }
 
 func NewStreamsList() *StreamsList {
-	return &StreamsList{hasher: blake3.New(32, nil)}
+	return &StreamsList{}
 }
 
-func (s *StreamsList) Add(checksumCache *lru.Cache, stream proto_sentry.Sentry_MessagesServer) (remove func()) {
+func (s *StreamsList) Add(stream proto_sentry.Sentry_MessagesServer) (remove func()) {
 	s.Lock()
 	defer s.Unlock()
 	if s.streams == nil {
-		s.streams = make(map[uint]Stream)
+		s.streams = make(map[uint]proto_sentry.Sentry_MessagesServer)
 	}
 	s.id++
 	id := s.id
-	s.streams[id] = Stream{checksumCache: checksumCache, stream: stream}
+	s.streams[id] = stream
 	return func() { s.remove(id) }
 }
 
 func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []error) {
 	s.Lock()
 	defer s.Unlock()
-	// Compute checksum
-	s.hasher.Reset()
-	s.hasher.Write(reply.Data)
-	var checksum [32]byte
-	s.hasher.Sum(checksum[:0])
-
 	for id, stream := range s.streams {
-		if _, ok := stream.checksumCache.Get(checksum); ok {
-			// This message has already been seen recently, skip
-			continue
-		}
-		stream.checksumCache.Add(checksum, struct{}{})
-
-		err := stream.stream.Send(reply)
+		err := stream.Send(reply)
 		if err != nil {
 			select {
-			case <-stream.stream.Context().Done():
+			case <-stream.Context().Done():
 				delete(s.streams, id)
 			default:
 			}
