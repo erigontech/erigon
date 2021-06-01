@@ -58,7 +58,7 @@ So, when we are generating indexes or hashed state, we do a multi-step process.
 
 This optimization sometimes leads to dramatic (orders of magnitude) write speed improvements.
 
-## Stages (for the up to date list see [`stagedsync.go`](/eth/stagedsync/stagedsync.go)):
+## Stages (for the up to date list see [`stagedsync.go`](/eth/stagedsync/stagedsync.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
 
 Each stage consists of 2 functions `ExecFunc` that progesses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 
@@ -106,7 +106,19 @@ This stage is disk intensive.
 
 This stage can spawn unwinds if the block execution fails.
 
-### Stage 6: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
+### Stage 6: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
+
+Erigon during execution uses Plain state storage.
+
+> Plain State: Instead of the normal (we call it "Hashed State") where accounts and storage items are addressed as `keccak256(address)`, in the plain state them are addressed by the `address` itself.
+
+Though, to make sure that some APIs work and keep the compatibility with the other clients, we generate Hashed state as well.
+
+If the hashed state is not empty, then we are looking at the History ChangeSets and update only the items that were changed.
+
+This stage doesn't use a network connection.
+
+### Stage 7: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
 
 This stage build the Merkle trie and checks the root hash for the current state.
 
@@ -117,18 +129,6 @@ If there were no intermediate hashes stored before (that could happend during th
 If there are intermediate hashes in the database, it uses the block history to figure out which ones are outdated and which ones are still up to date. Then it builds a partial Merkle trie using the up-to-date hashes and only rebuilding the outdated ones.
 
 If the root hash doesn't match, it initiates an unwind one block backwards.
-
-This stage doesn't use a network connection.
-
-### Stage 7: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
-
-Erigon during execution uses Plain state storage.
-
-> Plain State: Instead of the normal (we call it "Hashed State") where accounts and storage items are addressed as `keccak256(address)`, in the plain state them are addressed by the `address` itself.
-
-Though, to make sure that some APIs work and keep the compatibility with the other clients, we generate Hashed state as well.
-
-If the hashed state is not empty, then we are looking at the History ChangeSets and update only the items that were changed.
 
 This stage doesn't use a network connection.
 
