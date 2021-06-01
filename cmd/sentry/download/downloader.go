@@ -166,7 +166,6 @@ func RecvMessage(
 		if wg != nil {
 			wg.Done()
 		}
-
 	}
 }
 
