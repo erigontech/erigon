@@ -55,6 +55,23 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (*remote.SentryCli
 	return remote.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
 
+func RecvUploadMessageLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *ControlServerImpl,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		SentryHandshake(ctx, sentry, cs)
+		RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg)
+	}
+}
+
 func RecvUploadMessage(ctx context.Context,
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,

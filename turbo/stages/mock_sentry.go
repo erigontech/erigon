@@ -223,7 +223,7 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.streamWg.Add(1)
-			go txpool.RecvTxMessage(mock.Ctx, mock.sentryClient, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			go txpool.RecvTxMessageLoop(mock.Ctx, mock.sentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),

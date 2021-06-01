@@ -331,7 +331,7 @@ func NewStagedSync2(
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+				go txpool.RecvTxMessageLoop(ctx, s, controlServer, txPoolServer.HandleInboundMessage, nil)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

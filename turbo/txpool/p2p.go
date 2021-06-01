@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -239,6 +240,24 @@ func (tp *P2PServer) HandleInboundMessage(ctx context.Context, inreq *proto_sent
 		return tp.getPooledTransactions66(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
+	}
+}
+
+func RecvTxMessageLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *download.ControlServerImpl,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		download.SentryHandshake(ctx, sentry, cs)
+		RecvTxMessage(ctx, sentry, handleInboundMessage, wg)
 	}
 }
 
