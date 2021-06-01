@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -349,7 +348,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 				return nil
 			}
 		}
-		fmt.Printf("StageLoop error: %v\n", err)
+		//fmt.Printf("StageLoop error: %v\n", err)
 		return err
 	}
 	return nil

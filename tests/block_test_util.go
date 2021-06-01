@@ -205,7 +205,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			if cErr != nil {
 				return nil, cErr
 			}
-			fmt.Printf("canonical for header %d is %x\n", cb.NumberU64(), canonical)
+			//fmt.Printf("canonical for header %d is %x\n", cb.NumberU64(), canonical)
 			if canonical == cb.Hash() {
 				return nil, fmt.Errorf("block insertion should have failed")
 			}
