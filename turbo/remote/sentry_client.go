@@ -72,6 +72,22 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 	return reply, nil
 }
 
+func (c *SentryClientRemote) filterIds(in []proto_sentry.MessageId) (filtered []proto_sentry.MessageId) {
+	c.RLock()
+	defer c.RUnlock()
+	for _, id := range in {
+		if _, ok := eth.FromProto[c.protocol]; ok {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
+}
+
+func (c *SentryClientRemote) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+	in.Ids = c.filterIds(in.Ids)
+	return c.Messages(ctx, in, opts...)
+}
+
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
 // SentryClient is linked directly to the SentryServer, for example, so any function call on the instance of the SentryClient
 // cause invocations directly on the corresponding instance of the SentryServer. However, the link between SentryClient and
