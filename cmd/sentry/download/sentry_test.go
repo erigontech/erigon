@@ -21,9 +21,7 @@ import (
 
 func testSentryServer(db ethdb.KVGetter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
 	s := &SentryServerImpl{
-		ctx:             context.Background(),
-		ReceiveCh:       make(chan StreamMsg, 1024),
-		ReceiveUploadCh: make(chan StreamMsg, 1024),
+		ctx: context.Background(),
 	}
 
 	head := rawdb.ReadCurrentHeader(db)

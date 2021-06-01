@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -90,6 +91,76 @@ var ToString = map[uint]string{
 	NewPooledTransactionHashesMsg: "NewPooledTransactionHashesMsg",
 	GetPooledTransactionsMsg:      "GetPooledTransactionsMsg",
 	PooledTransactionsMsg:         "PooledTransactionsMsg",
+}
+
+var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
+	ETH65: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_65,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_65,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_65,
+		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_65,
+		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_65,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_65,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_65,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_65,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_65,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_65,
+	},
+	ETH66: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
+		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_66,
+		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+	},
+}
+
+var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+	ETH65: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_65:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_65:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_65:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_65:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_65:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_65:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_65:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_65:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_65:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_65:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_65:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_65:           PooledTransactionsMsg,
+	},
+	ETH66: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
 }
 
 var (

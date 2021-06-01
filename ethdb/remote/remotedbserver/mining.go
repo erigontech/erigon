@@ -106,8 +106,12 @@ func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
 func (s *MiningServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Mining_OnPendingBlockServer) error {
 	remove := s.pendingBlockStreams.Add(reply)
 	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	select {
+	case <-s.ctx.Done():
+		return nil
+	case <-reply.Context().Done():
+		return nil
+	}
 }
 
 func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {

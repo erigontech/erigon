@@ -119,6 +119,10 @@ message SetStatusReply {
   Protocol protocol = 1;
 }
 
+message MessagesRequest {
+ repeated MessageId ids = 1;
+}
+
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
   rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
@@ -128,8 +132,5 @@ service Sentry {
       returns (SentPeers);
   rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
   rpc SetStatus(StatusData) returns (SetStatusReply);
-  rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
-  rpc ReceiveUploadMessages(google.protobuf.Empty)
-      returns (stream InboundMessage);
-  rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc Messages(MessagesRequest) returns (stream InboundMessage);
 }
