@@ -184,7 +184,8 @@ func BodiesForward(
 			break
 		}
 		if test {
-			return fmt.Errorf("%s: did not complete", logPrefix)
+			stopped = true
+			break
 		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
@@ -204,9 +205,6 @@ func BodiesForward(
 		}
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
-	}
-	if !stopped {
-		rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	}
 	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
 		return err

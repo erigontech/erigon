@@ -29,12 +29,12 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -104,8 +104,13 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
 	}
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := stages.MockWithGenesis(tst, t.genesis(config), key)
+	var engine consensus.Engine
+	if t.json.SealEngine == "NoProof" {
+		engine = ethash.NewFaker()
+	} else {
+		engine = ethash.NewShared()
+	}
+	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
 	db := ethdb.NewObjectDatabase(m.DB)
 	defer db.Close()
 
@@ -115,11 +120,6 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	}
 	if m.Genesis.Root() != t.json.Genesis.StateRoot {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
-	}
-	if t.json.SealEngine == "NoProof" {
-		m.Engine = ethash.NewFaker()
-	} else {
-		m.Engine = ethash.NewShared()
 	}
 
 	/*
@@ -134,7 +134,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 		return err
 	}
 
-	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	tx, err1 := m.DB.BeginRo(context.Background())
 	if err1 != nil {
 		return fmt.Errorf("blockTest create tx: %v", err1)
 	}
@@ -290,7 +290,7 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btBlock) error {
+func (t *BlockTest) validateImportedHeaders(tx ethdb.Tx, validBlocks []btBlock) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {
@@ -301,11 +301,11 @@ func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btB
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b := rawdb.ReadCurrentHeader(db); b != nil && b.Number.Uint64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b); err != nil {
+	for b := rawdb.ReadCurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %v", err)
 		}
-		b, _ = rawdb.ReadHeaderByHash(db, b.ParentHash)
+		b, _ = rawdb.ReadBlockByHash(tx, b.Header().ParentHash)
 	}
 	return nil
 }
