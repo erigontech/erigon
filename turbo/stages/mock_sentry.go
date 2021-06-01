@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -58,14 +57,19 @@ type MockSentry struct {
 	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 
-	streams  map[proto_sentry.MessageId]*download.StreamsList
+	streams  map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	streamWg sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) []error {
+func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
 	ms.streamWg.Wait()
-	return ms.streams[req.Id].Broadcast(req)
+	for _, stream := range ms.streams[req.Id] {
+		if err := stream.Send(req); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
@@ -91,28 +95,10 @@ func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*pro
 }
 func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
 	if ms.streams == nil {
-		ms.streams = map[proto_sentry.MessageId]*download.StreamsList{}
+		ms.streams = map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer{}
 	}
-
-	checksumCache, err := lru.New(1024)
-	if err != nil {
-		panic(err)
-	}
-
-	cleanStack := make([]func(), len(req.Ids))
-	defer func() {
-		for i := range cleanStack {
-			cleanStack[i]()
-		}
-	}()
-	for i, id := range req.Ids {
-		m, ok := ms.streams[id]
-		if !ok {
-			m = download.NewStreamsList()
-			ms.streams[id] = m
-		}
-
-		cleanStack[i] = m.Add(checksumCache, stream)
+	for _, id := range req.Ids {
+		ms.streams[id] = append(ms.streams[id], stream)
 	}
 	ms.streamWg.Done()
 	select {

@@ -614,11 +614,6 @@ func Sentry(datadir string, natSetting string, port int, sentryAddr string, stat
 	return nil
 }
 
-type StreamMsg struct {
-	b     []byte
-	msgId proto_sentry.MessageId
-}
-
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx           context.Context
@@ -705,15 +700,10 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	if !found {
 		return &proto_sentry.SentPeers{}, nil
 	}
-	var msgcode uint64
-	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66, proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
-		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_GET_BLOCK_BODIES_66, proto_sentry.MessageId_GET_BLOCK_BODIES_65:
-		msgcode = eth.GetBlockBodiesMsg
-	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
-		msgcode = eth.GetPooledTransactionsMsg
-	default:
+	msgcode := eth.FromProto[inreq.Data.Id]
+	if msgcode != eth.GetBlockHeadersMsg &&
+		msgcode != eth.GetBlockBodiesMsg &&
+		msgcode != eth.GetPooledTransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
@@ -737,23 +727,14 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
 	}
 	peerInfo := x.(*PeerInfo)
-	var msgcode uint64
-	switch inreq.Data.Id {
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66, proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
-		msgcode = eth.GetBlockHeadersMsg
-	case proto_sentry.MessageId_BLOCK_HEADERS_66, proto_sentry.MessageId_BLOCK_HEADERS_65:
-		msgcode = eth.BlockHeadersMsg
-	case proto_sentry.MessageId_BLOCK_BODIES_66, proto_sentry.MessageId_BLOCK_BODIES_65:
-		msgcode = eth.BlockBodiesMsg
-	case proto_sentry.MessageId_GET_RECEIPTS_66, proto_sentry.MessageId_GET_RECEIPTS_65:
-		msgcode = eth.GetReceiptsMsg
-	case proto_sentry.MessageId_RECEIPTS_66, proto_sentry.MessageId_RECEIPTS_65:
-		msgcode = eth.ReceiptsMsg
-	case proto_sentry.MessageId_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_POOLED_TRANSACTIONS_65:
-		msgcode = eth.PooledTransactionsMsg
-	case proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
-		msgcode = eth.GetPooledTransactionsMsg
-	default:
+	msgcode := eth.FromProto[inreq.Data.Id]
+	if msgcode != eth.GetBlockHeadersMsg &&
+		msgcode != eth.BlockHeadersMsg &&
+		msgcode != eth.BlockBodiesMsg &&
+		msgcode != eth.GetReceiptsMsg &&
+		msgcode != eth.ReceiptsMsg &&
+		msgcode != eth.PooledTransactionsMsg &&
+		msgcode != eth.GetPooledTransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
@@ -771,13 +752,8 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 }
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
-	var msgcode uint64
-	switch req.Data.Id {
-	case proto_sentry.MessageId_NEW_BLOCK_66, proto_sentry.MessageId_NEW_BLOCK_65:
-		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66, proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
-		msgcode = eth.NewBlockHashesMsg
-	default:
+	msgcode := eth.FromProto[req.Data.Id]
+	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
@@ -818,13 +794,8 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 }
 
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
-	var msgcode uint64
-	switch req.Id {
-	case proto_sentry.MessageId_NEW_BLOCK_66, proto_sentry.MessageId_NEW_BLOCK_65:
-		msgcode = eth.NewBlockMsg
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66, proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
-		msgcode = eth.NewBlockHashesMsg
-	default:
+	msgcode := eth.FromProto[req.Id]
+	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)
 	}
 
@@ -1010,6 +981,7 @@ func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []erro
 
 	for id, stream := range s.streams {
 		if _, ok := stream.checksumCache.Get(checksum); ok {
+			panic("del")
 			// This message has already been seen recently, skip
 			continue
 		}
@@ -1025,7 +997,7 @@ func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []erro
 			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errs
 }
 
 func (s *StreamsList) Len() int {
