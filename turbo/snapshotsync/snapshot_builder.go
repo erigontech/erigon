@@ -305,6 +305,23 @@ func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 		}).Readonly().Path(dbPath).Open()
 	}
 }
+func OpenBodiesSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
+	if useMdbx {
+		return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
+				dbutils.EthTx: dbutils.BucketsConfigs[dbutils.EthTx],
+			}
+		}).Open()
+	} else {
+		return ethdb.NewLMDB().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
+				dbutils.EthTx: dbutils.BucketsConfigs[dbutils.EthTx],
+			}
+		}).Open()
+	}
+}
 
 func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string, useMdbx bool) error {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
