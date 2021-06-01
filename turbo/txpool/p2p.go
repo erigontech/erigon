@@ -252,13 +252,23 @@ func RecvTxMessage(ctx context.Context,
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveClient, err2 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_Tx}, &grpc.EmptyCallOption{})
-	if err2 != nil {
-		log.Error("ReceiveTx messages failed", "error", err2)
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.NewPooledTransactionHashesMsg],
+		eth.ToProto[eth.ETH65][eth.GetPooledTransactionsMsg],
+		eth.ToProto[eth.ETH65][eth.TransactionsMsg],
+		eth.ToProto[eth.ETH65][eth.PooledTransactionsMsg],
+
+		eth.ToProto[eth.ETH66][eth.NewPooledTransactionHashesMsg],
+		eth.ToProto[eth.ETH66][eth.GetPooledTransactionsMsg],
+		eth.ToProto[eth.ETH66][eth.TransactionsMsg],
+		eth.ToProto[eth.ETH66][eth.PooledTransactionsMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		log.Error("ReceiveTx messages failed", "error", err)
 		return
 	}
 
-	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -24,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
-	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -36,8 +37,9 @@ import (
 )
 
 type MockSentry struct {
-	sentry.UnimplementedSentryServer
+	proto_sentry.UnimplementedSentryServer
 	Ctx           context.Context
+	t             *testing.T
 	cancel        context.CancelFunc
 	DB            ethdb.RwKV
 	tmpdir        string
@@ -56,59 +58,69 @@ type MockSentry struct {
 	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 
-	stream       sentry.Sentry_MessagesServer // Stream of annoucements and download responses
-	txStream     sentry.Sentry_MessagesServer
-	uploadStream sentry.Sentry_MessagesServer
-	streamWg     sync.WaitGroup
+	streams  map[proto_sentry.MessageId]*download.StreamsList
+	streamWg sync.WaitGroup
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *MockSentry) Stream() sentry.Sentry_MessagesServer {
+func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) []error {
 	ms.streamWg.Wait()
-	return ms.stream
-}
-func (ms *MockSentry) TxStream() sentry.Sentry_MessagesServer {
-	ms.streamWg.Wait()
-	return ms.txStream
-}
-func (ms *MockSentry) UploadStream() sentry.Sentry_MessagesServer {
-	ms.streamWg.Wait()
-	return ms.uploadStream
+	return ms.streams[req.Id].Broadcast(req)
 }
 
-func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) PeerMinBlock(context.Context, *sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageByMinBlock(context.Context, *sentry.SendMessageByMinBlockRequest) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageByMinBlock(context.Context, *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageById(context.Context, *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageById(context.Context, *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToRandomPeers(context.Context, *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(context.Context, *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToAll(context.Context, *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
-	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
+func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+	return &proto_sentry.SetStatusReply{Protocol: proto_sentry.Protocol_ETH66}, nil
 }
-func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
-	switch req.Type {
-	case sentry.MessageType_DownloadBlocks:
-		ms.stream = stream
-	case sentry.MessageType_UploadBlocks:
-		ms.uploadStream = stream
-	case sentry.MessageType_Tx:
-		ms.txStream = stream
+func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
+	if ms.streams == nil {
+		ms.streams = map[proto_sentry.MessageId]*download.StreamsList{}
+	}
+
+	checksumCache, err := lru.New(1024)
+	if err != nil {
+		panic(err)
+	}
+
+	cleanStack := make([]func(), len(req.Ids))
+	defer func() {
+		for i := range cleanStack {
+			cleanStack[i]()
+		}
+	}()
+	for i, id := range req.Ids {
+		m, ok := ms.streams[id]
+		if !ok {
+			m = download.NewStreamsList()
+			ms.streams[id] = m
+		}
+
+		cleanStack[i] = m.Add(checksumCache, stream)
 	}
 	ms.streamWg.Done()
-	<-ms.Ctx.Done()
-	return nil
+	select {
+	case <-ms.Ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
@@ -116,15 +128,17 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *
 }
 
 func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
-	mock := &MockSentry{}
+	mock := &MockSentry{
+		t:           t,
+		DB:          ethdb.NewTestKV(t),
+		tmpdir:      t.TempDir(),
+		Engine:      ethash.NewFaker(),
+		ChainConfig: gspec.Config,
+		Key:         key,
+	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
-	mock.DB = ethdb.NewTestKV(t)
-	var err error
-	mock.tmpdir = t.TempDir()
-	mock.Engine = ethash.NewFaker()
-	mock.ChainConfig = gspec.Config
-	mock.Key = key
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
+	var err error
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte {
 		return nil
 	}
@@ -287,8 +301,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	if err = ms.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}); err != nil {
-		return err
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
+		if err != nil {
+			return err
+		}
 	}
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -299,8 +315,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	if err = ms.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}); err != nil {
-		return err
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
+		if err != nil {
+			return err
+		}
 	}
 	// Send all the bodies
 	packet := make(eth.BlockBodiesPacket, chain.Length)
@@ -315,8 +333,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	if err = ms.Stream().Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}); err != nil {
-		return err
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
+		if err != nil {
+			return err
+		}
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	notifier := &remotedbserver.Events{}

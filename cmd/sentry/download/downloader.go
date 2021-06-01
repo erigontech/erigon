@@ -62,13 +62,18 @@ func RecvUploadMessage(ctx context.Context,
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveUploadClient, err3 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_UploadBlocks}, grpc.WaitForReady(true))
-	if err3 != nil {
-		log.Error("Receive upload messages failed", "error", err3)
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
+		eth.ToProto[eth.ETH65][eth.GetBlockBodiesMsg],
+
+		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		log.Error("Receive upload messages failed", "error", err)
 		return
 	}
-
-	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
@@ -123,7 +128,17 @@ func RecvMessage(
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
-	receiveClient, err2 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Type: proto_sentry.MessageType_DownloadBlocks}, grpc.WaitForReady(true))
+	receiveClient, err2 := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH65][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH65][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH65][eth.NewBlockMsg],
+
+		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
+	}}, grpc.WaitForReady(true))
 	if err2 != nil {
 		log.Error("Receive messages failed", "error", err2)
 		return
