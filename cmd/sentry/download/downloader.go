@@ -231,6 +231,9 @@ func RecvMessage(
 func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
 		log.Error("sentry not ready yet", "err", err)
 	}
 }
