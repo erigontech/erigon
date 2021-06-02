@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -70,14 +69,12 @@ func setupTxPool(t testing.TB) (*TxPool, *ecdsa.PrivateKey) {
 	diskdb := ethdb.NewTestDB(t)
 
 	key, _ := crypto.GenerateKey()
-	txCacher := NewTxSenderCacher(1)
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, diskdb)
 	//nolint:errcheck
 	pool.Start(1000000000, 0)
 
 	t.Cleanup(func() {
 		pool.Stop()
-		txCacher.Close()
 	})
 	return pool, key
 }
@@ -167,13 +164,11 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	tx0 := transaction(0, 100000, key)
 	tx1 := transaction(1, 100000, key)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("start tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -536,13 +531,11 @@ func TestTransactionPostponing(t *testing.T) {
 	// Create the pool to test the postponing with
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -751,13 +744,11 @@ func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	config.NoLocals = nolocals
 	config.GlobalQueue = config.AccountQueue*3 - 1 // reduce the queue limits to shorten test time (-1 to make it non divisible)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -847,13 +838,11 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	config.Lifetime = time.Second
 	config.NoLocals = nolocals
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -966,13 +955,11 @@ func TestTransactionPendingGlobalLimiting(t *testing.T) {
 	config := TestTxPoolConfig
 	config.GlobalSlots = config.AccountSlots * 10
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1071,13 +1058,11 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 	config.AccountQueue = 2
 	config.GlobalSlots = 8
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1107,13 +1092,11 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 	config := TestTxPoolConfig
 	config.GlobalSlots = 1
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1157,13 +1140,11 @@ func TestTransactionPoolRepricing(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1282,13 +1263,11 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1352,13 +1331,11 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 	config.GlobalSlots = 2
 	config.GlobalQueue = 2
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1462,13 +1439,11 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 	config.GlobalSlots = 128
 	config.GlobalQueue = 0
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1526,13 +1501,11 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 func TestTransactionDeduplication(t *testing.T) {
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1596,13 +1569,11 @@ func TestTransactionReplacement(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1700,13 +1671,11 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	config.Journal = journal
 	config.Rejournal = time.Second
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
@@ -1747,7 +1716,6 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	}
 
 	// Terminate the old pool, bump the local nonce, create a new pool and ensure relevant transaction survive
-	txCacher.Close()
 	pool.Stop()
 
 	stateWriter = state.NewPlainStateWriter(db, nil, 1)
@@ -1757,8 +1725,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatal(err)
 	}
 
-	txCacher = NewTxSenderCacher(runtime.NumCPU())
-	pool = NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool = NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1790,7 +1757,6 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	//<-pool.requestReset(nil, nil)
 	time.Sleep(2 * config.Rejournal)
 
-	txCacher.Close()
 	pool.Stop()
 
 	stateWriter = state.NewPlainStateWriter(db, nil, 1)
@@ -1800,8 +1766,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatal(err)
 	}
 
-	txCacher = NewTxSenderCacher(runtime.NumCPU())
-	pool = NewTxPool(config, params.TestChainConfig, db, txCacher)
+	pool = NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1830,13 +1795,11 @@ func TestTransactionStatusCheck(t *testing.T) {
 	// Create the pool to test the status retrievals with
 	db := ethdb.NewTestDB(t)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
 	defer func() {
-		txCacher.Close()
 		pool.Stop()
 	}()
 
