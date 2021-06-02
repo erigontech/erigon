@@ -147,8 +147,8 @@ func makeP2PServer(
 		urls = params.GoerliBootnodes
 	case params.RinkebyGenesisHash:
 		urls = params.RinkebyBootnodes
-	case params.BaikalGenesisHash:
-		urls = params.BaikalBootnodes
+	case params.CalaverasGenesisHash:
+		urls = params.CalaverasBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {

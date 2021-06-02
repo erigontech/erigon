@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/spf13/cobra"
@@ -407,23 +406,16 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 
 func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), nil, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
 	if err != nil {
 		return nil
 	}
 
 	if reset {
-		err = resetExec(tx)
-		if err != nil {
+		if err = db.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
 			return err
 		}
-		return tx.Commit()
 	}
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
@@ -434,65 +426,78 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	stage4 := stage(sync, tx, stages.Execution)
-	log.Info("Stage4", "progress", stage4.BlockNumber)
+	var execStage *stagedsync.StageState
+	err = db.View(ctx, func(tx ethdb.Tx) error {
+		execStage = stage(sync, tx, stages.Execution)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Info("Stage4", "progress", execStage.BlockNumber)
 	ch := ctx.Done()
 	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		err = stagedsync.UnwindExecutionStage(u, stage4, tx, ch, cfg, nil)
+		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execStage.BlockNumber - unwind}
+		err = stagedsync.UnwindExecutionStage(u, execStage, nil, ch, cfg, nil)
 		if err != nil {
 			return err
 		}
-	} else {
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, block, ch, cfg, nil)
-		if err != nil {
-			return err
-		}
+		return nil
 	}
-	return tx.Commit()
+
+	err = stagedsync.SpawnExecuteBlocksStage(execStage, nil, block, ch, cfg, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageTrie(db ethdb.RwKV, ctx context.Context) error {
 	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
+	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), nil, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
 	if err != nil {
 		return nil
 	}
 
 	if reset {
-		err = stagedsync.ResetIH(tx)
-		if err != nil {
+		if err = db.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetIH(tx) }); err != nil {
 			return err
 		}
-		return tx.Commit()
+	}
+	var execStage, trieStage *stagedsync.StageState
+	if err = db.View(ctx, func(tx ethdb.Tx) error {
+		execStage = stage(sync, tx, stages.Execution)
+		trieStage = stage(sync, tx, stages.IntermediateHashes)
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	stage4 := stage(sync, tx, stages.Execution)
-	stage5 := stage(sync, tx, stages.IntermediateHashes)
-	log.Info("Stage4", "progress", stage4.BlockNumber)
-	log.Info("Stage5", "progress", stage5.BlockNumber)
+	log.Info("Stage4", "progress", execStage.BlockNumber)
+	log.Info("Stage5", "progress", trieStage.BlockNumber)
 	ch := ctx.Done()
 	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, cfg, ch); err != nil {
+		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: trieStage.BlockNumber - unwind}
+		if err := stagedsync.UnwindIntermediateHashesStage(u, trieStage, nil, cfg, ch); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, cfg, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(trieStage, nil /* Unwinder */, nil, cfg, ch); err != nil {
 			return err
 		}
 	}
-	integrity.Trie(tx, integritySlow, ch)
-	return tx.Commit()
+	if err = db.View(ctx, func(tx ethdb.Tx) error {
+		integrity.Trie(tx, integritySlow, ch)
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageHashState(db ethdb.RwKV, ctx context.Context) error {
@@ -782,9 +787,9 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.BaikalChainName:
-		chainConfig = params.BaikalChainConfig
-		genesis = core.DefaultBaikalGenesisBlock()
+	case params.CalaverasChainName:
+		chainConfig = params.CalaverasChainConfig
+		genesis = core.DefaultCalaverasGenesisBlock()
 	}
 	events := remotedbserver.NewEvents()
 
@@ -859,20 +864,6 @@ func stage(st *stagedsync.State, db ethdb.KVGetter, stage stages.SyncStage) *sta
 		panic(err)
 	}
 	return res
-}
-
-func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.SnapshotMode) error {
-	if len(snapshotDir) > 0 {
-		//todo change to new format
-		snapshotKV := db.(ethdb.HasRwKV).RwKV()
-		var err error
-		snapshotKV, err = snapshotsync.WrapBySnapshotsFromDir(snapshotKV, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-		db.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-	}
-	return nil
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
