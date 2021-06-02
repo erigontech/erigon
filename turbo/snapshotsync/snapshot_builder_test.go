@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/anacrolix/torrent/bencode"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -761,6 +759,83 @@ func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
 }
 
 
+func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
+	var err error
+	if to > math.MaxInt8 {
+		return errors.New("greater than uint8")
+	}
+	for i := from; i <= to; i++ {
+		for blockNum:=1; blockNum<4; blockNum++ {
+			bodyForStorage := new(types.BodyForStorage)
+			baseTxId,err:=tx.IncrementSequence(dbutils.EthTx, 3)
+			if err!=nil {
+				return err
+			}
+			bodyForStorage.BaseTxId = baseTxId
+			bodyForStorage.TxAmount = 3
+			body, err:=rlp.EncodeToBytes(bodyForStorage)
+			if err!=nil {
+				return err
+			}
+			err = tx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(uint64(i), common.Hash{uint8(i), uint8(blockNum)}), body)
+			if err!=nil {
+				return err
+			}
+			header:=&types.Header{
+				Number: big.NewInt(int64(i)),
+			}
+			headersBytes,err:= rlp.EncodeToBytes(header)
+			if err!=nil {
+				return err
+			}
+			//fmt.Println("block", uint64(i), common.Hash{uint8(i), uint8(blockNum)})
+			err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
+			if err != nil {
+				return err
+			}
+
+			genTx:= func(a common.Address) ([]byte, error) {
+				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(), 1, uint256.NewInt(), nil))
+			}
+			txBytes,err:=genTx(common.Address{uint8(i), uint8(blockNum), 1})
+			if err!=nil {
+				return err
+			}
+
+			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId), txBytes)
+			if err!=nil {
+				return err
+			}
+			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 2})
+			if err!=nil {
+				return err
+			}
+
+			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+1), txBytes)
+			if err!=nil {
+				return err
+			}
+
+			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 3})
+			if err!=nil {
+				return err
+			}
+
+			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+2), txBytes)
+			if err!=nil {
+				return err
+			}
+		}
+
+		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3)+1}.Bytes())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+
 
 
 
@@ -890,480 +965,6 @@ func TestBlocks(t *testing.T) {
 		t.Fatal(blockNum)
 	}
 
-}
-
-func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
-	var err error
-	if to > math.MaxInt8 {
-		return errors.New("greater than uint8")
-	}
-	for i := from; i <= to; i++ {
-		for blockNum:=1; blockNum<4; blockNum++ {
-			bodyForStorage := new(types.BodyForStorage)
-			baseTxId,err:=tx.IncrementSequence(dbutils.EthTx, 3)
-			if err!=nil {
-				return err
-			}
-			bodyForStorage.BaseTxId = baseTxId
-			bodyForStorage.TxAmount = 3
-			body, err:=rlp.EncodeToBytes(bodyForStorage)
-			if err!=nil {
-				return err
-			}
-			err = tx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(uint64(i), common.Hash{uint8(i), uint8(blockNum)}), body)
-			if err!=nil {
-				return err
-			}
-			header:=&types.Header{
-				Number: big.NewInt(int64(i)),
-			}
-			headersBytes,err:= rlp.EncodeToBytes(header)
-			if err!=nil {
-				return err
-			}
-			//fmt.Println("block", uint64(i), common.Hash{uint8(i), uint8(blockNum)})
-			err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
-			if err != nil {
-				return err
-			}
-
-			genTx:= func(a common.Address) ([]byte, error) {
-				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(), 1, uint256.NewInt(), nil))
-			}
-			txBytes,err:=genTx(common.Address{uint8(i), uint8(blockNum), 1})
-			if err!=nil {
-				return err
-			}
-
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId), txBytes)
-			if err!=nil {
-				return err
-			}
-			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 2})
-			if err!=nil {
-				return err
-			}
-
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+1), txBytes)
-			if err!=nil {
-				return err
-			}
-
-			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 3})
-			if err!=nil {
-				return err
-			}
-
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+2), txBytes)
-			if err!=nil {
-				return err
-			}
-		}
-
-		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3)+1}.Bytes())
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-
-func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.RwTx, toBlock uint64) error {
-	readBodyCursor,err:=readTX.Cursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
-		return err
-	}
-
-	writeBodyCursor,err:=writeTX.RwCursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
-		return err
-	}
-	writeEthTXCursor,err:=writeTX.RwCursor(dbutils.EthTx)
-	if err!=nil {
-		return err
-	}
-	readEthTXCursor,err:=readTX.Cursor(dbutils.EthTx)
-	if err!=nil {
-		return err
-	}
-
-
-	var expectedBaseTxId uint64
-	err = ethdb.Walk(readBodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
-		fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k))
-		canonocalHash,err:=readTX.GetOne(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
-		if err!=nil {
-			return false, err
-		}
-		if !bytes.Equal(canonocalHash, k[8:]) {
-			return true, nil
-		}
-		bd:=&types.BodyForStorage{}
-		err = rlp.DecodeBytes(v, bd)
-		if err!=nil {
-			return false, fmt.Errorf("block %s decode err %w", common.Bytes2Hex(k), err)
-		}
-		baseTxId:=bd.BaseTxId
-		amount:=bd.TxAmount
-
-		bd.BaseTxId = expectedBaseTxId
-		newV,err:=rlp.EncodeToBytes(bd)
-		if err!=nil {
-			return false, err
-		}
-		err = writeBodyCursor.Append(common.CopyBytes(k), newV)
-		if err!=nil {
-			return false, err
-		}
-
-		newExpectedTx:=expectedBaseTxId
-		err = ethdb.Walk(readEthTXCursor, dbutils.EncodeBlockNumber(baseTxId), 0, func(k, v []byte) (bool, error) {
-			if  newExpectedTx>=expectedBaseTxId+uint64(amount) {
-				return false, nil
-			}
-			err = writeEthTXCursor.Append(dbutils.EncodeBlockNumber(newExpectedTx), common.CopyBytes(v))
-			if err!=nil {
-				return false, err
-			}
-			newExpectedTx++
-			return true,nil
-		})
-		if err!=nil {
-			return false, err
-		}
-		if newExpectedTx > expectedBaseTxId+uint64(amount) {
-			fmt.Println("newExpectedTx > expectedBaseTxId+amount", newExpectedTx, expectedBaseTxId, amount, "block", common.Bytes2Hex(k))
-			return false, errors.New("newExpectedTx > expectedBaseTxId+amount")
-		}
-		expectedBaseTxId+=uint64(amount)
-		return true, nil
-	})
-	 if err!=nil {
-	 	return err
-	 }
-	//var first bool
-	//var expectedBaseTxId uint64
-	//var prevBaseTx, prevAmount uint64
-	//tt:=time.Now()
-	//ttt:=time.Now()
-	//for i:=uint64(0); i<= toBlock;i++ {
-	//	if i%100000 == 0 {
-	//		fmt.Println(i, "block", time.Since(ttt), "all", time.Since(tt), "expectedBaseTx", expectedBaseTxId)
-	//		ttt=time.Now()
-	//	}
-	//	hash, err:=rawdb.ReadCanonicalHash(readTX, i)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	nextBaseTx:=prevBaseTx+prevAmount
-	//	v,err:=readTX.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash))
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	bd:=&types.BodyForStorage{}
-	//	err = rlp.DecodeBytes(v, bd)
-	//	if err!=nil {
-	//		return fmt.Errorf("block %d decode err %w", i, err)
-	//	}
-	//	baseTxId:=bd.BaseTxId
-	//	amount:=bd.TxAmount
-	//
-	//	if !first {
-	//		if expectedBaseTxId!=baseTxId {
-	//			fmt.Println("diff on", i)
-	//			first=true
-	//		}
-	//	}
-	//	if nextBaseTx!=baseTxId {
-	//		fmt.Println("block",i, "expected",nextBaseTx, "got",baseTxId,amount)
-	//		c,err:=readTX.Cursor(dbutils.BlockBodyPrefix)
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		err = ethdb.Walk(c,dbutils.BlockBodyKey(i-1,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-	//			bodyForStorage := new(types.BodyForStorage)
-	//			err := rlp.DecodeBytes(v, bodyForStorage)
-	//			if err != nil {
-	//				return false, err
-	//			}
-	//
-	//			fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-	//			return true,nil
-	//		})
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		err = ethdb.Walk(c,dbutils.BlockBodyKey(i,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-	//			bodyForStorage := new(types.BodyForStorage)
-	//			err := rlp.DecodeBytes(v, bodyForStorage)
-	//			if err != nil {
-	//				return false, err
-	//			}
-	//
-	//			fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-	//			return true,nil
-	//		})
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		//break
-	//	}
-	//	bd.BaseTxId = expectedBaseTxId
-	//	newV,err:=rlp.EncodeToBytes(bd)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	err = bodyCursor.Append(dbutils.HeaderKey(i, hash), newV)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	txsCursor,err:=readTX.Cursor(dbutils.EthTx)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//
-	//	newExpectedTx:=expectedBaseTxId
-	//	err = ethdb.Walk(txsCursor, dbutils.EncodeBlockNumber(baseTxId), 0, func(k, v []byte) (bool, error) {
-	//		if  newExpectedTx>=expectedBaseTxId+uint64(amount) {
-	//			return false, nil
-	//		}
-	//		err = txsWriteCursor.Append(dbutils.EncodeBlockNumber(newExpectedTx), common.CopyBytes(v))
-	//		if err!=nil {
-	//			return false, err
-	//		}
-	//		newExpectedTx++
-	//		return true,nil
-	//	})
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	if newExpectedTx > expectedBaseTxId+uint64(amount) {
-	//		fmt.Println("newExpectedTx > expectedBaseTxId+amount", newExpectedTx, expectedBaseTxId, amount, "block", i)
-	//		continue
-	//	}
-	//	prevBaseTx=baseTxId
-	//	prevAmount=uint64(amount)
-	//	expectedBaseTxId+=uint64(amount)
-	//}
-
-	return nil
-}
-
-func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotDir string) error  {
-	kv, err := ethdb.NewMDBX().Path(snapshotDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-			dbutils.EthTx: dbutils.BucketsConfigs[dbutils.EthTx],
-		}
-	}).Open()
-	if err!=nil {
-		return err
-	}
-
-	defer kv.Close()
-	writeTX,err :=kv.BeginRw(context.Background())
-	if err!=nil {
-		return err
-	}
-	defer writeTX.Rollback()
-	err = GenerateBodiesSnapshot(context.TODO(), readTx, writeTX, lastBlock)
-	if err!=nil {
-		return err
-	}
-	return writeTX.Commit()
-}
-
-
-
-
-
-
-func TestBlocksSnapshot(t *testing.T) {
-	chaindataDir := "/media/b00ris/nvme/goerly/tg/chaindata"
-	snapshotDir := "/media/b00ris/nvme/snapshots/body4500000"
-
-	err:=os.RemoveAll(snapshotDir)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	//
-	//info,err:=snapshotsync.BuildInfoBytesForSnapshot(snapshotDir,snapshotsync.MdbxFilename)
-	//if err!=nil {
-	//	//t.Fatal(err)
-	//}
-	//infoBytes, err := bencode.Marshal(info)
-	//if err != nil {
-	////	t.Fatal(err)
-	//}
-	//t.Log("hash was:",metainfo.HashBytes(infoBytes).String())
-
-
-	chaindata, err := ethdb.Open(chaindataDir, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpDb:=ethdb.NewMemDatabase()
-
-	kv, err := ethdb.NewMDBX().Path(snapshotDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-			dbutils.EthTx: dbutils.BucketsConfigs[dbutils.EthTx],
-		}
-	}).Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeTX,err:=kv.BeginRw(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	//tmpDb := ethdb.NewObjectDatabase(kv)
-	snkv := ethdb.NewSnapshotKV().DB(tmpDb.RwKV()).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderNumberBucket, dbutils.HeaderCanonicalBucket,  dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.EthTx}, chaindata.RwKV()).Open()
-	defer func() {
-		fmt.Println("close db")
-		snkv.Close()
-		fmt.Println("closed db")
-	}()
-	tx, err := snkv.BeginRw(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		fmt.Println("rollback")
-		tx.Rollback()
-		fmt.Println("rollbacked")
-	}()
-	//currentHead:=rawdb.ReadCurrentHeader(tx)
-	lastBlock:=uint64(4500000)//currentHead.Number.Uint64()
-
-	bodyCursor,err:=writeTX.RwCursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	txsWriteCursor,err:=writeTX.RwCursor(dbutils.EthTx)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	var first bool
-	var expectedBaseTxId uint64
-	var prevBaseTx, prevAmount uint64
-	tt:=time.Now()
-	ttt:=time.Now()
-	for i:=uint64(0); i<lastBlock;i++ {
-		if i%100000 == 0 {
-			fmt.Println(i, "block", time.Since(ttt), "all", time.Since(tt), "expectedBaseTx", expectedBaseTxId)
-			ttt=time.Now()
-		}
-		hash, err:=rawdb.ReadCanonicalHash(tx, i)
-		if err!=nil {
-			t.Fatal(err)
-		}
-		nextBaseTx:=prevBaseTx+prevAmount
-		v,err:=tx.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash))
-		if err!=nil {
-			t.Fatal(err)
-		}
-		bd:=&types.BodyForStorage{}
-		err = rlp.DecodeBytes(v, bd)
-		if err!=nil {
-			t.Fatal(err)
-		}
-		baseTxId:=bd.BaseTxId
-		amount:=bd.TxAmount
-
-		if !first {
-			if expectedBaseTxId!=baseTxId {
-				fmt.Println("diff on", i)
-				first=true
-			}
-		}
-		if nextBaseTx!=baseTxId {
-			fmt.Println("block",i, "expected",nextBaseTx, "got",baseTxId,amount)
-			c,err:=tx.Cursor(dbutils.BlockBodyPrefix)
-			if err!=nil {
-				t.Fatal(err)
-			}
-			err = ethdb.Walk(c,dbutils.BlockBodyKey(i-1,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-				bodyForStorage := new(types.BodyForStorage)
-				err := rlp.DecodeBytes(v, bodyForStorage)
-				if err != nil {
-					return false, err
-				}
-
-				fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-				return true,nil
-			})
-			if err!=nil {
-				t.Fatal(err)
-			}
-			err = ethdb.Walk(c,dbutils.BlockBodyKey(i,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-				bodyForStorage := new(types.BodyForStorage)
-				err := rlp.DecodeBytes(v, bodyForStorage)
-				if err != nil {
-					return false, err
-				}
-
-				fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-				return true,nil
-			})
-			if err!=nil {
-				t.Fatal(err)
-			}
-			//break
-		}
-		bd.BaseTxId = expectedBaseTxId
-		newV,err:=rlp.EncodeToBytes(bd)
-		if err!=nil {
-			t.Fatal(err)
-		}
-		err = bodyCursor.Append(dbutils.HeaderKey(i, hash), newV)
-		if err!=nil {
-			t.Fatal(err)
-		}
-		txsCursor,err:=tx.Cursor(dbutils.EthTx)
-		if err!=nil {
-			t.Fatal(err)
-		}
-
-		newExpectedTx:=expectedBaseTxId
-		err = ethdb.Walk(txsCursor, dbutils.EncodeBlockNumber(baseTxId), 0, func(k, v []byte) (bool, error) {
-			if  newExpectedTx>=expectedBaseTxId+uint64(amount) {
-				return false, nil
-			}
-			err = txsWriteCursor.Append(dbutils.EncodeBlockNumber(newExpectedTx), common.CopyBytes(v))
-			if err!=nil {
-				return false, err
-			}
-			newExpectedTx++
-			return true,nil
-		})
-		if err!=nil {
-			t.Fatal(err)
-		}
-		if newExpectedTx > expectedBaseTxId+uint64(amount) {
-			fmt.Println("newExpectedTx > expectedBaseTxId+amount", newExpectedTx, expectedBaseTxId, amount, "block", i)
-			continue
-		}
-		prevBaseTx=baseTxId
-		prevAmount=uint64(amount)
-		expectedBaseTxId+=uint64(amount)
-	}
-
-	err=writeTX.Commit()
-	if err!=nil {
-		t.Fatal(err)
-	}
-
-	info,err:=BuildInfoBytesForSnapshot(snapshotDir,MdbxFilename)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	infoBytes, err := bencode.Marshal(info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log("hash is:",metainfo.HashBytes(infoBytes).String())
 }
 
 
