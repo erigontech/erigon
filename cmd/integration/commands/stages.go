@@ -427,28 +427,28 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	var stage4 *stagedsync.StageState
+	var execStage *stagedsync.StageState
 	err = db.View(ctx, func(tx ethdb.Tx) error {
-		stage4 = stage(sync, tx, stages.Execution)
+		execStage = stage(sync, tx, stages.Execution)
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	log.Info("Stage4", "progress", stage4.BlockNumber)
+	log.Info("Stage4", "progress", execStage.BlockNumber)
 	ch := ctx.Done()
 	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDBPath)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		err = stagedsync.UnwindExecutionStage(u, stage4, nil, ch, cfg, nil)
+		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execStage.BlockNumber - unwind}
+		err = stagedsync.UnwindExecutionStage(u, execStage, nil, ch, cfg, nil)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err = stagedsync.SpawnExecuteBlocksStage(stage4, nil, block, ch, cfg, nil)
+	err = stagedsync.SpawnExecuteBlocksStage(execStage, nil, block, ch, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -469,26 +469,26 @@ func stageTrie(db ethdb.RwKV, ctx context.Context) error {
 			return err
 		}
 	}
-	var stage4, stage5 *stagedsync.StageState
+	var execStage, trieStage *stagedsync.StageState
 	if err = db.View(ctx, func(tx ethdb.Tx) error {
-		stage4 = stage(sync, tx, stages.Execution)
-		stage5 = stage(sync, tx, stages.IntermediateHashes)
+		execStage = stage(sync, tx, stages.Execution)
+		trieStage = stage(sync, tx, stages.IntermediateHashes)
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	log.Info("Stage4", "progress", stage4.BlockNumber)
-	log.Info("Stage5", "progress", stage5.BlockNumber)
+	log.Info("Stage4", "progress", execStage.BlockNumber)
+	log.Info("Stage5", "progress", trieStage.BlockNumber)
 	ch := ctx.Done()
 	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, nil, cfg, ch); err != nil {
+		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: trieStage.BlockNumber - unwind}
+		if err := stagedsync.UnwindIntermediateHashesStage(u, trieStage, nil, cfg, ch); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, nil, cfg, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(trieStage, nil /* Unwinder */, nil, cfg, ch); err != nil {
 			return err
 		}
 	}
