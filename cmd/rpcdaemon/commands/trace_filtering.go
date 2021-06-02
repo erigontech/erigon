@@ -241,8 +241,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 		}
 	}
+	//fmt.Printf("allBlocks after processing addresses: [%d]\n", allBlocks.ToArray())
 	allBlocks.RemoveRange(0, fromBlock)
+	fmt.Printf("allBlocks after clipping by fromBlock %d: [%d]\n", fromBlock, allBlocks.ToArray())
 	allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+	fmt.Printf("allBlocks after clipping by toBlock %d: [%d]\n", toBlock, allBlocks.ToArray())
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -279,12 +282,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		if tErr != nil {
 			return tErr
 		}
+		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
-				if filter_trace(pt, fromAddresses, toAddresses) {
+				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
 					pt.TransactionHash = &txHash

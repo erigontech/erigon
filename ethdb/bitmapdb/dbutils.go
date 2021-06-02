@@ -3,6 +3,7 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 
 	"github.com/RoaringBitmap/roaring"
@@ -282,16 +283,19 @@ func Get64(db ethdb.Tx, bucket string, key []byte, from, to uint64) (*roaring64.
 		return nil, err
 	}
 	defer c.Close()
+	fmt.Printf("Fromkey %x\n", fromKey)
 	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
+		fmt.Printf("Key %x\n", k)
 		bm := roaring64.New()
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return false, err
 		}
+		fmt.Printf("bm = [%d]\n", bm.ToArray())
 		chunks = append(chunks, bm)
-		if binary.BigEndian.Uint64(k[len(k)-8:]) >= to {
-			return false, nil
-		}
+		//if binary.BigEndian.Uint64(k[len(k)-8:]) >= to {
+		//	return false, nil
+		//}
 		return true, nil
 	}); err != nil {
 		return nil, err
