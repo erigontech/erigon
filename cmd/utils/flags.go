@@ -604,8 +604,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.BaikalChainName:
-			urls = params.BaikalBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -644,8 +644,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.BaikalChainName:
-			urls = params.BaikalBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -803,8 +803,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.BaikalChainName:
-		return filepath.Join(datadir, "bailkal")
+	case params.CalaverasChainName:
+		return filepath.Join(datadir, "calaveras")
 	default:
 		return datadir
 	}
@@ -1164,11 +1164,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
 		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case params.BaikalChainName:
+	case params.CalaverasChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 1642 // baikal
+			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
 		}
-		cfg.Genesis = core.DefaultBaikalGenesisBlock()
+		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1254,8 +1254,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultGoerliGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
-	case params.BaikalChainName:
-		genesis = core.DefaultBaikalGenesisBlock()
+	case params.CalaverasChainName:
+		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}
