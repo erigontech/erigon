@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"io/ioutil"
@@ -446,32 +447,127 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot
 	if _, ok := db.(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot := db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
-	if headerSnapshot == nil {
-		log.Info("headerSnapshot is empty")
+	bodiesSnapshot := db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.BlockBodyPrefix)
+	if bodiesSnapshot == nil {
+		log.Info("bodiesSnapshot is empty")
 		return nil
 	}
+	blockBodySnapshotReadTX,err:=bodiesSnapshot.BeginRo(context.Background())
+	if err!=nil {
+	    return err
+	}
+	ethtxSnapshotReadTX,err:=blockBodySnapshotReadTX.Cursor(dbutils.EthTx)
+	if err!=nil {
+	    return err
+	}
+	lastEthTXSnapshotKey,_,err:=ethtxSnapshotReadTX.Last()
+	if err!=nil {
+	    return err
+	}
+	rewriteId:=binary.BigEndian.Uint64(lastEthTXSnapshotKey)+1
+
 	writeTX := tx.(ethdb.DBTX).DBTX()
-	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
+	blockBodyWriteCursor, err := writeTX.RwCursor(dbutils.BlockBodyPrefix)
 	if err != nil {
-		return fmt.Errorf("get headers cursor %w", err)
+		return fmt.Errorf("get bodies cursor %w", err)
+	}
+	ethTXWriteCursor, err := writeTX.RwCursor(dbutils.EthTx)
+	if err != nil {
+		return fmt.Errorf("get ethtx cursor %w", err)
 	}
 
-	return headerSnapshot.View(context.Background(), func(tx ethdb.Tx) error {
-		c2, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
+	bodiesCollector:=etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	ethTXCollector:=etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	err = ethdb.Walk(blockBodyWriteCursor, dbutils.BlockBodyKey(currentSnapshot, common.Hash{}), 0, func(k, v []byte) (bool, error) {
+		if binary.BigEndian.Uint64(k)>newSnapshot {
+			return false, nil
 		}
-		defer c2.Close()
-		defer c2.Close()
-		return ethdb.Walk(c2, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
-			innerErr := c.Delete(k, nil)
+		has,err:=blockBodySnapshotReadTX.Has(dbutils.BlockBodyPrefix, k)
+		if err!=nil {
+			return false, err
+		}
+		bd:=types.BodyForStorage{}
+		err = rlp.DecodeBytes(v, &bd)
+		if err!=nil {
+			return false, err
+		}
+
+		if has {
+			innerErr := blockBodyWriteCursor.Delete(k, nil)
 			if innerErr != nil {
 				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
 			}
-			return true, nil
-		})
+			for i:=bd.BaseTxId; i<bd.BaseTxId+uint64(bd.TxAmount); i++ {
+				err = ethTXWriteCursor.Delete(dbutils.EncodeBlockNumber(i), nil)
+				if err!=nil {
+					return false, err
+				}
+			}
+		} else {
+			collectKey:=common.CopyBytes(k)
+			oldBaseTxId:=bd.BaseTxId
+			bd.BaseTxId=rewriteId
+			bodyBytes, err:=rlp.EncodeToBytes(bd)
+			if err!=nil {
+			    return false, err
+			}
+
+			innerErr := blockBodyWriteCursor.Delete(collectKey, nil)
+			if innerErr != nil {
+				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
+			}
+
+			if bd.TxAmount > 0 {
+				txIdKey := make([]byte, 8)
+				binary.BigEndian.PutUint64(txIdKey, oldBaseTxId)
+				i := uint32(0)
+
+				for k, v, err := ethTXWriteCursor.Seek(txIdKey); k != nil; k, v, err = ethTXWriteCursor.Next() {
+					if err != nil {
+						return false, err
+					}
+					err = ethTXCollector.Collect(dbutils.EncodeBlockNumber(rewriteId+uint64(i)), common.CopyBytes(v))
+					if err!=nil {
+					    return false, err
+					}
+
+					i++
+					if i >= bd.TxAmount {
+						break
+					}
+				}
+			}
+			for i:=oldBaseTxId; i<oldBaseTxId+uint64(bd.TxAmount); i++ {
+				err = ethTXWriteCursor.Delete(dbutils.EncodeBlockNumber(i), nil)
+				if err!=nil {
+					return false, err
+				}
+			}
+
+			rewriteId+=uint64(bd.TxAmount)
+
+
+			err = bodiesCollector.Collect(collectKey, bodyBytes)
+			if err!=nil {
+			    return false, err
+			}
+		}
+
+		return true, nil
 	})
+	if err!=nil {
+	    return err
+	}
+	err = bodiesCollector.Load("bodies", writeTX, dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
+	if err!=nil {
+	    return err
+	}
+
+	err = ethTXCollector.Load("ethtx", writeTX, dbutils.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{})
+	if err!=nil {
+	    return err
+	}
+	return nil
 }
 
 func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.RwTx, toBlock uint64) error {

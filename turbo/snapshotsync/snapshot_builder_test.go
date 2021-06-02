@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -840,6 +841,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer bodyCursor.Close()
 
 	var blockNum uint64
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -885,7 +887,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer bodyCursor.Close()
 	var blockNum uint64
 	var numOfDuplicateBlocks uint8
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -979,6 +981,8 @@ func TestBlocks(t *testing.T) {
 		panic(err)
 	}
 	verifyFullBodiesData(t, tx, dataTo)
+	fmt.Println("Print origin bodies")
+	PrintBodyBuckets(t, tx)
 	err = tx.Commit()
 	if err != nil {
 		t.Error(err)
@@ -1010,6 +1014,10 @@ func TestBlocks(t *testing.T) {
 	}
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
+
+	fmt.Println("Print snapshot bodies")
+	PrintBodyBuckets(t, bodySnapshotTX)
+
 	bodySnapshotTX.Rollback()
 	ch := make(chan struct{})
 	db.UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, kvSnapshot, ch)
@@ -1023,4 +1031,58 @@ func TestBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
+	withbodySnapshotTX.Rollback()
+
+	rwTX,err:=db.BeginRw(context.Background())
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	err = RemoveBlocksData(db, rwTX, 0, snapshotTo)
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	err = rwTX.Commit()
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	withbodySnapshotTX, err = db.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("Print after remove bodies")
+	PrintBodyBuckets(t, withbodySnapshotTX)
+
+	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
+	withbodySnapshotTX.Rollback()
+}
+
+func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) {
+	bodyCursor,err:=tx.Cursor(dbutils.BlockBodyPrefix)
+	if err!=nil {
+	    t.Fatal(err)
+	}
+	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+		bfs := types.BodyForStorage{}
+		err = rlp.DecodeBytes(v, &bfs)
+		if err != nil {
+			t.Fatal(err, v)
+		}
+		fmt.Println(binary.BigEndian.Uint64(k), k[8:],bfs.BaseTxId, bfs.TxAmount)
+
+
+		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, transaction := range transactions {
+			fmt.Println("----", transaction.GetTo())
+		}
+		return true, nil
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
 }
