@@ -251,8 +251,16 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 	if err != nil {
 		return err
 	}
+	badBlock := u.BadBlock != (common.Hash{})
 	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
 		//fmt.Printf("Deleting canonical hash for %d\n", blockHeight)
+		if badBlock {
+			var hash common.Hash
+			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
+				return err
+			}
+			rawdb.DeleteHeader(tx, hash, blockHeight)
+		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
 		}

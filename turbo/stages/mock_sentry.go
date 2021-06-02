@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -339,16 +340,20 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead); err != nil {
-		if errors.Is(err, common.ErrStopped) {
-			if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) != nil {
-				for _, block := range chain.Blocks {
-					ms.downloader.Bd.AddToPrefetch(block)
-				}
-				return nil
-			}
+		if !errors.Is(err, common.ErrStopped) {
+			return err
 		}
-		//fmt.Printf("StageLoop error: %v\n", err)
-		return err
+		//	if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) != nil {
+		//		for _, block := range chain.Blocks {
+		//			ms.downloader.Bd.AddToPrefetch(block)
+		//		}
+		//		return nil
+		//	}
+		//}
+	}
+	// Check if the latest header was imported or rolled back
+	if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }
