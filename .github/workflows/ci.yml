@@ -43,7 +43,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.38
+          version: v1.40
           args: "--build-tags=mdbx"
           skip-go-installation: true
           skip-pkg-cache: true
