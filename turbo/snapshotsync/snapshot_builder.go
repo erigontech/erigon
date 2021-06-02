@@ -500,7 +500,10 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 
 	var expectedBaseTxId uint64
 	err = ethdb.Walk(readBodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
-		fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k))
+		if binary.BigEndian.Uint64(k) >toBlock {
+			return false, nil
+		}
+		//fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k))
 		canonocalHash,err:=readTX.GetOne(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
 		if err!=nil {
 			return false, err
@@ -551,111 +554,6 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 	if err!=nil {
 		return err
 	}
-	//var first bool
-	//var expectedBaseTxId uint64
-	//var prevBaseTx, prevAmount uint64
-	//tt:=time.Now()
-	//ttt:=time.Now()
-	//for i:=uint64(0); i<= toBlock;i++ {
-	//	if i%100000 == 0 {
-	//		fmt.Println(i, "block", time.Since(ttt), "all", time.Since(tt), "expectedBaseTx", expectedBaseTxId)
-	//		ttt=time.Now()
-	//	}
-	//	hash, err:=rawdb.ReadCanonicalHash(readTX, i)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	nextBaseTx:=prevBaseTx+prevAmount
-	//	v,err:=readTX.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash))
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	bd:=&types.BodyForStorage{}
-	//	err = rlp.DecodeBytes(v, bd)
-	//	if err!=nil {
-	//		return fmt.Errorf("block %d decode err %w", i, err)
-	//	}
-	//	baseTxId:=bd.BaseTxId
-	//	amount:=bd.TxAmount
-	//
-	//	if !first {
-	//		if expectedBaseTxId!=baseTxId {
-	//			fmt.Println("diff on", i)
-	//			first=true
-	//		}
-	//	}
-	//	if nextBaseTx!=baseTxId {
-	//		fmt.Println("block",i, "expected",nextBaseTx, "got",baseTxId,amount)
-	//		c,err:=readTX.Cursor(dbutils.BlockBodyPrefix)
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		err = ethdb.Walk(c,dbutils.BlockBodyKey(i-1,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-	//			bodyForStorage := new(types.BodyForStorage)
-	//			err := rlp.DecodeBytes(v, bodyForStorage)
-	//			if err != nil {
-	//				return false, err
-	//			}
-	//
-	//			fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-	//			return true,nil
-	//		})
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		err = ethdb.Walk(c,dbutils.BlockBodyKey(i,common.Hash{}),8*8, func(k, v []byte) (bool, error) {
-	//			bodyForStorage := new(types.BodyForStorage)
-	//			err := rlp.DecodeBytes(v, bodyForStorage)
-	//			if err != nil {
-	//				return false, err
-	//			}
-	//
-	//			fmt.Println(binary.BigEndian.Uint64(k), common.Bytes2Hex(k), bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
-	//			return true,nil
-	//		})
-	//		if err!=nil {
-	//			return err
-	//		}
-	//		//break
-	//	}
-	//	bd.BaseTxId = expectedBaseTxId
-	//	newV,err:=rlp.EncodeToBytes(bd)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	err = bodyCursor.Append(dbutils.HeaderKey(i, hash), newV)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	txsCursor,err:=readTX.Cursor(dbutils.EthTx)
-	//	if err!=nil {
-	//		return err
-	//	}
-	//
-	//	newExpectedTx:=expectedBaseTxId
-	//	err = ethdb.Walk(txsCursor, dbutils.EncodeBlockNumber(baseTxId), 0, func(k, v []byte) (bool, error) {
-	//		if  newExpectedTx>=expectedBaseTxId+uint64(amount) {
-	//			return false, nil
-	//		}
-	//		err = txsWriteCursor.Append(dbutils.EncodeBlockNumber(newExpectedTx), common.CopyBytes(v))
-	//		if err!=nil {
-	//			return false, err
-	//		}
-	//		newExpectedTx++
-	//		return true,nil
-	//	})
-	//	if err!=nil {
-	//		return err
-	//	}
-	//	if newExpectedTx > expectedBaseTxId+uint64(amount) {
-	//		fmt.Println("newExpectedTx > expectedBaseTxId+amount", newExpectedTx, expectedBaseTxId, amount, "block", i)
-	//		continue
-	//	}
-	//	prevBaseTx=baseTxId
-	//	prevAmount=uint64(amount)
-	//	expectedBaseTxId+=uint64(amount)
-	//}
-
 	return nil
 }
 
