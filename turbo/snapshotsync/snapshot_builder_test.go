@@ -1033,19 +1033,19 @@ func TestBlocks(t *testing.T) {
 	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
 	withbodySnapshotTX.Rollback()
 
-	rwTX,err:=db.BeginRw(context.Background())
-	if err!=nil {
-	    t.Fatal(err)
+	rwTX, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	err = RemoveBlocksData(db, rwTX, 0, snapshotTo)
-	if err!=nil {
-	    t.Fatal(err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	err = rwTX.Commit()
-	if err!=nil {
-	    t.Fatal(err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	withbodySnapshotTX, err = db.BeginRo(context.Background())
@@ -1060,9 +1060,9 @@ func TestBlocks(t *testing.T) {
 }
 
 func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) {
-	bodyCursor,err:=tx.Cursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
-	    t.Fatal(err)
+	bodyCursor, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		t.Fatal(err)
 	}
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		bfs := types.BodyForStorage{}
@@ -1070,8 +1070,7 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) {
 		if err != nil {
 			t.Fatal(err, v)
 		}
-		fmt.Println(binary.BigEndian.Uint64(k), k[8:],bfs.BaseTxId, bfs.TxAmount)
-
+		fmt.Println(binary.BigEndian.Uint64(k), k[8:], bfs.BaseTxId, bfs.TxAmount)
 
 		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
@@ -1082,7 +1081,7 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) {
 		}
 		return true, nil
 	})
-	if err!=nil {
-	    t.Fatal(err)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
