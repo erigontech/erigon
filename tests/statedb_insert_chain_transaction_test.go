@@ -8,18 +8,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/contracts"
@@ -31,7 +28,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -46,20 +43,21 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	// BLOCK 1
-	incorrectHeader := blocks[0].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
+	incorrectHeader := chain.Headers[0]
+	incorrectHeader.Root = chain.Headers[1].Root
 
-	if blocks[0].Header().Root == incorrectHeader.Root {
+	if chain.Headers[0].Root == incorrectHeader.Root {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	engine, db, blocks, _, err = genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(5000)),
 			data.keys[1],
@@ -68,12 +66,14 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, data.genesisSpec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -95,7 +95,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -109,20 +109,21 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	// BLOCK 1
-	incorrectHeader := blocks[0].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
+	incorrectHeader := chain.Headers[0]
+	incorrectHeader.Root = chain.Headers[1].Root
 
-	if blocks[0].Header().Root == incorrectHeader.Root {
+	if chain.Headers[0].Root == incorrectHeader.Root {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	engine, db, blocks, _, err = genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(5000)),
 			fromKey,
@@ -131,12 +132,14 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, data.genesisSpec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -155,7 +158,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -170,17 +173,17 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 
 	// BLOCK 1
-	incorrectHeader := blocks[0].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
+	incorrectHeader := chain.Headers[0]
+	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	engine, db, blocks, _, err = genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -189,12 +192,14 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, data.genesisSpec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -213,7 +218,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -228,17 +233,17 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	incorrectHeader := blocks[0].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
+	incorrectHeader := chain.Headers[0]
+	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	engine, db, blocks, _, err = genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -247,12 +252,14 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, data.genesisSpec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -271,7 +278,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	fromKey := data.keys[0]
 	to := common.Address{1}
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(3000)),
 			fromKey,
@@ -286,16 +293,17 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 
 	// BLOCK 1
-	incorrectHeader := blocks[0].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
+	incorrectHeader := chain.Headers[0]
+	incorrectHeader.Root = chain.Headers[1].Root
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
 
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// insert a correct block
-	engine, db, blocks, _, err = genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
 			fromKey,
@@ -304,12 +312,14 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, data.genesisSpec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -331,7 +341,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -344,13 +354,15 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -359,16 +371,17 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 	}
 
-	incorrectHeader := blocks[1].Header()
-	incorrectHeader.Root = blocks[0].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[1].Transactions(), blocks[1].Uncles(), receipts[1])
+	incorrectHeader := chain.Headers[1]
+	incorrectHeader.Root = chain.Headers[0].Root
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[1].Transactions(), chain.Blocks[1].Uncles(), chain.Receipts[1])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
 
 	// BLOCK 2 - INCORRECT
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -378,11 +391,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2 - CORRECT
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -401,7 +414,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -418,13 +431,15 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -434,11 +449,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -448,16 +463,17 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3 - INCORRECT
-	incorrectHeader := blocks[2].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
+	incorrectHeader := chain.Headers[2]
+	incorrectHeader.Root = chain.Headers[1].Root
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
 
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -471,7 +487,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -492,13 +508,15 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -508,11 +526,11 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -522,21 +540,22 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 4 - INCORRECT
-	incorrectHeader := blocks[3].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
+	incorrectHeader := chain.Headers[3]
+	incorrectHeader.Root = chain.Headers[1].Root
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
 
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -550,7 +569,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	var contractAddress common.Address
 	eipContract := new(contracts.Testcontract)
 
-	engine, db, blocks, receipts, err := genBlocks(t, data.genesisSpec, map[int]tx{
+	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
 			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
 			fromKey,
@@ -571,13 +590,15 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -587,11 +608,11 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
@@ -601,21 +622,21 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 4 - INCORRECT
-	incorrectHeader := blocks[3].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
-
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, incorrectBlock, true /* checkRoot */); err == nil {
+	incorrectHeader := chain.Headers[3]
+	incorrectHeader.Root = chain.Headers[1].Root
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3])
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock, Length: 1}
+	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, data.genesisSpec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -673,16 +694,14 @@ type tx struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (consensus.Engine, *ethdb.ObjectDatabase, []*types.Block, []types.Receipts, error) {
-	engine := ethash.NewFaker()
-	db := ethdb.NewMemDatabase()
-	t.Cleanup(db.Close)
-	genesis := gspec.MustCommit(db)
+func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := stages.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), len(txs), func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)
@@ -710,9 +729,9 @@ func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (consensus.Eng
 		contractBackend.Commit()
 	}, false /* intermediateHashes */)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("generate chain: %w", err)
+		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
-	return engine, db, chain.Blocks, chain.Receipts, err
+	return m, chain, err
 }
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
