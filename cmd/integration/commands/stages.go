@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/spf13/cobra"
