@@ -567,6 +567,14 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 	if pool.currentMaxGas < tx.GetGas() {
 		return ErrGasLimit
 	}
+	fmt.Printf("a: %d, %d\n", tx.GetFeeCap().Uint64(), tx.GetFeeCap().BitLen())
+	// Sanity check for extremely large numbers
+	if tx.GetFeeCap().BitLen() > 256 {
+		return ErrFeeCapVeryHigh
+	}
+	if tx.GetTip().BitLen() > 256 {
+		return ErrTipVeryHigh
+	}
 	// Make sure the transaction is signed properly.
 	from, err := tx.Sender(*pool.signer)
 	if err != nil {

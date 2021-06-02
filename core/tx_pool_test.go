@@ -42,10 +42,18 @@ import (
 // sideeffects used during testing.
 var TestTxPoolConfig TxPoolConfig
 
+// eip1559Config is a chain config with EIP-1559 enabled at block 0.
+var eip1559Config *params.ChainConfig
+
 func init() {
 	TestTxPoolConfig = DefaultTxPoolConfig
 	TestTxPoolConfig.Journal = ""
 	TestTxPoolConfig.StartOnInit = true
+
+	cpy := *params.TestChainConfig
+	eip1559Config = &cpy
+	eip1559Config.BerlinBlock = common.Big0
+	eip1559Config.LondonBlock = common.Big0
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
@@ -66,12 +74,37 @@ func pricedDataTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int,
 	return tx
 }
 
+func dynamicFeeTx(nonce uint64, gaslimit uint64, gasFee *uint256.Int, tip *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
+	chainID, _ := uint256.FromBig(params.TestChainConfig.ChainID)
+	tx, err := types.SignNewTx(key, *types.LatestSigner(params.TestChainConfig), &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce: nonce,
+			Gas:   gaslimit,
+			To:    &common.Address{},
+			Value: uint256.NewInt().SetUint64(100),
+			Data:  nil,
+		},
+		ChainID:    chainID,
+		Tip:        tip,
+		FeeCap:     gasFee,
+		AccessList: nil,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return tx
+}
+
 func setupTxPool(t testing.TB) (*TxPool, *ecdsa.PrivateKey) {
+	return setupTxPoolWithConfig(t, params.TestChainConfig)
+}
+
+func setupTxPoolWithConfig(t testing.TB, config *params.ChainConfig) (*TxPool, *ecdsa.PrivateKey) {
 	diskdb := ethdb.NewTestDB(t)
 
 	key, _ := crypto.GenerateKey()
 	txCacher := NewTxSenderCacher(1)
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, diskdb, txCacher)
+	pool := NewTxPool(TestTxPoolConfig, config, diskdb, txCacher)
 	//nolint:errcheck
 	pool.Start(1000000000, 0)
 
@@ -297,6 +330,25 @@ func TestTransactionQueue2(t *testing.T) {
 	}
 	if pool.queue[from].Len() != 2 {
 		t.Error("expected len(queue) == 2, got", pool.queue[from].Len())
+	}
+}
+
+func TestTransactionVeryHighValues(t *testing.T) {
+	t.Skip("uint 256 can't encode 1 << 300")
+	pool, key := setupTxPoolWithConfig(t, eip1559Config)
+	defer pool.Stop()
+
+	veryBigNumber := uint256.NewInt().SetUint64(1)
+	veryBigNumber.Lsh(veryBigNumber, 260)
+
+	tx := dynamicFeeTx(0, 100, uint256.NewInt().SetUint64(1), veryBigNumber, key)
+	if err := pool.AddRemote(tx); err != ErrTipVeryHigh {
+		t.Error("expected", ErrTipVeryHigh, "got", err)
+	}
+
+	tx2 := dynamicFeeTx(0, 100, veryBigNumber, uint256.NewInt().SetUint64(1), key)
+	if err := pool.AddRemote(tx2); err != ErrFeeCapVeryHigh {
+		t.Error("expected", ErrFeeCapVeryHigh, "got", err)
 	}
 }
 
