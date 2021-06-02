@@ -757,34 +757,33 @@ func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
 	return nil
 }
 
-
 func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 	var err error
 	if to > math.MaxInt8 {
 		return errors.New("greater than uint8")
 	}
 	for i := from; i <= to; i++ {
-		for blockNum:=1; blockNum<4; blockNum++ {
+		for blockNum := 1; blockNum < 4; blockNum++ {
 			bodyForStorage := new(types.BodyForStorage)
-			baseTxId,err:=tx.IncrementSequence(dbutils.EthTx, 3)
-			if err!=nil {
+			baseTxId, err := tx.IncrementSequence(dbutils.EthTx, 3)
+			if err != nil {
 				return err
 			}
 			bodyForStorage.BaseTxId = baseTxId
 			bodyForStorage.TxAmount = 3
-			body, err:=rlp.EncodeToBytes(bodyForStorage)
-			if err!=nil {
+			body, err := rlp.EncodeToBytes(bodyForStorage)
+			if err != nil {
 				return err
 			}
 			err = tx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(uint64(i), common.Hash{uint8(i), uint8(blockNum)}), body)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
-			header:=&types.Header{
+			header := &types.Header{
 				Number: big.NewInt(int64(i)),
 			}
-			headersBytes,err:= rlp.EncodeToBytes(header)
-			if err!=nil {
+			headersBytes, err := rlp.EncodeToBytes(header)
+			if err != nil {
 				return err
 			}
 			//fmt.Println("block", uint64(i), common.Hash{uint8(i), uint8(blockNum)})
@@ -793,40 +792,40 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			genTx:= func(a common.Address) ([]byte, error) {
+			genTx := func(a common.Address) ([]byte, error) {
 				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(), 1, uint256.NewInt(), nil))
 			}
-			txBytes,err:=genTx(common.Address{uint8(i), uint8(blockNum), 1})
-			if err!=nil {
+			txBytes, err := genTx(common.Address{uint8(i), uint8(blockNum), 1})
+			if err != nil {
 				return err
 			}
 
 			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId), txBytes)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
-			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 2})
-			if err!=nil {
+			txBytes, err = genTx(common.Address{uint8(i), uint8(blockNum), 2})
+			if err != nil {
 				return err
 			}
 
 			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+1), txBytes)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
 
-			txBytes,err=genTx(common.Address{uint8(i), uint8(blockNum), 3})
-			if err!=nil {
+			txBytes, err = genTx(common.Address{uint8(i), uint8(blockNum), 3})
+			if err != nil {
 				return err
 			}
 
 			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+2), txBytes)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
 		}
 
-		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3)+1}.Bytes())
+		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3) + 1}.Bytes())
 		if err != nil {
 			return err
 		}
@@ -835,57 +834,55 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 }
 
 // check snapshot data based on GenerateBodyData
-func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint64)  {
+func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint64) {
 	t.Helper()
-	bodyCursor,err:=bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
+	bodyCursor, err := bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	var blockNum uint64
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		//fmt.Println(common.Bytes2Hex(k))
-		if binary.BigEndian.Uint64(k[:8])!=blockNum {
+		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect blocknum", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
 		}
-		if !bytes.Equal(k[8:], common.Hash{uint8(blockNum), uint8(blockNum%3)+1}.Bytes()) {
+		if !bytes.Equal(k[8:], common.Hash{uint8(blockNum), uint8(blockNum%3) + 1}.Bytes()) {
 			t.Fatal("block is not canonical", blockNum, common.Bytes2Hex(k))
 		}
-		bfs:=types.BodyForStorage{}
-		err = rlp.DecodeBytes(v,&bfs)
-		if err!=nil {
+		bfs := types.BodyForStorage{}
+		err = rlp.DecodeBytes(v, &bfs)
+		if err != nil {
 			t.Fatal(err, v)
 		}
 		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
-		if err!=nil {
+		if err != nil {
 			t.Fatal(err)
 		}
 
 		var txNum uint8 = 1
-		for _,tr:=range transactions {
-			expected:=common.Address{uint8(blockNum),uint8(blockNum%3+1), txNum}
+		for _, tr := range transactions {
+			expected := common.Address{uint8(blockNum), uint8(blockNum%3 + 1), txNum}
 			if *tr.GetTo() != expected {
-				t.Fatal(*tr.GetTo(), expected )
+				t.Fatal(*tr.GetTo(), expected)
 			}
 			txNum++
 		}
 		blockNum++
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if blockNum-1!=snapshotTo {
+	if blockNum-1 != snapshotTo {
 		t.Fatal(blockNum)
 	}
 }
 
-
-
-func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64)  {
+func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) {
 	t.Helper()
-	bodyCursor,err:=bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
-	if err!=nil {
+	bodyCursor, err := bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -893,38 +890,37 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 	var numOfDuplicateBlocks uint8
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
 		numOfDuplicateBlocks++
-		if binary.BigEndian.Uint64(k[:8])!=blockNum {
+		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect blocknum", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
 		}
-		if !bytes.Equal(k[8:],common.Hash{uint8(blockNum), uint8(numOfDuplicateBlocks)}.Bytes()){
-			t.Fatal("incorrect block hash", blockNum, numOfDuplicateBlocks,common.Bytes2Hex(k))
+		if !bytes.Equal(k[8:], common.Hash{uint8(blockNum), uint8(numOfDuplicateBlocks)}.Bytes()) {
+			t.Fatal("incorrect block hash", blockNum, numOfDuplicateBlocks, common.Bytes2Hex(k))
 		}
-		bfs:=types.BodyForStorage{}
-		err = rlp.DecodeBytes(v,&bfs)
-		if err!=nil {
+		bfs := types.BodyForStorage{}
+		err = rlp.DecodeBytes(v, &bfs)
+		if err != nil {
 			t.Fatal(err, v)
 		}
 		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
-		if err!=nil {
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(transactions)!=3 {
+		if len(transactions) != 3 {
 			t.Fatal("incorrect tx num", len(transactions))
 		}
-		expected:=common.Address{uint8(blockNum),numOfDuplicateBlocks, 1}
+		expected := common.Address{uint8(blockNum), numOfDuplicateBlocks, 1}
 		if *transactions[0].GetTo() != expected {
 			t.Fatal(*transactions[0].GetTo(), expected)
 		}
-		expected=common.Address{uint8(blockNum),numOfDuplicateBlocks, 2}
+		expected = common.Address{uint8(blockNum), numOfDuplicateBlocks, 2}
 		if *transactions[1].GetTo() != expected {
 			t.Fatal(*transactions[1].GetTo(), expected)
 		}
-		expected=common.Address{uint8(blockNum),numOfDuplicateBlocks, 3}
+		expected = common.Address{uint8(blockNum), numOfDuplicateBlocks, 3}
 		if *transactions[2].GetTo() != expected {
 			t.Fatal(*transactions[2].GetTo(), expected)
 		}
-
 
 		if numOfDuplicateBlocks%3 == 0 {
 			blockNum++
@@ -933,23 +929,10 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 func TestBlocks(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
@@ -988,8 +971,8 @@ func TestBlocks(t *testing.T) {
 		panic(err)
 	}
 	defer tx.Rollback()
-	dataTo:=uint64(15)
-	snapshotTo:=uint64(10)
+	dataTo := uint64(15)
+	snapshotTo := uint64(10)
 	err = GenerateBodyData(tx, 0, dataTo)
 	if err != nil {
 		t.Error(err)
@@ -1009,38 +992,35 @@ func TestBlocks(t *testing.T) {
 	}
 	defer readTX.Rollback()
 
-
-	bodySnapshotPath:=path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
+	bodySnapshotPath := path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
 
 	err = CreateBodySnapshot(readTX, 10, bodySnapshotPath)
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	kvSnapshot, err :=OpenBodiesSnapshot(bodySnapshotPath, true)
-	if err!=nil {
+	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath, true)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	bodySnapshotTX,err:=kvSnapshot.BeginRo(context.Background())
-	if err!=nil {
+	bodySnapshotTX, err := kvSnapshot.BeginRo(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
 	bodySnapshotTX.Rollback()
-	ch:=make(chan struct{})
+	ch := make(chan struct{})
 	db.UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, kvSnapshot, ch)
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5):
 		t.Fatal("timeout on snapshot replace")
 	}
-	withbodySnapshotTX,err:=db.BeginRo(context.Background())
-	if err!=nil {
+	withbodySnapshotTX, err := db.BeginRo(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
 }
-
-
