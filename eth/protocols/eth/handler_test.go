@@ -82,10 +82,9 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	txconfig := core.DefaultTxPoolConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
-	txCacher := core.NewTxSenderCacher(1)
 	b := &testBackend{
 		db:          db,
-		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db, txCacher),
+		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db),
 		headBlock:   headBlock,
 		genesis:     genesis,
 		chainConfig: params.TestChainConfig,
