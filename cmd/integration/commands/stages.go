@@ -787,9 +787,9 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.BaikalChainName:
-		chainConfig = params.BaikalChainConfig
-		genesis = core.DefaultBaikalGenesisBlock()
+	case params.CalaverasChainName:
+		chainConfig = params.CalaverasChainConfig
+		genesis = core.DefaultCalaverasGenesisBlock()
 	}
 	events := remotedbserver.NewEvents()
 
