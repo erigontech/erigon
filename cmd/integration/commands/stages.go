@@ -867,20 +867,6 @@ func stage(st *stagedsync.State, db ethdb.KVGetter, stage stages.SyncStage) *sta
 	return res
 }
 
-func SetSnapshotKV(db ethdb.Database, snapshotDir string, mode snapshotsync.SnapshotMode) error {
-	if len(snapshotDir) > 0 {
-		//todo change to new format
-		snapshotKV := db.(ethdb.HasRwKV).RwKV()
-		var err error
-		snapshotKV, err = snapshotsync.WrapBySnapshotsFromDir(snapshotKV, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-		db.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-	}
-	return nil
-}
-
 func overrideStorageMode(db ethdb.RwKV) error {
 	sm, err := ethdb.StorageModeFromString(storageMode)
 	if err != nil {
