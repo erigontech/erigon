@@ -901,9 +901,11 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
-func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
+func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
+	} else {
+		cfg.Ethash.DatasetDir = path.Join(datadir, "erigon", "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -1086,7 +1088,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
-	setEthash(ctx, cfg)
+	setEthash(ctx, stack.Config().DataDir, cfg)
 	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
