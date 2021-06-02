@@ -425,6 +425,11 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	ListenPort65Flag = cli.IntFlag{
+		Name:  "p2p.65.port",
+		Usage: "ETH65 Network listening port",
+		Value: 30304,
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -688,6 +693,10 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
+		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
+		cfg.Eth65Enabled = true
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
