@@ -76,11 +76,9 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
-	bodyProgress, err = stages.GetStageProgress(tx, stages.Bodies)
-	if err != nil {
-		return err
-	}
+	bodyProgress = s.BlockNumber
 	if bodyProgress == headerProgress {
+		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -91,6 +89,7 @@ func BodiesForward(
 		// Do not print logs for short periods
 		log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
+	//fmt.Printf("Processing bodies from %d to %d\n", bodyProgress, headerProgress)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var prevDeliveredCount float64 = 0
@@ -100,6 +99,7 @@ func BodiesForward(
 	var req *bodydownload.BodyRequest
 	var peer []byte
 	stopped := false
+Loop:
 	for !stopped {
 		// TODO: this is incorrect use
 		if req == nil {
@@ -156,12 +156,14 @@ func BodiesForward(
 			blockHeight := header.Number.Uint64()
 			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
 			if err != nil {
+				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "error", err)
 				if unwindErr := u.UnwindTo(blockHeight-1, tx, header.Hash()); unwindErr != nil {
 					return unwindErr
 				}
 				//fmt.Printf("Uncle verification failed for %d %x: %v\n", blockHeight, header.Hash(), err)
-				return nil
+				break Loop
 			}
+			//fmt.Printf("Validated uncles for %d %x\n", blockHeight, header.Hash())
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
@@ -235,7 +237,7 @@ func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesC
 		}
 		defer tx.Rollback()
 	}
-
+	//fmt.Printf("Unwinding bodies %+v\n", u)
 	err := u.Done(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {

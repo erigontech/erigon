@@ -337,7 +337,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	notifier := &remotedbserver.Events{}
-	initialCycle := true
+	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead); err != nil {
 		if !errors.Is(err, common.ErrStopped) {

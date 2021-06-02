@@ -611,6 +611,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = append(hd.insertList, linksInFuture...)
 		linksInFuture = nil //nolint
 	}
+	//fmt.Printf("InsertHeaders hd.topSeenHeight %d\n", hd.topSeenHeight)
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
@@ -745,12 +746,13 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
+			hi.unwind = true
 		}
 		// This makes sure we end up chosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 		//fmt.Printf("header %x %d had higher diff\n", hash, blockHeight)
 		//} else {
-		//fmt.Printf("header %x %d had lower diff\n", hash, blockHeight)
+		//	fmt.Printf("header %x %d had lower diff\n", hash, blockHeight)
 	}
 	data, err2 := rlp.EncodeToBytes(header)
 	if err2 != nil {
@@ -780,6 +782,10 @@ func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+func (hi *HeaderInserter) Unwind() bool {
+	return hi.unwind
 }
 
 func (hi *HeaderInserter) BestHeaderChanged() bool {

@@ -222,7 +222,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -280,6 +280,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	logTime := time.Now()
 
 	var stoppedErr error
+Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
@@ -317,7 +318,12 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		}
 
 		if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
-			return err
+			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
+			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
+				return unwindErr
+			}
+			//fmt.Printf("Execution failed for %d %x: %v\n", blockNum, block.Hash(), err)
+			break Loop
 		}
 
 		// TEVM marking new contracts sub-stage

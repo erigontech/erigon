@@ -95,7 +95,6 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 					return trie.EmptyRoot, err
 				}
 			}
-			return trie.EmptyRoot, nil
 		}
 		if err = s.DoneAndUpdate(tx, to); err != nil {
 			return trie.EmptyRoot, err

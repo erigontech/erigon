@@ -166,7 +166,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, ctx.Done(), exec, world.Accumulator)
+						return SpawnExecuteBlocksStage(s, u, tx, 0, ctx.Done(), exec, world.Accumulator)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.Accumulator)

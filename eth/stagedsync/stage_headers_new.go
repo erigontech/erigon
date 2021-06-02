@@ -162,7 +162,6 @@ func HeadersForward(
 			}
 		}
 		if test {
-			stopped = true
 			break
 		}
 		timer := time.NewTimer(1 * time.Second)
@@ -180,19 +179,18 @@ func HeadersForward(
 		}
 		timer.Stop()
 	}
-	if headerInserter.UnwindPoint() < headerProgress {
+	if headerInserter.Unwind() {
+		//fmt.Printf("Unwinding headers to %d\n", headerInserter.UnwindPoint())
 		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx, common.Hash{}); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else if headerInserter.GetHighest() != 0 {
-		//fmt.Printf("Fixing canonical chain %d %x\n", headerInserter.GetHighest(), headerInserter.GetHighestHash())
+		//fmt.Printf("Fixing canonical chain %d %x, stopped: %t\n", headerInserter.GetHighest(), headerInserter.GetHighestHash(), stopped)
 		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
-		if !stopped {
-			s.Done()
-		}
 	}
+	s.Done()
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -260,6 +258,8 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 				return err
 			}
 			rawdb.DeleteHeader(tx, hash, blockHeight)
+			rawdb.DeleteTd(tx, hash, blockHeight)
+			rawdb.DeleteHeaderNumber(tx, hash)
 		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err

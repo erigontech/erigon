@@ -258,6 +258,7 @@ type HeaderInserter struct {
 	prevHeight       uint64
 	newCanonical     bool
 	unwindPoint      uint64
+	unwind           bool
 	highest          uint64
 	highestHash      common.Hash
 	highestTimestamp uint64

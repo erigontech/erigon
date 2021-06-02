@@ -88,7 +88,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, world.QuitCh, execCfg, nil)
+						return SpawnExecuteBlocksStage(s, u, tx, 0, world.QuitCh, execCfg, nil)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, world.QuitCh, execCfg, nil)
