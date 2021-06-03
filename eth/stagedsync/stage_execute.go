@@ -438,11 +438,13 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for pruning %s: %v", logPrefix, name, err)
 	}
+	defer changeSetCursor.Close()
+
 	var prunedMin uint64 = math.MaxUint64
 	var prunedMax uint64 = 0
 	var k []byte
 
-	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.Next() {
+	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.NextNoDup() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if endBlock-blockNum <= pruningDistance {
 			break
@@ -457,7 +459,7 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		}
-		if err = changeSetCursor.DeleteCurrent(); err != nil {
+		if err = changeSetCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove %s for block %d: %v", logPrefix, name, blockNum, err)
 		}
 		if blockNum < prunedMin {
