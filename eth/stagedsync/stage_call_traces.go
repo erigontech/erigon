@@ -246,6 +246,7 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err
 			}
+			fmt.Printf("Write chunk %x: %d\n", chunkKey, chunk.ToArray())
 			return next(k, chunkKey, buf.Bytes())
 		}); err != nil {
 			return err
@@ -254,10 +255,12 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 		return nil
 	}
 
+	fmt.Printf("Finalise traces FROM\n")
 	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 
+	fmt.Printf("Finalise traces TO\n")
 	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
@@ -303,7 +306,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	traceCursor, err := db.CursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := db.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}
@@ -311,6 +314,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 	var k, v []byte
 	prev := to + 1
 	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		fmt.Printf("Unwind reading traceCall set k = %x\n", k)
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= from {
 			break
