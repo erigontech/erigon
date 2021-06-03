@@ -1,19 +1,24 @@
 ChangeLog
 ---------
 
+## v0.10.2 (in development)
+
 ### TODO
 
+ - [More flexible support of asynchronous runtime/framework(s)](https://github.com/erthink/libmdbx/issues/200).
+ - [Migration guide from LMDB to MDBX](https://github.com/erthink/libmdbx/issues/199).
  - [Get rid of dirty-pages list in MDBX_WRITEMAP mode](https://github.com/erthink/libmdbx/issues/193).
  - [Large/Overflow pages accounting for dirty-room](https://github.com/erthink/libmdbx/issues/192).
  - [C++ Buffer issue](https://github.com/erthink/libmdbx/issues/191).
- - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - [Support for RAW devices](https://github.com/erthink/libmdbx/issues/124).
  - [Test framework issue](https://github.com/erthink/libmdbx/issues/127).
  - [Support MessagePack for Keys & Values](https://github.com/erthink/libmdbx/issues/115).
  - [Engage new terminology](https://github.com/erthink/libmdbx/issues/137).
- - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), Fedora/RHEL, Debian/Ubuntu.
+ - Finalize C++ API (few typos and trivia bugs are still likely for now).
+ - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), etc.
 
-## v0.10.1 (scheduled for 2020-06-01)
+
+## v0.10.1 at 2021-06-01
 
 Acknowledgements:
 
