@@ -112,6 +112,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	var k, v []byte
 	prev := startBlock
 	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		fmt.Printf("traceCursor loop %x, startBlock %d endBlock %d\n", k, startBlock, endBlock)
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= endBlock {
 			break
