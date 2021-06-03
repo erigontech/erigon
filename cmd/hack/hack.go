@@ -1833,11 +1833,15 @@ func readCallTraces(chaindata string, block uint64) error {
 		return err1
 	}
 	defer traceCursor.Close()
-	k, v, err2 := traceCursor.Seek(dbutils.EncodeBlockNumber(block))
-	if err2 != nil {
-		return err2
+	var k []byte
+	count := 0
+	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
+		count++
 	}
-	fmt.Printf("k = %x\nv = %x\n", k, v)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Found %d records\n", count)
 	return nil
 }
 
