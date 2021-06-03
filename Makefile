@@ -79,6 +79,7 @@ integration:
 
 sentry:
 	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
+	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
@@ -128,6 +129,7 @@ mdbx:
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
 		&& mv config.h config2.h \
 		&& tail -n +2 config2.h > config.h  \
+		&& rm -f config2.h \
 		&& cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
