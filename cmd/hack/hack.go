@@ -1828,7 +1828,7 @@ func readCallTraces(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	traceCursor, err1 := tx.CursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err1 := tx.CursorDupSort("CallTraceSet")
 	if err1 != nil {
 		return err1
 	}
