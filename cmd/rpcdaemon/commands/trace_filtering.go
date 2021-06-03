@@ -241,11 +241,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 		}
 	}
-	//fmt.Printf("allBlocks after processing addresses: [%d]\n", allBlocks.ToArray())
-	allBlocks.RemoveRange(0, fromBlock)
-	fmt.Printf("allBlocks after clipping by fromBlock %d: [%d]\n", fromBlock, allBlocks.ToArray())
-	allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
-	fmt.Printf("allBlocks after clipping by toBlock %d: [%d]\n", toBlock, allBlocks.ToArray())
+	// Special case - if no addresses specified, take all traces
+	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
+		allBlocks.AddRange(fromBlock, toBlock+1)
+	} else {
+		allBlocks.RemoveRange(0, fromBlock)
+		allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+	}
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -308,7 +310,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		if _, ok := toAddresses[block.Coinbase()]; ok {
+		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
 			var tr ParityTrace
 			var rewardAction = &RewardTraceAction{}
 			rewardAction.Author = block.Coinbase()
@@ -334,7 +336,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.Write(b)
 		}
 		for i, uncle := range block.Uncles() {
-			if _, ok := toAddresses[uncle.Coinbase]; ok {
+			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 				if i < len(uncleRewards) {
 					var tr ParityTrace
 					rewardAction := &RewardTraceAction{}

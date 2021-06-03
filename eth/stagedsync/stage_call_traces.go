@@ -112,9 +112,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	var k, v []byte
 	prev := startBlock
 	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil && err == nil; k, v, err = traceCursor.Next() {
-		fmt.Printf("traceCursor loop %x, startBlock %d endBlock %d\n", k, startBlock, endBlock)
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= endBlock {
+		if blockNum > endBlock {
 			break
 		}
 		if len(v) != common.AddressLength+1 {
@@ -152,7 +151,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"numGC", int(m.NumGC))
 		case <-checkFlushEvery.C:
 			if needFlush64(froms, bufLimit) {
-				fmt.Printf("Flushing %d froms (limit)\n", len(froms))
 				if err := flushBitmaps64(collectorFrom, froms); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
@@ -161,7 +159,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			}
 
 			if needFlush64(tos, bufLimit) {
-				fmt.Printf("Flushing %d tos (limit)\n", len(tos))
 				if err := flushBitmaps64(collectorTo, tos); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
@@ -173,11 +170,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
 	}
-	fmt.Printf("Flushing %d froms\n", len(froms))
 	if err = flushBitmaps64(collectorFrom, froms); err != nil {
 		return err
 	}
-	fmt.Printf("Flushing %d tos\n", len(tos))
 	if err = flushBitmaps64(collectorTo, tos); err != nil {
 		return err
 	}
@@ -245,14 +240,11 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 			}
 			currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
 		}
-
-		fmt.Printf("currentBitmap for %x: %d\n", k, currentBitmap.ToArray())
 		if err := bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err
 			}
-			fmt.Printf("Write chunk %x: %d\n", chunkKey, chunk.ToArray())
 			return next(k, chunkKey, buf.Bytes())
 		}); err != nil {
 			return err
@@ -260,13 +252,9 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 		currentBitmap.Clear()
 		return nil
 	}
-
-	fmt.Printf("Finalise traces FROM\n")
 	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-
-	fmt.Printf("Finalise traces TO\n")
 	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
