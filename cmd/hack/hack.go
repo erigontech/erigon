@@ -1823,12 +1823,12 @@ func snapSizes(chaindata string) error {
 func readCallTraces(chaindata string, block uint64) error {
 	kv := ethdb.MustOpenKV(chaindata)
 	defer kv.Close()
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	traceCursor, err1 := tx.CursorDupSort("CallTraceSet")
+	traceCursor, err1 := tx.CursorDupSort(dbutils.CallTraceSet)
 	if err1 != nil {
 		return err1
 	}
@@ -1836,13 +1836,25 @@ func readCallTraces(chaindata string, block uint64) error {
 	var k []byte
 	count := 0
 	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
-		fmt.Printf("%x %d\n", k, binary.BigEndian.Uint64(k))
+		//fmt.Printf("%x %d\n", k, binary.BigEndian.Uint64(k))
 		count++
 	}
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Found %d records\n", count)
+	idxCursor, err2 := tx.Cursor(dbutils.CallToIndex)
+	if err2 != nil {
+		return err2
+	}
+	var v []byte
+	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
+	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
+		fmt.Printf("%x: %x\n", k, v)
+	}
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
