@@ -232,15 +232,16 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 
-		lastChunk := roaring64.New()
 		if len(lastChunkBytes) > 0 {
+			lastChunk := roaring64.New()
 			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
+			currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
 		}
 
-		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
+		fmt.Printf("currentBitmap for %x: %d\n", k, currentBitmap.ToArray())
 		if err := bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {

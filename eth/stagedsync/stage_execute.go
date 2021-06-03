@@ -176,10 +176,12 @@ func executeBlockWithGo(
 				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
+				//fmt.Printf("Append %x %x\n", blockNumEnc[:], v[:])
 			} else {
 				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
+				//fmt.Printf("AppendDup %x %x\n", blockNumEnc[:], v[:])
 			}
 			copy(prev[:], addr[:])
 		}
@@ -419,10 +421,10 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		}
 	}
 
+	if traceCursor != nil {
+		traceCursor.Close()
+	}
 	if !useExternalTx {
-		if traceCursor != nil {
-			traceCursor.Close()
-		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
