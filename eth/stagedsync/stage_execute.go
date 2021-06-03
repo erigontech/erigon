@@ -171,8 +171,14 @@ func executeBlockWithGo(
 			if _, ok := callTracer.tos[addr]; ok {
 				v[common.AddressLength] |= 2
 			}
-			if err = tx.AppendDup(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-				return err
+			if j == 0 {
+				if err = tx.Append(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+					return err
+				}
+			} else {
+				if err = tx.AppendDup(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+					return err
+				}
 			}
 			copy(prev[:], addr[:])
 		}
@@ -308,9 +314,18 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			var blockNumEnc [8]byte
 			binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
 
-			for i := range touchedContracts {
-				if err = tx.AppendDup(dbutils.ContractTEVMCodeStatusBucket, blockNumEnc[:], touchedContracts[i][:]); err != nil {
-					return err
+			for i, hash := range touchedContracts {
+				var h [common.HashLength]byte
+				copy(h[:], hash[:])
+
+				if i == 0 {
+					if err = tx.Append(dbutils.ContractTEVMCodeStatusBucket, blockNumEnc[:], h[:]); err != nil {
+						return err
+					}
+				} else {
+					if err = tx.AppendDup(dbutils.ContractTEVMCodeStatusBucket, blockNumEnc[:], h[:]); err != nil {
+						return err
+					}
 				}
 			}
 		}

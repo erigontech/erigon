@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -122,14 +123,23 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
+	var prevK []byte
 	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
-			return err
+		if bytes.Equal(k, prevK) {
+			if err = w.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
+				return err
+			}
+		} else {
+			if err = w.db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
+				return err
+			}
 		}
+		prevK = k
 		return nil
 	}); err != nil {
 		return err
 	}
+	prevK = nil
 
 	storageChanges, err := w.GetStorageChanges()
 	if err != nil {
@@ -139,9 +149,16 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 		return nil
 	}
 	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
-			return err
+		if bytes.Equal(k, prevK) {
+			if err = w.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
+				return err
+			}
+		} else {
+			if err = w.db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
+				return err
+			}
 		}
+		prevK = k
 		return nil
 	}); err != nil {
 		return err
