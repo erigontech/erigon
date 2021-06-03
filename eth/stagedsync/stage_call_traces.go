@@ -151,6 +151,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"numGC", int(m.NumGC))
 		case <-checkFlushEvery.C:
 			if needFlush64(froms, bufLimit) {
+				fmt.Printf("Flushing %d froms (limit)\n", len(froms))
 				if err := flushBitmaps64(collectorFrom, froms); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
@@ -159,6 +160,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			}
 
 			if needFlush64(tos, bufLimit) {
+				fmt.Printf("Flushing %d tos (limit)\n", len(tos))
 				if err := flushBitmaps64(collectorTo, tos); err != nil {
 					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
@@ -170,16 +172,18 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err != nil {
 		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
 	}
+	fmt.Printf("Flushing %d froms\n", len(froms))
 	if err = flushBitmaps64(collectorFrom, froms); err != nil {
 		return err
 	}
+	fmt.Printf("Flushing %d tos\n", len(tos))
 	if err = flushBitmaps64(collectorTo, tos); err != nil {
 		return err
 	}
 	// Clean up before loading call traces to reclaim space
 	var prunedMin uint64 = math.MaxUint64
 	var prunedMax uint64 = 0
-	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.Next() {
+	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if endBlock-blockNum <= params.FullImmutabilityThreshold {
 			break
@@ -194,7 +198,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		}
-		if err = traceCursor.DeleteCurrent(); err != nil {
+		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
 		}
 		if blockNum < prunedMin {
