@@ -1829,15 +1829,19 @@ func readCallTraces(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	traceCursor, err1 := tx.CursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err1 := tx.RwCursorDupSort(dbutils.CallTraceSet)
 	if err1 != nil {
 		return err1
 	}
 	defer traceCursor.Close()
 	var k []byte
+	var v []byte
 	count := 0
-	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
-		//fmt.Printf("%x %d\n", k, binary.BigEndian.Uint64(k))
+	for k, v, err = traceCursor.First(); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum == block {
+			fmt.Printf("%x\n", v)
+		}
 		count++
 	}
 	if err != nil {
@@ -1848,7 +1852,6 @@ func readCallTraces(chaindata string, block uint64) error {
 	if err2 != nil {
 		return err2
 	}
-	var v []byte
 	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
 	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
 		bm := roaring64.New()
@@ -1856,7 +1859,7 @@ func readCallTraces(chaindata string, block uint64) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%x: %d\n", k, bm.ToArray())
+		//fmt.Printf("%x: %d\n", k, bm.ToArray())
 	}
 	if err != nil {
 		return err
