@@ -210,7 +210,7 @@ func newStateReaderWriter(
 	if writeChangesets {
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
 	} else {
-		stateWriter = state.NewPlainStateWriterNoHistory(batch, blockNum).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
 
 	if readerWriterWrapper != nil {

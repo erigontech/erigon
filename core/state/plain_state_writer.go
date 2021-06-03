@@ -17,22 +17,19 @@ var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
 type PlainStateWriter struct {
 	db          ethdb.Database
 	csw         *ChangeSetWriter
-	blockNumber uint64
 	accumulator *shards.Accumulator
 }
 
 func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
-		db:          db,
-		csw:         NewChangeSetWriterPlain(changeSetsDB, blockNumber),
-		blockNumber: blockNumber,
+		db:  db,
+		csw: NewChangeSetWriterPlain(changeSetsDB, blockNumber),
 	}
 }
 
-func NewPlainStateWriterNoHistory(db ethdb.Database, blockNumber uint64) *PlainStateWriter {
+func NewPlainStateWriterNoHistory(db ethdb.Database) *PlainStateWriter {
 	return &PlainStateWriter{
-		db:          db,
-		blockNumber: blockNumber,
+		db: db,
 	}
 }
 
