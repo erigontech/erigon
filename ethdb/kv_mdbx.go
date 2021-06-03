@@ -380,15 +380,15 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 
 type MdbxTx struct {
 	readOnly         bool
-	cursorID         uint16
+	cursorID         uint64
 	tx               *mdbx.Txn
 	db               *MdbxKV
-	cursors          map[uint16]*mdbx.Cursor
+	cursors          map[uint64]*mdbx.Cursor
 	statelessCursors map[string]Cursor
 }
 
 type MdbxCursor struct {
-	id         uint16
+	id         uint64
 	tx         *MdbxTx
 	bucketName string
 	dbi        mdbx.DBI
@@ -812,7 +812,8 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = map[uint16]*mdbx.Cursor{}
+	tx.cursors = nil
+	tx.statelessCursors = nil
 }
 
 func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
@@ -977,7 +978,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
 
 	// add to auto-cleanup on end of transactions
 	if tx.cursors == nil {
-		tx.cursors = map[uint16]*mdbx.Cursor{}
+		tx.cursors = map[uint64]*mdbx.Cursor{}
 	}
 	tx.cursors[c.id] = c.c
 	return c, nil
