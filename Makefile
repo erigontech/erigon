@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 1 --tags 'mdbx'
+GOTEST = go test ./... -p 1
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -18,7 +18,6 @@ endif
 ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
-
 all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
 go-version:
@@ -151,11 +150,11 @@ test-mdbx:
 	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci: mdbx
 	@echo "--> Running linter for code"
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
