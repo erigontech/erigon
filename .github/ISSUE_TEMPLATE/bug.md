@@ -8,9 +8,9 @@ assignees: ''
 
 #### System information
 
-Geth version: `geth version`
+Erigon version: `./erigon --version`
 OS & Version: Windows/Linux/OSX
-Commit hash : (if `develop`)
+Commit hash : 
 
 #### Expected behaviour
 
