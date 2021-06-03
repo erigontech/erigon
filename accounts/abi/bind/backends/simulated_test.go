@@ -114,7 +114,7 @@ const deployedCode = `60806040526004361061003b576000357c010000000000000000000000
 var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
 func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
+	expectedBal := uint256.NewInt(10000000000)
 	return NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			testAddr: {Balance: expectedBal.ToBig()},
@@ -124,7 +124,7 @@ func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
 
 func TestNewSimulatedBackend(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
+	expectedBal := uint256.NewInt(10000000000)
 	sim := simTestBackend(t, testAddr)
 
 	if sim.config != params.AllEthashProtocolChanges {
@@ -208,7 +208,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 
 func TestSimulatedBackend_BalanceAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
+	expectedBal := uint256.NewInt(10000000000)
 	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
@@ -293,7 +293,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -334,7 +334,7 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -368,7 +368,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -541,8 +541,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt(),
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(0),
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, nil},
 
@@ -550,8 +550,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(1000),
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(1000),
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, nil},
 
@@ -559,8 +559,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(1e14), // gascost = 2.1ether
-			Value:    uint256.NewInt().SetUint64(1e17), // the remaining balance for fee is 2.1ether
+			GasPrice: uint256.NewInt(1e14), // gascost = 2.1ether
+			Value:    uint256.NewInt(1e17), // the remaining balance for fee is 2.1ether
 			Data:     nil,
 		}, 21000, nil},
 
@@ -568,8 +568,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(2e14), // gascost = 4.2ether
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(2e14), // gascost = 4.2ether
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, errors.New("gas required exceeds allowance (10999)")}, // 10999=(2.2ether-1000wei)/(2e14)
 	}
@@ -676,7 +676,7 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -731,7 +731,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -786,7 +786,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -809,7 +809,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	}
 
 	// make a new transaction with a nonce of 1
-	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err = types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -838,7 +838,7 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)

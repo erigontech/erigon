@@ -1365,7 +1365,7 @@ func supply(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	count := 0
-	supply := uint256.NewInt()
+	supply := uint256.NewInt(0)
 	var a accounts.Account
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)

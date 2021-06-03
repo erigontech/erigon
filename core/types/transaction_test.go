@@ -42,14 +42,14 @@ var (
 	emptyTx = NewTransaction(
 		0,
 		common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
-		uint256.NewInt(), 0, uint256.NewInt(),
+		uint256.NewInt(0), 0, uint256.NewInt(0),
 		nil,
 	)
 
 	rightvrsTx, _ = NewTransaction(
 		3,
 		testAddr,
-		uint256.NewInt().SetUint64(10),
+		uint256.NewInt(10),
 		2000,
 		u256.Num1,
 		common.FromHex("5544"),
@@ -64,11 +64,11 @@ var (
 			CommonTx: CommonTx{
 				Nonce: 3,
 				To:    &testAddr,
-				Value: uint256.NewInt().SetUint64(10),
+				Value: uint256.NewInt(10),
 				Gas:   25000,
 				Data:  common.FromHex("5544"),
 			},
-			GasPrice: uint256.NewInt().SetUint64(1),
+			GasPrice: uint256.NewInt(1),
 		},
 	}
 
@@ -283,7 +283,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
-			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(uint64(start+i)), nil), *signer, key)
+			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
 
 			j, ok := idx[addr]
 			if ok {
@@ -342,7 +342,7 @@ func TestTransactionTimeSort(t *testing.T) {
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 
-		tx, _ := SignTx(NewTransaction(0, common.Address{}, uint256.NewInt().SetUint64(100), 100, uint256.NewInt().SetUint64(1), nil), *signer, key)
+		tx, _ := SignTx(NewTransaction(0, common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(1), nil), *signer, key)
 		tx.(*LegacyTx).time = time.Unix(0, int64(len(keys)-start))
 		i, ok := idx[addr]
 		if ok {
@@ -419,7 +419,7 @@ func TestTransactionCoding(t *testing.T) {
 		case 2:
 			// Tx with non-zero access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt().SetUint64(1),
+				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce: i,
@@ -427,14 +427,14 @@ func TestTransactionCoding(t *testing.T) {
 						Gas:   123457,
 						Data:  []byte("abcdef"),
 					},
-					GasPrice: uint256.NewInt().SetUint64(10),
+					GasPrice: uint256.NewInt(10),
 				},
 				AccessList: accesses,
 			}
 		case 3:
 			// Tx with empty access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt().SetUint64(1),
+				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce: i,
@@ -442,19 +442,19 @@ func TestTransactionCoding(t *testing.T) {
 						Gas:   123457,
 						Data:  []byte("abcdef"),
 					},
-					GasPrice: uint256.NewInt().SetUint64(10),
+					GasPrice: uint256.NewInt(10),
 				},
 			}
 		case 4:
 			// Contract creation with access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt().SetUint64(1),
+				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce: i,
 						Gas:   123457,
 					},
-					GasPrice: uint256.NewInt().SetUint64(10),
+					GasPrice: uint256.NewInt(10),
 				},
 				AccessList: accesses,
 			}

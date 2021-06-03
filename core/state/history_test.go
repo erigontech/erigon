@@ -125,7 +125,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 		resAccStorage := make(map[common.Hash]uint256.Int)
 		err = ethdb.Walk(plainState, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), 8*(common.AddressLength+8), func(k, v []byte) (b bool, e error) {
-			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt().SetBytes(v)
+			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt(0).SetBytes(v)
 			return true, nil
 		})
 		if err != nil {
@@ -144,7 +144,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			result := uint256.NewInt().SetBytes(res)
+			result := uint256.NewInt(0).SetBytes(res)
 			if !v.Eq(result) {
 				t.Fatalf("incorrect storage history for %x %x %x", addr.String(), v, result)
 			}
@@ -202,7 +202,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	for i, addr := range addrs {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
-			value := uint256.NewInt().SetUint64(uint64(10 + j))
+			value := uint256.NewInt(uint64(10 + j))
 			if err2 := expectedChangeSet.Add(dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), accHistory[i].Incarnation, key.Bytes()), value.Bytes()); err2 != nil {
 				t.Fatal(err2)
 			}
@@ -224,26 +224,26 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 	ctx := context.Background()
 	for i := range accHistory {
 		accHistory[i], addrs[i], _ = randomAccount(t)
-		accHistory[i].Balance = *uint256.NewInt().SetUint64(100)
+		accHistory[i].Balance = *uint256.NewInt(100)
 		accHistory[i].CodeHash = common.Hash{uint8(10 + i)}
 		accHistory[i].Root = common.Hash{uint8(10 + i)}
 		accHistory[i].Incarnation = uint64(i + 1)
 
 		accState[i] = accHistory[i].SelfCopy()
 		accState[i].Nonce++
-		accState[i].Balance = *uint256.NewInt().SetUint64(200)
+		accState[i].Balance = *uint256.NewInt(200)
 
 		accStateStorage[i] = make(map[common.Hash]uint256.Int)
 		accHistoryStateStorage[i] = make(map[common.Hash]uint256.Int)
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
-			newValue := uint256.NewInt().SetUint64(uint64(j))
+			newValue := uint256.NewInt(uint64(j))
 			if !newValue.IsZero() {
 				// Empty value is not considered to be present
 				accStateStorage[i][key] = *newValue
 			}
 
-			value := uint256.NewInt().SetUint64(uint64(10 + j))
+			value := uint256.NewInt(uint64(10 + j))
 			accHistoryStateStorage[i][key] = *value
 			if err := blockWriter.WriteAccountStorage(ctx, addrs[i], accHistory[i].Incarnation, &key, value, newValue); err != nil {
 				t.Fatal(err)
@@ -270,7 +270,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 	}
 	acc := accounts.NewAccount()
 	acc.Initialised = true
-	acc.Balance = *uint256.NewInt().SetUint64(uint64(rand.Int63()))
+	acc.Balance = *uint256.NewInt(uint64(rand.Int63()))
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	addrHash, err := common.HashData(addr.Bytes())
 	if err != nil {
@@ -300,9 +300,9 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 func TestWalkAsOfStatePlain(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
 
-	emptyVal := uint256.NewInt()
-	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	emptyVal := uint256.NewInt(0)
+	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt(0).SetBytes([]byte("state"))
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)
 	key := common.Hash{123}
@@ -460,9 +460,9 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
 
-	emptyVal := uint256.NewInt()
-	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal := uint256.NewInt().SetBytes([]byte("state"))
+	emptyVal := uint256.NewInt(0)
+	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
+	stateVal := uint256.NewInt(0).SetBytes([]byte("state"))
 
 	addr1 := common.Address{1}
 	addr2 := common.Address{2}
@@ -974,9 +974,9 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		addrHashes[i] = addrHash
 	}
 	key := common.Hash{123}
-	emptyVal := uint256.NewInt()
+	emptyVal := uint256.NewInt(0)
 
-	val := uint256.NewInt().SetBytes([]byte("block 1"))
+	val := uint256.NewInt(0).SetBytes([]byte("block 1"))
 	writeStorageBlockData(t, NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1), []storageData{
 		{
 			addr:   addrs[0],
@@ -1003,7 +1003,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 	prev := val
 	for i := 2; i < 1100; i++ {
-		val = uint256.NewInt().SetBytes([]byte("block " + strconv.Itoa(i)))
+		val = uint256.NewInt(0).SetBytes([]byte("block " + strconv.Itoa(i)))
 		writeStorageBlockData(t, NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, uint64(i)), []storageData{
 			{
 				addr:   addrs[0],
@@ -1030,7 +1030,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		prev = val
 	}
 
-	val = uint256.NewInt().SetBytes([]byte("block 1100"))
+	val = uint256.NewInt(0).SetBytes([]byte("block 1100"))
 
 	writeStorageBlockData(t, NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1100), []storageData{
 		{
@@ -1071,7 +1071,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		valBytes := uint256.NewInt().SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
+		valBytes := uint256.NewInt(0).SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
 		expected := &changeset.ChangeSet{
 			Changes: []changeset.Change{
 				{

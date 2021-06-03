@@ -150,10 +150,10 @@ func TestDeriveFields(t *testing.T) {
 				CommonTx: CommonTx{
 					To:    &to3,
 					Nonce: 3,
-					Value: uint256.NewInt().SetUint64(3),
+					Value: uint256.NewInt(3),
 					Gas:   3,
 				},
-				GasPrice: uint256.NewInt().SetUint64(3),
+				GasPrice: uint256.NewInt(3),
 			},
 		},
 	}

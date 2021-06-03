@@ -314,13 +314,13 @@ func initialState1() error {
 		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -338,7 +338,7 @@ func initialState1() error {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -375,7 +375,7 @@ func initialState1() error {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

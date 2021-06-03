@@ -176,14 +176,14 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJum
 			b := stack1.Pop(pc0)
 
 			if a.kind == ConcreteValue && b.kind == ConcreteValue {
-				v := uint256.NewInt()
+				v := uint256.NewInt(0)
 				v.And(a.value, b.value)
 				stack1.Push(AbsValueConcrete(*v))
 			} else {
 				stack1.Push(AbsValueTop(pc0))
 			}
 		} else if op0 == PC {
-			v := uint256.NewInt()
+			v := uint256.NewInt(0)
 			v.SetUint64(uint64(pc0))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {

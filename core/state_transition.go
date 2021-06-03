@@ -191,11 +191,11 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	mgval := uint256.NewInt().SetUint64(st.msg.Gas())
+	mgval := uint256.NewInt(st.msg.Gas())
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
 	if st.feeCap != nil {
-		balanceCheck = uint256.NewInt().SetUint64(st.msg.Gas())
+		balanceCheck = uint256.NewInt(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.feeCap)
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {

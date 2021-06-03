@@ -94,7 +94,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			}
 			block.AddTx(tx)
 			// Send 1 wei to contract after self-destruction
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt().SetUint64(1000), 21000, uint256.NewInt().SetUint64(1), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
