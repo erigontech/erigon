@@ -1836,6 +1836,7 @@ func readCallTraces(chaindata string, block uint64) error {
 	var k []byte
 	count := 0
 	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
+		fmt.Printf("%x %d\n", k, binary.BigEndian.Uint64(k))
 		count++
 	}
 	if err != nil {
