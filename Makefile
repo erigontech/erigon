@@ -128,6 +128,7 @@ mdbx:
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
 		&& mv config.h config2.h \
 		&& tail -n +2 config2.h > config.h  \
+		&& rm -f config2.h \
 		&& cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
