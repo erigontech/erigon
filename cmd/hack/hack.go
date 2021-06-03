@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -1850,7 +1851,12 @@ func readCallTraces(chaindata string, block uint64) error {
 	var v []byte
 	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
 	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
-		fmt.Printf("%x: %x\n", k, v)
+		bm := roaring64.New()
+		_, err = bm.ReadFrom(bytes.NewReader(v))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%x: %d\n", k, bm.ToArray())
 	}
 	if err != nil {
 		return err
