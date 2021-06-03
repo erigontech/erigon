@@ -9,7 +9,9 @@ assignees: ''
 #### System information
 
 Erigon version: `./erigon --version`
+
 OS & Version: Windows/Linux/OSX
+
 Commit hash : 
 
 #### Expected behaviour
