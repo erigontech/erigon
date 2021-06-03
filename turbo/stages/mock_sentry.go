@@ -233,6 +233,7 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.StreamWg.Add(1)
 			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			mock.StreamWg.Wait()
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
@@ -263,8 +264,10 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 	mock.PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	mock.StreamWg.Add(1)
 	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
 	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
