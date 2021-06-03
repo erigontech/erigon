@@ -868,6 +868,21 @@ func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 	return bytes.Equal(key, k), nil
 }
 
+func (tx *MdbxTx) Append(bucket string, k, v []byte) error {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
+	}
+	return c.Append(k, v)
+}
+func (tx *MdbxTx) AppendDup(bucket string, k, v []byte) error {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
+	}
+	return c.(*MdbxDupSortCursor).Append(k, v)
+}
+
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	c, err := tx.statelessCursor(dbutils.Sequence)
 	if err != nil {
