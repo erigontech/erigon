@@ -62,7 +62,10 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 			}
 			// Override account balance.
 			if account.Balance != nil {
-				balance, _ := uint256.FromBig((*big.Int)(*account.Balance))
+				balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
+				if overflow {
+					return nil, fmt.Errorf("account.Balance higher than 2^256-1")
+				}
 				state.SetBalance(addr, balance)
 			}
 			if account.State != nil && account.StateDiff != nil {
