@@ -176,12 +176,10 @@ func executeBlockWithGo(
 				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
-				//fmt.Printf("Append %x %x\n", blockNumEnc[:], v[:])
 			} else {
 				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
-				//fmt.Printf("AppendDup %x %x\n", blockNumEnc[:], v[:])
 			}
 			copy(prev[:], addr[:])
 		}

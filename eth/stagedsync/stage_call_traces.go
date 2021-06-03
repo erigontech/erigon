@@ -181,7 +181,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	var prunedMax uint64 = 0
 	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
 		blockNum := binary.BigEndian.Uint64(k)
-		if endBlock-blockNum <= params.FullImmutabilityThreshold {
+		if blockNum+params.FullImmutabilityThreshold <= endBlock {
 			break
 		}
 		select {
@@ -308,7 +308,6 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 	var k, v []byte
 	prev := to + 1
 	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil && err == nil; k, v, err = traceCursor.Next() {
-		fmt.Printf("Unwind reading traceCall set k = %x\n", k)
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= from {
 			break
