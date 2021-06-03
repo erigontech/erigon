@@ -880,7 +880,7 @@ func (tx *MdbxTx) AppendDup(bucket string, k, v []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(*MdbxDupSortCursor).Append(k, v)
+	return c.(*MdbxDupSortCursor).AppendDup(k, v)
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
