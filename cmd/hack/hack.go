@@ -1820,7 +1820,7 @@ func snapSizes(chaindata string) error {
 	return nil
 }
 
-func readCallTraces(chaindata string) error {
+func readCallTraces(chaindata string, block uint64) error {
 	kv := ethdb.MustOpenKV(chaindata)
 	defer kv.Close()
 	tx, err := kv.BeginRo(context.Background())
@@ -1833,7 +1833,7 @@ func readCallTraces(chaindata string) error {
 		return err1
 	}
 	defer traceCursor.Close()
-	k, v, err2 := traceCursor.Seek(dbutils.EncodeBlockNumber(12560481))
+	k, v, err2 := traceCursor.Seek(dbutils.EncodeBlockNumber(block))
 	if err2 != nil {
 		return err2
 	}
@@ -1981,7 +1981,7 @@ func main() {
 		err = dumpAddresses(*chaindata)
 
 	case "readCallTraces":
-		err = readCallTraces(*chaindata)
+		err = readCallTraces(*chaindata, uint64(*block))
 	}
 
 	if err != nil {
