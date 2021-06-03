@@ -17,6 +17,7 @@
 package core
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -37,7 +38,10 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 	}
 	var baseFee uint256.Int
 	if header.Eip1559 {
-		baseFee.SetFromBig(header.BaseFee)
+		overflow := baseFee.SetFromBig(header.BaseFee)
+		if overflow {
+			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
+		}
 	}
 	if checkTEVM == nil {
 		checkTEVM = func(_ common.Hash) (bool, error) {

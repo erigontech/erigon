@@ -212,7 +212,10 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	// Ensure a valid value field and resolve the account nonce
 	value := uint256.NewInt()
 	if opts.Value != nil {
-		value.SetFromBig(opts.Value)
+		overflow := value.SetFromBig(opts.Value)
+		if overflow {
+			return nil, fmt.Errorf("opts.Value higher than 2^256-1")
+		}
 	}
 	var nonce uint64
 	if opts.Nonce == nil {
@@ -231,7 +234,10 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 			return nil, fmt.Errorf("failed to suggest gas price: %v", err)
 		}
 	}
-	gasPrice, _ := uint256.FromBig(gasPriceBig)
+	gasPrice, overflow := uint256.FromBig(gasPriceBig)
+	if overflow {
+		return nil, fmt.Errorf("gasPriceBig higher than 2^256-1")
+	}
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {
 		// Gas estimation cannot succeed without code for method invocations

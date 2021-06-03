@@ -19,7 +19,6 @@ package core
 import (
 	"fmt"
 	"math"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -196,7 +195,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
 	if st.feeCap != nil {
-		balanceCheck, _ = uint256.FromBig(new(big.Int).SetUint64(st.msg.Gas()))
+		balanceCheck = uint256.NewInt().SetUint64(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.feeCap)
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
@@ -205,7 +204,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		}
 	}
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-		return err
+		if !gasBailout {
+			return err
+		}
 	}
 	st.gas += st.msg.Gas()
 

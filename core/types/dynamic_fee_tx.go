@@ -443,7 +443,10 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 		accessList: tx.AccessList,
 		checkNonce: true,
 	}
-	msg.gasPrice.SetFromBig(baseFee)
+	overflow := msg.gasPrice.SetFromBig(baseFee)
+	if overflow {
+		return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
 	if msg.gasPrice.Gt(tx.FeeCap) {
 		msg.gasPrice.Set(tx.FeeCap)
