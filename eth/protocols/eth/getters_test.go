@@ -82,7 +82,6 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 			block := rawdb.ReadHeaderByNumber(tx, i)
 
 			hashes = append(hashes, block.Hash())
-			receipts = append(receipts)
 			// If known, encode and queue for response packet
 			encoded, err := rlp.EncodeToBytes(rawdb.ReadReceiptsByHash(tx, block.Hash()))
 			require.NoError(t, err)
