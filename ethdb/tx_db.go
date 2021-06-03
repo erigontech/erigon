@@ -127,6 +127,7 @@ func (m *TxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
 
 func (m *TxDb) cursor(bucket string) (Cursor, error) {
 	c, ok := m.cursors[bucket]
+	fmt.Printf("aa: %s, %t\n", bucket, ok)
 	if !ok {
 		var err error
 		c, err = m.tx.Cursor(bucket)
