@@ -93,6 +93,9 @@ func (b *BlockGen) SetDifficulty(diff *big.Int) {
 func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
+func (b *BlockGen) AddFailedTx(tx types.Transaction) {
+	b.AddFailedTxWithChain(nil, nil, tx)
+}
 
 // AddTxWithChain adds a transaction to the generated block. If no coinbase has
 // been set, the block's coinbase is set to the zero address.
@@ -112,6 +115,18 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
+	b.txs = append(b.txs, tx)
+	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+	if b.gasPool == nil {
+		b.SetCoinbase(common.Address{})
+	}
+	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
+	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
 }
