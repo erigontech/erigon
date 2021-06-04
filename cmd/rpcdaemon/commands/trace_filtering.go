@@ -192,6 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
+		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
 	defer dbtx.Rollback()
@@ -212,6 +213,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if fromBlock > toBlock {
+		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -265,6 +267,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
+			stream.WriteNil()
 			return hashErr
 		}
 
@@ -274,6 +277,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			return bErr
 		}
 		if block == nil {
+			stream.WriteNil()
 			return fmt.Errorf("could not find block %x %d", hash, b)
 		}
 
@@ -282,6 +286,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
 		if tErr != nil {
+			stream.WriteNil()
 			return tErr
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
