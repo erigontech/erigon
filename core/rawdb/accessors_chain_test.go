@@ -364,7 +364,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Check that no receipt entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
+	b, senders, err := ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
@@ -379,7 +382,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	if err := WriteReceipts(tx, 0, receipts); err != nil {
 		t.Fatalf("WriteReceipts failed: %v", err)
 	}
-	if rs := ReadReceipts(tx, hash, 0); len(rs) == 0 {
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -388,11 +394,17 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	DeleteBody(tx, hash, 0)
-	if rs := ReadReceipts(tx, hash, 0); rs != nil {
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	if rs := ReadReceipts(tx, b, senders); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(ReadRawReceipts(tx, hash, 0), receipts); err != nil {
+	b, _, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	if err := checkReceiptsRLP(ReadRawReceipts(tx, b.NumberU64()), receipts); err != nil {
 		t.Fatal(err)
 	}
 	// Sanity check that body alone without the receipt is a full purge
@@ -403,7 +415,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	if err := DeleteReceipts(tx, 0); err != nil {
 		t.Fatalf("DeleteReceipts failed: %v", err)
 	}
-	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

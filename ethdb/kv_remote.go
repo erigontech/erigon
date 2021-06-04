@@ -321,6 +321,25 @@ func (tx *remoteTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []b
 	return nil
 }
 
+func (tx *remoteTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	c, err := tx.statelessCursor(bucket)
 	if err != nil {

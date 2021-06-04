@@ -429,6 +429,23 @@ func (s *snTX) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) 
 	}
 	return nil
 }
+func (s *snTX) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (s *snTX) Commit() error {
 	for i := range s.snTX {
