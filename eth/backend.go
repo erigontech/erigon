@@ -346,28 +346,29 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return res
 		}
 
-		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-
 		d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 		if err != nil {
 			return nil, err
 		}
 
-		server65 := download.NewSentryServer(backend.downloadV2Ctx,
+		server66 := download.NewSentryServer(backend.downloadV2Ctx,
 			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
 			path.Join(stack.Config().DataDir, "nodes", "eth66"),
 			stack.Config().P2P.ListenAddr, d66, readNodeInfo, eth.ETH66)
-		server66 := download.NewSentryServer(backend.downloadV2Ctx,
-			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
-			path.Join(stack.Config().DataDir, "nodes", "eth65"),
-			":30304", d65, readNodeInfo, eth.ETH65)
-		backend.sentryServers = append(backend.sentryServers, server65, server66)
-		backend.sentries = []remote.SentryClient{
-			remote.NewSentryClientDirect(eth.ETH66, server65),
-			remote.NewSentryClientDirect(eth.ETH65, server66)}
+		backend.sentryServers = append(backend.sentryServers, server66)
+		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
+		if stack.Config().P2P.Eth65Enabled {
+			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				return nil, err
+			}
+			server65 := download.NewSentryServer(backend.downloadV2Ctx,
+				path.Join(stack.Config().DataDir, "erigon", "nodekey"),
+				path.Join(stack.Config().DataDir, "nodes", "eth65"),
+				stack.Config().P2P.ListenAddr65, d65, readNodeInfo, eth.ETH65)
+			backend.sentryServers = append(backend.sentryServers, server65)
+			backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		}
 	}
 	blockDownloaderWindow := 65536
 	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)

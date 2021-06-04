@@ -255,8 +255,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.GoerliChainConfig
 	case ghash == params.ErigonGenesisHash:
 		return params.ErigonChainConfig
-	case ghash == params.BaikalGenesisHash:
-		return params.BaikalChainConfig
+	case ghash == params.CalaverasGenesisHash:
+		return params.CalaverasChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -515,15 +515,15 @@ func DefaultErigonGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultBaikalGenesisBlock() *Genesis {
+func DefaultCalaverasGenesisBlock() *Genesis {
 	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
 	return &Genesis{
-		Config:     params.BaikalChainConfig,
-		Timestamp:  0x6092ca7f,
+		Config:     params.CalaverasChainConfig,
+		Timestamp:  0x60b3877f,
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000005211cea3870c7ba7c6c44b185e62eecdb864cd8c560228ce57d31efbf64c200b2c200aacec78cf17a7148e784fe95a7a750335f8b9572ee28d72e7650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x47b760,
 		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/baikal.json"),
+		Alloc:      readPrealloc("allocs/calaveras.json"),
 	}
 }
 

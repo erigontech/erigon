@@ -425,6 +425,11 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	ListenPort65Flag = cli.IntFlag{
+		Name:  "p2p.65.port",
+		Usage: "ETH65 Network listening port",
+		Value: 30304,
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -604,8 +609,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.BaikalChainName:
-			urls = params.BaikalBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -644,8 +649,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.BaikalChainName:
-			urls = params.BaikalBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -688,6 +693,10 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
+		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
+		cfg.Eth65Enabled = true
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
@@ -803,8 +812,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.BaikalChainName:
-		return filepath.Join(datadir, "bailkal")
+	case params.CalaverasChainName:
+		return filepath.Join(datadir, "calaveras")
 	default:
 		return datadir
 	}
@@ -901,9 +910,11 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
-func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
+func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
+	} else {
+		cfg.Ethash.DatasetDir = path.Join(datadir, "erigon", "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -1086,7 +1097,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
-	setEthash(ctx, cfg)
+	setEthash(ctx, stack.Config().DataDir, cfg)
 	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
@@ -1164,11 +1175,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
 		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case params.BaikalChainName:
+	case params.CalaverasChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 1642 // baikal
+			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
 		}
-		cfg.Genesis = core.DefaultBaikalGenesisBlock()
+		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1254,8 +1265,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultGoerliGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
-	case params.BaikalChainName:
-		genesis = core.DefaultBaikalGenesisBlock()
+	case params.CalaverasChainName:
+		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

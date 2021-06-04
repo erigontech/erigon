@@ -33,9 +33,10 @@ var (
 	}
 )
 
+//nolint
 func WrapBySnapshotsFromDir(kv ethdb.RwKV, snapshotDir string, mode SnapshotMode) (ethdb.RwKV, error) {
 	//todo remove it
-	return nil, errors.New("deprecated")
+	return nil, errors.New("deprecated") //nolint
 }
 
 func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.RwKV, error) {
