@@ -183,7 +183,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t.Fatal(err)
 	}
 
-	blockDownloaderWindow := 128
+	blockDownloaderWindow := 65536
 	networkID := uint64(1)
 	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []remote.SentryClient{mock.SentryClient}
