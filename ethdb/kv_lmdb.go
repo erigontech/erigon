@@ -450,6 +450,25 @@ func (tx *lmdbTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	return nil
 }
 
+func (tx *lmdbTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
 // All buckets stored as keys of un-named bucketw
 func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
