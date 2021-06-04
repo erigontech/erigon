@@ -395,7 +395,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, tx, block, ch)
+		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, sync, tx, block, ch)
 		if err != nil {
 			return err
 		}
