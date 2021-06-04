@@ -361,7 +361,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, callContext *call
 	}
 	// we can reuse dataOffset now (aliasing it for clarity)
 	end := dataOffset
-	overflow = end.AddOverflow(&dataOffset, &length)
+	_, overflow = end.AddOverflow(&dataOffset, &length)
 	if overflow {
 		return nil, ErrReturnDataOutOfBounds
 	}

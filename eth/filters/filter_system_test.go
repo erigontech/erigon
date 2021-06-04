@@ -641,7 +641,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 			default:
 			}
 
-			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(), 0, uint256.NewInt(), nil)
+			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(0), 0, uint256.NewInt(0), nil)
 			backend.txFeed.Send(core.NewTxsEvent{Txs: []types.Transaction{tx}})
 			i++
 		}

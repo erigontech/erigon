@@ -273,56 +273,56 @@ func sui64(n uint64) string {
 
 /*
 func cfg0Test0() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func cfg0Test1() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func dfTest0() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func dfTest1() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func dfTest2() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x2, byte(vm.PUSH1), 0x6, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func dfTest3() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 //should fail to find concrete jump
 func absIntTest1() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 //should fail to find concrete jump
 func absIntTest2() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x0, byte(vm.JUMP), 0x0}
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 
 func absIntTest3() {
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1,
 		byte(vm.PUSH1), 0x55,
 		byte(vm.MLOAD),
@@ -598,7 +598,7 @@ func testGenCfg() error {
 			EVMInterpreter: "SaInterpreter",
 		}, nil)
 
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, vm.NewDestsCache(50000))
+	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(0), 10000, vm.NewDestsCache(50000))
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	//contract.Code = []byte{byte(vm.ADD), 0x1, 0x1, 0x0}
 

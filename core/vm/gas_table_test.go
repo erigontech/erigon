@@ -93,7 +93,7 @@ func TestEIP2200(t *testing.T) {
 			s := state.New(state.NewPlainStateReader(tx))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
+			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
 			_ = s.CommitBlock(context.Background(), state.NewPlainStateWriter(tx, tx, 0))
 			vmctx := BlockContext{
