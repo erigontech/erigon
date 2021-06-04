@@ -36,8 +36,8 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db ethdb.Tx, hash common.Hash) *uint64 {
-	data, _ := db.GetOne(dbutils.TxLookupPrefix, hash.Bytes())
+func ReadTxLookupEntry(db ethdb.Tx, txnHash common.Hash) *uint64 {
+	data, _ := db.GetOne(dbutils.TxLookupPrefix, txnHash.Bytes())
 	if len(data) == 0 {
 		return nil
 	}
@@ -131,11 +131,11 @@ func ReadTransactionDeprecated(db ethdb.Getter, hash common.Hash) (types.Transac
 	return nil, common.Hash{}, 0, 0
 }
 
-// ReadReceipt retrieves a specific transaction receipt from the database, along with
+// ReadReceiptDeprecated retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
-func ReadReceipt(db ethdb.Getter, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+func ReadReceiptDeprecated(db ethdb.Getter, txHash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber := ReadTxLookupEntryDeprecated(db, hash)
+	blockNumber := ReadTxLookupEntryDeprecated(db, txHash)
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
 	}
@@ -150,11 +150,11 @@ func ReadReceipt(db ethdb.Getter, hash common.Hash) (*types.Receipt, common.Hash
 	// Read all the receipts from the block and return the one with the matching hash
 	receipts := ReadReceiptsDeprecated(db, blockHash, *blockNumber)
 	for receiptIndex, receipt := range receipts {
-		if receipt.TxHash == hash {
+		if receipt.TxHash == txHash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)
 		}
 	}
-	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
 	return nil, common.Hash{}, 0, 0
 }
 

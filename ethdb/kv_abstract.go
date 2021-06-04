@@ -177,6 +177,7 @@ type Tx interface {
 
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	Comparator(bucket string) dbutils.CmpFunc
 

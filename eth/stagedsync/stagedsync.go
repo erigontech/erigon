@@ -129,3 +129,9 @@ func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snap
 	stagedSync.params.SnapshotDir = snapshotsDir
 	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }
+func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) error {
+	if stagedSync.params.SnapshotMigrator != nil {
+		return stagedSync.params.SnapshotMigrator.Final
+	}
+	return nil
+}
