@@ -690,6 +690,9 @@ func ReadRawReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64)
 // corresponding block body, so if the block body is not found it will return nil even
 // if the receipt itself is stored.
 func ReadReceipts(db ethdb.Tx, block *types.Block, senders []common.Address) types.Receipts {
+	if block == nil {
+		return nil
+	}
 	// We're deriving many fields from the block body, retrieve beside the receipt
 	receipts := ReadRawReceipts(db, block.NumberU64())
 	if receipts == nil {

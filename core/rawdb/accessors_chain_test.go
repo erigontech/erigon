@@ -327,6 +327,7 @@ func TestHeadStorage(t *testing.T) {
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
+	require := require.New(t)
 
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
@@ -361,30 +362,28 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
+	header := &types.Header{Number: big.NewInt(0)}
 
 	// Check that no receipt entries are in a pristine database
-	hash := common.BytesToHash([]byte{0x03, 0x14})
+	hash := header.Hash() //common.BytesToHash([]byte{0x03, 0x14})
 	b, senders, err := ReadBlockWithSenders(tx, hash, 0)
-	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.NoError(err)
+	//require.NotNil(t, b)
 	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
+
+	WriteHeader(tx, header)
 	// Insert the body that corresponds to the receipts
-	if err := WriteBody(tx, hash, 0, body); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteSenders(tx, hash, 0, body.SendersFromTxs()); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(WriteBody(tx, hash, 0, body))
+	require.NoError(WriteSenders(tx, hash, 0, body.SendersFromTxs()))
 
 	// Insert the receipt slice into the database and check presence
-	if err := WriteReceipts(tx, 0, receipts); err != nil {
-		t.Fatalf("WriteReceipts failed: %v", err)
-	}
+	require.NoError(WriteReceipts(tx, 0, receipts))
+
 	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
-	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.NoError(err)
+	require.NotNil(b)
 	if rs := ReadReceipts(tx, b, senders); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
@@ -393,31 +392,25 @@ func TestBlockReceiptStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
+	DeleteHeader(tx, hash, 0)
 	DeleteBody(tx, hash, 0)
 	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
-	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.NoError(err)
+	require.Nil(b)
 	if rs := ReadReceipts(tx, b, senders); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	b, _, err = ReadBlockWithSenders(tx, hash, 0)
-	require.NoError(t, err)
-	require.NotNil(t, b)
-	if err := checkReceiptsRLP(ReadRawReceipts(tx, b.NumberU64()), receipts); err != nil {
+	if err := checkReceiptsRLP(ReadRawReceipts(tx, 0), receipts); err != nil {
 		t.Fatal(err)
 	}
+	WriteHeader(tx, header)
 	// Sanity check that body alone without the receipt is a full purge
-	if err := WriteBody(tx, hash, 0, body); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := DeleteReceipts(tx, 0); err != nil {
-		t.Fatalf("DeleteReceipts failed: %v", err)
-	}
+	require.NoError(WriteBody(tx, hash, 0, body))
+	require.NoError(DeleteReceipts(tx, 0))
 	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
-	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.NoError(err)
+	require.NotNil(b)
 	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
