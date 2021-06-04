@@ -730,9 +730,6 @@ func (tx *MdbxTx) Commit() error {
 		slowTx = debug.SlowCommit()
 	}
 
-	//commitTimer := time.Now()
-	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
-
 	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
 		tx.PrintDebugInfo()
 	}
@@ -742,12 +739,15 @@ func (tx *MdbxTx) Commit() error {
 		return err
 	}
 
-	dbCommitPreparation.Update(latency.Preparation)
-	dbCommitGc.Update(latency.GC)
-	dbCommitAudit.Update(latency.Audit)
-	dbCommitWrite.Update(latency.Write)
-	dbCommitSync.Update(latency.Sync)
-	dbCommitEnding.Update(latency.Ending)
+	if tx.db.opts.label == Chain {
+		dbCommitPreparation.Update(latency.Preparation)
+		dbCommitGc.Update(latency.GC)
+		dbCommitAudit.Update(latency.Audit)
+		dbCommitWrite.Update(latency.Write)
+		dbCommitSync.Update(latency.Sync)
+		dbCommitEnding.Update(latency.Ending)
+		dbCommitBigBatchTimer.Update(latency.Whole)
+	}
 
 	if latency.Whole > slowTx {
 		log.Info("Commit",
