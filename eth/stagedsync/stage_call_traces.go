@@ -113,7 +113,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	prev := startBlock
 	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil && err == nil; k, v, err = traceCursor.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= endBlock {
+		if blockNum > endBlock {
 			break
 		}
 		if len(v) != common.AddressLength+1 {
@@ -179,9 +179,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	// Clean up before loading call traces to reclaim space
 	var prunedMin uint64 = math.MaxUint64
 	var prunedMax uint64 = 0
-	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.Next() {
+	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
 		blockNum := binary.BigEndian.Uint64(k)
-		if endBlock-blockNum <= params.FullImmutabilityThreshold {
+		if blockNum+params.FullImmutabilityThreshold <= endBlock {
 			break
 		}
 		select {
@@ -194,7 +194,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		}
-		if err = traceCursor.DeleteCurrent(); err != nil {
+		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
 		}
 		if blockNum < prunedMin {
@@ -232,15 +232,14 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 
-		lastChunk := roaring64.New()
 		if len(lastChunkBytes) > 0 {
+			lastChunk := roaring64.New()
 			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
+			currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
 		}
-
-		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
 		if err := bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {
@@ -253,11 +252,9 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 		currentBitmap.Clear()
 		return nil
 	}
-
 	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-
 	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
@@ -303,7 +300,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	traceCursor, err := db.CursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := db.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
 	}

@@ -58,6 +58,7 @@ var migrations = []Migration{
 	headerPrefixToSeparateBuckets,
 	removeCliqueBucket,
 	dbSchemaVersion,
+	rebuilCallTraceIndex,
 }
 
 type Migration struct {

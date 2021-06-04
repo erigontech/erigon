@@ -487,7 +487,7 @@ func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
 }
 
-// All buckets stored as keys of un-named bucket
+// ExistingBuckets - all buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string
 	rawTx := tx.tx
