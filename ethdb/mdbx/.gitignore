@@ -2,6 +2,7 @@
 *.dylib
 *.o
 config.h
+config2.h
 config_darwin.h
 config_linux.h
 config_win.h

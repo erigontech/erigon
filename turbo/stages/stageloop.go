@@ -205,7 +205,10 @@ func StageLoopStep(
 	}
 	rotx.Rollback()
 	headTd256 := new(uint256.Int)
-	headTd256.SetFromBig(headTd)
+	overflow := headTd256.SetFromBig(headTd)
+	if overflow {
+		return fmt.Errorf("headTds higher than 2^256-1")
+	}
 	updateHead(ctx, head, headHash, headTd256)
 
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
