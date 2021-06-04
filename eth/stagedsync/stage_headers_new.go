@@ -291,22 +291,22 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return fmt.Errorf("key in TD table has to be 40 bytes long: %x", lastK)
 		}
 		k = lastK
-		var maxTd big.Int
+		var maxTd *big.Int
 		var maxHash common.Hash
 		copy(maxHash[:], lastK[8:])
 		var maxNum uint64 = binary.BigEndian.Uint64(lastK[:8])
 		if k != nil {
-			if err = rlp.DecodeBytes(v, &maxTd); err != nil {
+			if err = rlp.DecodeBytes(v, maxTd); err != nil {
 				return err
 			}
 		}
 		for ; err == nil && k != nil && len(k) == 40 && bytes.Equal(k[:8], lastK[:8]); k, v, err = tdCursor.Prev() {
-			var td big.Int
+			var td *big.Int
 			if err = rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}
-			if td.Cmp(&maxTd) > 0 {
-				maxTd.Set(&td)
+			if td.Cmp(maxTd) > 0 {
+				maxTd.Set(td)
 				copy(maxHash[:], k[8:])
 				maxNum = binary.BigEndian.Uint64(k[:8])
 			}
