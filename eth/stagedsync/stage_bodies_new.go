@@ -180,6 +180,7 @@ Loop:
 			break
 		}
 		if test {
+			stopped = true
 			break
 		}
 		timer.Stop()
@@ -208,6 +209,9 @@ Loop:
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+	}
+	if stopped {
+		return common.ErrStopped
 	}
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 	return nil

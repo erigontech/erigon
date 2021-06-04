@@ -151,7 +151,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnRecoverSendersStage(senders, s, tx, 0, ctx.Done())
+						return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindSendersStage(u, s, tx, senders)
