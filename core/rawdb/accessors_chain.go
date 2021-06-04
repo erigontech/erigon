@@ -730,7 +730,7 @@ func ReadReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64) ty
 	}
 	return receipts
 }
-func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
+func ReadReceiptsByHashDeprecated(db ethdb.Getter, hash common.Hash) types.Receipts {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil
@@ -742,6 +742,17 @@ func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
 	return receipts
 }
 
+func ReadReceiptsByHash(db ethdb.Tx, hash common.Hash) types.Receipts {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil
+	}
+	receipts := ReadReceipts(db, hash, *number)
+	if receipts == nil {
+		return nil
+	}
+	return receipts
+}
 func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
 	h, _ := ReadCanonicalHash(db, number)
 	return ReadReceiptsDeprecated(db, h, number)
