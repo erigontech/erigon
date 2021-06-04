@@ -71,7 +71,7 @@ func OpenKV(path string, readOnly bool) (RwKV, error) {
 	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
 		kv, err = NewMDBX().Path(path).Open()
 	default:
-		opts := NewLMDB().Path(path)
+		opts := NewMDBX().Path(path)
 		if readOnly {
 			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}

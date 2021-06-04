@@ -419,10 +419,10 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		}
 	}
 
+	if traceCursor != nil {
+		traceCursor.Close()
+	}
 	if !useExternalTx {
-		if traceCursor != nil {
-			traceCursor.Close()
-		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
