@@ -778,19 +778,8 @@ func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) erro
 	return nil
 }
 
-// WriteReceipts stores all the transaction receipts belonging to a block.
+// AppendReceipts stores all the transaction receipts belonging to a block.
 func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) error {
-	logsC, err := tx.RwCursor(dbutils.Log)
-	if err != nil {
-		return err
-	}
-	defer logsC.Close()
-	receiptsC, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
-	if err != nil {
-		return err
-	}
-	defer receiptsC.Close()
-
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
@@ -804,18 +793,18 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 			return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 		}
 
-		if err = logsC.Append(dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
+		if err = tx.Append(dbutils.Log, dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
 			return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 		}
 	}
 
 	buf.Reset()
-	err = cbor.Marshal(buf, receipts)
+	err := cbor.Marshal(buf, receipts)
 	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
 
-	if err = receiptsC.Append(dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
+	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 	}
 	return nil

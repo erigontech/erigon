@@ -306,7 +306,6 @@ func (s *snTX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
 	}
 	return c.(RwCursorDupSort), nil
 }
-
 func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	v, err := s.dbTX.GetOne(bucket, key)
 	if err != nil {
@@ -333,10 +332,11 @@ func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (s *snTX) Put(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).Put(bucket, k, v)
+func (s *snTX) Put(bucket string, k, v []byte) error    { return s.dbTX.(RwTx).Put(bucket, k, v) }
+func (s *snTX) Append(bucket string, k, v []byte) error { return s.dbTX.(RwTx).Append(bucket, k, v) }
+func (s *snTX) AppendDup(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).AppendDup(bucket, k, v)
 }
-
 func (s *snTX) Delete(bucket string, k, v []byte) error {
 	return s.dbTX.(RwTx).Put(bucket, k, DeletedValue)
 }

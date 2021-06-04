@@ -380,13 +380,15 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 
 type MdbxTx struct {
 	readOnly         bool
+	cursorID         uint64
 	tx               *mdbx.Txn
 	db               *MdbxKV
-	cursors          []*mdbx.Cursor
+	cursors          map[uint64]*mdbx.Cursor
 	statelessCursors map[string]Cursor
 }
 
 type MdbxCursor struct {
+	id         uint64
 	tx         *MdbxTx
 	bucketName string
 	dbi        mdbx.DBI
@@ -828,7 +830,8 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
-	tx.cursors = []*mdbx.Cursor{}
+	tx.cursors = nil
+	tx.statelessCursors = nil
 }
 
 func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
@@ -882,6 +885,21 @@ func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 		return false, err
 	}
 	return bytes.Equal(key, k), nil
+}
+
+func (tx *MdbxTx) Append(bucket string, k, v []byte) error {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
+	}
+	return c.Append(k, v)
+}
+func (tx *MdbxTx) AppendDup(bucket string, k, v []byte) error {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return err
+	}
+	return c.(*MdbxDupSortCursor).AppendDup(k, v)
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
@@ -967,7 +985,8 @@ func (tx *MdbxTx) Cursor(bucket string) (Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.cursorID}
+	tx.cursorID++
 
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
@@ -977,9 +996,9 @@ func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
 
 	// add to auto-cleanup on end of transactions
 	if tx.cursors == nil {
-		tx.cursors = make([]*mdbx.Cursor, 0, 1)
+		tx.cursors = map[uint64]*mdbx.Cursor{}
 	}
-	tx.cursors = append(tx.cursors, c.c)
+	tx.cursors[c.id] = c.c
 	return c, nil
 }
 
@@ -1409,21 +1428,7 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
-		l := len(c.tx.cursors)
-		if l == 0 {
-			c.c = nil
-			return
-		}
-		//TODO: Find a better solution to avoid the leak?
-		newCursors := make([]*mdbx.Cursor, l-1)
-		i := 0
-		for _, cc := range c.tx.cursors {
-			if cc != c.c {
-				newCursors[i] = cc
-				i++
-			}
-		}
-		c.tx.cursors = newCursors
+		delete(c.tx.cursors, c.id)
 		c.c = nil
 	}
 }
