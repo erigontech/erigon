@@ -46,6 +46,6 @@ var rebuilCallTraceIndex = Migration{
 		if err = stages.SaveStageUnwind(db, stages.CallTraces, blockNum-1); err != nil {
 			return err
 		}
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
