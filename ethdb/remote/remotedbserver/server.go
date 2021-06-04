@@ -30,7 +30,7 @@ const MaxTxTTL = 30 * time.Second
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
 // 1.2.0 - Added separated services for mining and txpool methods
 // 2.0.0 - Rename all buckets
-var KvServiceAPIVersion = &types.VersionReply{Major: 2, Minor: 0, Patch: 0}
+var KvServiceAPIVersion = &types.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
