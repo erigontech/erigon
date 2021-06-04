@@ -149,6 +149,8 @@ type StatelessWriteTx interface {
 	Deleter
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	Append(bucket string, k, v []byte) error
+	AppendDup(bucket string, k, v []byte) error
 }
 
 type StatelessRwTx interface {
@@ -170,6 +172,7 @@ type Tx interface {
 
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	Comparator(bucket string) dbutils.CmpFunc
 

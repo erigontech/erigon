@@ -107,7 +107,6 @@ func executeBlockWithGo(
 	batch ethdb.Database,
 	params ExecuteBlockCfg,
 	writeChangesets bool,
-	traceCursor ethdb.RwCursorDupSort,
 	accumulator *shards.Accumulator,
 	readerWriterWrapper func(r state.StateReader, w state.WriterWithChangeSets) *TouchReaderWriter,
 	checkTEVM func(hash common.Hash) (bool, error),
@@ -173,11 +172,11 @@ func executeBlockWithGo(
 				v[common.AddressLength] |= 2
 			}
 			if j == 0 {
-				if err = traceCursor.Append(blockNumEnc[:], v[:]); err != nil {
+				if err = tx.Append(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			} else {
-				if err = traceCursor.AppendDup(blockNumEnc[:], v[:]); err != nil {
+				if err = tx.AppendDup(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			}
@@ -250,24 +249,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	var traceCursor ethdb.RwCursorDupSort
-	if cfg.writeCallTraces {
-		var err error
-		if traceCursor, err = tx.RwCursorDupSort(dbutils.CallTraceSet); err != nil {
-			return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
-		}
-		defer traceCursor.Close()
-	}
-
-	var tevmStatusCursor ethdb.RwCursorDupSort
-	if cfg.writeTEVM {
-		var err error
-		if tevmStatusCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
-			return fmt.Errorf("%s: failed to create cursor for TEVM status: %v", logPrefix, err)
-		}
-		defer tevmStatusCursor.Close()
-	}
-
 	var batch ethdb.DbWithPendingMutations
 	batch = ethdb.NewBatch(tx)
 	defer batch.Rollback()
@@ -316,39 +297,36 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			checkTEVMCode = nil
 		}
 
-		if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, traceCursor, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
+		if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
 			return err
 		}
 
 		// TEVM marking new contracts sub-stage
 		if cfg.writeTEVM {
 			codeHashes := stateReaderWriter.AllTouches()
-			touchedСontracts := make(common.Hashes, 0, len(codeHashes))
+			touchedContracts := make(common.Hashes, 0, len(codeHashes))
 
 			for codeHash := range codeHashes {
-				touchedСontracts = append(touchedСontracts, codeHash)
+				touchedContracts = append(touchedContracts, codeHash)
 			}
-			sort.Sort(touchedСontracts)
+			sort.Sort(touchedContracts)
 
 			var blockNumEnc [8]byte
 			binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
 
-			var prev common.Hash
-			for i, hash := range touchedСontracts {
+			for i, hash := range touchedContracts {
 				var h [common.HashLength]byte
 				copy(h[:], hash[:])
 
 				if i == 0 {
-					if err = tevmStatusCursor.Append(blockNumEnc[:], h[:]); err != nil {
+					if err = tx.Append(dbutils.ContractTEVMCodeStatusBucket, blockNumEnc[:], h[:]); err != nil {
 						return err
 					}
 				} else {
-					if err = tevmStatusCursor.AppendDup(blockNumEnc[:], h[:]); err != nil {
+					if err = tx.AppendDup(dbutils.ContractTEVMCodeStatusBucket, blockNumEnc[:], h[:]); err != nil {
 						return err
 					}
 				}
-
-				copy(prev[:], h[:])
 			}
 		}
 
@@ -363,9 +341,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				if err = s.Update(tx, stageProgress); err != nil {
 					return err
 				}
-				if traceCursor != nil {
-					traceCursor.Close()
-				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}
@@ -375,17 +350,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				}
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
-
-				if cfg.writeCallTraces {
-					if traceCursor, err = tx.RwCursorDupSort(dbutils.CallTraceSet); err != nil {
-						return fmt.Errorf("%s: failed to create cursor for call traces: %v", logPrefix, err)
-					}
-				}
-				if cfg.writeTEVM {
-					if tevmStatusCursor, err = tx.RwCursorDupSort(dbutils.ContractTEVMCodeStatusBucket); err != nil {
-						return fmt.Errorf("%s: failed to create cursor for tevm statuses: %v", logPrefix, err)
-					}
-				}
 			}
 			batch = ethdb.NewBatch(tx)
 			// TODO: This creates stacked up deferrals
@@ -419,9 +383,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 		}
 	}
 
-	if traceCursor != nil {
-		traceCursor.Close()
-	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -438,11 +399,13 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 	if err != nil {
 		return fmt.Errorf("%s: failed to create cursor for pruning %s: %v", logPrefix, name, err)
 	}
+	defer changeSetCursor.Close()
+
 	var prunedMin uint64 = math.MaxUint64
 	var prunedMax uint64 = 0
 	var k []byte
 
-	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.Next() {
+	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.NextNoDup() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if endBlock-blockNum <= pruningDistance {
 			break
@@ -457,7 +420,7 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, name string, tableName str
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		}
-		if err = changeSetCursor.DeleteCurrent(); err != nil {
+		if err = changeSetCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove %s for block %d: %v", logPrefix, name, blockNum, err)
 		}
 		if blockNum < prunedMin {

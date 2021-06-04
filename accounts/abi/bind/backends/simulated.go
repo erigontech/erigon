@@ -260,7 +260,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
+	receipt, _, _, _ := rawdb.ReadReceiptDeprecated(b.database, txHash)
 	return receipt, nil
 }
 

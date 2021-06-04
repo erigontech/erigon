@@ -450,6 +450,25 @@ func (tx *lmdbTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	return nil
 }
 
+func (tx *lmdbTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
 // All buckets stored as keys of un-named bucketw
 func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
@@ -706,6 +725,24 @@ func (tx *lmdbTx) Put(bucket string, k, v []byte) error {
 	}
 
 	return tx.tx.Put(lmdb.DBI(b.DBI), k, v, 0)
+}
+
+func (tx *lmdbTx) Append(bucket string, k, v []byte) error {
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.Append(k, v)
+}
+
+func (tx *lmdbTx) AppendDup(bucket string, k, v []byte) error {
+	c, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.AppendDup(k, v)
 }
 
 func (tx *lmdbTx) Delete(bucket string, k, v []byte) error {

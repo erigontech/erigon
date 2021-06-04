@@ -286,8 +286,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 
 func TestDump(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
-	w := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
-	state := New(NewPlainStateReader(ethdb.NewRoTxDb(tx)))
+	w := NewPlainStateWriter(tx, tx, 0)
+	state := New(NewPlainStateReader(tx))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -314,7 +314,7 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockWriter := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1)
+	blockWriter := NewPlainStateWriter(tx, tx, 1)
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)

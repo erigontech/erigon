@@ -119,17 +119,6 @@ func (w *ChangeSetWriter) CreateContract(address common.Address) error {
 }
 
 func (w *ChangeSetWriter) WriteChangeSets() error {
-	accC, err := w.db.RwCursorDupSort(dbutils.AccountChangeSetBucket)
-	if err != nil {
-		return err
-	}
-	defer accC.Close()
-	stC, err := w.db.RwCursorDupSort(dbutils.StorageChangeSetBucket)
-	if err != nil {
-		return err
-	}
-	defer stC.Close()
-
 	accountChanges, err := w.GetAccountChanges()
 	if err != nil {
 		return err
@@ -137,11 +126,11 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	var prevK []byte
 	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = accC.AppendDup(k, v); err != nil {
+			if err = w.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = accC.Append(k, v); err != nil {
+			if err = w.db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}
@@ -161,11 +150,11 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	}
 	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = stC.AppendDup(k, v); err != nil {
+			if err = w.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = stC.Append(k, v); err != nil {
+			if err = w.db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}

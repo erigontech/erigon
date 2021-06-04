@@ -347,7 +347,7 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 
-	blockWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
+	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
