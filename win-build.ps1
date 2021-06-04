@@ -343,7 +343,7 @@ Set-Location $MyContext.Directory
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
 $Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
-$Erigon.Build   = "go build -v -trimpath -tags=mdbx -ldflags ""-X main.gitCommit=$($Erigon.Commit) -X main.gitBranch=$($Erigon.Branch)"""
+$Erigon.Build   = "go build -v -trimpath -ldflags ""-X main.gitCommit=$($Erigon.Commit) -X main.gitBranch=$($Erigon.Branch)"""
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
 
