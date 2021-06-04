@@ -59,7 +59,7 @@ var migrations = map[ethdb.Label][]Migration{
 		headerPrefixToSeparateBuckets,
 		removeCliqueBucket,
 		dbSchemaVersion,
-                rebuilCallTraceIndex,
+		rebuilCallTraceIndex,
 	},
 	ethdb.TxPool: {},
 	ethdb.Sentry: {},
