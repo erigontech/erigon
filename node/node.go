@@ -501,17 +501,7 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string, datadir string) (*ethdb.ObjectDatabase, error) {
-	return n.OpenDatabaseWithFreezer(name, datadir)
-}
-
-// OpenDatabaseWithFreezer opens an existing database with the given name (or
-// creates one if no previous can be found) from within the node's data directory,
-// also attaching a chain freezer to it that moves ancient chain data from the
-// database to immutable append-only files. If the node is an ephemeral one, a
-// memory database is returned.
-// NOTE: kept for compatibility and for easier rebases (erigon)
-func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.ObjectDatabase, error) {
+func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -519,66 +509,75 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 		return nil, ErrNodeStopped
 	}
 
+	var name string
+	switch label {
+	case ethdb.Chain:
+		name = "chaindata"
+	case ethdb.TxPool:
+		name = "txpool"
+	default:
+		name = "test"
+	}
 	var db *ethdb.ObjectDatabase
 	if n.config.DataDir == "" {
-		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
-	} else {
-		dbPath := n.config.ResolvePath(name)
+		n.databases = append(n.databases, db)
+		return db, nil
+	}
+	dbPath := n.config.ResolvePath(name)
 
-		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
-		if n.config.MDBX {
-			log.Info("Opening Database (MDBX)")
-			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-				if exclusive {
-					opts = opts.Exclusive()
-				}
-				kv, err1 := opts.Open()
-				if err1 != nil {
-					return nil, err1
-				}
-				return ethdb.NewObjectDatabase(kv), nil
+	var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
+	if n.config.MDBX {
+		log.Info("Opening Database", "label", name, "type", "mdbx")
+		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+			opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
+			if exclusive {
+				opts = opts.Exclusive()
 			}
-		} else {
-			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
-			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-				if exclusive {
-					opts = opts.Exclusive()
-				}
-				kv, err1 := opts.Open()
-				if err1 != nil {
-					return nil, err1
-				}
-				return ethdb.NewObjectDatabase(kv), nil
+			kv, err1 := opts.Open()
+			if err1 != nil {
+				return nil, err1
 			}
+			return ethdb.NewObjectDatabase(kv), nil
 		}
-		var err error
+	} else {
+		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
+		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+			opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
+			if exclusive {
+				opts = opts.Exclusive()
+			}
+			kv, err1 := opts.Open()
+			if err1 != nil {
+				return nil, err1
+			}
+			return ethdb.NewObjectDatabase(kv), nil
+		}
+	}
+	var err error
+	db, err = openFunc(false)
+	if err != nil {
+		return nil, err
+	}
+	migrator := migrations.NewMigrator(label)
+	has, err := migrator.HasPendingMigrations(db.RwKV())
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		log.Info("Re-Opening DB in exclusive mode to apply migrations")
+		db.Close()
+		db, err = openFunc(true)
+		if err != nil {
+			return nil, err
+		}
+		if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
+			return nil, err
+		}
+		db.Close()
 		db, err = openFunc(false)
 		if err != nil {
 			return nil, err
-		}
-		migrator := migrations.NewMigrator()
-		has, err := migrator.HasPendingMigrations(db)
-		if err != nil {
-			return nil, err
-		}
-		if has {
-			log.Info("Re-Opening DB in exclusive mode to apply migrations")
-			db.Close()
-			db, err = openFunc(true)
-			if err != nil {
-				return nil, err
-			}
-			if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
-				return nil, err
-			}
-			db.Close()
-			db, err = openFunc(false)
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
 

@@ -130,7 +130,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
 	var err error
-	chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
+	chainDb, err = stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		return nil, err
 	}
