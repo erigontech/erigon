@@ -58,8 +58,6 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Frontier`, "No receipt validation before Byzantium")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Homestead`, "No receipt validation before Byzantium")
 
-	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcHomesteadToDao/DaoTransactions.json`, "Don't care about splitting from ETC anymore")
-
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
