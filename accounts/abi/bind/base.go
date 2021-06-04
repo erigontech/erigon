@@ -210,7 +210,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	var err error
 
 	// Ensure a valid value field and resolve the account nonce
-	value := uint256.NewInt()
+	value := uint256.NewInt(0)
 	if opts.Value != nil {
 		overflow := value.SetFromBig(opts.Value)
 		if overflow {

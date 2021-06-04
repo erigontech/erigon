@@ -30,11 +30,11 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
+			getBlockTx(from, to, uint256.NewInt(2000)),
 			fromKey,
 		},
 	})
@@ -59,7 +59,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	// insert a correct block
 	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(5000)),
+			getBlockTx(data.addresses[1], to, uint256.NewInt(5000)),
 			data.keys[1],
 		},
 	})
@@ -97,11 +97,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
+			getBlockTx(from, to, uint256.NewInt(2000)),
 			fromKey,
 		},
 	})
@@ -125,7 +125,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	// insert a correct block
 	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(5000)),
+			getBlockTx(from, to, uint256.NewInt(5000)),
 			fromKey,
 		},
 	})
@@ -160,11 +160,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
+			getBlockTx(from, to, uint256.NewInt(2000)),
 			fromKey,
 		},
 	})
@@ -185,7 +185,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	// insert a correct block
 	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 	})
@@ -220,11 +220,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(2000)),
+			getBlockTx(from, to, uint256.NewInt(2000)),
 			fromKey,
 		},
 	})
@@ -245,7 +245,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	// insert a correct block
 	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 	})
@@ -280,11 +280,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(3000)),
+			getBlockTx(from, to, uint256.NewInt(3000)),
 			fromKey,
 		},
 		1: {
-			getBlockTx(data.addresses[1], to, uint256.NewInt().SetUint64(2000)),
+			getBlockTx(data.addresses[1], to, uint256.NewInt(2000)),
 			data.keys[1],
 		},
 	})
@@ -305,7 +305,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	// insert a correct block
 	m, chain, err = genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(1000)),
+			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
 		},
 	})
@@ -343,7 +343,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
+			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
 		},
 		1: {
@@ -416,7 +416,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
+			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
 		},
 		1: {
@@ -489,7 +489,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
+			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
 		},
 		1: {
@@ -571,7 +571,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, uint256.NewInt().SetUint64(10)),
+			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
 		},
 		1: {

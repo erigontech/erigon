@@ -353,14 +353,14 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 			b := stack1.Pop(edge.pc0)
 
 			if a.kind == ConcreteValue && b.kind == ConcreteValue {
-				v := uint256.NewInt()
+				v := uint256.NewInt(0)
 				v.And(a.value, b.value)
 				stack1.Push(AbsValueConcrete(*v))
 			} else {
 				stack1.Push(AbsValueTop(edge.pc0))
 			}
 		} else if stmt.opcode == PC {
-			v := uint256.NewInt()
+			v := uint256.NewInt(0)
 			v.SetUint64(uint64(stmt.pc))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {

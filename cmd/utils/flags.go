@@ -1245,8 +1245,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
-	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name, stack.Config().DataDir)
+	chainDb, err := stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

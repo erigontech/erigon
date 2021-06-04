@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -38,37 +37,30 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDatabase2(path string, applyMigrations bool, snapshotDir string, snapshotMode snapshotsync.SnapshotMode) ethdb.RwKV {
-	db := ethdb.NewObjectDatabase(openKV(path, false))
+func openDB(path string, applyMigrations bool) ethdb.RwKV {
+	label := ethdb.Chain
+	db := ethdb.NewObjectDatabase(openKV(label, path, false))
 	if applyMigrations {
-		has, err := migrations.NewMigrator().HasPendingMigrations(db)
+		has, err := migrations.NewMigrator(label).HasPendingMigrations(db.RwKV())
 		if err != nil {
 			panic(err)
 		}
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
-			db = ethdb.NewObjectDatabase(openKV(path, true))
-			if err := migrations.NewMigrator().Apply(db, datadir, database != "lmdb"); err != nil {
+			db = ethdb.NewObjectDatabase(openKV(label, path, true))
+			if err := migrations.NewMigrator(label).Apply(db, datadir, database != "lmdb"); err != nil {
 				panic(err)
 			}
 			db.Close()
-			db = ethdb.NewObjectDatabase(openKV(path, false))
+			db = ethdb.NewObjectDatabase(openKV(label, path, false))
 		}
 	}
 	metrics.AddCallback(db.RwKV().CollectMetrics)
 	return db.RwKV()
 }
 
-func openDatabase(path string, applyMigrations bool) ethdb.RwKV {
-	mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-	return openDatabase2(path, applyMigrations, snapshotDir, mode)
-}
-
-func openKV(path string, exclusive bool) ethdb.RwKV {
+func openKV(label ethdb.Label, path string, exclusive bool) ethdb.RwKV {
 	if database == "lmdb" {
 		opts := ethdb.NewLMDB().Path(path)
 		if exclusive {
@@ -87,14 +79,9 @@ func openKV(path string, exclusive bool) ethdb.RwKV {
 		return kv
 	}
 
-	opts := ethdb.NewMDBX().Path(path)
+	opts := ethdb.NewMDBX().Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()
-	}
-	if mapSizeStr != "" {
-		var mapSize datasize.ByteSize
-		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-		opts = opts.MapSize(mapSize)
 	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))

@@ -38,7 +38,7 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
@@ -54,7 +54,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
@@ -70,7 +70,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageExec(db, ctx); err != nil {
@@ -86,7 +86,7 @@ var cmdStageTrie = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
@@ -102,7 +102,7 @@ var cmdStageHashState = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
@@ -118,7 +118,7 @@ var cmdStageHistory = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
@@ -134,7 +134,7 @@ var cmdLogIndex = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
@@ -150,7 +150,7 @@ var cmdCallTraces = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
@@ -166,7 +166,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
@@ -181,7 +181,7 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDB(chaindata, false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -197,7 +197,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDB(chaindata, false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -212,7 +212,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, false)
+		db := openDB(chaindata, false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -226,7 +226,7 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
@@ -237,7 +237,7 @@ var cmdSetStorageMode = &cobra.Command{
 	Use:   "set_storage_mode",
 	Short: "Override storage mode (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 		return overrideStorageMode(db)
 	},
@@ -737,20 +737,22 @@ func printAllStages(db ethdb.RoKV, ctx context.Context) error {
 	return db.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) })
 }
 
-func printAppliedMigrations(db ethdb.RwKV, _ context.Context) error {
-	applied, err := migrations.AppliedMigrations(ethdb.NewObjectDatabase(db), false /* withPayload */)
-	if err != nil {
-		return err
-	}
-	var appliedStrs = make([]string, len(applied))
-	i := 0
-	for k := range applied {
-		appliedStrs[i] = k
-		i++
-	}
-	sort.Strings(appliedStrs)
-	log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
-	return nil
+func printAppliedMigrations(db ethdb.RwKV, ctx context.Context) error {
+	return db.View(ctx, func(tx ethdb.Tx) error {
+		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
+		if err != nil {
+			return err
+		}
+		var appliedStrs = make([]string, len(applied))
+		i := 0
+		for k := range applied {
+			appliedStrs[i] = k
+			i++
+		}
+		sort.Strings(appliedStrs)
+		log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
+		return nil
+	})
 }
 
 func removeMigration(db ethdb.RwKV, ctx context.Context) error {

@@ -46,6 +46,13 @@ var (
 )
 
 type DBVerbosityLvl int8
+type Label uint8
+
+const (
+	Chain  Label = 0
+	TxPool Label = 1
+	Sentry Label = 2
+)
 
 type Has interface {
 	// Has indicates whether a key exists in the database.

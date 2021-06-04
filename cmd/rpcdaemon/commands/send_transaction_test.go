@@ -57,6 +57,6 @@ func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Tra
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt().SetUint64(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
+	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
 	return tx
 }

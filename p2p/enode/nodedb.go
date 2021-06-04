@@ -100,7 +100,7 @@ func newMemoryDB() (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
 	if UseMDBX {
-		db.kv, err = ethdb.NewMDBX().InMem().WithBucketsConfig(bucketsConfig).Open()
+		db.kv, err = ethdb.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ func newPersistentDB(path string) (*DB, error) {
 	var kv ethdb.RwKV
 	var err error
 	if UseMDBX {
-		kv, err = ethdb.NewMDBX().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+		kv, err = ethdb.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 		if err != nil {
 			return nil, err
 		}

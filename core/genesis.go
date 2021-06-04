@@ -286,7 +286,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
 			key := key
-			val := uint256.NewInt().SetBytes(value.Bytes())
+			val := uint256.NewInt(0).SetBytes(value.Bytes())
 			statedb.SetState(addr, &key, *val)
 		}
 
