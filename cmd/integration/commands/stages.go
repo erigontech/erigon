@@ -445,7 +445,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, block, ch, cfg, nil)
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, block, ch, cfg, nil)
 		if err != nil {
 			return err
 		}
