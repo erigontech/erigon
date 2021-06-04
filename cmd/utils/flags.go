@@ -426,7 +426,7 @@ var (
 		Value: 30303,
 	}
 	ListenPort65Flag = cli.IntFlag{
-		Name:  "p2p.65.port",
+		Name:  "p2p.eth65.port",
 		Usage: "ETH65 Network listening port",
 		Value: 30304,
 	}
