@@ -127,7 +127,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	// If currentBaseFee is defined, add it to the vmContext.
 	if pre.Env.BaseFee != nil {
 		vmContext.BaseFee = new(uint256.Int)
-		vmContext.BaseFee.SetFromBig(pre.Env.BaseFee)
+		overflow := vmContext.BaseFee.SetFromBig(pre.Env.BaseFee)
+		if overflow {
+			return nil, nil, fmt.Errorf("pre.Env.BaseFee higher than 2^256-1")
+		}
 	}
 	// If DAO is supported/enabled, we need to handle it here. In geth 'proper', it's
 	// done in StateProcessor.Process(block, ...), right before transactions are applied.

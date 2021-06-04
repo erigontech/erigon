@@ -69,7 +69,10 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash
 		headTd = new(big.Int)
 	}
 	headTd256 = new(uint256.Int)
-	headTd256.SetFromBig(headTd)
+	overflow := headTd256.SetFromBig(headTd)
+	if overflow {
+		return 0, [32]byte{}, nil, fmt.Errorf("headTd higher than 2^256-1")
+	}
 	return headHeight, headHash, headTd256, nil
 }
 

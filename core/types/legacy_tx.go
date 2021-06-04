@@ -64,9 +64,9 @@ type LegacyTx struct {
 	GasPrice *uint256.Int // wei per gas
 }
 
-func (tx LegacyTx) GetPrice() *uint256.Int {
-	return tx.GasPrice
-}
+func (tx LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
+func (tx LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
+func (tx LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
 
 func (tx LegacyTx) Cost() *uint256.Int {
 	total := new(uint256.Int).SetUint64(tx.Gas)

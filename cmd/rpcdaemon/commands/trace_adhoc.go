@@ -116,19 +116,31 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 	}
 	gasPrice := new(uint256.Int)
 	if args.GasPrice != nil {
-		gasPrice.SetFromBig(args.GasPrice.ToInt())
+		overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	var tip *uint256.Int
 	if args.Tip != nil {
-		tip.SetFromBig(args.Tip.ToInt())
+		overflow := tip.SetFromBig(args.Tip.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.Tip higher than 2^256-1"))
+		}
 	}
 	var feeCap *uint256.Int
 	if args.FeeCap != nil {
-		feeCap.SetFromBig(args.FeeCap.ToInt())
+		overflow := feeCap.SetFromBig(args.FeeCap.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.FeeCap higher than 2^256-1"))
+		}
 	}
 	value := new(uint256.Int)
 	if args.Value != nil {
-		value.SetFromBig(args.Value.ToInt())
+		overflow := value.SetFromBig(args.Value.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.Value higher than 2^256-1"))
+		}
 	}
 	var data []byte
 	if args.Data != nil {
