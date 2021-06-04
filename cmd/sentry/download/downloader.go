@@ -99,9 +99,11 @@ func RecvUploadMessage(ctx context.Context,
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
 		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
 		eth.ToProto[eth.ETH65][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH65][eth.GetReceiptsMsg],
 
 		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
 		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
@@ -127,7 +129,6 @@ func RecvUploadMessage(ctx context.Context,
 		if req == nil {
 			return
 		}
-
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
 		}

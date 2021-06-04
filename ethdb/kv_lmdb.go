@@ -727,6 +727,24 @@ func (tx *lmdbTx) Put(bucket string, k, v []byte) error {
 	return tx.tx.Put(lmdb.DBI(b.DBI), k, v, 0)
 }
 
+func (tx *lmdbTx) Append(bucket string, k, v []byte) error {
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.Append(k, v)
+}
+
+func (tx *lmdbTx) AppendDup(bucket string, k, v []byte) error {
+	c, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.AppendDup(k, v)
+}
+
 func (tx *lmdbTx) Delete(bucket string, k, v []byte) error {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {

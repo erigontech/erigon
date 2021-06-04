@@ -156,6 +156,8 @@ type StatelessWriteTx interface {
 	Deleter
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	Append(bucket string, k, v []byte) error
+	AppendDup(bucket string, k, v []byte) error
 }
 
 type StatelessRwTx interface {

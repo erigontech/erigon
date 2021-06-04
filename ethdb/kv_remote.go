@@ -252,6 +252,8 @@ func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, err
 func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
+func (tx *remoteTx) Append(bucket string, k, v []byte) error    { panic("no write methods") }
+func (tx *remoteTx) AppendDup(bucket string, k, v []byte) error { panic("no write methods") }
 
 func (tx *remoteTx) Commit() error {
 	panic("remote db is read-only")

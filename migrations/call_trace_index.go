@@ -19,7 +19,7 @@ var rebuilCallTraceIndex = Migration{
 		}
 		if !sm.CallTraces {
 			// Call traces are not on, nothing to migrate
-			return nil
+			return CommitProgress(db, nil, true)
 		}
 		// Find the lowest key in the TraceCallSet table
 		tx := db.(ethdb.HasTx).Tx()
@@ -35,12 +35,12 @@ var rebuilCallTraceIndex = Migration{
 		}
 		if k == nil {
 			log.Warn("Nothing to rebuild, CallTraceSet table is empty")
-			return nil
+			return CommitProgress(db, nil, true)
 		}
 		blockNum := binary.BigEndian.Uint64((k))
 		if blockNum == 0 {
 			log.Warn("Nothing to rebuild, CallTraceSet's first record", "number", blockNum)
-			return nil
+			return CommitProgress(db, nil, true)
 		}
 		log.Info("First record in CallTraceTable", "number", blockNum)
 		if err = stages.SaveStageUnwind(db, stages.CallTraces, blockNum-1); err != nil {

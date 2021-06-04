@@ -71,7 +71,7 @@ func hashedWriterGen(tx ethdb.RwTx) stateWriterGen {
 
 func plainWriterGen(tx ethdb.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, blockNum)
+		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}
 }
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
