@@ -64,7 +64,7 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.LmdbFilename)
+		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.MdbxFilename)
 		if err != nil {
 			return err
 		}
