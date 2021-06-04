@@ -753,6 +753,9 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 	case params.CalaverasChainName:
 		chainConfig = params.CalaverasChainConfig
 		genesis = core.DefaultCalaverasGenesisBlock()
+	case params.SokolChainName:
+		chainConfig = params.SokolChainConfig
+		genesis = core.DefaultSokolGenesisBlock()
 	}
 	events := remotedbserver.NewEvents()
 
