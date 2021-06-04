@@ -82,7 +82,7 @@ func StageLoop(
 		if !initialCycle && stateStream {
 			accumulator = &shards.Accumulator{}
 		}
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead, sync.GetSnapshotMigratorFinal()); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -109,6 +109,7 @@ func StageLoopStep(
 	initialCycle bool,
 	accumulator *shards.Accumulator,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	// avoid crash because Erigon's core does many things -
 	defer func() {
@@ -203,6 +204,13 @@ func StageLoopStep(
 	if headTd, err = rawdb.ReadTd(rotx, headHash, head); err != nil {
 		return err
 	}
+
+	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
+		err = snapshotMigratorFinal(rotx)
+		if err != nil {
+			log.Error("snapshot migration failed", "err", err)
+		}
+	}
 	rotx.Rollback()
 	headTd256 := new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
@@ -215,6 +223,7 @@ func StageLoopStep(
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 

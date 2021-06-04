@@ -1,10 +1,10 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 1 --tags 'mdbx'
+GOTEST = go test ./... -p 1
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GOBUILD = env GO111MODULE=on go build -trimpath -tags=mdbx -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
-GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx,debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
+GOBUILD = env GO111MODULE=on go build -trimpath -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
+GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
@@ -18,7 +18,6 @@ endif
 ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
-
 all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
 go-version:
@@ -152,11 +151,11 @@ test-mdbx:
 	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci: mdbx
 	@echo "--> Running linter for code"
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint

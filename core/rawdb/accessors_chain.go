@@ -307,26 +307,18 @@ func ReadTransactions(db ethdb.Tx, baseTxId uint64, amount uint32) ([]types.Tran
 	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-	c, err := db.Cursor(dbutils.EthTx)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
 
-	var decodeErr error
-	for k, v, err := c.Seek(txIdKey); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, err
-		}
+	if err := db.ForAmount(dbutils.EthTx, txIdKey, amount, func(k, v []byte) error {
+		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
 		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
-			return nil, decodeErr
+			return decodeErr
 		}
 		i++
-		if i >= amount {
-			break
-		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
 	return txs, nil
@@ -627,9 +619,9 @@ func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db ethdb.Tx, hash common.Hash, number uint64) types.Receipts {
+func ReadRawReceipts(db ethdb.Tx, blockNum uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
-	data, err := db.GetOne(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number))
+	data, err := db.GetOne(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNum))
 	if err != nil {
 		log.Error("ReadRawReceipts failed", "err", err)
 	}
@@ -638,26 +630,22 @@ func ReadRawReceipts(db ethdb.Tx, hash common.Hash, number uint64) types.Receipt
 	}
 	var receipts types.Receipts
 	if err := cbor.Unmarshal(&receipts, bytes.NewReader(data)); err != nil {
-		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
+		log.Error("receipt unmarshal failed", "err", err)
 		return nil
 	}
 
-	c, err := db.Cursor(dbutils.Log)
-	if err != nil {
-		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
-		return nil
-	}
-	defer c.Close()
-	if err := ethdb.Walk(c, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+	prefix := make([]byte, 8)
+	binary.BigEndian.PutUint64(prefix, blockNum)
+	if err := db.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return false, fmt.Errorf("receipt unmarshal failed: %x, %w", hash, err)
+			return fmt.Errorf("receipt unmarshal failed:  %w", err)
 		}
 
 		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
-		return true, nil
+		return nil
 	}); err != nil {
-		log.Error("logs fetching failed", "hash", hash, "err", err)
+		log.Error("logs fetching failed", "err", err)
 		return nil
 	}
 
@@ -701,27 +689,18 @@ func ReadRawReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64)
 // The current implementation populates these metadata fields by reading the receipts'
 // corresponding block body, so if the block body is not found it will return nil even
 // if the receipt itself is stored.
-func ReadReceipts(db ethdb.Tx, hash common.Hash, number uint64) types.Receipts {
+func ReadReceipts(db ethdb.Tx, block *types.Block, senders []common.Address) types.Receipts {
+	if block == nil {
+		return nil
+	}
 	// We're deriving many fields from the block body, retrieve beside the receipt
-	receipts := ReadRawReceipts(db, hash, number)
+	receipts := ReadRawReceipts(db, block.NumberU64())
 	if receipts == nil {
 		return nil
 	}
-	body := ReadBody(db, hash, number)
-	if body == nil {
-		log.Error("Missing body but have receipt", "hash", hash, "number", number)
-		return nil
-	}
-	senders, err := ReadSenders(db, hash, number)
-	if err != nil {
-		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
-		return nil
-	}
-	if senders == nil {
-		return nil
-	}
-	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
-		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
+	block.Body().SendersToTxs(senders)
+	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
+		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err)
 		return nil
 	}
 	return receipts
@@ -751,7 +730,7 @@ func ReadReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64) ty
 	}
 	return receipts
 }
-func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
+func ReadReceiptsByHashDeprecated(db ethdb.Getter, hash common.Hash) types.Receipts {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil
@@ -763,6 +742,20 @@ func ReadReceiptsByHash(db ethdb.Getter, hash common.Hash) types.Receipts {
 	return receipts
 }
 
+func ReadReceiptsByHash(db ethdb.Tx, hash common.Hash) (types.Receipts, error) {
+	b, s, err := ReadBlockByHashWithSenders(db, hash)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+	receipts := ReadReceipts(db, b, s)
+	if receipts == nil {
+		return nil, nil
+	}
+	return receipts, nil
+}
 func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
 	h, _ := ReadCanonicalHash(db, number)
 	return ReadReceiptsDeprecated(db, h, number)
@@ -799,19 +792,8 @@ func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) erro
 	return nil
 }
 
-// WriteReceipts stores all the transaction receipts belonging to a block.
+// AppendReceipts stores all the transaction receipts belonging to a block.
 func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) error {
-	logsC, err := tx.RwCursor(dbutils.Log)
-	if err != nil {
-		return err
-	}
-	defer logsC.Close()
-	receiptsC, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
-	if err != nil {
-		return err
-	}
-	defer receiptsC.Close()
-
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
@@ -825,18 +807,18 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 			return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 		}
 
-		if err = logsC.Append(dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
+		if err = tx.Append(dbutils.Log, dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
 			return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 		}
 	}
 
 	buf.Reset()
-	err = cbor.Marshal(buf, receipts)
+	err := cbor.Marshal(buf, receipts)
 	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
 
-	if err = receiptsC.Append(dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
+	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 	}
 	return nil
@@ -848,61 +830,30 @@ func DeleteReceipts(db ethdb.RwTx, number uint64) error {
 		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
 	}
 
-	c, err := db.Cursor(dbutils.Log)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	if err := ethdb.Walk(c, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.Log, k, nil); err != nil {
-			return false, err
-		}
-		return true, nil
+	prefix := make([]byte, 8)
+	binary.BigEndian.PutUint64(prefix, number)
+	if err := db.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
+		return db.Delete(dbutils.Log, k, nil)
 	}); err != nil {
-		return fmt.Errorf("logs delete failed: %d, %w", number, err)
+		return err
 	}
 	return nil
 }
 
 // DeleteNewerReceipts removes all receipt for given block number or newer
 func DeleteNewerReceipts(db ethdb.RwTx, number uint64) error {
-	receipts, err := db.Cursor(dbutils.BlockReceiptsPrefix)
-	if err != nil {
-		return err
-	}
-	defer receipts.Close()
-	receiptsDel, err := db.RwCursor(dbutils.BlockReceiptsPrefix)
-	if err != nil {
-		return err
-	}
-	defer receiptsDel.Close()
-	if err := ethdb.Walk(receipts, dbutils.ReceiptsKey(number), 0, func(k, v []byte) (bool, error) {
-		if err := receiptsDel.Delete(k, nil); err != nil {
-			return false, err
-		}
-		return true, nil
+	if err := db.ForEach(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), func(k, v []byte) error {
+		return db.Delete(dbutils.BlockReceiptsPrefix, k, nil)
 	}); err != nil {
-		return fmt.Errorf("delete newer receipts failed: %d, %w", number, err)
+		return err
 	}
 
-	logs, err := db.Cursor(dbutils.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
-	logsDel, err := db.RwCursor(dbutils.Log)
-	if err != nil {
-		return err
-	}
-	defer logsDel.Close()
-	if err := ethdb.Walk(logs, dbutils.LogKey(number, 0), 0, func(k, v []byte) (bool, error) {
-		if err := logsDel.Delete(k, nil); err != nil {
-			return false, err
-		}
-		return true, nil
+	from := make([]byte, 8)
+	binary.BigEndian.PutUint64(from, number)
+	if err := db.ForEach(dbutils.Log, from, func(k, v []byte) error {
+		return db.Delete(dbutils.Log, k, nil)
 	}); err != nil {
-		return fmt.Errorf("delete newer logs failed: %d, %w", number, err)
+		return err
 	}
 	return nil
 }

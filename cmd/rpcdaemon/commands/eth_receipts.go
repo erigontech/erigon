@@ -24,14 +24,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
+func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
+	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
-	}
-
-	block := rawdb.ReadBlock(tx, hash, number)
-	if block == nil {
-		return nil, nil
 	}
 
 	bc := adapter.NewBlockGetter(tx)
@@ -39,7 +34,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		return rawdb.ReadHeader(tx, hash, number)
 	}
 	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, hash, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +135,14 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), err
 	}
 	for _, blockNToMatch := range blockNumbers.ToArray() {
-		blockHash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
+		b, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, uint64(blockNToMatch))
 		if err != nil {
-			return returnLogs(logs), err
+			return nil, err
 		}
-		if blockHash == (common.Hash{}) {
-			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
+		if b == nil {
+			return nil, fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-		receipts, err := getReceipts(ctx, tx, cc, uint64(blockNToMatch), blockHash)
+		receipts, err := getReceipts(ctx, tx, cc, b, senders)
 		if err != nil {
 			return returnLogs(logs), err
 		}
@@ -208,24 +203,39 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	// Retrieve the transaction and assemble its EVM context
-	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
-	if txn == nil {
+	blockNumber := rawdb.ReadTxLookupEntry(tx, hash)
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	}
+
+	// Extract transactions from block
+	block, senders, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	if bErr != nil {
+		return nil, bErr
+	}
+	if block == nil {
+		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
+	}
+	var txIndex uint64
+	for idx, txn := range block.Transactions() {
+		if txn.Hash() == hash {
+			txIndex = uint64(idx)
+			break
+		}
 	}
 
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, cc, blockNumber, blockHash)
+	receipts, err := getReceipts(ctx, tx, cc, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
-	return marshalReceipt(receipts[txIndex], txn), nil
+	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex]), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -240,15 +250,10 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	block, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
 	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		return nil, err
 	}
-	if hash == (common.Hash{}) {
-		return nil, nil
-	}
-
-	block := rawdb.ReadBlock(tx, hash, blockNum)
 	if block == nil {
 		return nil, nil
 	}
@@ -256,7 +261,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, blockNum, hash)
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

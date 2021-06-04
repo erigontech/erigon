@@ -17,17 +17,16 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, fmt.Errorf("block not found: %x", hash)
-	}
-
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	receipts, err := getReceipts(ctx, tx, chainConfig, *number, hash)
+	block, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

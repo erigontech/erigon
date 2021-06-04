@@ -328,7 +328,10 @@ func (s *PlainKVState) ForEachStorage(addr common.Address, startLocation common.
 	st := llrb.New()
 	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(k[:], addr[:])
-	accData, _ := GetAsOf(s.tx, false /* storage */, addr[:], s.blockNr+1)
+	accData, err := GetAsOf(s.tx, false /* storage */, addr[:], s.blockNr+1)
+	if err != nil {
+		return err
+	}
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)

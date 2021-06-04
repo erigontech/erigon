@@ -9,8 +9,8 @@ import (
 )
 
 // DBSchemaVersion
-var DBSchemaVersionLMDB = types.VersionReply{Major: 1, Minor: 0, Patch: 0}
-var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 0, Patch: 0}
+var DBSchemaVersionLMDB = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
+var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 // Buckets
 
@@ -214,8 +214,8 @@ const (
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
-	BlockReceiptsPrefix = "r"      // block_num_u64 + hash -> block receipts
-	Log                 = "log"    // block_num_u64 + hash -> block receipts
+	BlockReceiptsPrefix = "r"      // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log                 = "log"    // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -237,8 +237,8 @@ const (
 	CallFromIndex = "call_from_index"
 	CallToIndex   = "call_to_index"
 
-	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	TxLookupPrefix  = "l" // hash -> transaction/receipt lookup metadata
+	BloomBitsPrefix = "B" // bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
 	PreimagePrefix = "secure-key-"      // preimagePrefix + hash -> preimage
 	ConfigPrefix   = "ethereum-config-" // config prefix for the db
@@ -262,7 +262,7 @@ const (
 	InodesBucket = "inodes"
 
 	// Transaction senders - stored separately from the block bodies
-	Senders = "txSenders"
+	Senders = "txSenders" // block_num_u64 + blockHash -> sendersList (no serialization format, every 20 bytes is new sender)
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"

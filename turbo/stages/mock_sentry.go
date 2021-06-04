@@ -55,18 +55,19 @@ type MockSentry struct {
 	Key           *ecdsa.PrivateKey
 	Address       common.Address
 	Genesis       *types.Block
-	sentryClient  remote.SentryClient
+	SentryClient  remote.SentryClient
 	PeerId        *ptypes.H512
 	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 
-	streams  map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	streamWg sync.WaitGroup
+	streams      map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
+	StreamWg     sync.WaitGroup
+	sentMessages []*proto_sentry.OutboundMessageData
 }
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
-	ms.streamWg.Wait()
+	ms.StreamWg.Wait()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
@@ -81,17 +82,24 @@ func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRe
 func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageByMinBlock(context.Context, *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageById(context.Context, *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(context.Context, *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
+}
+func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
+	return ms.sentMessages[i]
 }
 func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	return &proto_sentry.SetStatusReply{Protocol: proto_sentry.Protocol_ETH66}, nil
@@ -100,10 +108,11 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 	if ms.streams == nil {
 		ms.streams = map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer{}
 	}
+
 	for _, id := range req.Ids {
 		ms.streams[id] = append(ms.streams[id], stream)
 	}
-	ms.streamWg.Done()
+	ms.StreamWg.Done()
 	select {
 	case <-ms.Ctx.Done():
 		return nil
@@ -176,8 +185,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 128
 	networkID := uint64(1)
-	mock.sentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
-	sentries := []remote.SentryClient{mock.sentryClient}
+	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
+	sentries := []remote.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		t.Fatal(err)
@@ -233,8 +242,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageCallTracesCfg(mock.DB, 0, batchSize, mock.tmpdir, mock.ChainConfig, mock.Engine),
 		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
-			mock.streamWg.Add(1)
-			go txpool.RecvTxMessageLoop(mock.Ctx, mock.sentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			mock.StreamWg.Add(1)
+			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			mock.StreamWg.Wait()
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
@@ -263,8 +273,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	)
 
 	mock.PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
-	mock.streamWg.Add(1)
-	go download.RecvMessageLoop(mock.Ctx, mock.sentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Add(1)
+	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
 	t.Cleanup(func() {
 		mock.cancel()
 		txPool.Stop()
@@ -339,7 +353,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	notifier := &remotedbserver.Events{}
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead); err != nil {
+	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
 		if !errors.Is(err, common.ErrStopped) {
 			return err
 		}
