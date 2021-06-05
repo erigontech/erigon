@@ -797,7 +797,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, ethdb.NewObjectDatabase(db))
 
-	chainConfig, genesisBlock, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), genesis, sm.History)
+	chainConfig, genesisBlock, genesisErr := core.SetupGenesisBlockDeprecated(ethdb.NewObjectDatabase(db), genesis, sm.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}

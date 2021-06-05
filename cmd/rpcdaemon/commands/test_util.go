@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -27,9 +28,9 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func createTestDb() (ethdb.Database, error) {
+func createTestKV(t *testing.T) ethdb.RwKV {
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestKV(t)
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -48,15 +49,10 @@ func createTestDb() (ethdb.Database, error) {
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
-		signer = types.LatestSignerForChainID(nil)
+		signer     = types.LatestSignerForChainID(nil)
+		_, genesis = core.MustCommitGenesisBlock(db, gspec, true)
+		engine     = ethash.NewFaker()
 	)
-	// Create intermediate hash bucket since it is mandatory now
-	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
-	if err != nil {
-		return nil, err
-	}
-
-	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -66,9 +62,10 @@ func createTestDb() (ethdb.Database, error) {
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 
+	var err error
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db, 10, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction
@@ -180,24 +177,14 @@ func createTestDb() (ethdb.Database, error) {
 		contractBackend.Commit()
 	}, true)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
-		return nil, err
+	if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
+		t.Fatal(err)
 	}
 
-	return db, nil
-}
-
-func createTestKV() (ethdb.RwKV, error) {
-	db, err := createTestDb()
-
-	if err != nil {
-		return nil, err
-	}
-
-	return db.(ethdb.HasRwKV).RwKV(), nil
+	return db
 }
 
 func createTestGrpcConn() *grpc.ClientConn { //nolint

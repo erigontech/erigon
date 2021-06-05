@@ -218,6 +218,18 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 	return err
 }
 
+func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForEach(bucket, fromPrefix, walker)
+	})
+}
+
+func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForPrefix(bucket, prefix, walker)
+	})
+}
+
 // Delete deletes the key from the queue and database
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation

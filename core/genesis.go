@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -147,7 +148,7 @@ func (e *GenesisMismatchError) Error() string {
 	return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
 }
 
-// SetupGenesisBlock writes or updates the genesis block in db.
+// SetupGenesisBlockDeprecated writes or updates the genesis block in db.
 // The block that will be used is:
 //
 //                          genesis == nil       genesis != nil
@@ -160,7 +161,113 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	block, s, err := SetupGenesisBlock(tx, genesis, history)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	return block, s, nil
+}
+
+func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block) {
+	c, b, err := CommitGenesisBlock(db, genesis, history)
+	if err != nil {
+		panic(err)
+	}
+	return c, b
+}
+
+func SetupGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+	if genesis != nil && genesis.Config == nil {
+		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
+	}
+	// Just commit the new block if there is no stored genesis block.
+	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
+	if storedErr != nil {
+		return nil, nil, storedErr
+	}
+	if (stored == common.Hash{}) {
+		custom := true
+		if genesis == nil {
+			log.Info("Writing default main-net genesis block")
+			genesis = DefaultGenesisBlock()
+			custom = false
+		}
+		block, _, err1 := genesis.Write(db, history)
+		if err1 != nil {
+			return genesis.Config, nil, err1
+		}
+		if custom {
+			log.Info("Writing custom genesis block", "hash", block.Hash().String())
+		}
+		return genesis.Config, block, nil
+	}
+
+	// Check whether the genesis block is already written.
+	if genesis != nil {
+		block, _, err1 := genesis.ToBlock()
+		if err1 != nil {
+			return genesis.Config, nil, err1
+		}
+		hash := block.Hash()
+		if hash != stored {
+			return genesis.Config, block, &GenesisMismatchError{stored, hash}
+		}
+	}
+	storedBlock, err := rawdb.ReadBlockByHash(db, stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Get the existing chain configuration.
+	newcfg := genesis.configOrDefault(stored)
+	if err := newcfg.CheckConfigForkOrder(); err != nil {
+		return newcfg, nil, err
+	}
+	storedcfg, storedErr := rawdb.ReadChainConfig(db, stored)
+	if storedErr != nil {
+		return newcfg, nil, storedErr
+	}
+	if storedcfg == nil {
+		log.Warn("Found genesis block without chain config")
+		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
+		if err1 != nil {
+			return newcfg, nil, err1
+		}
+		return newcfg, storedBlock, nil
+	}
+	// Special case: don't change the existing config of a non-mainnet chain if no new
+	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
+	// if we just continued here.
+	if genesis == nil && stored != params.MainnetGenesisHash {
+		return storedcfg, storedBlock, nil
+	}
+	// Check config compatibility and write the config. Compatibility errors
+	// are returned to the caller unless we're already at block zero.
+	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
+	if height == nil {
+		//return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
+	} else {
+		compatErr := storedcfg.CheckCompatible(newcfg, *height)
+		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
+			return newcfg, storedBlock, compatErr
+		}
+	}
+	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
+		return newcfg, nil, err
+	}
+	return newcfg, storedBlock, nil
+}
+
+func SetupGenesisBlockDeprecated(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -265,42 +372,51 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
-	var tmpDB ethdb.RwKV
-	if UseMDBX {
-		tmpDB = ethdb.NewMDBX().InMem().MustOpen()
-	} else {
-		tmpDB = ethdb.NewLMDB().InMem().MustOpen()
-	}
-	defer tmpDB.Close()
-	tx, err := tmpDB.BeginRw(context.Background())
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback()
-	r, w := state.NewDbStateReader(ethdb.WrapIntoTxDB(tx)), state.NewDbStateWriter(ethdb.WrapIntoTxDB(tx), 0)
-	statedb := state.New(r)
-	for addr, account := range g.Alloc {
-		balance, _ := uint256.FromBig(account.Balance)
-		statedb.AddBalance(addr, balance)
-		statedb.SetCode(addr, account.Code)
-		statedb.SetNonce(addr, account.Nonce)
-		for key, value := range account.Storage {
-			key := key
-			val := uint256.NewInt(0).SetBytes(value.Bytes())
-			statedb.SetState(addr, &key, *val)
+	var root common.Hash
+	var statedb *state.IntraBlockState
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
+		defer wg.Done()
+		var tmpDB ethdb.RwKV
+		if UseMDBX {
+			tmpDB = ethdb.NewMDBX().InMem().MustOpen()
+		} else {
+			tmpDB = ethdb.NewLMDB().InMem().MustOpen()
 		}
+		defer tmpDB.Close()
+		tx, err := tmpDB.BeginRw(context.Background())
+		if err != nil {
+			panic(err)
+		}
+		defer tx.Rollback()
+		r, w := state.NewDbStateReader(ethdb.WrapIntoTxDB(tx)), state.NewDbStateWriter(ethdb.WrapIntoTxDB(tx), 0)
+		statedb = state.New(r)
+		for addr, account := range g.Alloc {
+			balance, _ := uint256.FromBig(account.Balance)
+			statedb.AddBalance(addr, balance)
+			statedb.SetCode(addr, account.Code)
+			statedb.SetNonce(addr, account.Nonce)
+			for key, value := range account.Storage {
+				key := key
+				val := uint256.NewInt(0).SetBytes(value.Bytes())
+				statedb.SetState(addr, &key, *val)
+			}
 
-		if len(account.Code) > 0 || len(account.Storage) > 0 {
-			statedb.SetIncarnation(addr, 1)
+			if len(account.Code) > 0 || len(account.Storage) > 0 {
+				statedb.SetIncarnation(addr, 1)
+			}
 		}
-	}
-	if err := statedb.FinalizeTx(context.Background(), w); err != nil {
-		return nil, nil, err
-	}
-	root, err := trie.CalcRoot("genesis", tx)
-	if err != nil {
-		return nil, nil, err
-	}
+		if err := statedb.FinalizeTx(context.Background(), w); err != nil {
+			panic(err)
+		}
+		root, err = trie.CalcRoot("genesis", tx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	wg.Wait()
+
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
@@ -369,6 +485,14 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 	return block, statedb, nil
 }
 
+func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState) {
+	b, s, err := g.Write(tx, history)
+	if err != nil {
+		panic(err)
+	}
+	return b, s
+}
+
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
@@ -425,8 +549,22 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
-func (g *Genesis) MustCommit(db ethdb.Database) *types.Block {
+func (g *Genesis) MustCommitDeprecated(db ethdb.Database) *types.Block {
 	block, _, err := g.Commit(db, true /* history */)
+	if err != nil {
+		panic(err)
+	}
+	return block
+}
+
+func (g *Genesis) MustCommit(db ethdb.RwKV) *types.Block {
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	block, _ := g.MustWrite(tx, true)
+	err = tx.Commit()
 	if err != nil {
 		panic(err)
 	}
@@ -436,7 +574,7 @@ func (g *Genesis) MustCommit(db ethdb.Database) *types.Block {
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db ethdb.Database, addr common.Address, balance *big.Int) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
-	block := g.MustCommit(db)
+	block := g.MustCommitDeprecated(db)
 	return block
 }
 
@@ -452,7 +590,7 @@ func GenesisWithAccounts(db ethdb.Database, accs []GenAccount) *types.Block {
 		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
 	}
 	g.Alloc = allocs
-	block := g.MustCommit(db)
+	block := g.MustCommitDeprecated(db)
 	return block
 }
 

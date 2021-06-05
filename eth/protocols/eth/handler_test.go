@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"math/rand"
@@ -69,7 +70,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}).MustCommit(db)
+	}).MustCommitDeprecated(db)
 
 	headBlock := genesis
 	if blocks > 0 {
@@ -438,7 +439,12 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		block := rawdb.ReadHeaderByNumber(backend.db, i)
 
 		hashes = append(hashes, block.Hash())
-		receipts = append(receipts, rawdb.ReadReceiptsByHashDeprecated(backend.db, block.Hash()))
+		if err := backend.db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+			receipts = append(receipts, rawdb.ReadReceiptsByHashDeprecated(tx, block.Hash()))
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Send the hash request and verify the response
 	if err := p2p.Send(peer.app, GetReceiptsMsg, hashes); err != nil {

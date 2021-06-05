@@ -666,14 +666,16 @@ func ReadRawReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64)
 		return nil
 	}
 
-	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+	newK := make([]byte, 8)
+	binary.BigEndian.PutUint64(newK, number)
+	if err := db.ForPrefix(dbutils.Log, newK, func(k, v []byte) error {
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return false, fmt.Errorf("receipt unmarshal failed: %x, %w", hash, err)
+			return fmt.Errorf("receipt unmarshal failed: %x, %w", hash, err)
 		}
 
 		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
-		return true, nil
+		return nil
 	}); err != nil {
 		log.Error("logs fetching failed", "hash", hash, "err", err)
 		return nil
@@ -705,37 +707,12 @@ func ReadReceipts(db ethdb.Tx, block *types.Block, senders []common.Address) typ
 	}
 	return receipts
 }
-func ReadReceiptsDeprecated(db ethdb.Getter, hash common.Hash, number uint64) types.Receipts {
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	receipts := ReadRawReceiptsDeprecated(db, hash, number)
-	if receipts == nil {
-		return nil
-	}
-	body := ReadBodyDeprecated(db, hash, number)
-	if body == nil {
-		log.Error("Missing body but have receipt", "hash", hash, "number", number)
-		return nil
-	}
-	senders, err := ReadSenders(db, hash, number)
-	if err != nil {
-		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
-		return nil
-	}
-	if senders == nil {
-		return nil
-	}
-	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
-		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
-		return nil
-	}
-	return receipts
-}
-func ReadReceiptsByHashDeprecated(db ethdb.Getter, hash common.Hash) types.Receipts {
+func ReadReceiptsByHashDeprecated(db ethdb.Tx, hash common.Hash) types.Receipts {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil
 	}
-	receipts := ReadReceiptsDeprecated(db, hash, *number)
+	receipts := ReadReceipts(db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -887,11 +864,6 @@ func ReadBlock(db ethdb.Tx, hash common.Hash, number uint64) *types.Block {
 		return nil
 	}
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
-}
-
-func HasBlockDeprecated(db ethdb.Getter, hash common.Hash, number uint64) bool {
-	body := ReadStorageBodyRLP(db, hash, number)
-	return len(body) > 0
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.

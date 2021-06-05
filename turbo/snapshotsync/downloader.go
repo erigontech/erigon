@@ -68,25 +68,25 @@ func (cli *Client) Torrents() []metainfo.Hash {
 }
 func (cli *Client) Load(db ethdb.Database) error {
 	log.Info("Load added torrents")
-	return db.Walk(dbutils.SnapshotInfoBucket, []byte{}, 0, func(k, infoHashBytes []byte) (bool, error) {
+	return db.ForEach(dbutils.SnapshotInfoBucket, []byte{}, func(k, infoHashBytes []byte) error {
 		if !bytes.HasPrefix(k[8:], []byte(SnapshotInfoHashPrefix)) {
-			return true, nil
+			return nil
 		}
 		networkID, snapshotName := ParseInfoHashKey(k)
 		infoHash := metainfo.Hash{}
 		copy(infoHash[:], infoHashBytes)
 		infoBytes, err := db.GetOne(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
 		if err != nil {
-			return false, err
+			return err
 		}
 
 		log.Info("Add torrent", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", len(infoBytes) > 0)
 		_, err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
 		if err != nil {
-			return false, err
+			return err
 		}
 
-		return true, nil
+		return nil
 	})
 }
 
@@ -258,15 +258,15 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[Snapsh
 	mp := make(map[SnapshotType]*SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
-	err := db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, func(k, v []byte) (bool, error) {
+	err := db.ForPrefix(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
 		var hash metainfo.Hash
 		if len(v) != metainfo.HashSize {
-			return true, nil
+			return nil
 		}
 		copy(hash[:], v)
 		t, ok := cli.Cli.Torrent(hash)
 		if !ok {
-			return true, nil
+			return nil
 		}
 
 		var gotInfo bool
@@ -281,7 +281,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[Snapsh
 		_, tpStr := ParseInfoHashKey(k)
 		tp, ok := SnapshotType_value[tpStr]
 		if !ok {
-			return false, fmt.Errorf("incorrect type: %v", tpStr)
+			return fmt.Errorf("incorrect type: %v", tpStr)
 		}
 
 		val := &SnapshotsInfo{
@@ -292,7 +292,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[Snapsh
 			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
 		}
 		mp[SnapshotType(tp)] = val
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		return nil, err

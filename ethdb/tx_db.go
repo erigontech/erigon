@@ -53,6 +53,14 @@ func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func
 	return Walk(c, startkey, fixedbits, walker)
 }
 
+func (m *roTxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *roTxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+
 func (m *roTxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
 	return &roTxDb{tx: m.tx, top: false}, nil
 }
@@ -268,6 +276,13 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 		}
 	}()
 	return Walk(c, startkey, fixedbits, walker)
+}
+func (m *TxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *TxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {

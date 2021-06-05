@@ -375,8 +375,6 @@ func TestChainTxReorgs(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key1)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	m2 := stages.MockWithGenesis(t, gspec, key1)
 	defer m2.DB.Close()
 
@@ -448,36 +446,41 @@ func TestChainTxReorgs(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
+	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 
-	// removed tx
-	txs := types.Transactions{pastDrop, freshDrop}
-	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn != nil {
-			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
+		// removed tx
+		txs := types.Transactions{pastDrop, freshDrop}
+		for i, txn := range txs {
+			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn != nil {
+				t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
+			}
+			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt != nil {
+				t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
+			}
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(db, tx.Hash()); rcpt != nil {
-			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
+		// added tx
+		txs = types.Transactions{pastAdd, freshAdd, futureAdd}
+		for i, txn := range txs {
+			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+				t.Errorf("add %d: expected tx to be found", i)
+			}
+			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("add %d: expected receipt to be found", i)
+			}
 		}
-	}
-	// added tx
-	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
-	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
-			t.Errorf("add %d: expected tx to be found", i)
+		// shared tx
+		txs = types.Transactions{postponed, swapped}
+		for i, txn := range txs {
+			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+				t.Errorf("share %d: expected tx to be found", i)
+			}
+			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("share %d: expected receipt to be found", i)
+			}
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(db, tx.Hash()); rcpt == nil {
-			t.Errorf("add %d: expected receipt to be found", i)
-		}
-	}
-	// shared tx
-	txs = types.Transactions{postponed, swapped}
-	for i, tx := range txs {
-		if txn, _, _, _ := rawdb.ReadTransactionDeprecated(db, tx.Hash()); txn == nil {
-			t.Errorf("share %d: expected tx to be found", i)
-		}
-		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(db, tx.Hash()); rcpt == nil {
-			t.Errorf("share %d: expected receipt to be found", i)
-		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

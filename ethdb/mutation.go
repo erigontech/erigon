@@ -214,6 +214,16 @@ func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker fun
 	return m.db.Walk(table, startkey, fixedbits, walker)
 }
 
+func (m *mutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	m.panicOnEmptyDB()
+	return m.db.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *mutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	m.panicOnEmptyDB()
+	return m.db.ForPrefix(bucket, prefix, walker)
+}
+
 func (m *mutation) Delete(table string, k, v []byte) error {
 	if v != nil {
 		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes

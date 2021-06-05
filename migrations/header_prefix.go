@@ -91,7 +91,7 @@ var headerPrefixToSeparateBuckets = Migration{
 			headersCollector.Close(logPrefix)
 		}()
 
-		err = db.Walk(dbutils.HeaderPrefixOld, []byte{}, 0, func(k, v []byte) (bool, error) {
+		err = db.ForEach(dbutils.HeaderPrefixOld, []byte{}, func(k, v []byte) error {
 			var innerErr error
 			switch {
 			case IsHeaderKey(k):
@@ -101,12 +101,12 @@ var headerPrefixToSeparateBuckets = Migration{
 			case IsHeaderHashKey(k):
 				innerErr = canonicalCollector.Collect(bytes.TrimSuffix(k, HeaderHashSuffix), v)
 			default:
-				return false, fmt.Errorf("incorrect header prefix key: %v", common.Bytes2Hex(k))
+				return fmt.Errorf("incorrect header prefix key: %v", common.Bytes2Hex(k))
 			}
 			if innerErr != nil {
-				return false, innerErr
+				return innerErr
 			}
-			return true, nil
+			return nil
 		})
 		if err = db.(ethdb.BucketsMigrator).DropBuckets(dbutils.HeaderPrefixOld); err != nil {
 			return err

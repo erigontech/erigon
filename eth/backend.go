@@ -163,7 +163,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.SetupGenesisBlockDeprecated(chainDb, config.Genesis, config.StorageMode.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}

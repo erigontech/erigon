@@ -411,7 +411,7 @@ func TestClique(t *testing.T) {
 			}
 
 			// Create a pristine blockchain with the genesis injected
-			db := ethdb.NewTestDB(t)
+			db := ethdb.NewTestKV(t)
 
 			genesis.MustCommit(db)
 
@@ -422,13 +422,13 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := ethdb.NewTestDB(t)
+			cliqueDB := ethdb.NewTestKV(t)
 
 			engine := New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.fakeDiff = true
 
 			genesisBlock, _, _ := genesis.ToBlock()
-			chain, err := core.GenerateChain(&config, genesisBlock, engine, db.RwKV(), len(tt.votes), func(j int, gen *core.BlockGen) {
+			chain, err := core.GenerateChain(&config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {
@@ -469,7 +469,7 @@ func TestClique(t *testing.T) {
 			// Pass all the headers through clique and ensure tallying succeeds
 			failed := false
 			for j := 0; j < len(batches)-1; j++ {
-				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
+				if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
 					t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 					failed = true
 					break
@@ -479,7 +479,7 @@ func TestClique(t *testing.T) {
 				engine.Close()
 				return
 			}
-			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
+			if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
 			if tt.failure != nil {
@@ -489,7 +489,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := chain.Blocks[len(chain.Blocks)-1]
 
-			snap, err := engine.snapshot(stagedsync.ChainReader{Cfg: config, Db: db}, head.NumberU64(), head.Hash(), nil)
+			snap, err := engine.snapshot(stagedsync.ChainReader{Cfg: config, Db: ethdb.NewObjectDatabase(db)}, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)

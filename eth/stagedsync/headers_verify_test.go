@@ -60,7 +60,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 
 	db := ethdb.NewTestDB(t)
 
-	config, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false)
+	config, _, err := core.SetupGenesisBlockDeprecated(db, core.DefaultGenesisBlock(), false)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
@@ -78,17 +78,17 @@ func TestVerifyHeadersClique(t *testing.T) {
 	headerRecs := decodeHeaders(verifyHardCodedHeadersClique)
 	headers := toHeaders(headerRecs)
 
-	db, cliqueDB := ethdb.NewTestDB(t), ethdb.NewTestDB(t)
+	db, cliqueDB := ethdb.NewTestKV(t), ethdb.NewTestKV(t)
 
 	engine := clique.New(params.RinkebyChainConfig, params.CliqueSnapshot, cliqueDB)
 
-	config, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false)
+	config, _, err := core.CommitGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
 
 	tn := time.Now()
-	err = VerifyHeaders(db, headers[1:], config, engine, 1)
+	err = VerifyHeaders(ethdb.NewObjectDatabase(db), headers[1:], config, engine, 1)
 	if err != nil {
 		t.Fatal("on VerifyHeaders", err)
 	}

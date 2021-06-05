@@ -18,6 +18,7 @@ package clique
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"sort"
 	"time"
@@ -89,8 +90,13 @@ func newSnapshot(config *params.CliqueConfig, number uint64, hash common.Hash, s
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.CliqueConfig, db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, error) {
-	blob, err := db.Get(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
+func loadSnapshot(config *params.CliqueConfig, db ethdb.RwKV, num uint64, hash common.Hash) (*Snapshot, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blob, err := tx.GetOne(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +112,14 @@ func loadSnapshot(config *params.CliqueConfig, db ethdb.Database, num uint64, ha
 
 var ErrNotFound = errors.New("not found")
 
-func lastSnapshot(db ethdb.Database) (uint64, error) {
-	lastEnc, err := db.Get(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
+func lastSnapshot(db ethdb.RwKV) (uint64, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	lastEnc, err := tx.GetOne(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
 	if err != nil {
 		if !errors.Is(err, ethdb.ErrKeyNotFound) {
 			log.Error("can't check last snapshot", "err", err)
@@ -125,12 +137,14 @@ func lastSnapshot(db ethdb.Database) (uint64, error) {
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db ethdb.Database) error {
+func (s *Snapshot) store(db ethdb.RwKV) error {
 	blob, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return db.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+	})
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
