@@ -84,32 +84,6 @@ type SimulatedBackend struct {
 	logsFeed   event.Feed
 }
 
-// NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
-// and uses a simulated blockchain for testing purposes.
-// A simulated backend always uses chainID 1337.
-func NewSimulatedBackendWithDatabase(database ethdb.RwKV, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
-	engine := ethash.NewFaker()
-	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
-	backend := &SimulatedBackend{
-		m:            m,
-		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
-			if err := database.View(context.Background(), func(tx ethdb.Tx) error {
-				h = rawdb.ReadHeader(tx, hash, number)
-				return nil
-			}); err != nil {
-				panic(err)
-			}
-			return h
-		},
-	}
-	backend.checkTEVM = ethdb.GetCheckTEVM(ethdb.NewObjectDatabase(database))
-	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
-	backend.emptyPendingBlock()
-	return backend
-}
-
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
@@ -137,9 +111,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithDatabase(ethdb.NewTestKV(t), alloc, gasLimit)
+	b := NewSimulatedBackendWithConfig(alloc, params.AllEthashProtocolChanges, gasLimit)
 	t.Cleanup(func() {
-		b.Close()
+		b.m.DB.Close()
 	})
 	return b
 }
@@ -160,7 +134,7 @@ func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := b.m.InsertChain(&core.ChainPack{
-		Headers:  []*types.Header{b.pendingBlock.Header()},
+		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
 		Length:   1,
 		TopBlock: b.pendingBlock,
