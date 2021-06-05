@@ -22,23 +22,22 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
 	// Create a simple chain to verify
-	db := ethdb.NewTestKV(t)
 	var (
-		gspec   = &core.Genesis{Config: params.TestChainConfig}
-		genesis = gspec.MustCommit(db)
-		engine  = ethash.NewFaker()
+		gspec  = &core.Genesis{Config: params.TestChainConfig}
+		engine = ethash.NewFaker()
 	)
+	m := stages.MockWithGenesisEngine(t, gspec, engine)
 
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 8, nil, false /* intemediateHashes */)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -48,18 +47,17 @@ func TestHeaderVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(db)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			} else {
 				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(db)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 			}
 		}
 
-		engine := ethash.NewFaker()
-		if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks[i:i+1], true /* checkRoot */); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 

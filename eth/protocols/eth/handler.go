@@ -40,12 +40,12 @@ const (
 
 	// maxHeadersServe is the maximum number of block headers to serve. This number
 	// is there to limit the number of disk lookups.
-	maxHeadersServe = 1024
+	MaxHeadersServe = 1024
 
 	// maxBodiesServe is the maximum number of block bodies to serve. This number
 	// is mostly there to limit the number of disk lookups. With 24KB block sizes
 	// nowadays, the practical limit will always be softResponseLimit.
-	maxBodiesServe = 1024
+	MaxBodiesServe = 1024
 
 	// maxReceiptsServe is the maximum number of block receipts to serve. This
 	// number is mostly there to limit the number of disk lookups. With block
