@@ -22,3 +22,7 @@ option 2 using - `kv_mdbx.go`
 Erigon using MDBX database. But any articles in internet about LMDB are also valid for MDBX.
 
 We have Go, Rust and C++ implementations of `RoKV` interface. 
+
+Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](./../../ethdb/Readme.md)
+
+MDBX docs: [erthink.github.io/libmdbx/](https://erthink.github.io/libmdbx/) and [https://github.com/erthink/libmdbx/blob/master/mdbx.h](https://github.com/erthink/libmdbx/blob/master/mdbx.h)
