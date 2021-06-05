@@ -208,12 +208,6 @@ func (m *mutation) BatchSize() int {
 	return m.size
 }
 
-// WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
-	m.panicOnEmptyDB()
-	return m.db.Walk(table, startkey, fixedbits, walker)
-}
-
 func (m *mutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForEach(bucket, fromPrefix, walker)
@@ -222,6 +216,11 @@ func (m *mutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []
 func (m *mutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForPrefix(bucket, prefix, walker)
+}
+
+func (m *mutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	m.panicOnEmptyDB()
+	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *mutation) Delete(table string, k, v []byte) error {

@@ -223,6 +223,11 @@ func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(
 		return tx.ForEach(bucket, fromPrefix, walker)
 	})
 }
+func (db *ObjectDatabase) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForAmount(bucket, fromPrefix, amount, walker)
+	})
+}
 
 func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
 	return db.kv.View(context.Background(), func(tx Tx) error {
