@@ -149,7 +149,7 @@ Loop:
 		}
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader2{Cfg: cfg.chanConfig, Db: cfg.db}
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: ethdb.WrapIntoTxDB(tx)}
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
