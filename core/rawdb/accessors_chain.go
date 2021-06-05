@@ -910,17 +910,6 @@ func DeleteBlock(db ethdb.RwTx, hash common.Hash, number uint64) error {
 	return nil
 }
 
-func ReadBlockByNumberDeprecated(db ethdb.Getter, number uint64) (*types.Block, error) {
-	hash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (common.Hash{}) {
-		return nil, nil
-	}
-
-	return ReadBlockDeprecated(db, hash, number), nil
-}
 func ReadBlockByNumber(db ethdb.Tx, number uint64) (*types.Block, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {

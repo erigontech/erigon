@@ -592,17 +592,22 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr = m.InsertChain(chain); chainErr != nil {
 		t.Fatal(chainErr)
 	}
-	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
-	if block.Transactions()[0].Protected() {
-		t.Error("Expected block[0].txs[0] to not be replay protected")
-	}
+	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		block, _ := rawdb.ReadBlockByNumber(tx, 1)
+		if block.Transactions()[0].Protected() {
+			t.Error("Expected block[0].txs[0] to not be replay protected")
+		}
 
-	block, _ = rawdb.ReadBlockByNumberDeprecated(db, 3)
-	if block.Transactions()[0].Protected() {
-		t.Error("Expected block[3].txs[0] to not be replay protected")
-	}
-	if !block.Transactions()[1].Protected() {
-		t.Error("Expected block[3].txs[1] to be replay protected")
+		block, _ = rawdb.ReadBlockByNumber(tx, 3)
+		if block.Transactions()[0].Protected() {
+			t.Error("Expected block[3].txs[0] to not be replay protected")
+		}
+		if !block.Transactions()[1].Protected() {
+			t.Error("Expected block[3].txs[1] to be replay protected")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	// generate an invalid chain id transaction
@@ -1756,7 +1761,13 @@ func TestEIP2718Transition(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	block, _ := rawdb.ReadBlockByNumberDeprecated(db, 1)
+	tx, err := m.DB.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	block, _ := rawdb.ReadBlockByNumber(tx, 1)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
 	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
