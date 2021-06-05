@@ -1,19 +1,24 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -161,7 +166,7 @@ func HeadersForward(
 			}
 		}
 		if test {
-			return fmt.Errorf("%s: did not complete", logPrefix)
+			break
 		}
 		timer := time.NewTimer(1 * time.Second)
 		select {
@@ -178,18 +183,16 @@ func HeadersForward(
 		}
 		timer.Stop()
 	}
-	if headerInserter.UnwindPoint() < headerProgress {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx); err != nil {
+	if headerInserter.Unwind() {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx, common.Hash{}); err != nil {
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
-	} else {
+	} else if headerInserter.GetHighest() != 0 {
 		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
-		if !stopped {
-			s.Done()
-		}
 	}
+	s.Done()
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -247,8 +250,65 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 	if err != nil {
 		return err
 	}
+	badBlock := u.BadBlock != (common.Hash{})
 	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
+		if badBlock {
+			var hash common.Hash
+			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
+				return err
+			}
+			rawdb.DeleteHeader(tx, hash, blockHeight)
+			rawdb.DeleteTd(tx, hash, blockHeight)
+			rawdb.DeleteHeaderNumber(tx, hash)
+		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
+			return err
+		}
+	}
+	if u.BadBlock != (common.Hash{}) {
+		cfg.hd.BadHeaders[u.BadBlock] = struct{}{}
+		// Find header with biggest TD
+		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
+		if cErr != nil {
+			return cErr
+		}
+		defer tdCursor.Close()
+		var lastK, k, v []byte
+		lastK, v, err = tdCursor.Last()
+		if err != nil {
+			return err
+		}
+		if len(lastK) != 40 {
+			return fmt.Errorf("key in TD table has to be 40 bytes long: %x", lastK)
+		}
+		k = lastK
+		var maxTd big.Int
+		var maxHash common.Hash
+		copy(maxHash[:], lastK[8:])
+		var maxNum uint64 = binary.BigEndian.Uint64(lastK[:8])
+		if k != nil {
+			if err = rlp.DecodeBytes(v, &maxTd); err != nil {
+				return err
+			}
+		}
+		for ; err == nil && k != nil && len(k) == 40 && bytes.Equal(k[:8], lastK[:8]); k, v, err = tdCursor.Prev() {
+			var td big.Int
+			if err = rlp.DecodeBytes(v, &td); err != nil {
+				return err
+			}
+			if td.Cmp(&maxTd) > 0 {
+				maxTd.Set(&td)
+				copy(maxHash[:], k[8:])
+				maxNum = binary.BigEndian.Uint64(k[:8])
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
+			return err
+		}
+		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
 			return err
 		}
 	}

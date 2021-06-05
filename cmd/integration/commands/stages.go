@@ -395,7 +395,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, tx, block, ch)
+		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, sync, tx, block, ch)
 		if err != nil {
 			return err
 		}
@@ -447,7 +447,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 		return nil
 	}
 
-	err = stagedsync.SpawnExecuteBlocksStage(execStage, nil, block, ch, cfg, nil)
+	err = stagedsync.SpawnExecuteBlocksStage(execStage, sync, nil, block, ch, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -795,8 +795,7 @@ func newSync(db ethdb.RwKV) (ethdb.StorageMode, consensus.Engine, *params.ChainC
 	}
 	events := remotedbserver.NewEvents()
 
-	txCacher := core.NewTxSenderCacher(1)
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, ethdb.NewObjectDatabase(db), txCacher)
+	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, ethdb.NewObjectDatabase(db))
 
 	chainConfig, genesisBlock, genesisErr := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), genesis, sm.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {

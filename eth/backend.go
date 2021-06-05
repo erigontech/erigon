@@ -28,7 +28,6 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"runtime"
 	"sync"
 	"time"
 
@@ -222,13 +221,11 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		return nil, err
 	}
 
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb)
 
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()

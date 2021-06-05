@@ -58,6 +58,7 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapsh
 			}
 		}
 	}
+	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.DoneAndUpdate(tx, executionAt)
 	if err != nil {
 		return err

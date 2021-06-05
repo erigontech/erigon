@@ -70,6 +70,7 @@ type Genesis struct {
 	Number     uint64      `json:"number"`
 	GasUsed    uint64      `json:"gasUsed"`
 	ParentHash common.Hash `json:"parentHash"`
+	BaseFee    *big.Int    `json:"baseFee"`
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
@@ -312,6 +313,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		MixDigest:  g.Mixhash,
 		Coinbase:   g.Coinbase,
 		Root:       root,
+		BaseFee:    g.BaseFee,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -321,7 +323,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
-		head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		if g.BaseFee == nil {
+			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
 	}
 
 	return types.NewBlock(head, nil, nil, nil), statedb, nil

@@ -3,6 +3,8 @@ package stages
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -122,12 +125,21 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *
 	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultStorageMode)
 }
 
+func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	return MockWithEverything(t, gspec, key, ethdb.DefaultStorageMode, engine)
+}
+
 func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
+	return MockWithEverything(t, gspec, key, sm, ethash.NewFaker())
+}
+
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode, engine consensus.Engine) *MockSentry {
 	mock := &MockSentry{
 		t:           t,
 		DB:          ethdb.NewTestKV(t),
 		tmpdir:      t.TempDir(),
-		Engine:      ethash.NewFaker(),
+		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
 	}
@@ -150,11 +162,10 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
 	}
 	blockDowloadTimeout := 10
-	txCacher := core.NewTxSenderCacher(1)
 	txPoolConfig := core.DefaultTxPoolConfig
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
-	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, ethdb.NewObjectDatabase(mock.DB), txCacher)
+	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, ethdb.NewObjectDatabase(mock.DB))
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
 	txPoolP2PServer, err := txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
 	if err != nil {
@@ -172,7 +183,7 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 		t.Fatal(err)
 	}
 
-	blockDownloaderWindow := 128
+	blockDownloaderWindow := 65536
 	networkID := uint64(1)
 	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []remote.SentryClient{mock.SentryClient}
@@ -340,10 +351,16 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	notifier := &remotedbserver.Events{}
-	initialCycle := true
+	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
-		return err
+		if !errors.Is(err, common.ErrStopped) {
+			return err
+		}
+	}
+	// Check if the latest header was imported or rolled back
+	if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }

@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -598,9 +597,6 @@ func TestEIP155Transition(t *testing.T) {
 	if !block.Transactions()[1].Protected() {
 		t.Error("Expected block[3].txs[1] to be replay protected")
 	}
-	if _, chainErr = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain.Blocks[4:], true /* checkRoot */); chainErr != nil {
-		t.Fatal(chainErr)
-	}
 
 	// generate an invalid chain id transaction
 	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
@@ -621,8 +617,8 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr != nil {
 		t.Fatalf("generate blocks: %v", chainErr)
 	}
-	if err := m.InsertChain(chain); !errors.Is(err, types.ErrInvalidChainId) {
-		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
+	if err := m.InsertChain(chain); err == nil {
+		t.Errorf("expected error")
 	}
 }
 

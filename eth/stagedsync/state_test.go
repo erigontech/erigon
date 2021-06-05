@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -246,7 +247,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, tx)
+					return u.UnwindTo(1500, tx, common.Hash{})
 				}
 				s.Done()
 				return nil
@@ -346,7 +347,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
@@ -447,7 +448,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
@@ -654,7 +655,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
