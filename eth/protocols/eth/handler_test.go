@@ -66,16 +66,16 @@ func newTestBackend(t *testing.T, blocks int) *testBackend {
 // wraps it into a mock backend.
 func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
-	db := ethdb.NewTestDB(t)
+	db := ethdb.NewTestKV(t)
 	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}).MustCommitDeprecated(db)
+	}).MustCommit(db)
 
 	headBlock := genesis
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, generator, true)
-		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
+		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
+		if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
 			panic(err)
 		}
 		headBlock = chain.TopBlock
@@ -84,7 +84,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
 	b := &testBackend{
-		db:          db,
+		db:          ethdb.NewObjectDatabase(db),
 		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db),
 		headBlock:   headBlock,
 		genesis:     genesis,

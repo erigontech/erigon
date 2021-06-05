@@ -167,7 +167,7 @@ func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, s, err := SetupGenesisBlock(tx, genesis, history)
+	block, s, err := WriteGenesisBlock(tx, genesis, history)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -186,7 +186,7 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*par
 	return c, b
 }
 
-func SetupGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -468,14 +468,6 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
-func (g *Genesis) MustCommitDeprecated(db ethdb.Database) *types.Block {
-	block, _, err := g.Commit(db, true /* history */)
-	if err != nil {
-		panic(err)
-	}
-	return block
-}
-
 func (g *Genesis) MustCommit(db ethdb.RwKV) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -502,14 +494,14 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db ethdb.Database, accs []GenAccount) *types.Block {
+func GenesisWithAccounts(db ethdb.RwKV, accs []GenAccount) *types.Block {
 	g := Genesis{Config: params.TestChainConfig}
 	allocs := make(map[common.Address]GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
 	}
 	g.Alloc = allocs
-	block := g.MustCommitDeprecated(db)
+	block := g.MustCommit(db)
 	return block
 }
 
