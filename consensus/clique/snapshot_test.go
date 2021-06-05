@@ -19,7 +19,6 @@ package clique_test
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"errors"
 	"sort"
 	"testing"
 
@@ -490,8 +489,12 @@ func TestClique(t *testing.T) {
 			}
 			chainX.Length = len(batches[len(batches)-1])
 			chainX.TopBlock = batches[len(batches)-1][len(batches[len(batches)-1])-1]
-			if err = m.InsertChain(chainX); !errors.Is(err, tt.failure) {
-				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+			err = m.InsertChain(chainX)
+			if tt.failure != nil && err == nil {
+				t.Errorf("test %d: expected failure", i)
+			}
+			if tt.failure == nil && err != nil {
+				t.Errorf("test %d: unexpected failure: %v", i, err)
 			}
 			if tt.failure != nil {
 				engine.Close()

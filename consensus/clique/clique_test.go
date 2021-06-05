@@ -98,6 +98,7 @@ func TestReimportMirroredState(t *testing.T) {
 
 		sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
 		copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
+		chain.Headers[i] = header
 		chain.Blocks[i] = block.WithSeal(header)
 	}
 
