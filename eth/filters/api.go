@@ -17,7 +17,16 @@
 package filters
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+
 	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // FilterCriteria represents a request to create a new filter.
@@ -453,6 +462,7 @@ func (api *PublicFilterAPI) GetFilterChanges(id rpc.ID) (interface{}, error) {
 
 	return []interface{}{}, fmt.Errorf("filter not found")
 }
+*/
 
 // returnHashes is a helper that will return an empty hash array case the given hash array is nil,
 // otherwise the given hashes array is returned.
@@ -590,4 +600,3 @@ func decodeTopic(s string) (common.Hash, error) {
 	}
 	return common.BytesToHash(b), err
 }
-*/
