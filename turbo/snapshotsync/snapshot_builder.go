@@ -270,19 +270,29 @@ func SnapshotName(baseDir, name string, blockNum uint64) string {
 	return path.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
 }
 
-func GetSnapshotInfo(db ethdb.Database) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
 		return 0, nil, err
 	}
-
+	defer tx.Rollback()
+	v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err != nil {
+		return 0, nil, err
+	}
+	if v == nil {
+		return 0, nil, err
+	}
 	var snapshotBlock uint64
 	if len(v) == 8 {
 		snapshotBlock = binary.BigEndian.Uint64(v)
 	}
 
-	infohash, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	infohash, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	if err != nil {
+		return 0, nil, err
+	}
+	if infohash == nil {
 		return 0, nil, err
 	}
 	return snapshotBlock, infohash, nil

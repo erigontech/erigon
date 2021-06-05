@@ -331,28 +331,28 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
 // need to fix it in future
-func UpdateMetrics(db ethdb.Getter) error {
+func UpdateMetrics(tx ethdb.Tx) error {
 	var progress uint64
 	var err error
-	progress, err = stages.GetStageProgress(db, stages.Headers)
+	progress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}
 	stageHeadersGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	progress, err = stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
 		return err
 	}
 	stageBodiesGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Execution)
+	progress, err = stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 	stageExecutionGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Translation)
+	progress, err = stages.GetStageProgress(tx, stages.Translation)
 	if err != nil {
 		return err
 	}
