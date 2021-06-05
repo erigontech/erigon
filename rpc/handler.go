@@ -134,10 +134,10 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			}
 		}
 
-		var answers []*jsonrpcMessage
+		answers := make([]*jsonrpcMessage, 0, len(msgs))
 		if allMethodsAreThreadSafe {
 			// All goroutines will place results right to this array. Because requests order must match reply orders.
-			answers = make([]*jsonrpcMessage, len(msgs))
+			answersWithNils := make([]*jsonrpcMessage, len(msgs))
 			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 			boundedConcurrency := make(chan struct{}, MaxGoroutinesPerBatchRequest)
 			defer close(boundedConcurrency)
@@ -151,14 +151,13 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 						<-boundedConcurrency
 					}()
 
-					answers[i] = h.handleCallMsg(cp, calls[i], stream)
+					answersWithNils[i] = h.handleCallMsg(cp, calls[i], stream)
 				}(i)
 			}
-			answersWithoutNil := make([]*jsonrpcMessage, 0, len(msgs))
 			wg.Wait()
-			for _, answer := range answers {
+			for _, answer := range answersWithNils {
 				if answer != nil {
-					answersWithoutNil = append(answersWithoutNil, answer)
+					answers = append(answers, answer)
 				}
 			}
 		} else {
