@@ -2,10 +2,10 @@ name: Continuous integration
 on:
   push:
     branches:
-      - master
+      - devel
   pull_request:
     branches:
-      - master
+      - devel
 jobs:
   tests:
     strategy:
