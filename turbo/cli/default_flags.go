@@ -61,7 +61,6 @@ var DefaultFlags = []cli.Flag{
 	utils.CliqueSnapshotInmemorySnapshotsFlag,
 	utils.CliqueSnapshotInmemorySignaturesFlag,
 	utils.CliqueDataDirFlag,
-	SilkwormFlag,
 	utils.MiningEnabledFlag,
 	utils.MinerNotifyFlag,
 	utils.MinerGasTargetFlag,

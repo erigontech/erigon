@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"unsafe"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -32,8 +30,6 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state writer for the block execution stage.
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
-
-	SilkwormExecutionFunc unsafe.Pointer
 
 	SnapshotDir      string
 	TorrnetClient    *snapshotsync.Client
@@ -79,29 +75,28 @@ func (stagedSync *StagedSync) Prepare(
 
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			d:                     d,
-			ChainConfig:           chainConfig,
-			Engine:                engine,
-			vmConfig:              vmConfig,
-			DB:                    db,
-			pid:                   pid,
-			storageMode:           storageMode,
-			TmpDir:                tmpdir,
-			QuitCh:                quitCh,
-			headersFetchers:       headersFetchers,
-			txPool:                txPool,
-			BatchSize:             batchSize,
-			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
-			stateReaderBuilder:    readerBuilder,
-			stateWriterBuilder:    writerBuilder,
-			notifier:              stagedSync.Notifier,
-			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
-			InitialCycle:          initialCycle,
-			mining:                miningConfig,
-			snapshotsDir:          stagedSync.params.SnapshotDir,
-			btClient:              stagedSync.params.TorrnetClient,
-			SnapshotBuilder:       stagedSync.params.SnapshotMigrator,
-			Accumulator:           accumulator,
+			d:                  d,
+			ChainConfig:        chainConfig,
+			Engine:             engine,
+			vmConfig:           vmConfig,
+			DB:                 db,
+			pid:                pid,
+			storageMode:        storageMode,
+			TmpDir:             tmpdir,
+			QuitCh:             quitCh,
+			headersFetchers:    headersFetchers,
+			txPool:             txPool,
+			BatchSize:          batchSize,
+			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
+			stateReaderBuilder: readerBuilder,
+			stateWriterBuilder: writerBuilder,
+			notifier:           stagedSync.Notifier,
+			InitialCycle:       initialCycle,
+			mining:             miningConfig,
+			snapshotsDir:       stagedSync.params.SnapshotDir,
+			btClient:           stagedSync.params.TorrnetClient,
+			SnapshotBuilder:    stagedSync.params.SnapshotMigrator,
+			Accumulator:        accumulator,
 		},
 	)
 	state := NewState(stages)
