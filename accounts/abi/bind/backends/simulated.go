@@ -91,22 +91,33 @@ type SimulatedBackend struct {
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
 // and uses a simulated blockchain for testing purposes.
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackendWithDatabase(database ethdb.RwKV, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommitDeprecated(database)
+	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		database:     database.RwKV(),
+		database:     database,
 		engine:       engine,
-		getHeader: func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(database, hash, number)
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
+			if err := database.View(context.Background(), func(tx ethdb.Tx) error {
+				h = rawdb.ReadHeader(tx, hash, number)
+				return nil
+			}); err != nil {
+				panic(err)
+			}
+			return h
 		},
-		checkTEVM: ethdb.GetCheckTEVM(database),
-		config:    genesis.Config,
+		config: genesis.Config,
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{database.RwKV(), backend})
+	if err := database.View(context.Background(), func(tx ethdb.Tx) error {
+		backend.checkTEVM = ethdb.GetCheckTEVM(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -114,29 +125,40 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
-	database := ethdb.NewMemDatabase()
+	database := ethdb.NewMemKV()
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommitDeprecated(database)
+	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
-		database:     database.RwKV(),
+		database:     database,
 		engine:       engine,
 		config:       genesis.Config,
-		getHeader: func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(database, hash, number)
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
+			if err := database.View(context.Background(), func(tx ethdb.Tx) error {
+				h = rawdb.ReadHeader(tx, hash, number)
+				return nil
+			}); err != nil {
+				panic(err)
+			}
+			return h
 		},
-		checkTEVM: ethdb.GetCheckTEVM(database),
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{database.RwKV(), backend})
+	if err := database.View(context.Background(), func(tx ethdb.Tx) error {
+		backend.checkTEVM = ethdb.GetCheckTEVM(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithDatabase(ethdb.NewObjectDatabase(ethdb.NewTestKV(t)), alloc, gasLimit)
+	b := NewSimulatedBackendWithDatabase(ethdb.NewTestKV(t), alloc, gasLimit)
 	t.Cleanup(func() {
 		b.Close()
 	})

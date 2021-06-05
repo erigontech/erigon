@@ -63,6 +63,8 @@ type KVGetter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 }
 
 // Putter wraps the database write operations.

@@ -178,7 +178,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.SetupGenesisBlockDeprecated(ethdb.NewObjectDatabase(mock.DB), gspec, sm.History)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, sm.History)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
 		t.Fatal(err)
 	}

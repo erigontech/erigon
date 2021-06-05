@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -887,15 +886,6 @@ func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.
 	}
 	block.Body().SendersToTxs(senders)
 	return block, senders, nil
-}
-
-// WriteBlock serializes a block into the database, header and body separately.
-func WriteBlockDeprecated(ctx context.Context, db ethdb.Database, block *types.Block) error {
-	if err := WriteBodyDeprecated(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
-		return err
-	}
-	WriteHeader(db, block.Header())
-	return nil
 }
 
 // WriteBlock serializes a block into the database, header and body separately.

@@ -34,7 +34,7 @@ import (
 )
 
 func getBlock(transactions int, uncles int, dataSize int) *types.Block {
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewMemKV()
 	defer db.Close()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
@@ -48,11 +48,11 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 			Config: params.TestChainConfig,
 			Alloc:  GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = gspec.MustCommitDeprecated(db)
+		genesis = gspec.MustCommit(db)
 	)
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), uncles+1,
+	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1,
 		func(n int, b *BlockGen) {
 			if n == uncles {
 				// Add transactions and stuff on the last block

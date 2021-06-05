@@ -49,8 +49,6 @@ type Getter interface {
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
 	Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
-	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 }
 
 type GetterTx interface {
