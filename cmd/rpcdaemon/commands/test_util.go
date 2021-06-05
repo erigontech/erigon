@@ -72,12 +72,18 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 		switch i {
 		case 0:
 			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)

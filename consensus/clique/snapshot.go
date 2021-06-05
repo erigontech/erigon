@@ -63,11 +63,11 @@ type Snapshot struct {
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
-type signersAscending []common.Address
+type SignersAscending []common.Address
 
-func (s signersAscending) Len() int           { return len(s) }
-func (s signersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
-func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s SignersAscending) Len() int           { return len(s) }
+func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
+func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
@@ -231,11 +231,11 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache, headers ...*types.Header) (*Sna
 			return nil, err
 		}
 		if _, ok := snap.Signers[signer]; !ok {
-			return nil, errUnauthorizedSigner
+			return nil, ErrUnauthorizedSigner
 		}
 		for _, recent := range snap.Recents {
 			if recent == signer {
-				return nil, errRecentlySigned
+				return nil, ErrRecentlySigned
 			}
 		}
 		snap.Recents[number] = signer
@@ -254,7 +254,7 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache, headers ...*types.Header) (*Sna
 		// Tally up the new vote from the signer
 		var authorize bool
 		switch {
-		case bytes.Equal(header.Nonce[:], nonceAuthVote):
+		case bytes.Equal(header.Nonce[:], NonceAuthVote):
 			authorize = true
 		case bytes.Equal(header.Nonce[:], nonceDropVote):
 			authorize = false
@@ -343,18 +343,18 @@ func (s *Snapshot) copy() *Snapshot {
 }
 
 // signers retrieves the list of authorized signers in ascending order.
-func (s *Snapshot) signers() []common.Address {
+func (s *Snapshot) GetSigners() []common.Address {
 	sigs := make([]common.Address, 0, len(s.Signers))
 	for sig := range s.Signers {
 		sigs = append(sigs, sig)
 	}
-	sort.Sort(signersAscending(sigs))
+	sort.Sort(SignersAscending(sigs))
 	return sigs
 }
 
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
-	signers, offset := s.signers(), 0
+	signers, offset := s.GetSigners(), 0
 	for offset < len(signers) && signers[offset] != signer {
 		offset++
 	}
