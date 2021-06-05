@@ -8,7 +8,7 @@ import (
 )
 
 func TestGetTransactionReceipt(t *testing.T) {
-	db, err := createTestKV()
+	db, err := createTestKV(t)
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestGetTransactionReceipt(t *testing.T) {
 }
 
 func TestGetTransactionReceiptUnprotected(t *testing.T) {
-	db, err := createTestKV()
+	db, err := createTestKV(t)
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}

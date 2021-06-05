@@ -239,7 +239,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 	}
 }
 
-func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeadersInStages1(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, false, 0, err
@@ -257,7 +257,7 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	return newCanonical, reorg, forkblocknumber, nil
 }
 
-func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
+func InsertBlocksInStages1(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
 	if len(blocks) == 0 {
 		return false, nil
 	}
@@ -343,8 +343,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	return true, nil
 }
 
-func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
-	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
+func InsertBlockInStages1(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
+	return InsertBlocksInStages1(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
 }
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels

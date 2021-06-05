@@ -9,7 +9,7 @@ import (
 )
 
 func TestEstimateGas(t *testing.T) {
-	db, err := createTestKV()
+	db, err := createTestKV(t)
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}

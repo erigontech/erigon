@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/bloombits"
@@ -43,12 +42,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -66,8 +65,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database  *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine    consensus.Engine
+	m         *stages.MockSentry
+	database  ethdb.Database
 	getHeader func(hash common.Hash, number uint64) *types.Header
 	checkTEVM func(hash common.Hash) (bool, error)
 
@@ -82,7 +81,6 @@ type SimulatedBackend struct {
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config     *params.ChainConfig
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
@@ -93,18 +91,16 @@ type SimulatedBackend struct {
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-
+	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
 	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		database:     database,
-		engine:       engine,
+		m:            m,
+		database:     ethdb.NewObjectDatabase(m.DB),
+		prependBlock: m.Genesis,
 		getHeader: func(hash common.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(database, hash, number)
 		},
 		checkTEVM: ethdb.GetCheckTEVM(database),
-		config:    genesis.Config,
 	}
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
@@ -116,14 +112,12 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
 	database := ethdb.NewMemDatabase()
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-
+	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
 	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		database:     database,
-		engine:       engine,
-		config:       genesis.Config,
+		m:            m,
+		database:     ethdb.NewObjectDatabase(m.DB),
+		prependBlock: m.Genesis,
 		getHeader: func(hash common.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(database, hash, number)
 		},
@@ -143,8 +137,8 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 	return b
 }
 
-func (b *SimulatedBackend) DB() ethdb.Database {
-	return b.database
+func (b *SimulatedBackend) DB() ethdb.RwKV {
+	return b.m.DB
 }
 
 // Close terminates the underlying blockchain's update loop.
@@ -158,7 +152,12 @@ func (b *SimulatedBackend) Close() error {
 func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
+	if err := b.m.InsertChain(&core.ChainPack{
+		Headers:  []*types.Header{b.pendingBlock.Header()},
+		Blocks:   []*types.Block{b.pendingBlock},
+		Length:   1,
+		TopBlock: b.pendingBlock,
+	}); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -180,7 +179,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	chain, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
@@ -623,10 +622,10 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil, b.checkTEVM)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.checkTEVM)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
+	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
@@ -639,7 +638,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
@@ -652,7 +651,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.getHeader, b.engine,
+		b.m.ChainConfig, b.getHeader, b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
@@ -660,11 +659,11 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	chain, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.engine, tx)
+			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
-		block.AddTxWithChain(b.getHeader, b.engine, tx)
+		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
@@ -781,9 +780,9 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database.RwKV(), 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.engine, tx)
+			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)

@@ -32,19 +32,15 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -1696,61 +1692,6 @@ func extractBodies(chaindata string, block uint64) error {
 	return nil
 }
 
-func applyBlock(chaindata string, hash common.Hash) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	f, err := os.Open("out.txt")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	s := bufio.NewScanner(r)
-	s.Buffer(nil, 20000000)
-	count := 0
-	var body *types.Body
-	var header *types.Header
-	for s.Scan() {
-		fields := strings.Split(s.Text(), " ")
-		h := common.HexToHash(fields[2][:64])
-		if h != hash {
-			continue
-		}
-		switch fields[0] {
-		case "Body":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &body); err != nil {
-				return nil
-			}
-		case "Header":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &header); err != nil {
-				return nil
-			}
-		}
-		count++
-	}
-	if s.Err() != nil {
-		return s.Err()
-	}
-	fmt.Printf("Lines: %d\n", count)
-	if body == nil {
-		fmt.Printf("block body with given hash %x not found\n", hash)
-		return nil
-	}
-	if header == nil {
-		fmt.Printf("header with given hash not found\n")
-		return nil
-	}
-	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
-	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, ethash.NewFaker(), block, true /* checkRoot */); err != nil {
-		return err
-	}
-	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
-		return err
-	}
-	return nil
-}
-
 func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
 	db := ethdb.MustOpen(chaindata)
@@ -1969,9 +1910,6 @@ func main() {
 
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
-
-	case "applyBlock":
-		err = applyBlock(*chaindata, common.HexToHash(*hash))
 
 	case "fixUnwind":
 		err = fixUnwind(*chaindata)

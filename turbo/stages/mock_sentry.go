@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"testing"
 
@@ -135,10 +136,16 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode, engine consensus.Engine) *MockSentry {
+	var tmpdir string
+	if t != nil {
+		tmpdir = t.TempDir()
+	} else {
+		tmpdir = os.TempDir()
+	}
 	mock := &MockSentry{
 		t:           t,
 		DB:          ethdb.NewTestKV(t),
-		tmpdir:      t.TempDir(),
+		tmpdir:      tmpdir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
@@ -169,7 +176,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
 	txPoolP2PServer, err := txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
 	if err != nil {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 	fetchTx := func(PeerId string, hashes []common.Hash) error {
 		txPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
@@ -180,7 +191,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = core.SetupGenesisBlock(ethdb.NewObjectDatabase(mock.DB), gspec, sm.History)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 
 	blockDownloaderWindow := 65536
@@ -189,7 +204,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sentries := []remote.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 	mock.Sync = NewStagedSync(mock.Ctx, sm,
 		stagedsync.StageHeadersCfg(
@@ -279,11 +298,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.StreamWg.Add(1)
 	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
-	t.Cleanup(func() {
-		mock.cancel()
-		txPool.Stop()
-		txPoolP2PServer.TxFetcher.Stop()
-	})
+	if t != nil {
+		t.Cleanup(func() {
+			mock.cancel()
+			txPool.Stop()
+			txPoolP2PServer.TxFetcher.Stop()
+		})
+	}
 	return mock
 }
 

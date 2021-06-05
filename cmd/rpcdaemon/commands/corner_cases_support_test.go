@@ -13,7 +13,7 @@ import (
 // see https://github.com/ledgerwatch/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
-	db, err := createTestKV()
+	db, err := createTestKV(t)
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
