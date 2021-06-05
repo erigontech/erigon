@@ -381,6 +381,10 @@ Increase it - if your 'hot data' is small or have much RAM or see "request timeo
 
 Reduce `--private.api.ratelimit` 
 
+### Read DB directly without Json-RPC/Graphql
+
+[./docs/programmers_guide/read_db.md](./docs/programmers_guide/read_db.md)
+
 ## For Developers
 
 ### Code generation
