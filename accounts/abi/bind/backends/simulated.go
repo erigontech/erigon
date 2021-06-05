@@ -110,12 +110,7 @@ func NewSimulatedBackendWithDatabase(database ethdb.RwKV, alloc core.GenesisAllo
 		},
 		config: genesis.Config,
 	}
-	if err := database.View(context.Background(), func(tx ethdb.Tx) error {
-		backend.checkTEVM = ethdb.GetCheckTEVM(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	backend.checkTEVM = ethdb.GetCheckTEVM(ethdb.NewObjectDatabase(database))
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
@@ -144,12 +139,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	if err := database.View(context.Background(), func(tx ethdb.Tx) error {
-		backend.checkTEVM = ethdb.GetCheckTEVM(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	backend.checkTEVM = ethdb.GetCheckTEVM(ethdb.NewObjectDatabase(database))
 	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
 	backend.emptyPendingBlock()
 	return backend
