@@ -127,12 +127,12 @@ func TestNewSimulatedBackend(t *testing.T) {
 	expectedBal := uint256.NewInt(10000000000)
 	sim := simTestBackend(t, testAddr)
 
-	if sim.config != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.config)
+	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
+		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
 	}
 
-	if sim.config != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
+	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
+		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
 	}
 	tx, err1 := sim.DB().BeginRo(context.Background())
 	if err1 != nil {
@@ -141,7 +141,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	defer tx.Rollback()
 
 	var num uint64
-	if err := sim.database.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := sim.m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 		num = rawdb.ReadCurrentHeader(tx).Number.Uint64()
 		return nil
 	}); err != nil {
