@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	mrand "math/rand"
@@ -77,87 +76,6 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 // HasBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
 	return rawdb.HasBlock(cr.Db, hash, number)
-}
-
-type ChainReader2 struct {
-	Cfg params.ChainConfig
-	Db  ethdb.RwKV
-}
-
-// Config retrieves the blockchain's chain configuration.
-func (cr ChainReader2) Config() *params.ChainConfig {
-	return &cr.Cfg
-}
-
-// CurrentHeader retrieves the current header from the local chain.
-func (cr ChainReader2) CurrentHeader() *types.Header {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	hash := rawdb.ReadHeadHeaderHash(tx)
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	return rawdb.ReadHeader(tx, hash, *number)
-}
-
-// GetHeader retrieves a block header from the database by hash and number.
-func (cr ChainReader2) GetHeader(hash common.Hash, number uint64) *types.Header {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	return rawdb.ReadHeader(tx, hash, number)
-}
-
-// GetHeaderByNumber retrieves a block header from the database by number.
-func (cr ChainReader2) GetHeaderByNumber(number uint64) *types.Header {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	hash, err := rawdb.ReadCanonicalHash(tx, number)
-	if err != nil {
-		log.Error("ReadCanonicalHash failed", "err", err)
-		return nil
-	}
-	return rawdb.ReadHeader(tx, hash, number)
-}
-
-// GetHeaderByHash retrieves a block header from the database by its hash.
-func (cr ChainReader2) GetHeaderByHash(hash common.Hash) *types.Header {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	return rawdb.ReadHeader(tx, hash, *number)
-}
-
-// GetBlock retrieves a block from the database by hash and number.
-func (cr ChainReader2) GetBlock(hash common.Hash, number uint64) *types.Block {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	return rawdb.ReadBlock(tx, hash, number)
-}
-
-// HasBlock retrieves a block from the database by hash and number.
-func (cr ChainReader2) HasBlock(hash common.Hash, number uint64) bool {
-	tx, err := cr.Db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	return rawdb.HasBlock(tx, hash, number)
 }
 
 func VerifyHeaders(db ethdb.Getter, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
