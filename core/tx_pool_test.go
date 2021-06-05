@@ -1723,7 +1723,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	config.Journal = journal
 	config.Rejournal = time.Second
 
-	pool := NewTxPool(config, params.TestChainConfig, db)
+	pool := NewTxPool(config, params.TestChainConfig, db.RwKV())
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1777,7 +1777,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatal(err)
 	}
 
-	pool = NewTxPool(config, params.TestChainConfig, db)
+	pool = NewTxPool(config, params.TestChainConfig, db.RwKV())
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1818,7 +1818,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatal(err)
 	}
 
-	pool = NewTxPool(config, params.TestChainConfig, db)
+	pool = NewTxPool(config, params.TestChainConfig, db.RwKV())
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}

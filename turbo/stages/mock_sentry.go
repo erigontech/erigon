@@ -165,7 +165,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	txPoolConfig := core.DefaultTxPoolConfig
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
-	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, ethdb.NewObjectDatabase(mock.DB))
+	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
 	txPoolP2PServer, err := txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
 	if err != nil {

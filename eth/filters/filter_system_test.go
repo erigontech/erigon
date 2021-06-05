@@ -74,9 +74,11 @@ func (b *testBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*type
 
 func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (receipts types.Receipts, err error) {
 	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		if number := rawdb.ReadHeaderNumber(tx, hash); number != nil {
-			receipts = rawdb.ReadReceipts(tx, hash, *number)
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
 		}
+		receipts = rawdb.ReadReceipts(tx, b, senders)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -87,11 +89,11 @@ func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (receip
 func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	var logs [][]*types.Log
 	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		number := rawdb.ReadHeaderNumber(tx, hash)
-		if number == nil {
-			return nil
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
 		}
-		receipts := rawdb.ReadReceipts(tx, hash, *number)
+		receipts := rawdb.ReadReceipts(tx, b, senders)
 		logs = make([][]*types.Log, len(receipts))
 		for i, receipt := range receipts {
 			logs[i] = receipt.Logs
