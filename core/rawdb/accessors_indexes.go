@@ -96,9 +96,8 @@ func ReadTransaction(db ethdb.Tx, hash common.Hash) (types.Transaction, common.H
 	return nil, common.Hash{}, 0, 0
 }
 
-// ReadReceiptDeprecated retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
-func ReadReceiptDeprecated(db ethdb.Tx, txHash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+func ReadReceipt(db ethdb.Tx, txHash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber := ReadTxLookupEntry(db, txHash)
 	if blockNumber == nil {
@@ -112,8 +111,13 @@ func ReadReceiptDeprecated(db ethdb.Tx, txHash common.Hash) (*types.Receipt, com
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0
 	}
+	b, senders, err := ReadBlockWithSenders(db, blockHash, *blockNumber)
+	if err != nil {
+		log.Error("ReadReceipt", "err", err, "number", blockNumber, "hash", blockHash, "txhash", txHash)
+		return nil, common.Hash{}, 0, 0
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := ReadReceipts(db, blockHash, *blockNumber)
+	receipts := ReadReceipts(db, b, senders)
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)

@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -267,7 +266,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 		return nil, err
 	}
 	defer tx.Rollback()
-	receipt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txHash)
+	receipt, _, _, _ := rawdb.ReadReceipt(tx, txHash)
 	return receipt, nil
 }
 
@@ -881,11 +880,11 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 		return nil, err
 	}
 	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, nil
+	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
 	}
-	return rawdb.ReadReceipts(tx, hash, *number), nil
+	return rawdb.ReadReceipts(tx, b, senders), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -894,11 +893,11 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 		return nil, err
 	}
 	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, nil
+	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
 	}
-	receipts := rawdb.ReadReceipts(tx, hash, *number)
+	receipts := rawdb.ReadReceipts(tx, b, senders)
 	if receipts == nil {
 		return nil, nil
 	}

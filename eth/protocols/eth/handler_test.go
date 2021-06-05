@@ -450,7 +450,9 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		block := rawdb.ReadHeaderByNumber(tx, i)
 
 		hashes = append(hashes, block.Hash())
-		receipts = append(receipts, rawdb.ReadReceiptsByHashDeprecated(tx, block.Hash()))
+		r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
+		require.NoError(t, err)
+		receipts = append(receipts, r)
 	}
 	// Send the hash request and verify the response
 	if err := p2p.Send(peer.app, GetReceiptsMsg, hashes); err != nil {

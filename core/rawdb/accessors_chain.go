@@ -706,17 +706,6 @@ func ReadReceipts(db ethdb.Tx, block *types.Block, senders []common.Address) typ
 	}
 	return receipts
 }
-func ReadReceiptsByHashDeprecated(db ethdb.Tx, hash common.Hash) types.Receipts {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil
-	}
-	receipts := ReadReceipts(db, hash, *number)
-	if receipts == nil {
-		return nil
-	}
-	return receipts
-}
 
 func ReadReceiptsByHash(db ethdb.Tx, hash common.Hash) (types.Receipts, error) {
 	b, s, err := ReadBlockByHashWithSenders(db, hash)
@@ -731,10 +720,6 @@ func ReadReceiptsByHash(db ethdb.Tx, hash common.Hash) (types.Receipts, error) {
 		return nil, nil
 	}
 	return receipts, nil
-}
-func ReadReceiptsByNumber(db ethdb.Getter, number uint64) types.Receipts {
-	h, _ := ReadCanonicalHash(db, number)
-	return ReadReceiptsDeprecated(db, h, number)
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
