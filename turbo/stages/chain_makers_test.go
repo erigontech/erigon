@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -100,8 +99,8 @@ func TestGenerateChain(t *testing.T) {
 	}
 
 	st := state.New(state.NewDbStateReader(db))
-	if big.NewInt(5).Cmp(rawdb.ReadCurrentBlockDeprecated(db).Number()) != 0 {
-		t.Errorf("wrong block number: %d", rawdb.ReadCurrentBlockDeprecated(db).Number())
+	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m.DB).Number())
 	}
 	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
 		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))

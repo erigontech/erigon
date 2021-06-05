@@ -174,7 +174,7 @@ type Clique struct {
 	chainConfig    *params.ChainConfig
 	config         *params.CliqueConfig   // Consensus engine configuration parameters
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
-	db             ethdb.Database         // Database to store and retrieve snapshot checkpoints
+	db             ethdb.RwKV             // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
@@ -193,7 +193,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.Database) *Clique {
+func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.RwKV) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -560,13 +560,11 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 
 	blockEncoded := dbutils.EncodeBlockNumber(latest)
 
-	var tx ethdb.Tx
-	if dbtx, err := c.db.Begin(context.Background(), ethdb.RO); err == nil {
-		defer dbtx.Rollback()
-		tx = dbtx.(ethdb.HasTx).Tx()
-	} else {
+	tx, err := c.db.BeginRo(context.Background())
+	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	cur, err1 := tx.Cursor(dbutils.CliqueSeparateBucket)
 	if err1 != nil {

@@ -2,16 +2,11 @@ package stagedsync
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool) StageBuilders {
@@ -239,138 +234,30 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 	}
 }
 
-func InsertHeadersInStages1(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
-	blockNum := headers[len(headers)-1].Number.Uint64()
-	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
-		return false, false, 0, err
-	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, 0)
-	if err != nil {
-		return false, false, 0, err
-	}
-	if !newCanonical {
-		return false, false, 0, nil
-	}
-	if err = stages.SaveStageProgress(db, stages.Headers, blockNum); err != nil {
-		return false, false, 0, err
-	}
-	return newCanonical, reorg, forkblocknumber, nil
-}
-
-func InsertBlocksInStages1(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
-	if len(blocks) == 0 {
-		return false, nil
-	}
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
-	// Header verification happens outside of the transaction
-	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
-		return false, err
-	}
-	var tx ethdb.RwTx
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = hasTx.Tx().(ethdb.RwTx)
-	}
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = db.RwKV().BeginRw(context.Background())
-		if err != nil {
-			return false, err
-		}
-		defer tx.Rollback()
-	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", ethdb.WrapIntoTxDB(tx), headers, 0)
-	if err != nil {
-		return false, err
-	}
-	if !newCanonical {
-		if _, err = core.InsertBodyChain("Bodies", context.Background(), ethdb.WrapIntoTxDB(tx), blocks, false /* newCanonical */); err != nil {
-			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
-		}
-		if !useExternalTx {
-			if err1 := tx.Commit(); err1 != nil {
-				return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
-			}
-		}
-		return false, nil // No change of the chain
-	}
-	blockNum := blocks[len(blocks)-1].Number().Uint64()
-	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
-		return false, err
-	}
-	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
-	syncState, err2 := stagedSync.Prepare(
-		nil,
-		config,
-		engine,
-		vmConfig,
-		db,
-		tx,
-		"1",
-		storageMode,
-		"",
-		8*1024,
-		nil,
-		nil,
-		nil,
-		false,
-		nil,
-		nil,
-	)
-	if err2 != nil {
-		return false, err2
-	}
-	syncState.DisableStages(stages.Finish)
-	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, tx, common.Hash{}); err != nil {
-			return false, err
-		}
-	}
-
-	if err = syncState.Run(db, tx); err != nil {
-		return false, err
-	}
-	if !useExternalTx {
-		if err1 := tx.Commit(); err1 != nil {
-			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
-		}
-	}
-	return true, nil
-}
-
-func InsertBlockInStages1(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
-	return InsertBlocksInStages1(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
-}
-
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
 // need to fix it in future
-func UpdateMetrics(db ethdb.Getter) error {
+func UpdateMetrics(tx ethdb.Tx) error {
 	var progress uint64
 	var err error
-	progress, err = stages.GetStageProgress(db, stages.Headers)
+	progress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}
 	stageHeadersGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	progress, err = stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
 		return err
 	}
 	stageBodiesGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Execution)
+	progress, err = stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 	stageExecutionGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Translation)
+	progress, err = stages.GetStageProgress(tx, stages.Translation)
 	if err != nil {
 		return err
 	}

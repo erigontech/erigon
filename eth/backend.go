@@ -77,8 +77,7 @@ type Ethereum struct {
 	txPool *core.TxPool
 
 	// DB interfaces
-	chainDB    ethdb.Database // Same as chainDb, but different interface
-	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -163,7 +162,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainDb.RwKV(), config.Genesis, config.StorageMode.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -171,7 +170,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	backend := &Ethereum{
 		config:               config,
-		chainDB:              chainDb,
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -198,26 +196,29 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-		return ethdb.SetStorageModeIfNotExist(tx, config.StorageMode)
-	}); err != nil {
-		return nil, err
-	}
-
-	sm, err := ethdb.GetStorageModeFromDB(chainDb)
-	if err != nil {
-		return nil, err
-	}
-	if config.StorageMode.Initialised {
-		// If storage mode is not explicitly specified, we take whatever is in the database
-		if !reflect.DeepEqual(sm, config.StorageMode) {
-			return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+			return err
 		}
-	} else {
-		config.StorageMode = sm
-	}
-	log.Info("Effective", "storage mode", config.StorageMode)
 
-	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
+			return err
+		}
+
+		sm, err := ethdb.GetStorageModeFromDB(tx)
+		if err != nil {
+			return err
+		}
+		if config.StorageMode.Initialised {
+			// If storage mode is not explicitly specified, we take whatever is in the database
+			if !reflect.DeepEqual(sm, config.StorageMode) {
+				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			}
+		} else {
+			config.StorageMode = sm
+		}
+
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -225,13 +226,13 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb)
+	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb.RwKV())
 
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
-		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
+		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb.RwKV())
 		if err != nil {
 			return nil, err
 		}
@@ -391,7 +392,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	backend.stagedSync2, err = stages2.NewStagedSync2(
 		backend.downloadV2Ctx,
 		backend.chainKV,
-		sm,
+		config.StorageMode,
 		config.BatchSize,
 		bodyDownloadTimeoutSeconds,
 		backend.downloadServer,
@@ -625,7 +626,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
 	}
 
-	go Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
+	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil
 }
 

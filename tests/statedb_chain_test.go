@@ -58,7 +58,7 @@ func TestSelfDestructReceive(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
+		genesis = gspec.MustCommit(db.RwKV())
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)

@@ -63,6 +63,15 @@ type KVGetter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
+
+	// ForEach iterates over entries with keys greater or equal to fromPrefix.
+	// walker is called for each eligible entry.
+	// If walker returns an error:
+	//   - implementations of local db - stop
+	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // Putter wraps the database write operations.

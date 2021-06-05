@@ -357,15 +357,15 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next Lo
 func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []byte) {
 	t.Helper()
 	b1Map := make(map[string]string)
-	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
+	err := db.ForEach(b1, startKey, func(k, v []byte) error {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	b2Map := make(map[string]string)
-	err = db.Walk(b2, nil, 0, func(k, v []byte) (bool, error) {
+	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)
@@ -374,16 +374,16 @@ func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []b
 func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 string) {
 	t.Helper()
 	b1Map := make(map[string]string)
-	err := db.Walk(b1, nil, 0, func(k, v []byte) (bool, error) {
+	err := db.ForEach(b1, nil, func(k, v []byte) error {
 		b1Map[fmt.Sprintf("%x", append(k, 0xAA))] = fmt.Sprintf("%x", append(v, 0xAA))
 		b1Map[fmt.Sprintf("%x", append(k, 0xBB))] = fmt.Sprintf("%x", append(v, 0xBB))
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	b2Map := make(map[string]string)
-	err = db.Walk(b2, nil, 0, func(k, v []byte) (bool, error) {
+	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)

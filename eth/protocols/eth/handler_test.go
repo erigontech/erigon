@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"math/rand"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -65,7 +67,7 @@ func newTestBackend(t *testing.T, blocks int) *testBackend {
 // wraps it into a mock backend.
 func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
-	db := ethdb.NewTestDB(t)
+	db := ethdb.NewTestKV(t)
 	genesis := (&core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
@@ -73,8 +75,8 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 
 	headBlock := genesis
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), blocks, generator, true)
-		if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
+		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
+		if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
 			panic(err)
 		}
 		headBlock = chain.TopBlock
@@ -83,7 +85,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
 	b := &testBackend{
-		db:          db,
+		db:          ethdb.NewObjectDatabase(db),
 		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db),
 		headBlock:   headBlock,
 		genesis:     genesis,
@@ -110,9 +112,9 @@ func (b *testBackend) AcceptTxs() bool {
 func (b *testBackend) Handle(*Peer, Packet) error {
 	panic("data processing tests should be done in the handler package")
 }
-func (b *testBackend) GetBlockHashesFromHash(hash common.Hash, max uint64) []common.Hash {
+func (b *testBackend) GetBlockHashesFromHash(tx ethdb.Tx, hash common.Hash, max uint64) []common.Hash {
 	// Get the origin header from which to fetch
-	header, _ := rawdb.ReadHeaderByHash(b.db, hash)
+	header, _ := rawdb.ReadHeaderByHash(tx, hash)
 	if header == nil {
 		return nil
 	}
@@ -120,7 +122,7 @@ func (b *testBackend) GetBlockHashesFromHash(hash common.Hash, max uint64) []com
 	chain := make([]common.Hash, 0, max)
 	for i := uint64(0); i < max; i++ {
 		next := header.ParentHash
-		if header = rawdb.ReadHeader(b.db, next, header.Number.Uint64()-1); header == nil {
+		if header = rawdb.ReadHeader(tx, next, header.Number.Uint64()-1); header == nil {
 			break
 		}
 		chain = append(chain, next)
@@ -137,6 +139,9 @@ func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, maxHeadersServe+15)
+	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
@@ -147,7 +152,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		unknown[i] = byte(i)
 	}
 	getBlockHash := func(n uint64) common.Hash {
-		h, _ := rawdb.ReadCanonicalHash(backend.db, n)
+		h, _ := rawdb.ReadCanonicalHash(tx, n)
 		return h
 
 	}
@@ -202,20 +207,20 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 0}, Amount: 1},
 			[]common.Hash{getBlockHash(0)},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64()}, Amount: 1},
-			[]common.Hash{rawdb.ReadCurrentHeader(backend.db).Hash()},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64()}, Amount: 1},
+			[]common.Hash{rawdb.ReadCurrentHeader(tx).Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 1}, Amount: limit + 10, Reverse: true},
-			backend.GetBlockHashesFromHash(rawdb.ReadCurrentHeader(backend.db).Hash(), limit),
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 1}, Amount: limit + 10, Reverse: true},
+			backend.GetBlockHashesFromHash(tx, rawdb.ReadCurrentHeader(tx).Hash(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 4}, Skip: 3, Amount: 3},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
-				getBlockHash(rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 4),
-				getBlockHash(rawdb.ReadCurrentHeader(backend.db).Number.Uint64()),
+				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4),
+				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64()),
 			},
 		}, {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
@@ -226,10 +231,10 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 4}, Skip: 2, Amount: 3},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
-				getBlockHash(rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 4),
-				getBlockHash(rawdb.ReadCurrentHeader(backend.db).Number.Uint64() - 1),
+				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4),
+				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 1),
 			},
 		}, {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
@@ -266,7 +271,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(backend.db).Number.Uint64() + 1}, Amount: 1},
+			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}
@@ -275,7 +280,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		// Collect the headers to expect in the response
 		var headers []*types.Header
 		for _, hash := range tt.expect {
-			h, _ := rawdb.ReadHeaderByHash(backend.db, hash)
+			h, _ := rawdb.ReadHeaderByHash(tx, hash)
 
 			headers = append(headers, h)
 		}
@@ -288,7 +293,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		}
 		// If the test used number origins, repeat with hashes as the too
 		if tt.query.Origin.Hash == (common.Hash{}) {
-			if origin := rawdb.ReadHeaderByNumber(backend.db, tt.query.Origin.Number); origin != nil {
+			if origin := rawdb.ReadHeaderByNumber(tx, tt.query.Origin.Number); origin != nil {
 				tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
 
 				if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
@@ -308,13 +313,16 @@ func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, maxBodiesServe+15)
+	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	peer, _ := newTestPeer("peer", protocol, backend)
 	defer peer.close()
 
-	block1 := rawdb.ReadHeaderByNumber(backend.db, 1)
-	block10 := rawdb.ReadHeaderByNumber(backend.db, 10)
-	block100 := rawdb.ReadHeaderByNumber(backend.db, 100)
+	block1 := rawdb.ReadHeaderByNumber(tx, 1)
+	block10 := rawdb.ReadHeaderByNumber(tx, 10)
+	block100 := rawdb.ReadHeaderByNumber(tx, 100)
 
 	// Create a batch of tests for various scenarios
 	limit := maxBodiesServe
@@ -328,9 +336,9 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		{10, nil, nil, 10},           // Multiple random blocks should be retrievable
 		{limit, nil, nil, limit},     // The maximum possible blocks should be retrievable
 		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
-		{0, []common.Hash{backend.genesis.Hash()}, []bool{true}, 1},                     // The genesis block should be retrievable
-		{0, []common.Hash{rawdb.ReadCurrentHeader(backend.db).Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
-		{0, []common.Hash{{}}, []bool{false}, 0},                                        // A non existent block should not be returned
+		{0, []common.Hash{backend.genesis.Hash()}, []bool{true}, 1},             // The genesis block should be retrievable
+		{0, []common.Hash{rawdb.ReadCurrentHeader(tx).Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
+		{0, []common.Hash{{}}, []bool{false}, 0},                                // A non existent block should not be returned
 
 		// Existing and non-existing blocks interleaved should not cause problems
 		{0, []common.Hash{
@@ -353,11 +361,11 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		)
 		for j := 0; j < tt.random; j++ {
 			for {
-				num := rand.Int63n(int64(rawdb.ReadCurrentHeader(backend.db).Number.Uint64()))
+				num := rand.Int63n(int64(rawdb.ReadCurrentHeader(tx).Number.Uint64()))
 				if !seen[num] {
 					seen[num] = true
 
-					block, _ := rawdb.ReadBlockByNumberDeprecated(backend.db, uint64(num))
+					block, _ := rawdb.ReadBlockByNumber(tx, uint64(num))
 					hashes = append(hashes, block.Hash())
 					if len(bodies) < tt.expected {
 						bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
@@ -369,7 +377,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		for j, hash := range tt.explicit {
 			hashes = append(hashes, hash)
 			if tt.available[j] && len(bodies) < tt.expected {
-				block, _ := rawdb.ReadBlockByHashDeprecated(backend.db, hash)
+				block, _ := rawdb.ReadBlockByHash(tx, hash)
 				bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
 			}
 		}
@@ -434,11 +442,17 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		hashes   []common.Hash
 		receipts []types.Receipts
 	)
-	for i := uint64(0); i <= rawdb.ReadCurrentHeader(backend.db).Number.Uint64(); i++ {
-		block := rawdb.ReadHeaderByNumber(backend.db, i)
+	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
+		block := rawdb.ReadHeaderByNumber(tx, i)
 
 		hashes = append(hashes, block.Hash())
-		receipts = append(receipts, rawdb.ReadReceiptsByHashDeprecated(backend.db, block.Hash()))
+		r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
+		require.NoError(t, err)
+		receipts = append(receipts, r)
 	}
 	// Send the hash request and verify the response
 	if err := p2p.Send(peer.app, GetReceiptsMsg, hashes); err != nil {

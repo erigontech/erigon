@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func createTestKV(t *testing.T) (ethdb.RwKV, error) {
+func createTestKV(t *testing.T) ethdb.RwKV {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -58,6 +58,7 @@ func createTestKV(t *testing.T) (ethdb.RwKV, error) {
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 
+	var err error
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, block *core.BlockGen) {
@@ -173,14 +174,14 @@ func createTestKV(t *testing.T) (ethdb.RwKV, error) {
 		contractBackend.Commit()
 	}, true)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
 	if err = m.InsertChain(chain); err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
-	return m.DB, nil
+	return m.DB
 }
 
 func createTestGrpcConn() *grpc.ClientConn { //nolint

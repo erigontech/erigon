@@ -17,6 +17,7 @@
 package clique
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -42,8 +43,8 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		db       = ethdb.NewTestDB(t)
-		cliqueDB = ethdb.NewTestDB(t)
+		db       = ethdb.NewTestKV(t)
+		cliqueDB = ethdb.NewTestKV(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
 		engine   = New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
@@ -59,9 +60,17 @@ func TestReimportMirroredState(t *testing.T) {
 	genesis := genspec.MustCommit(db)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(db, hash, number) }
+	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
+		if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+			h = rawdb.ReadHeader(tx, hash, number)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		return h
+	}
 
-	chain, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(diffInTurn)
@@ -93,27 +102,38 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
-	db = ethdb.NewTestDB(t)
+	db = ethdb.NewTestKV(t)
 	genspec.MustCommit(db)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
-		t.Errorf("could not read chain head: %v", err1)
-	} else if head.NumberU64() != 2 {
-		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
+			t.Errorf("could not read chain head: %v", err1)
+		} else if head.NumberU64() != 2 {
+			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if head, err1 := rawdb.ReadBlockByHashDeprecated(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
-		t.Errorf("could not read chain head: %v", err1)
-	} else if head.NumberU64() != 3 {
-		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
+			t.Errorf("could not read chain head: %v", err1)
+		} else if head.NumberU64() != 3 {
+			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
+
 }

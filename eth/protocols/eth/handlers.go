@@ -290,7 +290,10 @@ func AnswerGetReceiptsQuery(db ethdb.Tx, query GetReceiptsPacket) ([]rlp.RawValu
 			break
 		}
 		// Retrieve the requested block's receipts
-		results := rawdb.ReadReceiptsByHashDeprecated(ethdb.NewRoTxDb(db), hash)
+		results, err := rawdb.ReadReceiptsByHash(db, hash)
+		if err != nil {
+			return nil, err
+		}
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {
