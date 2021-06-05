@@ -164,18 +164,18 @@ func (e *GenesisMismatchError) Error() string {
 func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	defer tx.Rollback()
-	block, s, err := WriteGenesisBlock(tx, genesis, history)
+	c, b, err := WriteGenesisBlock(tx, genesis, history)
 	if err != nil {
-		return nil, nil, err
+		return c, b, err
 	}
 	err = tx.Commit()
 	if err != nil {
-		panic(err)
+		return c, b, err
 	}
-	return block, s, nil
+	return c, b, nil
 }
 
 func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block) {
@@ -225,7 +225,7 @@ func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.C
 	}
 	storedBlock, err := rawdb.ReadBlockByHash(db, stored)
 	if err != nil {
-		return nil, nil, err
+		return genesis.Config, nil, err
 	}
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
@@ -451,17 +451,17 @@ func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.Intra
 }
 
 func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
-	tx, dbErr := db.Begin(context.Background(), ethdb.RW)
-	if dbErr != nil {
-		return nil, nil, dbErr
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return nil, nil, err
 	}
 	defer tx.Rollback()
-	block, statedb, err2 := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
-	if err2 != nil {
-		return block, statedb, err2
+	block, statedb, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+	if err != nil {
+		return block, statedb, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		return block, statedb, err
 	}
 	return block, statedb, nil
 }

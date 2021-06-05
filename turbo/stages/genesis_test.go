@@ -168,6 +168,14 @@ func TestSetupGenesis(t *testing.T) {
 			if !reflect.DeepEqual(config, test.wantConfig) {
 				t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
 			}
+
+			if test.wantHash == (common.Hash{}) {
+				if genesis != nil {
+					t.Fatalf("%s: returned non-nil genesis block, want nil", test.name)
+				}
+				return
+			}
+
 			if genesis.Hash() != test.wantHash {
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {

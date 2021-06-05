@@ -143,15 +143,18 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 
 func TestLastBlock(t *testing.T) {
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	var err error
 
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 1, m, 0)
+	chain := makeBlockChain(current(m.DB), 1, m, 0)
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
-	if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(db) {
+
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(tx) {
 		t.Fatalf("Write/Get HeadBlockHash failed")
 	}
 }
@@ -281,17 +284,14 @@ func testReorgShort(t *testing.T) {
 func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
-
 	// Insert an easy and a difficult chain afterwards
-	easyChain, err := core.GenerateChain(m.ChainConfig, rawdb.ReadCurrentBlockDeprecated(db), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
+	easyChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
 	}, false /* intemediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffChain, err := core.GenerateChain(m.ChainConfig, rawdb.ReadCurrentBlockDeprecated(db), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
+	diffChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
 		b.OffsetTime(second[i])
 	}, false /* intemediateHashes */)
 	if err != nil {
@@ -303,10 +303,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	if err = m.InsertChain(diffChain); err != nil {
 		t.Fatalf("failed to insert difficult chain: %v", err)
 	}
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	// Check that the chain is valid number and link wise
-	prev := rawdb.ReadCurrentBlockDeprecated(db)
-	block, err := rawdb.ReadBlockByNumberDeprecated(db, rawdb.ReadCurrentHeader(db).Number.Uint64()-1)
+	prev := rawdb.ReadCurrentBlock(tx)
+	block, err := rawdb.ReadBlockByNumber(tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,14 +318,14 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
 		prev = block
-		block, err = rawdb.ReadBlockByNumberDeprecated(db, block.NumberU64()-1)
+		block, err = rawdb.ReadBlockByNumber(tx, block.NumberU64()-1)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-	have, err := rawdb.ReadTdByHash(db, rawdb.ReadCurrentHeader(db).Hash())
+	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,8 +344,9 @@ func testBadHashes(t *testing.T) {
 	db := ethdb.NewObjectDatabase(m.DB)
 	defer db.Close()
 	var err error
+
 	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 3, m, 10)
+	chain := makeBlockChain(current(m.DB), 3, m, 10)
 
 	core.BadHashes[chain.Headers[2].Hash()] = true
 	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
@@ -446,49 +450,45 @@ func TestChainTxReorgs(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
-	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-		// removed tx
-		txs := types.Transactions{pastDrop, freshDrop}
-		for i, txn := range txs {
-			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn != nil {
-				t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
-			}
-			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt != nil {
-				t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
-			}
+	// removed tx
+	txs := types.Transactions{pastDrop, freshDrop}
+	for i, txn := range txs {
+		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn != nil {
+			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		// added tx
-		txs = types.Transactions{pastAdd, freshAdd, futureAdd}
-		for i, txn := range txs {
-			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
-				t.Errorf("add %d: expected tx to be found", i)
-			}
-			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
-				t.Errorf("add %d: expected receipt to be found", i)
-			}
+		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt != nil {
+			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
-		// shared tx
-		txs = types.Transactions{postponed, swapped}
-		for i, txn := range txs {
-			if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
-				t.Errorf("share %d: expected tx to be found", i)
-			}
-			if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
-				t.Errorf("share %d: expected receipt to be found", i)
-			}
+	}
+	// added tx
+	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
+	for i, txn := range txs {
+		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+			t.Errorf("add %d: expected tx to be found", i)
 		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
+			t.Errorf("add %d: expected receipt to be found", i)
+		}
+	}
+	// shared tx
+	txs = types.Transactions{postponed, swapped}
+	for i, txn := range txs {
+		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+			t.Errorf("share %d: expected tx to be found", i)
+		}
+		if rcpt, _, _, _ := rawdb.ReadReceiptDeprecated(tx, txn.Hash()); rcpt == nil {
+			t.Errorf("share %d: expected receipt to be found", i)
+		}
 	}
 }
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err2 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 	if err2 != nil {
@@ -497,9 +497,13 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	err := m.InsertChain(chain)
 	require.NoError(t, err)
 
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := rawdb.ReadCanonicalHash(db, block.NumberU64())
+		ch, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)
@@ -511,7 +515,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 			t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
 			return
 		}
-		fb := rawdb.ReadBlockDeprecated(db, ch, block.NumberU64())
+		fb := rawdb.ReadBlock(tx, ch, block.NumberU64())
 		if fb == nil {
 			t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
 			return
@@ -647,8 +651,6 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 		}
 	)
 	m := stages.MockWithGenesisStorageMode(t, gspec, key, ethdb.StorageMode{Initialised: true, History: history, Receipts: receipts, TxIndex: txlookup})
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
@@ -699,6 +701,10 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 		return err
 	}
 
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for bucketName, shouldBeEmpty := range map[string]bool{
 		dbutils.AccountsHistoryBucket: !history,
 		dbutils.BlockReceiptsPrefix:   !receipts,
@@ -706,15 +712,15 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 	} {
 		numberOfEntries := 0
 
-		err := db.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
+		err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
 			// we ignore empty account history
 			//nolint:scopelint
 			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
-				return true, nil
+				return nil
 			}
 
 			numberOfEntries++
-			return true, nil
+			return nil
 		})
 		if err != nil {
 			return err
@@ -892,20 +898,20 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
-	dbTx, err := db.RwKV().BeginRo(context.Background())
+	tx, err := db.RwKV().BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
-	defer dbTx.Rollback()
-	st = state.New(state.NewPlainKvState(dbTx, 0))
+	defer tx.Rollback()
+	st = state.New(state.NewPlainKvState(tx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainKvState(dbTx, 1))
+	st = state.New(state.NewPlainKvState(tx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainKvState(dbTx, 2))
+	st = state.New(state.NewPlainKvState(tx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -917,12 +923,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
-	m := stages.Mock(t)
-	defer m.DB.Close()
-
-	m2 := stages.Mock(t)
-	db2 := ethdb.NewObjectDatabase(m2.DB)
-	defer db2.Close()
+	m, m2 := stages.Mock(t), stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(common.Address{1}) }, false /* intermediateHashes */)
 	if err != nil {
@@ -953,16 +954,21 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 
-		b, h := rawdb.ReadCurrentBlockDeprecated(db2), rawdb.ReadCurrentHeader(db2)
-		if b.Hash() != h.Hash() {
-			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
-		}
-		if err := m2.InsertChain(forks[i]); err != nil {
-			t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
-		}
-		b, h = rawdb.ReadCurrentBlockDeprecated(db2), rawdb.ReadCurrentHeader(db2)
-		if b.Hash() != h.Hash() {
-			t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+		if err := m2.DB.View(context.Background(), func(tx ethdb.Tx) error {
+			b, h := rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			if b.Hash() != h.Hash() {
+				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			}
+			if err := m2.InsertChain(forks[i]); err != nil {
+				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
+			}
+			b, h = rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			if b.Hash() != h.Hash() {
+				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -974,11 +980,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	// Generate the original common chain segment and the two competing forks
 
-	m2 := stages.Mock(t)
-	defer m2.DB.Close()
-
-	m := stages.Mock(t)
-	defer m.DB.Close()
+	m, m2 := stages.Mock(t), stages.Mock(t)
 
 	shared, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1040,7 +1042,6 @@ func TestLowDiffLongChain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
-	defer m.DB.Close()
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
@@ -1066,8 +1067,6 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// Import the canonical chain
 	m2 := stages.Mock(t)
-	db2 := ethdb.NewObjectDatabase(m2.DB)
-	defer db2.Close()
 
 	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
@@ -1078,18 +1077,24 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	head := rawdb.ReadCurrentBlockDeprecated(db2)
-	if got := fork.TopBlock.Hash(); got != head.Hash() {
-		t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
-	}
-	// Sanity check that all the canonical numbers are present
-	header := rawdb.ReadCurrentHeader(db2)
-	for number := head.NumberU64(); number > 0; number-- {
-		if hash := rawdb.ReadHeaderByNumber(db2, number).Hash(); hash != header.Hash() {
-			t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
+	if err := m2.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		head := rawdb.ReadCurrentBlock(tx)
+		if got := fork.TopBlock.Hash(); got != head.Hash() {
+			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 		}
 
-		header = rawdb.ReadHeader(db2, header.ParentHash, number-1)
+		// Sanity check that all the canonical numbers are present
+		header := rawdb.ReadCurrentHeader(tx)
+		for number := head.NumberU64(); number > 0; number-- {
+			if hash := rawdb.ReadHeaderByNumber(tx, number).Hash(); hash != header.Hash() {
+				t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
+			}
+
+			header = rawdb.ReadHeader(tx, header.ParentHash, number-1)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1141,7 +1146,6 @@ func TestDeleteCreateRevert(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	defer m.DB.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1913,4 +1917,13 @@ func TestEIP1559Transition(t *testing.T) {
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 	}
+}
+
+func current(kv ethdb.RwKV) *types.Block {
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	return rawdb.ReadCurrentBlock(tx)
 }
