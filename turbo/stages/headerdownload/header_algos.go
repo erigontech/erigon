@@ -560,13 +560,10 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		}
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
-		//fmt.Printf("Inserting header hash %x, height %d\n", link.hash, link.blockHeight)
 		if !link.preverified {
 			if _, bad := hd.BadHeaders[link.hash]; bad {
-				//fmt.Printf("Known bad header hash %x, height %d,\n", link.hash, link.blockHeight)
 				skip = true
 			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
-				//fmt.Printf("Verification failed for heder hash %x, height %d, error: %v\n", link.header.Hash(), link.blockHeight, err)
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -577,7 +574,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 					skip = true
 				}
 			} else {
-				//fmt.Printf("Verification succeeded for heder hash %x, height %d\n", link.header.Hash(), link.blockHeight)
 				if hd.seenAnnounces.Pop(link.hash) {
 					hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
 				}
@@ -611,7 +607,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = append(hd.insertList, linksInFuture...)
 		linksInFuture = nil //nolint
 	}
-	//fmt.Printf("InsertHeaders hd.topSeenHeight %d\n", hd.topSeenHeight)
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
@@ -750,9 +745,6 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		}
 		// This makes sure we end up chosing the chain with the max total difficulty
 		hi.localTd.Set(td)
-		//fmt.Printf("header %x %d had higher diff\n", hash, blockHeight)
-		//} else {
-		//	fmt.Printf("header %x %d had lower diff\n", hash, blockHeight)
 	}
 	data, err2 := rlp.EncodeToBytes(header)
 	if err2 != nil {

@@ -113,7 +113,6 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
 	db := ethdb.NewObjectDatabase(m.DB)
 	defer db.Close()
-	//fmt.Printf("Genesis hash: %x\n", m.Genesis.Hash())
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
@@ -123,13 +122,6 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 
-	/*
-		fmt.Printf("INSERTED CHAIN\n")
-		for _, b := range t.json.Blocks {
-			cb, _ := b.decode()
-			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
-		}
-	*/
 	validBlocks, err := t.insertBlocks(m)
 	if err != nil {
 		return err
@@ -205,7 +197,6 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			if cErr != nil {
 				return nil, cErr
 			}
-			//fmt.Printf("canonical for header %d is %x\n", cb.NumberU64(), canonical)
 			if canonical == cb.Hash() {
 				return nil, fmt.Errorf("block insertion should have failed")
 			}

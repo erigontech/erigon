@@ -66,7 +66,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	}
 
 	var to = prevStageProgress
-	//fmt.Printf("Started sender %d -> %d\n", s.BlockNumber, to)
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
@@ -202,7 +201,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	for recoveryErr := range errCh {
 		if recoveryErr.err != nil {
 			if recoveryErr.blockHash == (common.Hash{}) {
-				//fmt.Printf("Critical error: %v\n", recoveryErr.err)
 				return recoveryErr.err
 			}
 			if recoveryErr.blockNumber < minBlockNum {
@@ -213,7 +211,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		}
 	}
 	if minBlockErr != nil {
-		//fmt.Printf("[%s] Error recovering senders for block %d %x): %v\n", logPrefix, minBlockNum, minBlockHash, minBlockErr)
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if to > s.BlockNumber {
 			if err = u.UnwindTo(minBlockNum-1, tx, minBlockHash); err != nil {

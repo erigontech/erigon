@@ -248,7 +248,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	//fmt.Printf("Block execution from %d to %d\n", s.BlockNumber, to)
 
 	var batch ethdb.DbWithPendingMutations
 	batch = ethdb.NewBatch(tx)
@@ -305,7 +304,6 @@ Loop:
 			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
 				return unwindErr
 			}
-			//fmt.Printf("Execution failed for %d %x: %v\n", blockNum, block.Hash(), err)
 			break Loop
 		}
 
@@ -481,7 +479,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		defer tx.Rollback()
 	}
 	logPrefix := s.state.LogPrefix()
-	//fmt.Printf("Unwind Execution from %d to %d\n", s.BlockNumber, u.UnwindPoint)
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	if err := unwindExecutionStage(u, s, tx, quit, cfg, accumulator); err != nil {
