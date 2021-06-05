@@ -13,10 +13,7 @@ import (
 // see https://github.com/ledgerwatch/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
+	db := createTestKV(t)
 	defer db.Close()
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	ctx := context.Background()

@@ -239,24 +239,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 	}
 }
 
-func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
-	blockNum := headers[len(headers)-1].Number.Uint64()
-	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
-		return false, false, 0, err
-	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, 0)
-	if err != nil {
-		return false, false, 0, err
-	}
-	if !newCanonical {
-		return false, false, 0, nil
-	}
-	if err = stages.SaveStageProgress(db, stages.Headers, blockNum); err != nil {
-		return false, false, 0, err
-	}
-	return newCanonical, reorg, forkblocknumber, nil
-}
-
 func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
 	if len(blocks) == 0 {
 		return false, nil
@@ -349,28 +331,28 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
 // need to fix it in future
-func UpdateMetrics(db ethdb.Getter) error {
+func UpdateMetrics(tx ethdb.Tx) error {
 	var progress uint64
 	var err error
-	progress, err = stages.GetStageProgress(db, stages.Headers)
+	progress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return err
 	}
 	stageHeadersGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Bodies)
+	progress, err = stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
 		return err
 	}
 	stageBodiesGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Execution)
+	progress, err = stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 	stageExecutionGauge.Update(int64(progress))
 
-	progress, err = stages.GetStageProgress(db, stages.Translation)
+	progress, err = stages.GetStageProgress(tx, stages.Translation)
 	if err != nil {
 		return err
 	}

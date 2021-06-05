@@ -18,18 +18,9 @@ package filters
 
 import (
 	"context"
-	"fmt"
-	"math/big"
 	"math/rand"
-	"reflect"
-	"runtime"
-	"testing"
-	"time"
 
-	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/bloombits"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -40,10 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var (
-	deadline = 5 * time.Minute
-)
-
 type testBackend struct {
 	db              ethdb.Database
 	sections        uint64
@@ -52,10 +39,6 @@ type testBackend struct {
 	rmLogsFeed      event.Feed
 	pendingLogsFeed event.Feed
 	chainFeed       event.Feed
-}
-
-func (b *testBackend) ChainDb() ethdb.Database {
-	return b.db
 }
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
@@ -89,23 +72,35 @@ func (b *testBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*type
 	return rawdb.ReadHeader(b.db, hash, *number), nil
 }
 
-func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	if number := rawdb.ReadHeaderNumber(b.db, hash); number != nil {
-		return rawdb.ReadReceiptsDeprecated(b.db, hash, *number), nil
+func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (receipts types.Receipts, err error) {
+	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
+		}
+		receipts = rawdb.ReadReceipts(tx, b, senders)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return nil, nil
 }
 
 func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	number := rawdb.ReadHeaderNumber(b.db, hash)
-	if number == nil {
-		return nil, nil
-	}
-	receipts := rawdb.ReadReceiptsDeprecated(b.db, hash, *number)
-
-	logs := make([][]*types.Log, len(receipts))
-	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
+	var logs [][]*types.Log
+	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
+		}
+		receipts := rawdb.ReadReceipts(tx, b, senders)
+		logs = make([][]*types.Log, len(receipts))
+		for i, receipt := range receipts {
+			logs[i] = receipt.Logs
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return logs, nil
 }
@@ -165,6 +160,11 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 	}()
 }
 
+/*
+var (
+	deadline = 5 * time.Minute
+)
+
 // TestBlockSubscription tests if a block subscription returns block hashes for posted chain events.
 // It creates multiple subscriptions:
 // - one at the start and should receive all posted chain events and a second (blockHashes)
@@ -177,8 +177,8 @@ func TestBlockSubscription(t *testing.T) {
 	var (
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, deadline)
-		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
-		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommitDeprecated(db)
+		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false)
 		chainEvents = []core.ChainEvent{}
 	)
 
@@ -683,7 +683,6 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 		t.Error("Tx sending loop hangs")
 	}
 }
-
 func flattenLogs(pl [][]*types.Log) []*types.Log {
 	//nolint: prealloc
 	var logs []*types.Log
@@ -692,3 +691,4 @@ func flattenLogs(pl [][]*types.Log) []*types.Log {
 	}
 	return logs
 }
+*/

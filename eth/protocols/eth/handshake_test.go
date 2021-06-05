@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests that handshake failures are detected and reported correctly.
@@ -43,11 +45,13 @@ func testHandshake(t *testing.T, protocol uint) {
 	// Create a test backend only to have some valid genesis chain
 	backend := newTestBackend(t, 3)
 
-	db := backend.db
+	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
 	var (
 		genesis = backend.genesis
-		head    = rawdb.ReadCurrentBlockDeprecated(db)
-		td, _   = rawdb.ReadTd(db, head.Hash(), head.NumberU64())
+		head    = rawdb.ReadCurrentBlock(tx)
+		td, _   = rawdb.ReadTd(tx, head.Hash(), head.NumberU64())
 		forkID  = forkid.NewID(backend.chainConfig, backend.genesis.Hash(), backend.headBlock.NumberU64())
 	)
 	tests := []struct {

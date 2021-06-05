@@ -20,9 +20,7 @@ import (
 
 func TestSendRawTransaction(t *testing.T) {
 	t.Skip("Flaky test")
-	db, err := createTestKV()
-	require.NoError(t, err)
-	defer db.Close()
+	db := createTestKV(t)
 	conn := createTestGrpcConn()
 	defer conn.Close()
 	txPool := txpool.NewTxpoolClient(conn)
@@ -34,7 +32,7 @@ func TestSendRawTransaction(t *testing.T) {
 	expect := uint64(40)
 	txn := transaction(expect, 1000000, testKey)
 	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
+	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)
 
 	txsCh := make(chan []types.Transaction, 1)

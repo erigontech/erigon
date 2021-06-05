@@ -37,22 +37,32 @@ import (
 )
 
 type testBackend struct {
-	db  ethdb.Database
+	db  ethdb.RwKV
 	cfg *params.ChainConfig
 }
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentHeader(b.db), nil
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	return rawdb.ReadHeaderByNumber(b.db, uint64(number)), nil
+	defer tx.Rollback()
+	if number == rpc.LatestBlockNumber {
+		return rawdb.ReadCurrentHeader(tx), nil
+	}
+	return rawdb.ReadHeaderByNumber(tx, uint64(number)), nil
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentBlockDeprecated(b.db), nil
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	return rawdb.ReadBlockByNumberDeprecated(b.db, uint64(number))
+	defer tx.Rollback()
+	if number == rpc.LatestBlockNumber {
+		return rawdb.ReadCurrentBlock(tx), nil
+	}
+	return rawdb.ReadBlockByNumber(tx, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *params.ChainConfig {
@@ -67,17 +77,14 @@ func newTestBackend(t *testing.T) *testBackend {
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
-		signer = types.LatestSigner(gspec.Config)
+		signer  = types.LatestSigner(gspec.Config)
+		engine  = ethash.NewFaker()
+		db      = ethdb.NewTestKV(t)
+		genesis = gspec.MustCommit(db)
 	)
-	engine := ethash.NewFaker()
-	db := ethdb.NewTestDB(t)
-	genesis, _, err := gspec.Commit(db, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Generate testing blocks
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db.RwKV(), 32, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -89,18 +96,31 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{db: db, cfg: params.TestChainConfig}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
-	return rawdb.ReadCurrentHeader(b.db)
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	return rawdb.ReadCurrentHeader(tx)
 }
 
 func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	r, _ := rawdb.ReadBlockByNumberDeprecated(b.db, number)
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	r, err := rawdb.ReadBlockByNumber(tx, number)
+	if err != nil {
+		panic(err)
+	}
 	return r
 }
 

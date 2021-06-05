@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/ethdb"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -38,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -134,13 +134,20 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.config != params.AllEthashProtocolChanges {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
-	tx, err1 := sim.DB().Begin(context.Background(), ethdb.RO)
+	tx, err1 := sim.DB().BeginRo(context.Background())
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}
 	defer tx.Rollback()
 
-	statedb := state.New(state.NewPlainDBState(tx, rawdb.ReadCurrentHeader(sim.database).Number.Uint64()))
+	var num uint64
+	if err := sim.database.View(context.Background(), func(tx ethdb.Tx) error {
+		num = rawdb.ReadCurrentHeader(tx).Number.Uint64()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	statedb := state.New(state.NewPlainDBState(ethdb.NewRoTxDb(tx), num))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

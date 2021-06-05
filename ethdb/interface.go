@@ -43,12 +43,6 @@ type DatabaseReader interface {
 // Getter wraps the database read operations.
 type Getter interface {
 	DatabaseReader
-
-	// Walk iterates over entries with keys greater or equal to startkey.
-	// Only the keys whose first fixedbits match those of startkey are iterated over.
-	// walker is called for each eligible entry.
-	// If walker returns false or an error, the walk stops.
-	Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
 }
 
 type GetterTx interface {

@@ -290,7 +290,7 @@ func initialState1() error {
 		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
 	)
 	// Create intermediate hash bucket since it is mandatory now
-	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
+	_, genesis, err := core.CommitGenesisBlock(db.RwKV(), gspec, true)
 	if err != nil {
 		return err
 	}
@@ -413,7 +413,7 @@ func initialState1() error {
 	kv := db.RwKV()
 	snapshotDB := db.MemCopy()
 
-	_, _, err = core.SetupGenesisBlock(db, gspec, true)
+	_, _, err = core.CommitGenesisBlock(db.RwKV(), gspec, true)
 	if err != nil {
 		return err
 	}

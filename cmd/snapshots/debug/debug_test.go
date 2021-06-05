@@ -56,14 +56,17 @@ func TestMatreshkaStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpDb := ethdb.NewObjectDatabase(kv)
-	chainConfig, _, genesisErr := core.SetupGenesisBlock(tmpDb, core.DefaultGenesisBlock(), true)
+	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock(), true)
 	if genesisErr != nil {
 		t.Fatal(err)
 	}
-	tmpDb.ClearBuckets(dbutils.HeadHeaderKey)
+	if err := kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.ClearBucket(dbutils.HeadHeaderKey)
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	snkv := ethdb.NewSnapshotKV().DB(tmpDb.RwKV()).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
+	snkv := ethdb.NewSnapshotKV().DB(kv).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
 	defer snkv.Close()
 	db := ethdb.NewObjectDatabase(snkv)
 

@@ -11,11 +11,7 @@ import (
 )
 
 func TestEmptyQuery(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -31,11 +27,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
