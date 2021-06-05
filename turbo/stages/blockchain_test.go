@@ -82,57 +82,81 @@ func newCanonical(t *testing.T, n int) *stages.MockSentry {
 func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
-	canonicalDb := ethdb.NewObjectDatabase(canonicalMock.DB)
-	defer canonicalDb.Close()
-	db := ethdb.NewObjectDatabase(m.DB)
 	var err error
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 common.Hash
-	if hash1, err = rawdb.ReadCanonicalHash(db, uint64(i)); err != nil {
-		t.Fatalf("Failed to read canonical hash: %v", err)
-	}
-	if hash2, err = rawdb.ReadCanonicalHash(canonicalDb, uint64(i)); err != nil {
-		t.Fatalf("Failed to read canonical hash 2: %v", err)
-	}
-	if block1 := rawdb.ReadBlockDeprecated(db, hash1, uint64(i)); block1 == nil {
-		t.Fatalf("Did not find canonical block")
-	}
-	if block2 := rawdb.ReadBlockDeprecated(canonicalDb, hash2, uint64(i)); block2 == nil {
-		t.Fatalf("Did not find canonical block 2")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if hash1, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
+			t.Fatalf("Failed to read canonical hash: %v", err)
+		}
+		if block1 := rawdb.ReadBlock(tx, hash1, uint64(i)); block1 == nil {
+			t.Fatalf("Did not find canonical block")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	canonicalMock.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if hash2, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
+			t.Fatalf("Failed to read canonical hash 2: %v", err)
+		}
+		if block2 := rawdb.ReadBlock(tx, hash2, uint64(i)); block2 == nil {
+			t.Fatalf("Did not find canonical block 2")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	if hash1 != hash2 {
 		t.Errorf("chain content mismatch at %d: have hash %v, want hash %v", i, hash2, hash1)
 	}
 	// Extend the newly created chain
 	var blockChainB *core.ChainPack
 	var tdPre, tdPost *big.Int
+	var currentBlockB *types.Block
 
-	currentBlockHash := rawdb.ReadHeadBlockHash(db)
-	currentBlock, err1 := rawdb.ReadBlockByHashDeprecated(db, currentBlockHash)
-	if err1 != nil {
-		t.Fatalf("Failed to read current bock: %v", err1)
-	}
-	currentBlockB, err2 := rawdb.ReadBlockByHashDeprecated(canonicalDb, rawdb.ReadHeadBlockHash(canonicalDb))
-	if err2 != nil {
-		t.Fatalf("Failed to read current bock: %v", err2)
-	}
+	err = canonicalMock.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		currentBlockB, err = rawdb.ReadBlockByHash(tx, rawdb.ReadHeadBlockHash(tx))
+		if err != nil {
+			t.Fatalf("Failed to read current bock: %v", err)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
-	tdPre, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
-	if err != nil {
-		t.Fatalf("Failed to read TD for current block: %v", err)
-	}
+
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		currentBlockHash := rawdb.ReadHeadBlockHash(tx)
+		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
+		if err1 != nil {
+			t.Fatalf("Failed to read current bock: %v", err1)
+		}
+		tdPre, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		if err != nil {
+			t.Fatalf("Failed to read TD for current block: %v", err)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	if err = m.InsertChain(blockChainB); err != nil {
 		t.Fatalf("failed to insert forking chain: %v", err)
 	}
-	currentBlockHash = blockChainB.TopBlock.Hash()
-	currentBlock, err1 = rawdb.ReadBlockByHashDeprecated(db, currentBlockHash)
-	if err1 != nil {
-		t.Fatalf("Failed to read last header: %v", err1)
-	}
-	tdPost, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
-	if err != nil {
-		t.Fatalf("Failed to read TD for current header: %v", err)
-	}
+	currentBlockHash := blockChainB.TopBlock.Hash()
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
+		if err1 != nil {
+			t.Fatalf("Failed to read last header: %v", err1)
+		}
+		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		if err != nil {
+			t.Fatalf("Failed to read TD for current header: %v", err)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 	// Sanity check that the forked chain can be imported into the original
 	if err := canonicalMock.InsertChain(blockChainB); err != nil {
 		t.Fatalf("failed to import forked block chain: %v", err)
@@ -242,11 +266,9 @@ func TestBrokenBlockChain(t *testing.T) { testBrokenChain(t) }
 func testBrokenChain(t *testing.T) {
 	// Make chain starting from genesis
 	m := newCanonical(t, 10)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// Create a forked chain, and try to insert with a missing link
-	chain := makeBlockChain(rawdb.ReadCurrentBlockDeprecated(db), 5, m, forkSeed)
+	chain := makeBlockChain(current(m.DB), 5, m, forkSeed)
 	brokenChain := chain.Slice(1, chain.Length)
 
 	if err := m.InsertChain(brokenChain); err == nil {
