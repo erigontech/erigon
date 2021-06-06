@@ -215,6 +215,7 @@ func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
 
 	if !useExternalTx {
 		tx.Rollback()
+		tx = nil
 	}
 
 	start := time.Now()
@@ -263,6 +264,7 @@ func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) e
 	}
 	if !useExternalTx {
 		tx.Rollback()
+		tx = nil
 	}
 
 	err = stage.UnwindFunc(unwind, stageState, tx)

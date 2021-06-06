@@ -66,7 +66,7 @@ func HeadersForward(
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
