@@ -54,8 +54,8 @@ require (
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
-	github.com/ugorji/go/codec v1.2.6
-	github.com/ugorji/go/codec/codecgen v1.2.6
+	github.com/ugorji/go/codec v1.1.13
+	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.4
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible

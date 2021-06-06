@@ -39,10 +39,10 @@ func codecSelfer2False() bool { return false }
 func codecSelfer2True() bool  { return true }
 
 func init() {
-	if codec1978.GenVersion != 25 {
+	if codec1978.GenVersion != 19 {
 		_, file, _, _ := runtime.Caller(0)
 		ver := strconv.FormatInt(int64(codec1978.GenVersion), 10)
-		panic(errors.New("codecgen version mismatch: current: 25, need " + ver + ". Re-generate file: " + file))
+		panic(errors.New("codecgen version mismatch: current: 19, need " + ver + ". Re-generate file: " + file))
 	}
 	if false { // reference the types, but skip this branch at build/run time
 		var _ pkg1_common.Address
@@ -50,15 +50,10 @@ func init() {
 	}
 }
 
-func (Receipt) codecSelferViaCodecgen() {}
 func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
-	if z.EncBasicHandle().CheckCircularRef {
-		z.EncEncode(x)
-		return
-	}
 	if x == nil {
 		r.EncodeNil()
 	} else {
@@ -88,7 +83,7 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 
 func (x *Receipt) CodecDecodeSelf(d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	if !z.DecBinary() && z.IsJSONHandle() {
 		z.DecJSONUnmarshal(x)
@@ -117,7 +112,7 @@ func (x *Receipt) CodecDecodeSelf(d *codec1978.Decoder) {
 
 func (x *Receipt) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	var yyhl3 bool = l >= 0
 	for yyj3 := 0; ; yyj3++ {
@@ -131,26 +126,26 @@ func (x *Receipt) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 			}
 		}
 		z.DecReadMapElemKey()
-		yys3 := r.DecodeStringAsBytes()
+		yys3 := z.StringView(r.DecodeStringAsBytes())
 		z.DecReadMapElemValue()
-		switch string(yys3) {
+		switch yys3 {
 		case "Type":
 			x.Type = (uint8)(z.C.UintV(r.DecodeUint64(), 8))
 		case "1":
-			x.PostState = z.DecodeBytesInto(([]byte)(x.PostState))
+			x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
 		case "2":
 			x.Status = (uint64)(r.DecodeUint64())
 		case "3":
 			x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
 		default:
-			z.DecStructFieldNotFound(-1, string(yys3))
+			z.DecStructFieldNotFound(-1, yys3)
 		} // end switch yys3
 	} // end for yyj3
 }
 
 func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	var yyj9 int
 	var yyb9 bool
@@ -178,7 +173,7 @@ func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 		return
 	}
 	z.DecReadArrayElem()
-	x.PostState = z.DecodeBytesInto(([]byte)(x.PostState))
+	x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
 	yyj9++
 	if yyhl9 {
 		yyb9 = yyj9 > l
@@ -219,13 +214,12 @@ func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 }
 
 func (x *Receipt) IsCodecEmpty() bool {
-	return !(x.Type != 0 || len(x.PostState) != 0 || x.Status != 0 || x.CumulativeGasUsed != 0 || false)
+	return !(x.Type != 0 && len(x.PostState) != 0 && x.Status != 0 && x.CumulativeGasUsed != 0 && true)
 }
 
-func (Receipts) codecSelferViaCodecgen() {}
 func (x Receipts) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
 	if x == nil {
 		r.EncodeNil()
@@ -236,20 +230,15 @@ func (x Receipts) CodecEncodeSelf(e *codec1978.Encoder) {
 
 func (x *Receipts) CodecDecodeSelf(d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	h.decReceipts((*Receipts)(x), d)
 }
 
-func (Log) codecSelferViaCodecgen() {}
 func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
-	if z.EncBasicHandle().CheckCircularRef {
-		z.EncEncode(x)
-		return
-	}
 	if x == nil {
 		r.EncodeNil()
 	} else {
@@ -265,7 +254,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 			if !z.EncBinary() {
 				z.EncTextMarshal(*yy6)
 			} else {
-				z.F.EncSliceUint8V(([]uint8)(yy6[:]), e)
+				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
 			z.EncWriteArrayElem()
 			if x.Topics == nil {
@@ -286,7 +275,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 
 func (x *Log) CodecDecodeSelf(d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	if !z.DecBinary() && z.IsJSONHandle() {
 		z.DecJSONUnmarshal(x)
@@ -315,7 +304,7 @@ func (x *Log) CodecDecodeSelf(d *codec1978.Decoder) {
 
 func (x *Log) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	var yyhl3 bool = l >= 0
 	for yyj3 := 0; ; yyj3++ {
@@ -329,28 +318,28 @@ func (x *Log) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 			}
 		}
 		z.DecReadMapElemKey()
-		yys3 := r.DecodeStringAsBytes()
+		yys3 := z.StringView(r.DecodeStringAsBytes())
 		z.DecReadMapElemValue()
-		switch string(yys3) {
+		switch yys3 {
 		case "1":
 			if !z.DecBinary() && z.IsJSONHandle() {
 				z.DecJSONUnmarshal(&x.Address)
 			} else {
-				z.F.DecSliceUint8N(([]uint8)(x.Address[:]), d)
+				h.deccommon_Address((*pkg1_common.Address)(&x.Address), d)
 			}
 		case "2":
 			h.decSlicecommon_Hash((*[]pkg1_common.Hash)(&x.Topics), d)
 		case "3":
-			x.Data = z.DecodeBytesInto(([]byte)(x.Data))
+			x.Data = r.DecodeBytes(([]byte)(x.Data), false)
 		default:
-			z.DecStructFieldNotFound(-1, string(yys3))
+			z.DecStructFieldNotFound(-1, yys3)
 		} // end switch yys3
 	} // end for yyj3
 }
 
 func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	var yyj10 int
 	var yyb10 bool
@@ -369,7 +358,7 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	if !z.DecBinary() && z.IsJSONHandle() {
 		z.DecJSONUnmarshal(&x.Address)
 	} else {
-		z.F.DecSliceUint8N(([]uint8)(x.Address[:]), d)
+		h.deccommon_Address((*pkg1_common.Address)(&x.Address), d)
 	}
 	yyj10++
 	if yyhl10 {
@@ -394,7 +383,7 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 		return
 	}
 	z.DecReadArrayElem()
-	x.Data = z.DecodeBytesInto(([]byte)(x.Data))
+	x.Data = r.DecodeBytes(([]byte)(x.Data), false)
 	for {
 		yyj10++
 		if yyhl10 {
@@ -411,13 +400,12 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 }
 
 func (x *Log) IsCodecEmpty() bool {
-	return !(len(x.Address) != 0 || len(x.Topics) != 0 || len(x.Data) != 0 || false)
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
 }
 
-func (Logs) codecSelferViaCodecgen() {}
 func (x Logs) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
 	if x == nil {
 		r.EncodeNil()
@@ -428,26 +416,26 @@ func (x Logs) CodecEncodeSelf(e *codec1978.Encoder) {
 
 func (x *Logs) CodecDecodeSelf(d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	h.decLogs((*Logs)(x), d)
 }
 
 func (x codecSelfer2) encReceipts(v Receipts, e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
 	if v == nil {
 		r.EncodeNil()
 		return
 	}
 	z.EncWriteArrayStart(len(v))
-	for yyv1 := range v {
+	for _, yyv1 := range v {
 		z.EncWriteArrayElem()
-		if v[yyv1] == nil {
+		if yyv1 == nil {
 			r.EncodeNil()
 		} else {
-			v[yyv1].CodecEncodeSelf(e)
+			yyv1.CodecEncodeSelf(e)
 		}
 	}
 	z.EncWriteArrayEnd()
@@ -455,7 +443,7 @@ func (x codecSelfer2) encReceipts(v Receipts, e *codec1978.Encoder) {
 
 func (x codecSelfer2) decReceipts(v *Receipts, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 
 	yyv1 := *v
@@ -537,22 +525,40 @@ func (x codecSelfer2) decReceipts(v *Receipts, d *codec1978.Decoder) {
 	}
 }
 
+func (x codecSelfer2) enccommon_Address(v *pkg1_common.Address, e *codec1978.Encoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperEncoder(e)
+	_, _, _ = h, z, r
+	if v == nil {
+		r.EncodeNil()
+		return
+	}
+	r.EncodeStringBytesRaw(((*[20]byte)(v))[:])
+}
+
+func (x codecSelfer2) deccommon_Address(v *pkg1_common.Address, d *codec1978.Decoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperDecoder(d)
+	_, _, _ = h, z, r
+	r.DecodeBytes(((*[20]byte)(v))[:], true)
+}
+
 func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
 	if v == nil {
 		r.EncodeNil()
 		return
 	}
 	z.EncWriteArrayStart(len(v))
-	for yyv1 := range v {
+	for _, yyv1 := range v {
 		z.EncWriteArrayElem()
-		yy2 := &v[yyv1]
+		yy2 := &yyv1
 		if !z.EncBinary() {
 			z.EncTextMarshal(*yy2)
 		} else {
-			z.F.EncSliceUint8V(([]uint8)(yy2[:]), e)
+			h.enccommon_Hash((*pkg1_common.Hash)(yy2), e)
 		}
 	}
 	z.EncWriteArrayEnd()
@@ -560,7 +566,7 @@ func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Enc
 
 func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 
 	yyv1 := *v
@@ -621,7 +627,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 				if !z.DecBinary() && z.IsJSONHandle() {
 					z.DecJSONUnmarshal(&yyv1[yyj1])
 				} else {
-					z.F.DecSliceUint8N(([]uint8)(yyv1[yyj1][:]), d)
+					h.deccommon_Hash((*pkg1_common.Hash)(&yyv1[yyj1]), d)
 				}
 			}
 		}
@@ -639,21 +645,39 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 	}
 }
 
+func (x codecSelfer2) enccommon_Hash(v *pkg1_common.Hash, e *codec1978.Encoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperEncoder(e)
+	_, _, _ = h, z, r
+	if v == nil {
+		r.EncodeNil()
+		return
+	}
+	r.EncodeStringBytesRaw(((*[32]byte)(v))[:])
+}
+
+func (x codecSelfer2) deccommon_Hash(v *pkg1_common.Hash, d *codec1978.Decoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperDecoder(d)
+	_, _, _ = h, z, r
+	r.DecodeBytes(((*[32]byte)(v))[:], true)
+}
+
 func (x codecSelfer2) encLogs(v Logs, e *codec1978.Encoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Encoder(e)
+	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
 	if v == nil {
 		r.EncodeNil()
 		return
 	}
 	z.EncWriteArrayStart(len(v))
-	for yyv1 := range v {
+	for _, yyv1 := range v {
 		z.EncWriteArrayElem()
-		if v[yyv1] == nil {
+		if yyv1 == nil {
 			r.EncodeNil()
 		} else {
-			v[yyv1].CodecEncodeSelf(e)
+			yyv1.CodecEncodeSelf(e)
 		}
 	}
 	z.EncWriteArrayEnd()
@@ -661,7 +685,7 @@ func (x codecSelfer2) encLogs(v Logs, e *codec1978.Encoder) {
 
 func (x codecSelfer2) decLogs(v *Logs, d *codec1978.Decoder) {
 	var h codecSelfer2
-	z, r := codec1978.GenHelper().Decoder(d)
+	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 
 	yyv1 := *v
