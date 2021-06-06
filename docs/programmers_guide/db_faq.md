@@ -40,3 +40,8 @@ RAM and will use all RAM without re-configuration. Same PageCache can be used by
 machine by just opening same DB file. For example if RPCDaemon started with —datadir option - it will open db of
 Erigon and will use same PageCache (if data A already in RAM because it’s hot and RPCDaemon read it - then it read it
 from RAM not from Disk). Shared memory.
+
+This also means - if you restart Erigon - PageCache will stay alive. Because it doesn’t belongs to Erigon.
+
+After machine reboot - warmup takes ~10min - Erigon will getting faster during this time (but we don’t have special code to warmup) - Erigon will just do usual work.
+
