@@ -2,9 +2,7 @@ package stagedsync
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
@@ -232,36 +230,6 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						fmt.Printf("Before IH ================\n")
-						if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
-							fmt.Printf("%x: %x\n", k, v)
-							return nil
-						}); err != nil {
-							return fmt.Errorf("print state: %w", err)
-						}
-						fmt.Printf("..................\n")
-						if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
-							fmt.Printf("%x: %x\n", k, v)
-							return nil
-						}); err != nil {
-							return fmt.Errorf("print state: %w", err)
-						}
-						fmt.Printf("..................\n")
-						if err := tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
-							fmt.Printf("%x: %x\n", k, v)
-							return nil
-						}); err != nil {
-							return fmt.Errorf("print state: %w", err)
-						}
-						fmt.Printf("..................\n")
-						if err := tx.ForEach(dbutils.TrieOfStorageBucket, nil, func(k, v []byte) error {
-							fmt.Printf("%x: %x\n", k, v)
-							return nil
-						}); err != nil {
-							return fmt.Errorf("print state: %w", err)
-						}
-						fmt.Printf("===============================\n")
-
 						_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx.Done())
 						return err
 					},
