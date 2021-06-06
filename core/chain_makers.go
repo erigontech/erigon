@@ -338,7 +338,22 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}); err != nil {
 				return nil, nil, fmt.Errorf("print state: %w", err)
 			}
+			fmt.Printf("..................\n")
 			if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
+				fmt.Printf("%x: %x\n", k, v)
+				return nil
+			}); err != nil {
+				return nil, nil, fmt.Errorf("print state: %w", err)
+			}
+			fmt.Printf("..................\n")
+			if err := tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
+				fmt.Printf("%x: %x\n", k, v)
+				return nil
+			}); err != nil {
+				return nil, nil, fmt.Errorf("print state: %w", err)
+			}
+			fmt.Printf("..................\n")
+			if err := tx.ForEach(dbutils.TrieOfStorageBucket, nil, func(k, v []byte) error {
 				fmt.Printf("%x: %x\n", k, v)
 				return nil
 			}); err != nil {
