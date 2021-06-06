@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package gasprice
+package gasprice_test
 
 import (
 	"context"
@@ -24,16 +24,15 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 type testBackend struct {
@@ -77,14 +76,12 @@ func newTestBackend(t *testing.T) *testBackend {
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
-		signer  = types.LatestSigner(gspec.Config)
-		engine  = ethash.NewFaker()
-		db      = ethdb.NewTestKV(t)
-		genesis = gspec.MustCommit(db)
+		signer = types.LatestSigner(gspec.Config)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
 
 	// Generate testing blocks
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -96,10 +93,10 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, chain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{db: db, cfg: params.TestChainConfig}
+	return &testBackend{db: m.DB, cfg: params.TestChainConfig}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
@@ -125,13 +122,13 @@ func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
 }
 
 func TestSuggestPrice(t *testing.T) {
-	config := Config{
+	config := gasprice.Config{
 		Blocks:     2,
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),
 	}
 	backend := newTestBackend(t)
-	oracle := NewOracle(backend, config)
+	oracle := gasprice.NewOracle(backend, config)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestPrice(context.Background())

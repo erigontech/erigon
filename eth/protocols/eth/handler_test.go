@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package eth
+package eth_test
 
 import (
 	"context"
@@ -25,17 +25,18 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,17 +68,17 @@ func newTestBackend(t *testing.T, blocks int) *testBackend {
 // wraps it into a mock backend.
 func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *testBackend {
 	// Create a database pre-initialize with a genesis block
-	db := ethdb.NewTestKV(t)
-	genesis := (&core.Genesis{
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := stages.MockWithGenesis(t, &core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}).MustCommit(db)
+	}, key)
 
-	headBlock := genesis
+	headBlock := m.Genesis
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, blocks, generator, true)
-		if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), chain.Blocks, true /* checkRoot */); err != nil {
-			panic(err)
+		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
+		if err := m.InsertChain(chain); err != nil {
+			t.Fatalf("generate chain: %v", err)
 		}
 		headBlock = chain.TopBlock
 	}
@@ -85,10 +86,10 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
 	b := &testBackend{
-		db:          ethdb.NewObjectDatabase(db),
-		txpool:      core.NewTxPool(txconfig, params.TestChainConfig, db),
+		db:          ethdb.NewObjectDatabase(m.DB),
+		txpool:      core.NewTxPool(txconfig, m.ChainConfig, m.DB),
 		headBlock:   headBlock,
-		genesis:     genesis,
+		genesis:     m.Genesis,
 		chainConfig: params.TestChainConfig,
 	}
 	t.Cleanup(func() {
@@ -97,9 +98,9 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	return b
 }
 
-func (b *testBackend) DB() ethdb.RwKV { return b.db.(ethdb.HasRwKV).RwKV() }
-func (b *testBackend) TxPool() TxPool { return b.txpool }
-func (b *testBackend) RunPeer(peer *Peer, handler Handler) error {
+func (b *testBackend) DB() ethdb.RwKV     { return b.db.(ethdb.HasRwKV).RwKV() }
+func (b *testBackend) TxPool() eth.TxPool { return b.txpool }
+func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
 	// is omitted and we will just give control back to the handler.
 	return handler(peer)
@@ -109,7 +110,7 @@ func (b *testBackend) PeerInfo(enode.ID) interface{} { panic("not implemented") 
 func (b *testBackend) AcceptTxs() bool {
 	panic("data processing tests should be done in the handler package")
 }
-func (b *testBackend) Handle(*Peer, Packet) error {
+func (b *testBackend) Handle(*eth.Peer, eth.Packet) error {
 	panic("data processing tests should be done in the handler package")
 }
 func (b *testBackend) GetBlockHashesFromHash(tx ethdb.Tx, hash common.Hash, max uint64) []common.Hash {
@@ -138,7 +139,7 @@ func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
-	backend := newTestBackend(t, maxHeadersServe+15)
+	backend := newTestBackend(t, eth.MaxHeadersServe+15)
 	tx, err := backend.db.RwKV().BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -157,29 +158,29 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 
 	}
 	// Create a batch of tests for various scenarios
-	limit := uint64(maxHeadersServe)
+	limit := uint64(eth.MaxHeadersServe)
 	tests := []struct {
-		query  *GetBlockHeadersPacket // The query to execute for header retrieval
-		expect []common.Hash          // The hashes of the block whose headers are expected
+		query  *eth.GetBlockHeadersPacket // The query to execute for header retrieval
+		expect []common.Hash              // The hashes of the block whose headers are expected
 	}{
 		// A single random block should be retrievable by hash and number too
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: getBlockHash(limit / 2)}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: getBlockHash(limit / 2)}, Amount: 1},
 			[]common.Hash{getBlockHash(limit / 2)},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: limit / 2}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 1},
 			[]common.Hash{getBlockHash(limit / 2)},
 		},
 		// Multiple headers should be retrievable in both directions
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: limit / 2}, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 3},
 			[]common.Hash{
 				getBlockHash(limit / 2),
 				getBlockHash(limit/2 + 1),
 				getBlockHash(limit/2 + 2),
 			},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: limit / 2}, Amount: 3, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 3, Reverse: true},
 			[]common.Hash{
 				getBlockHash(limit / 2),
 				getBlockHash(limit/2 - 1),
@@ -188,14 +189,14 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Multiple headers with skip lists should be retrievable
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3},
 			[]common.Hash{
 				getBlockHash(limit / 2),
 				getBlockHash(limit/2 + 4),
 				getBlockHash(limit/2 + 8),
 			},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3, Reverse: true},
 			[]common.Hash{
 				getBlockHash(limit / 2),
 				getBlockHash(limit/2 - 4),
@@ -204,26 +205,26 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// The chain endpoints should be retrievable
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 0}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 0}, Amount: 1},
 			[]common.Hash{getBlockHash(0)},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64()}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64()}, Amount: 1},
 			[]common.Hash{rawdb.ReadCurrentHeader(tx).Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 1}, Amount: limit + 10, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 1}, Amount: limit + 10, Reverse: true},
 			backend.GetBlockHashesFromHash(tx, rawdb.ReadCurrentHeader(tx).Hash(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 3, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
 				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4),
 				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64()),
 			},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
 			[]common.Hash{
 				getBlockHash(4),
 				getBlockHash(0),
@@ -231,13 +232,13 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 2, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
 				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 4),
 				getBlockHash(rawdb.ReadCurrentHeader(tx).Number.Uint64() - 1),
 			},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
 			[]common.Hash{
 				getBlockHash(4),
 				getBlockHash(1),
@@ -245,7 +246,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Check a corner case where requesting more can iterate past the endpoints
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: 2}, Amount: 5, Reverse: true},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 2}, Amount: 5, Reverse: true},
 			[]common.Hash{
 				getBlockHash(2),
 				getBlockHash(1),
@@ -254,24 +255,24 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 		},
 		// Check a corner case where skipping overflow loops back into the chain start
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: getBlockHash(3)}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: getBlockHash(3)}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
 			[]common.Hash{
 				getBlockHash(3),
 			},
 		},
 		// Check a corner case where skipping overflow loops back to the same header
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: getBlockHash(1)}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: getBlockHash(1)}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
 			[]common.Hash{
 				getBlockHash(1),
 			},
 		},
 		// Check that non existing headers aren't returned
 		{
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Hash: unknown}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&GetBlockHeadersPacket{Origin: HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() + 1}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: rawdb.ReadCurrentHeader(tx).Number.Uint64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}
@@ -285,10 +286,10 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			headers = append(headers, h)
 		}
 		// Send the hash request and verify the response
-		if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
+		if err := p2p.Send(peer.app, eth.GetBlockHeadersMsg, tt.query); err != nil {
 			t.Fatal(err)
 		}
-		if err := p2p.ExpectMsg(peer.app, BlockHeadersMsg, headers); err != nil {
+		if err := p2p.ExpectMsg(peer.app, eth.BlockHeadersMsg, headers); err != nil {
 			t.Errorf("test %d: headers mismatch: %v", i, err)
 		}
 		// If the test used number origins, repeat with hashes as the too
@@ -296,10 +297,10 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			if origin := rawdb.ReadHeaderByNumber(tx, tt.query.Origin.Number); origin != nil {
 				tt.query.Origin.Hash, tt.query.Origin.Number = origin.Hash(), 0
 
-				if err := p2p.Send(peer.app, GetBlockHeadersMsg, tt.query); err != nil {
+				if err := p2p.Send(peer.app, eth.GetBlockHeadersMsg, tt.query); err != nil {
 					t.Fatal(err)
 				}
-				if err := p2p.ExpectMsg(peer.app, BlockHeadersMsg, headers); err != nil {
+				if err := p2p.ExpectMsg(peer.app, eth.BlockHeadersMsg, headers); err != nil {
 					t.Errorf("test %d: headers mismatch: %v", i, err)
 				}
 			}
@@ -312,7 +313,7 @@ func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
-	backend := newTestBackend(t, maxBodiesServe+15)
+	backend := newTestBackend(t, eth.MaxBodiesServe+15)
 	tx, err := backend.db.RwKV().BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -325,7 +326,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 	block100 := rawdb.ReadHeaderByNumber(tx, 100)
 
 	// Create a batch of tests for various scenarios
-	limit := maxBodiesServe
+	limit := eth.MaxBodiesServe
 	tests := []struct {
 		random    int           // Number of blocks to fetch randomly from the chain
 		explicit  []common.Hash // Explicitly requested blocks
@@ -356,7 +357,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 		// Collect the hashes to request, and the response to expectva
 		var (
 			hashes []common.Hash
-			bodies []*BlockBody
+			bodies []*eth.BlockBody
 			seen   = make(map[int64]bool)
 		)
 		for j := 0; j < tt.random; j++ {
@@ -368,7 +369,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 					block, _ := rawdb.ReadBlockByNumber(tx, uint64(num))
 					hashes = append(hashes, block.Hash())
 					if len(bodies) < tt.expected {
-						bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
+						bodies = append(bodies, &eth.BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
 					}
 					break
 				}
@@ -378,14 +379,14 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 			hashes = append(hashes, hash)
 			if tt.available[j] && len(bodies) < tt.expected {
 				block, _ := rawdb.ReadBlockByHash(tx, hash)
-				bodies = append(bodies, &BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
+				bodies = append(bodies, &eth.BlockBody{Transactions: block.Transactions(), Uncles: block.Uncles()})
 			}
 		}
 		// Send the hash request and verify the response
-		if err := p2p.Send(peer.app, GetBlockBodiesMsg, hashes); err != nil {
+		if err := p2p.Send(peer.app, eth.GetBlockBodiesMsg, hashes); err != nil {
 			t.Fatal(err)
 		}
-		if err := p2p.ExpectMsg(peer.app, BlockBodiesMsg, bodies); err != nil {
+		if err := p2p.ExpectMsg(peer.app, eth.BlockBodiesMsg, bodies); err != nil {
 			t.Errorf("test %d: bodies mismatch: %v", i, err)
 		}
 	}
@@ -394,6 +395,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 // Tests that the transaction receipts can be retrieved based on hashes.
 func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
+func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
 
 func testGetBlockReceipts(t *testing.T, protocol uint) {
 	// Define three accounts to simulate transactions with
@@ -432,33 +434,61 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		}
 	}
 	// Assemble the test environment
-	backend := newTestBackendWithGenerator(t, 4, generator)
-
-	peer, _ := newTestPeer("peer", protocol, backend)
-	defer peer.close()
+	m := mockWithGenerator(t, 4, generator)
 
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []common.Hash
-		receipts []types.Receipts
+		receipts []rlp.RawValue
 	)
-	tx, err := backend.db.RwKV().BeginRw(context.Background())
+
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
+			block := rawdb.ReadHeaderByNumber(tx, i)
+
+			hashes = append(hashes, block.Hash())
+			// If known, encode and queue for response packet
+			r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
+			if err != nil {
+				return err
+			}
+			encoded, err := rlp.EncodeToBytes(r)
+			require.NoError(t, err)
+			receipts = append(receipts, encoded)
+		}
+		return nil
+	})
 	require.NoError(t, err)
-	defer tx.Rollback()
+	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
+	require.NoError(t, err)
 
-	for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-		block := rawdb.ReadHeaderByNumber(tx, i)
+	m.StreamWg.Wait()
 
-		hashes = append(hashes, block.Hash())
-		r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
-		require.NoError(t, err)
-		receipts = append(receipts, r)
-	}
 	// Send the hash request and verify the response
-	if err := p2p.Send(peer.app, GetReceiptsMsg, hashes); err != nil {
-		t.Fatal(err)
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+		require.NoError(t, err)
 	}
-	if err := p2p.ExpectMsg(peer.app, ReceiptsMsg, receipts); err != nil {
-		t.Errorf("receipts mismatch: %v", err)
+
+	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
+	require.NoError(t, err)
+	m.ReceiveWg.Wait()
+	sent := m.SentMessage(0)
+	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+	require.Equal(t, expect, sent.Data)
+}
+
+// newTestBackend creates a chain with a number of explicitly defined blocks and
+// wraps it into a mock backend.
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *stages.MockSentry {
+	m := stages.MockWithGenesis(t, &core.Genesis{
+		Config: params.TestChainConfig,
+		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+	}, testKey)
+	if blocks > 0 {
+		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
+		err := m.InsertChain(chain)
+		require.NoError(t, err)
 	}
+	return m
 }

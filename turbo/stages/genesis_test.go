@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package stages
+package stages_test
 
 import (
 	"context"
@@ -24,14 +24,13 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 func TestDefaultGenesisBlock(t *testing.T) {
@@ -60,14 +59,14 @@ func TestSetupGenesis(t *testing.T) {
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = core.Genesis{
-			Config: &params.ChainConfig{HomesteadBlock: big.NewInt(3)},
+			Config: &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
 			Alloc: core.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
 		}
 		oldcustomg = customg
 	)
-	oldcustomg.Config = &params.ChainConfig{HomesteadBlock: big.NewInt(2)}
+	oldcustomg.Config = &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		name       string
 		fn         func(ethdb.RwKV) (*params.ChainConfig, *types.Block, error)
@@ -132,17 +131,18 @@ func TestSetupGenesis(t *testing.T) {
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
-				genesis := oldcustomg.MustCommit(db)
+				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+				m := stages.MockWithGenesis(t, &oldcustomg, key)
 
-				chain, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
+				chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil, false /* intermediateHashes */)
 				if err != nil {
 					return nil, nil, err
 				}
-				if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), chain.Blocks, true /* checkRoot */); err != nil {
+				if err = m.InsertChain(chain); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return core.CommitGenesisBlock(db, &customg, true)
+				return core.CommitGenesisBlock(m.DB, &customg, true)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,

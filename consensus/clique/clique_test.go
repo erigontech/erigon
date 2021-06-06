@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package clique
+package clique_test
 
 import (
 	"context"
@@ -24,14 +24,14 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.
@@ -43,25 +43,25 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		db       = ethdb.NewTestKV(t)
 		cliqueDB = ethdb.NewTestKV(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
+		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &core.Genesis{
-		ExtraData: make([]byte, ExtraVanity+common.AddressLength+ExtraSeal),
+		ExtraData: make([]byte, clique.ExtraVanity+common.AddressLength+clique.ExtraSeal),
 		Alloc: map[common.Address]core.GenesisAccount{
 			addr: {Balance: big.NewInt(1)},
 		},
+		Config: params.AllCliqueProtocolChanges,
 	}
-	copy(genspec.ExtraData[ExtraVanity:], addr[:])
-	genesis := genspec.MustCommit(db)
+	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
+	m := stages.MockWithGenesisEngine(t, genspec, engine)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
-		if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 			h = rawdb.ReadHeader(tx, hash, number)
 			return nil
 		}); err != nil {
@@ -70,10 +70,10 @@ func TestReimportMirroredState(t *testing.T) {
 		return h
 	}
 
-	chain, err := core.GenerateChain(params.AllCliqueProtocolChanges, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
-		block.SetDifficulty(diffInTurn)
+		block.SetDifficulty(clique.DiffInTurn)
 
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
@@ -93,22 +93,20 @@ func TestReimportMirroredState(t *testing.T) {
 		if i > 0 {
 			header.ParentHash = chain.Blocks[i-1].Hash()
 		}
-		header.Extra = make([]byte, ExtraVanity+ExtraSeal)
-		header.Difficulty = diffInTurn
+		header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
+		header.Difficulty = clique.DiffInTurn
 
-		sig, _ := crypto.Sign(SealHash(header).Bytes(), key)
-		copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
+		sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
+		copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
+		chain.Headers[i] = header
 		chain.Blocks[i] = block.WithSeal(header)
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
-	db = ethdb.NewTestKV(t)
-	genspec.MustCommit(db)
-
-	if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 2 {
@@ -122,10 +120,10 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if _, err := stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 3 {

@@ -14,23 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package clique
+package clique_test
 
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"errors"
 	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -53,9 +53,9 @@ func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) 
 	for i, signer := range signers {
 		auths[i] = ap.address(signer)
 	}
-	sort.Sort(signersAscending(auths))
+	sort.Sort(clique.SignersAscending(auths))
 	for i, auth := range auths {
-		copy(header.Extra[ExtraVanity+i*common.AddressLength:], auth.Bytes())
+		copy(header.Extra[clique.ExtraVanity+i*common.AddressLength:], auth.Bytes())
 	}
 }
 
@@ -82,8 +82,8 @@ func (ap *testerAccountPool) sign(header *types.Header, signer string) {
 		ap.accounts[signer], _ = crypto.GenerateKey()
 	}
 	// Sign the header and embed the signature in extra data
-	sig, _ := crypto.Sign(SealHash(header).Bytes(), ap.accounts[signer])
-	copy(header.Extra[len(header.Extra)-ExtraSeal:], sig)
+	sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), ap.accounts[signer])
+	copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
 }
 
 // testerVote represents a single block signed by a parcitular account, where
@@ -345,7 +345,7 @@ func TestClique(t *testing.T) {
 			votes: []testerVote{
 				{signer: "B"},
 			},
-			failure: errUnauthorizedSigner,
+			failure: clique.ErrUnauthorizedSigner,
 		}, {
 			name:    "An authorized signer that signed recenty should not be able to sign again",
 			signers: []string{"A", "B"},
@@ -353,7 +353,7 @@ func TestClique(t *testing.T) {
 				{signer: "A"},
 				{signer: "A"},
 			},
-			failure: errRecentlySigned,
+			failure: clique.ErrRecentlySigned,
 		}, {
 			name:    "Recent signatures should not reset on checkpoint blocks imported in a batch",
 			epoch:   3,
@@ -364,7 +364,7 @@ func TestClique(t *testing.T) {
 				{signer: "A", checkpoint: []string{"A", "B", "C"}},
 				{signer: "A"},
 			},
-			failure: errRecentlySigned,
+			failure: clique.ErrRecentlySigned,
 		}, {
 			// Recent signatures should not reset on checkpoint blocks imported in a new
 			// batch (https://github.com/ledgerwatch/erigon/issues/17593). Whilst this
@@ -378,7 +378,7 @@ func TestClique(t *testing.T) {
 				{signer: "A", checkpoint: []string{"A", "B", "C"}},
 				{signer: "A", newbatch: true},
 			},
-			failure: errRecentlySigned,
+			failure: clique.ErrRecentlySigned,
 		},
 	}
 	// Run through the scenarios and test them
@@ -403,17 +403,12 @@ func TestClique(t *testing.T) {
 			}
 			// Create the genesis block with the initial set of signers
 			genesis := &core.Genesis{
-				ExtraData: make([]byte, ExtraVanity+common.AddressLength*len(signers)+ExtraSeal),
+				ExtraData: make([]byte, clique.ExtraVanity+common.AddressLength*len(signers)+clique.ExtraSeal),
 				Config:    params.AllCliqueProtocolChanges,
 			}
 			for j, signer := range signers {
-				copy(genesis.ExtraData[ExtraVanity+j*common.AddressLength:], signer[:])
+				copy(genesis.ExtraData[clique.ExtraVanity+j*common.AddressLength:], signer[:])
 			}
-
-			// Create a pristine blockchain with the genesis injected
-			db := ethdb.NewTestKV(t)
-
-			genesis.MustCommit(db)
 
 			// Assemble a chain of headers from the cast votes
 			config := *params.AllCliqueProtocolChanges
@@ -424,16 +419,17 @@ func TestClique(t *testing.T) {
 
 			cliqueDB := ethdb.NewTestKV(t)
 
-			engine := New(&config, params.CliqueSnapshot, cliqueDB)
-			engine.fakeDiff = true
+			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
+			engine.FakeDiff = true
+			// Create a pristine blockchain with the genesis injected
+			m := stages.MockWithGenesisEngine(t, genesis, engine)
 
-			genesisBlock, _, _ := genesis.ToBlock()
-			chain, err := core.GenerateChain(&config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {
 					var nonce types.BlockNonce
-					copy(nonce[:], nonceAuthVote)
+					copy(nonce[:], clique.NonceAuthVote)
 					gen.SetNonce(nonce)
 				}
 			}, false /* intemediateHashes */)
@@ -447,12 +443,12 @@ func TestClique(t *testing.T) {
 				if j > 0 {
 					header.ParentHash = chain.Blocks[j-1].Hash()
 				}
-				header.Extra = make([]byte, ExtraVanity+ExtraSeal)
+				header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
 				if auths := tt.votes[j].checkpoint; auths != nil {
-					header.Extra = make([]byte, ExtraVanity+len(auths)*common.AddressLength+ExtraSeal)
+					header.Extra = make([]byte, clique.ExtraVanity+len(auths)*common.AddressLength+clique.ExtraSeal)
 					accounts.checkpoint(header, auths)
 				}
-				header.Difficulty = diffInTurn // Ignored, we just need a valid number
+				header.Difficulty = clique.DiffInTurn // Ignored, we just need a valid number
 
 				// Generate the signature, embed it into the header and the block
 				accounts.sign(header, tt.votes[j].signer)
@@ -469,7 +465,14 @@ func TestClique(t *testing.T) {
 			// Pass all the headers through clique and ensure tallying succeeds
 			failed := false
 			for j := 0; j < len(batches)-1; j++ {
-				if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
+				chainX := &core.ChainPack{Blocks: batches[j]}
+				chainX.Headers = make([]*types.Header, len(batches[j]))
+				for k, b := range batches[j] {
+					chainX.Headers[k] = b.Header()
+				}
+				chainX.Length = len(batches[j])
+				chainX.TopBlock = batches[j][len(batches[j])-1]
+				if err = m.InsertChain(chainX); err != nil {
 					t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 					failed = true
 					break
@@ -479,8 +482,19 @@ func TestClique(t *testing.T) {
 				engine.Close()
 				return
 			}
-			if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
-				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+			chainX := &core.ChainPack{Blocks: batches[len(batches)-1]}
+			chainX.Headers = make([]*types.Header, len(batches[len(batches)-1]))
+			for k, b := range batches[len(batches)-1] {
+				chainX.Headers[k] = b.Header()
+			}
+			chainX.Length = len(batches[len(batches)-1])
+			chainX.TopBlock = batches[len(batches)-1][len(batches[len(batches)-1])-1]
+			err = m.InsertChain(chainX)
+			if tt.failure != nil && err == nil {
+				t.Errorf("test %d: expected failure", i)
+			}
+			if tt.failure == nil && err != nil {
+				t.Errorf("test %d: unexpected failure: %v", i, err)
 			}
 			if tt.failure != nil {
 				engine.Close()
@@ -489,7 +503,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := chain.Blocks[len(chain.Blocks)-1]
 
-			snap, err := engine.snapshot(stagedsync.ChainReader{Cfg: config, Db: ethdb.NewObjectDatabase(db)}, head.NumberU64(), head.Hash(), nil)
+			snap, err := engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: ethdb.NewObjectDatabase(m.DB)}, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)
@@ -509,7 +523,7 @@ func TestClique(t *testing.T) {
 					}
 				}
 			}
-			result := snap.signers()
+			result := snap.GetSigners()
 			if len(result) != len(signers) {
 				t.Errorf("test %d: signers mismatch: have %x, want %x", i, result, signers)
 				engine.Close()

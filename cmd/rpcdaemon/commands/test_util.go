@@ -13,24 +13,21 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/mock"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )
 
 func createTestKV(t *testing.T) ethdb.RwKV {
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestKV(t)
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -46,13 +43,13 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
 			},
+			GasLimit: 10000000,
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
-		signer     = types.LatestSignerForChainID(nil)
-		_, genesis = core.MustCommitGenesisBlock(db, gspec, true)
-		engine     = ethash.NewFaker()
+		signer = types.LatestSignerForChainID(nil)
 	)
+	m := stages.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -65,22 +62,29 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 	var err error
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db, 10, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction
+			err error
 		)
 
 		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
 			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -180,11 +184,11 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 		t.Fatal(err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(ethdb.NewObjectDatabase(db), ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
+	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	return db
+	return m.DB
 }
 
 func createTestGrpcConn() *grpc.ClientConn { //nolint

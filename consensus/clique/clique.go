@@ -57,12 +57,12 @@ const (
 
 // Clique proof-of-authority protocol constants.
 var (
-	nonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
+	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
 	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
-	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
+	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 )
 
@@ -128,12 +128,12 @@ var (
 	// be modified via out-of-range or non-contiguous headers.
 	errInvalidVotingChain = errors.New("invalid voting chain")
 
-	// errUnauthorizedSigner is returned if a header is signed by a non-authorized entity.
-	errUnauthorizedSigner = errors.New("unauthorized signer")
+	// ErrUnauthorizedSigner is returned if a header is signed by a non-authorized entity.
+	ErrUnauthorizedSigner = errors.New("unauthorized signer")
 
-	// errRecentlySigned is returned if a header is signed by an authorized entity
+	// ErrRecentlySigned is returned if a header is signed by an authorized entity
 	// that already signed a header recently, thus is temporarily not allowed to.
-	errRecentlySigned = errors.New("recently signed")
+	ErrRecentlySigned = errors.New("recently signed")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -186,7 +186,7 @@ type Clique struct {
 	lock   sync.RWMutex   // Protects the signer fields
 
 	// The fields below are for testing only
-	fakeDiff bool // Skip difficulty verifications
+	FakeDiff bool // Skip difficulty verifications
 
 	exitCh chan struct{}
 }
@@ -286,7 +286,7 @@ func (c *Clique) VerifyUncles(chain consensus.ChainReader, header *types.Header,
 // in the header satisfies the consensus protocol requirements.
 func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 
-	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	number := header.Number.Uint64()
 	// Assemble the voting snapshot to check which votes make sense
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		if len(addresses) > 0 {
 			header.Coinbase = addresses[rand.Intn(len(addresses))]
 			if c.proposals[header.Coinbase] {
-				copy(header.Nonce[:], nonceAuthVote)
+				copy(header.Nonce[:], NonceAuthVote)
 			} else {
 				copy(header.Nonce[:], nonceDropVote)
 			}
@@ -338,7 +338,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = header.Extra[:ExtraVanity]
 
 	if number%c.config.Epoch == 0 {
-		for _, signer := range snap.signers() {
+		for _, signer := range snap.GetSigners() {
 			header.Extra = append(header.Extra, signer[:]...)
 		}
 	}
@@ -411,12 +411,12 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		return errUnauthorizedSigner
+		return ErrUnauthorizedSigner
 	}
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {
@@ -468,7 +468,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
 
-	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
+	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
 		return nil
 	}
@@ -477,7 +477,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(diffInTurn)
+		return new(big.Int).Set(DiffInTurn)
 	}
 	return new(big.Int).Set(diffNoTurn)
 }

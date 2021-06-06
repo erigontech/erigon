@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package eth
+package eth_test
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/stretchr/testify/require"
@@ -60,24 +61,24 @@ func testHandshake(t *testing.T, protocol uint) {
 		want error
 	}{
 		{
-			code: TransactionsMsg, data: []interface{}{},
-			want: errNoStatusMsg,
+			code: eth.TransactionsMsg, data: []interface{}{},
+			want: eth.ErrNoStatusMsg,
 		},
 		{
-			code: StatusMsg, data: StatusPacket{10, 1, td, head.Hash(), genesis.Hash(), forkID},
-			want: errProtocolVersionMismatch,
+			code: eth.StatusMsg, data: eth.StatusPacket{10, 1, td, head.Hash(), genesis.Hash(), forkID},
+			want: eth.ErrProtocolVersionMismatch,
 		},
 		{
-			code: StatusMsg, data: StatusPacket{uint32(protocol), 999, td, head.Hash(), genesis.Hash(), forkID},
-			want: errNetworkIDMismatch,
+			code: eth.StatusMsg, data: eth.StatusPacket{uint32(protocol), 999, td, head.Hash(), genesis.Hash(), forkID},
+			want: eth.ErrNetworkIDMismatch,
 		},
 		{
-			code: StatusMsg, data: StatusPacket{uint32(protocol), 1, td, head.Hash(), common.Hash{3}, forkID},
-			want: errGenesisMismatch,
+			code: eth.StatusMsg, data: eth.StatusPacket{uint32(protocol), 1, td, head.Hash(), common.Hash{3}, forkID},
+			want: eth.ErrGenesisMismatch,
 		},
 		{
-			code: StatusMsg, data: StatusPacket{uint32(protocol), 1, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
-			want: errForkIDRejected,
+			code: eth.StatusMsg, data: eth.StatusPacket{uint32(protocol), 1, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			want: eth.ErrForkIDRejected,
 		},
 	}
 	for i, test := range tests {
@@ -86,7 +87,7 @@ func testHandshake(t *testing.T, protocol uint) {
 		defer app.Close()
 		defer net.Close()
 
-		peer := NewPeer(protocol, p2p.NewPeer(enode.ID{}, "peer", nil), net, nil)
+		peer := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{}, "peer", nil), net, nil)
 		defer peer.Close()
 
 		// Send the junk test with one peer, check the handshake failure

@@ -164,14 +164,14 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 }
 
 var (
-	errNoStatusMsg             = errors.New("no status message")
+	ErrNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")
 	errDecode                  = errors.New("invalid message")
 	errInvalidMsgCode          = errors.New("invalid message code")
-	errProtocolVersionMismatch = errors.New("protocol version mismatch")
-	errNetworkIDMismatch       = errors.New("network ID mismatch")
-	errGenesisMismatch         = errors.New("genesis mismatch")
-	errForkIDRejected          = errors.New("fork ID rejected")
+	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
+	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
+	ErrGenesisMismatch         = errors.New("genesis mismatch")
+	ErrForkIDRejected          = errors.New("fork ID rejected")
 )
 
 // Packet represents a p2p message in the `eth` protocol.

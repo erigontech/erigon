@@ -38,7 +38,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 
 	// Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
-	if !bytes.Equal(header.Nonce[:], nonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
+	if !bytes.Equal(header.Nonce[:], NonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
 		return errInvalidVote
 	}
 
@@ -71,7 +71,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if number > 0 {
-		if header.Difficulty == nil || (header.Difficulty.Cmp(diffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
+		if header.Difficulty == nil || (header.Difficulty.Cmp(DiffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
 			return errInvalidDifficulty
 		}
 	}
@@ -131,7 +131,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+	snap, err := c.Snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
-		for i, signer := range snap.signers() {
+		for i, signer := range snap.GetSigners() {
 			copy(signers[i*common.AddressLength:], signer[:])
 		}
 
@@ -153,7 +153,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	return c.verifySeal(chain, header, snap)
 }
 
-func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
+func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -251,22 +251,22 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	if _, ok := snap.Signers[signer]; !ok {
-		return errUnauthorizedSigner
+		return ErrUnauthorizedSigner
 	}
 
 	for seen, recent := range snap.Recents {
 		if recent == signer {
 			// Signer is among RecentsRLP, only fail if the current block doesn't shift it out
 			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
-				return errRecentlySigned
+				return ErrRecentlySigned
 			}
 		}
 	}
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
-	if !c.fakeDiff {
+	if !c.FakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
+		if inturn && header.Difficulty.Cmp(DiffInTurn) != 0 {
 			return errWrongDifficulty
 		}
 		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
