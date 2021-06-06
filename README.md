@@ -228,9 +228,9 @@ FAQ
 
 ### How much RAM do I need
 
-- on SSD: 16Gb RAM sync takes 5 days, 32Gb - 4 days, 64Gb - 3 days
-- on NVMe: 16Gb RAM sync takes 4 days, 32Gb - 4 days, 64Gb - 3 days
-- File systems: Ext4 50% faster than ZFS. ZFS 50% faster than BTRfs. ZFS 50% faster than "zfs compression=on"
+- Baseline (ext4 SSD): 16Gb RAM sync takes 5 days, 32Gb - 4 days, 64Gb - 3 days
+- +1 day on "zfs compression=off". +2 days on "zfs compression=on" (2x compression ratio). +3 days on btrfs.
+- -1 day on NVMe 
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
