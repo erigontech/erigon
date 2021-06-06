@@ -330,18 +330,19 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 			}
 			c.Close()
-			if GenerateTrace {
-				fmt.Printf("State after %d================\n", i)
-				if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
-					fmt.Printf("%x: %x\n", k, v)
-					return nil
-				}); err != nil {
-					return nil, nil, fmt.Errorf("print state: %w", err)
-				}
-				fmt.Printf("===============================\n")
+			//if GenerateTrace {
+			fmt.Printf("State after %d================\n", b.header.Number)
+			if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
+				fmt.Printf("%x: %x\n", k, v)
+				return nil
+			}); err != nil {
+				return nil, nil, fmt.Errorf("print state: %w", err)
 			}
+			fmt.Printf("===============================\n")
+			//}
 			if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
 				b.header.Root = hash
+				fmt.Printf("State root %x\n", hash)
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
