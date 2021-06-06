@@ -1,4 +1,6 @@
-# How to read DB directly - not by Json-RPC/Graphql:
+# Database FAQ
+
+### How to read DB directly - not by Json-RPC/Graphql:
 
 There are 2 options exist:
 
@@ -21,8 +23,25 @@ option 2 using - `kv_mdbx.go`
 
 Erigon using MDBX database. But any articles in internet about LMDB are also valid for MDBX.
 
-We have Go, Rust and C++ implementations of `RoKV` interface. 
+We have Go, Rust and C++ implementations of `RoKV` interface.
 
 Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](./../../ethdb/Readme.md)
 
-MDBX docs: [erthink.github.io/libmdbx/](https://erthink.github.io/libmdbx/) and [https://github.com/erthink/libmdbx/blob/master/mdbx.h](https://github.com/erthink/libmdbx/blob/master/mdbx.h)
+MDBX docs: [erthink.github.io/libmdbx/](https://erthink.github.io/libmdbx/)
+and [https://github.com/erthink/libmdbx/blob/master/mdbx.h](https://github.com/erthink/libmdbx/blob/master/mdbx.h)
+
+
+### How RAM used
+
+Erigon will use all available RAM, but this RAM will not belong to Eroigon’s process. OS will own all this
+memory. And OS will maintain hot part of DB in RAM. If OS will need RAM for other programs or for second Erigon instance
+OS will manage all the work. This called PageCache. Erigon itself using under 2Gb. So, Erigon will benefit from more
+RAM and will use all RAM without re-configuration. Same PageCache can be used by other processes if they run on same
+machine by just opening same DB file. For example if RPCDaemon started with —datadir option - it will open db of
+Erigon and will use same PageCache (if data A already in RAM because it’s hot and RPCDaemon read it - then it read it
+from RAM not from Disk). Shared memory.
+
+This also means - if you restart Erigon - PageCache will stay alive. Because it doesn’t belongs to Erigon.
+
+After machine reboot - warmup takes ~10min - Erigon will getting faster during this time (but we don’t have special code to warmup) - Erigon will just do usual work.
+
