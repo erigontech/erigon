@@ -21,7 +21,6 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,10 +31,11 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -395,13 +395,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 // Tests that the transaction receipts can be retrieved based on hashes.
 func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
-
-func TestGetBlockReceipts66(t *testing.T) {
-	t.Skip("wip")
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	testGetBlockReceipts(t, 66)
-}
+func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
 
 func testGetBlockReceipts(t *testing.T, protocol uint) {
 	// Define three accounts to simulate transactions with
@@ -440,33 +434,61 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		}
 	}
 	// Assemble the test environment
-	backend := newTestBackendWithGenerator(t, 4, generator)
-
-	peer, _ := newTestPeer("peer", protocol, backend)
-	defer peer.close()
+	m := mockWithGenerator(t, 4, generator)
 
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []common.Hash
-		receipts []types.Receipts
+		receipts []rlp.RawValue
 	)
-	tx, err := backend.db.RwKV().BeginRw(context.Background())
+
+	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
+			block := rawdb.ReadHeaderByNumber(tx, i)
+
+			hashes = append(hashes, block.Hash())
+			// If known, encode and queue for response packet
+			r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
+			if err != nil {
+				return err
+			}
+			encoded, err := rlp.EncodeToBytes(r)
+			require.NoError(t, err)
+			receipts = append(receipts, encoded)
+		}
+		return nil
+	})
 	require.NoError(t, err)
-	defer tx.Rollback()
+	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
+	require.NoError(t, err)
 
-	for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-		block := rawdb.ReadHeaderByNumber(tx, i)
+	m.StreamWg.Wait()
 
-		hashes = append(hashes, block.Hash())
-		r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
-		require.NoError(t, err)
-		receipts = append(receipts, r)
-	}
 	// Send the hash request and verify the response
-	if err := p2p.Send(peer.app, eth.GetReceiptsMsg, hashes); err != nil {
-		t.Fatal(err)
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+		require.NoError(t, err)
 	}
-	if err := p2p.ExpectMsg(peer.app, eth.ReceiptsMsg, receipts); err != nil {
-		t.Errorf("receipts mismatch: %v", err)
+
+	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
+	require.NoError(t, err)
+	m.ReceiveWg.Wait()
+	sent := m.SentMessage(0)
+	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+	require.Equal(t, expect, sent.Data)
+}
+
+// newTestBackend creates a chain with a number of explicitly defined blocks and
+// wraps it into a mock backend.
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *stages.MockSentry {
+	m := stages.MockWithGenesis(t, &core.Genesis{
+		Config: params.TestChainConfig,
+		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+	}, testKey)
+	if blocks > 0 {
+		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
+		err := m.InsertChain(chain)
+		require.NoError(t, err)
 	}
+	return m
 }
