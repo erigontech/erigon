@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	// gitCommit is injected through the build flags (see Makefile)
+	// Following vars are injected through the build flags (see Makefile)
 	gitCommit string
 	gitBranch string
+	gitTag    string
 )
 
 func main() {
@@ -51,7 +52,7 @@ func runErigon(cliCtx *cli.Context) {
 	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
-	log.Info("Build info", "git_branch", gitBranch, "git_commit", gitCommit)
+	log.Info("Build info", "git_branch", gitBranch, "git_tag", gitTag, "git_commit", gitCommit)
 	eri := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
 	eri.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
 		var lc net.ListenConfig
