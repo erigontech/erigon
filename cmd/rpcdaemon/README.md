@@ -12,6 +12,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
+    * [Batch requests](#batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -384,6 +385,15 @@ Reduce `--private.api.ratelimit`
 ### Read DB directly without Json-RPC/Graphql
 
 [./docs/programmers_guide/read_db.md](./docs/programmers_guide/read_db.md)
+
+### Batch requests 
+
+Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. 
+But to limit impact of 1 huge batch to other users - max amount of goroutines hardcoded to 50.
+If submit 1 batch with 200 requests - RPCDaemon will spawn 50 goroutines and will use them to process 200 requests.
+We can make it configurable if your use-case need it. 
+
+But if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will processed sequentially (on 1 goroutine).
 
 ## For Developers
 

@@ -265,7 +265,6 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withBatchSize(cmdStageExec)
-	withSilkworm(cmdStageExec)
 	withTxTrace(cmdStageExec)
 	withChain(cmdStageExec)
 

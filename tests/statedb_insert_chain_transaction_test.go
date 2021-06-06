@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -66,14 +67,16 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -132,14 +135,16 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -192,14 +197,16 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -252,14 +259,16 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -312,14 +321,16 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
+	tx, err := m.DB.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -354,22 +365,23 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
-
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	incorrectHeader := *chain.Headers[1] // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[0].Root
@@ -381,28 +393,36 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
-	}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2 - CORRECT
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
-	}
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 func TestAccountCreateIncorrectRoot(t *testing.T) {
@@ -431,36 +451,43 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
+		}
 
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
-	}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 3 - INCORRECT
 	incorrectHeader := *chain.Headers[2] // Copy header, not just pointer
@@ -508,36 +535,43 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
-	}
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 3
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
@@ -590,36 +624,42 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// BLOCK 1
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
+		if st.Exist(contractAddress) {
+			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 2
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewPlainStateReader(db))
-	if !st.Exist(from) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		st := state.New(state.NewPlainStateReader(tx))
+		if !st.Exist(from) {
+			t.Error("expected account to exist")
+		}
 
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.Hash().String())
-	}
+		if !st.Exist(contractAddress) {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.Hash().String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// BLOCK 3
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {

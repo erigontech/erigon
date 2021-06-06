@@ -173,7 +173,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(ethdb.NewObjectDatabase(db), tx)
+	err = st.Run(db, tx)
 	if err != nil {
 		return err
 	}
