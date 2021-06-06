@@ -101,7 +101,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(
+func executeBlock(
 	block *types.Block,
 	tx ethdb.RwTx,
 	batch ethdb.Database,
@@ -299,7 +299,7 @@ Loop:
 		}
 
 		stageProgress = blockNum
-		if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, writeChangesets, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
 			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
 				return unwindErr

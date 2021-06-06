@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -42,16 +41,15 @@ type StageParameters struct {
 	TmpDir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh                <-chan struct{}
-	headersFetchers       []func() error
-	txPool                *core.TxPool
-	prefetchedBlocks      *bodydownload.PrefetchedBlocks
-	stateReaderBuilder    StateReaderBuilder
-	stateWriterBuilder    StateWriterBuilder
-	notifier              ChainEventNotifier
-	silkwormExecutionFunc unsafe.Pointer
-	InitialCycle          bool
-	mining                *MiningCfg
+	QuitCh             <-chan struct{}
+	headersFetchers    []func() error
+	txPool             *core.TxPool
+	prefetchedBlocks   *bodydownload.PrefetchedBlocks
+	stateReaderBuilder StateReaderBuilder
+	stateWriterBuilder StateWriterBuilder
+	notifier           ChainEventNotifier
+	InitialCycle       bool
+	mining             *MiningCfg
 
 	snapshotsDir    string
 	btClient        *snapshotsync.Client
