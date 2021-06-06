@@ -338,9 +338,18 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}); err != nil {
 				return nil, nil, fmt.Errorf("print state: %w", err)
 			}
+			if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
+				fmt.Printf("%x: %x\n", k, v)
+				return nil
+			}); err != nil {
+				return nil, nil, fmt.Errorf("print state: %w", err)
+			}
 			fmt.Printf("===============================\n")
 			//}
+			//fmt.Printf("===============================\n")
+			//}
 			if hash, err := trie.CalcRoot("GenerateChain", tx); err == nil {
+				fmt.Printf("State root %x\n", hash)
 				b.header.Root = hash
 				fmt.Printf("State root %x\n", hash)
 			} else {

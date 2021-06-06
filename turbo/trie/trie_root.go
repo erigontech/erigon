@@ -179,6 +179,7 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //	}
 func (l *FlatDBTrieLoader) CalcTrieRoot(tx ethdb.Tx, prefix []byte, quit <-chan struct{}) (common.Hash, error) {
 
+	fmt.Printf("--------CALCTRIEROOT----------------------\n")
 	accC, err := tx.Cursor(dbutils.HashedAccountsBucket)
 	if err != nil {
 		return EmptyRoot, err
@@ -293,6 +294,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx ethdb.Tx, prefix []byte, quit <-chan 
 		return EmptyRoot, err
 	}
 
+	fmt.Printf("---------------FINISHED CALCTRIEROOT %x ---------------------\n", l.receiver.Root().Bytes())
 	return l.receiver.Root(), nil
 }
 
@@ -1487,6 +1489,5 @@ func CalcRoot(logPrefix string, tx ethdb.Tx) (common.Hash, error) {
 	if err != nil {
 		return EmptyRoot, err
 	}
-
 	return h, nil
 }
