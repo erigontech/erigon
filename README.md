@@ -19,6 +19,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [JSON-RPC daemon](#json-rpc-daemon)
   + [Run all components by docker-compose](#run-all-components-by-docker-compose)
   + [Grafana dashboard](#grafana-dashboard)
+- [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
   + [Erigon Discord Server](#erigon-discord-server)
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
@@ -221,6 +222,17 @@ XDG_DATA_HOME=/preferred/data/folder docker-compose up
 ### Grafana dashboard
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+
+FAQ
+================
+
+### How much RAM do I need
+
+- on SSD: 16Gb RAM sync takes 5 days, 32Gb - 4 days, 64Gb - 3 days
+- on NVMe: 16Gb RAM sync takes 4 days, 32Gb - 4 days, 64Gb - 3 days
+- File systems: Ext4 50% faster than ZFS. ZFS 50% faster than BTRfs. ZFS 50% faster than "zfs compression=on"
+
+Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
 Getting in touch
 ================
