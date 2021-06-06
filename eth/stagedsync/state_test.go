@@ -47,7 +47,7 @@ func TestStateStagesSuccess(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -93,7 +93,7 @@ func TestStateDisabledStages(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -142,7 +142,7 @@ func TestStateRepeatedStage(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -189,7 +189,7 @@ func TestStateErroredStage(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -279,7 +279,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -383,7 +383,7 @@ func TestStateUnwind(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -468,7 +468,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -527,11 +527,11 @@ func TestStateSyncDoTwice(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	state = NewState(s)
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -591,13 +591,13 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
 	state = NewState(s)
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -680,14 +680,14 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	tx, err := db.RwKV().BeginRw(context.Background())
 	assert.NoError(t, err)
 	defer tx.Rollback()
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.Error(t, errInterrupted, err)
 
 	state = NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	err = state.LoadUnwindInfo(tx)
 	assert.NoError(t, err)
-	err = state.Run(db, tx)
+	err = state.Run(tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{

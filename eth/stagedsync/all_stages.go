@@ -314,7 +314,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		}
 	}
 
-	if err = syncState.Run(db, tx); err != nil {
+	if err = syncState.Run(tx); err != nil {
 		return false, err
 	}
 	if !useExternalTx {

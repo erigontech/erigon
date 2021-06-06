@@ -16,10 +16,6 @@ type State struct {
 	stages       []*Stage
 	unwindOrder  []*Stage
 	currentStage uint
-
-	beforeStageRun    map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)
-	onBeforeUnwind    func(stages.SyncStage, ethdb.RwTx) (ethdb.RwTx, error)
-	beforeStageUnwind map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)
 }
 
 func (s *State) Len() int {
@@ -125,11 +121,9 @@ func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 
 func NewState(stagesList []*Stage) *State {
 	return &State{
-		stages:            stagesList,
-		currentStage:      0,
-		unwindStack:       NewPersistentUnwindStack(),
-		beforeStageRun:    make(map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)),
-		beforeStageUnwind: make(map[string]func(tx ethdb.RwTx) (ethdb.RwTx, error)),
+		stages:       stagesList,
+		currentStage: 0,
+		unwindStack:  NewPersistentUnwindStack(),
 	}
 }
 
@@ -150,7 +144,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
+func (s *State) Run(db ethdb.RwTx) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
@@ -158,22 +152,8 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 				if err := s.SetCurrentStage(unwind.Stage); err != nil {
 					return err
 				}
-				if s.onBeforeUnwind != nil {
-					var err error
-					tx, err = s.onBeforeUnwind(unwind.Stage, tx)
-					if err != nil {
-						return err
-					}
-				}
-				if hook, ok := s.beforeStageUnwind[string(unwind.Stage)]; ok {
-					var err error
-					tx, err = hook(tx)
-					if err != nil {
-						return err
-					}
-				}
 				t := time.Now()
-				if err := s.UnwindStage(unwind, db, tx); err != nil {
+				if err := s.UnwindStage(unwind, db); err != nil {
 					return err
 				}
 				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
@@ -184,13 +164,6 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 		}
 
 		_, stage := s.CurrentStage()
-		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
-			var err error
-			tx, err = hook(tx)
-			if err != nil {
-				return err
-			}
-		}
 
 		if stage.Disabled {
 			logPrefix := s.LogPrefix()
@@ -206,7 +179,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 		}
 
 		t := time.Now()
-		if err := s.runStage(stage, db, tx); err != nil {
+		if err := s.runStage(stage, db); err != nil {
 			return err
 		}
 		timings = append(timings, string(stage.ID), time.Since(t))
@@ -223,10 +196,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.RwTx) error {
-	if tx != nil {
-		db = tx
-	}
+func (s *State) runStage(stage *Stage, db ethdb.RwTx) error {
 	stageState, err := s.StageState(stage.ID, db)
 	if err != nil {
 		return err
@@ -234,7 +204,7 @@ func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.RwTx) error {
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	if err = stage.ExecFunc(stageState, s, tx); err != nil {
+	if err = stage.ExecFunc(stageState, s, db); err != nil {
 		return err
 	}
 
@@ -244,7 +214,7 @@ func (s *State) runStage(stage *Stage, db ethdb.KVGetter, tx ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) UnwindStage(unwind *UnwindState, db TxOrDb, tx ethdb.RwTx) error {
+func (s *State) UnwindStage(unwind *UnwindState, db ethdb.RwTx) error {
 	start := time.Now()
 	log.Info("Unwinding...", "stage", string(unwind.Stage))
 	stage, err := s.StageByID(unwind.Stage)
@@ -253,9 +223,6 @@ func (s *State) UnwindStage(unwind *UnwindState, db TxOrDb, tx ethdb.RwTx) error
 	}
 	if stage.UnwindFunc == nil {
 		return nil
-	}
-	if tx != nil {
-		db = tx
 	}
 	stageState, err := s.StageState(unwind.Stage, db)
 	if err != nil {
@@ -269,7 +236,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db TxOrDb, tx ethdb.RwTx) error
 		return nil
 	}
 
-	err = stage.UnwindFunc(unwind, stageState, tx)
+	err = stage.UnwindFunc(unwind, stageState, db)
 	if err != nil {
 		return err
 	}
@@ -314,16 +281,4 @@ func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 			s.stages[i].ExecFunc = f
 		}
 	}
-}
-
-func (s *State) BeforeStageRun(id stages.SyncStage, f func(tx ethdb.RwTx) (ethdb.RwTx, error)) {
-	s.beforeStageRun[string(id)] = f
-}
-
-func (s *State) BeforeStageUnwind(id stages.SyncStage, f func(tx ethdb.RwTx) (ethdb.RwTx, error)) {
-	s.beforeStageUnwind[string(id)] = f
-}
-
-func (s *State) OnBeforeUnwind(f func(id stages.SyncStage, tx ethdb.RwTx) (ethdb.RwTx, error)) {
-	s.onBeforeUnwind = f
 }

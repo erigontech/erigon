@@ -173,7 +173,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(ethdb.NewObjectDatabase(db), tx)
+	err = st.Run(tx)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 	if err != nil {
 		return err
 	}
-	if err = miningState.Run(nil, tx); err != nil {
+	if err = miningState.Run(tx); err != nil {
 		return err
 	}
 	tx.Rollback()
