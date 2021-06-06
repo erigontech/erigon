@@ -43,6 +43,7 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
 			},
+			GasLimit: 10000000,
 		}
 		chainId = big.NewInt(1337)
 		// this code generates a log
