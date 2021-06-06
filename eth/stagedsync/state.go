@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"time"
@@ -144,7 +145,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.RwTx) error {
+func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
@@ -153,7 +154,7 @@ func (s *State) Run(db ethdb.RwTx) error {
 					return err
 				}
 				t := time.Now()
-				if err := s.UnwindStage(unwind, db); err != nil {
+				if err := s.unwindStage(unwind, db, tx); err != nil {
 					return err
 				}
 				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
@@ -179,7 +180,7 @@ func (s *State) Run(db ethdb.RwTx) error {
 		}
 
 		t := time.Now()
-		if err := s.runStage(stage, db); err != nil {
+		if err := s.runStage(stage, db, tx); err != nil {
 			return err
 		}
 		timings = append(timings, string(stage.ID), time.Since(t))
@@ -196,15 +197,29 @@ func (s *State) Run(db ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.RwTx) error {
-	stageState, err := s.StageState(stage.ID, db)
+func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	stageState, err := s.StageState(stage.ID, tx)
 	if err != nil {
 		return err
 	}
 
+	if !useExternalTx {
+		tx.Rollback()
+	}
+
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	if err = stage.ExecFunc(stageState, s, db); err != nil {
+	if err = stage.ExecFunc(stageState, s, tx); err != nil {
 		return err
 	}
 
@@ -214,7 +229,17 @@ func (s *State) runStage(stage *Stage, db ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) UnwindStage(unwind *UnwindState, db ethdb.RwTx) error {
+func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	start := time.Now()
 	log.Info("Unwinding...", "stage", string(unwind.Stage))
 	stage, err := s.StageByID(unwind.Stage)
@@ -224,19 +249,23 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.RwTx) error {
 	if stage.UnwindFunc == nil {
 		return nil
 	}
-	stageState, err := s.StageState(unwind.Stage, db)
+	var stageState *StageState
+	stageState, err = s.StageState(unwind.Stage, tx)
 	if err != nil {
 		return err
 	}
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
-		if err = unwind.Skip(db); err != nil {
+		if err = unwind.Skip(tx); err != nil {
 			return err
 		}
 		return nil
 	}
+	if !useExternalTx {
+		tx.Rollback()
+	}
 
-	err = stage.UnwindFunc(unwind, stageState, db)
+	err = stage.UnwindFunc(unwind, stageState, tx)
 	if err != nil {
 		return err
 	}
