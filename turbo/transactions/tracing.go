@@ -36,7 +36,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(hash common.Hash) (bool, error), engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
 	// Create the parent state database
 	block, err := blockGetter.GetBlockByHash(blockHash)
 	if err != nil {
@@ -206,7 +206,7 @@ func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsonite
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+func (l *JsonStreamLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
 	return nil
 }
 

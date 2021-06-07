@@ -164,7 +164,7 @@ type OeTracer struct {
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
 	if precompile {
 		ot.precompile = true
 		return nil

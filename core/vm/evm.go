@@ -228,7 +228,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	p, isPrecompile := evm.precompile(addr)
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), common.Hash{})
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
@@ -311,7 +311,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	p, isPrecompile := evm.precompile(addr)
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), common.Hash{})
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
@@ -364,7 +364,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	p, isPrecompile := evm.precompile(addr)
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1))
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), common.Hash{})
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
@@ -412,7 +412,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	p, isPrecompile := evm.precompile(addr)
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2))
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), common.Hash{})
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
@@ -486,8 +486,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if !evm.Context.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
-	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig())
+	if evm.vmConfig.Debug || evm.vmConfig.TEMV {
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), codeAndHash.hash)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())

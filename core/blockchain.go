@@ -94,7 +94,7 @@ func ExecuteBlockEphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	checkTEVM func(hash common.Hash) (bool, error),
+	checkTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 	block.Uncles()

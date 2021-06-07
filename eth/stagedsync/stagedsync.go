@@ -73,6 +73,11 @@ func (stagedSync *StagedSync) Prepare(
 		writerBuilder = stagedSync.params.StateWriterBuilder
 	}
 
+	if vmConfig == nil {
+		vmConfig = &vm.Config{}
+	}
+	vmConfig.TEMV = storageMode.TEVM
+
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                  d,

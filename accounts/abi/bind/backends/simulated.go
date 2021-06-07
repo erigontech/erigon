@@ -66,7 +66,7 @@ var (
 type SimulatedBackend struct {
 	m         *stages.MockSentry
 	getHeader func(hash common.Hash, number uint64) *types.Header
-	checkTEVM func(hash common.Hash) (bool, error)
+	checkTEVM func(common.Hash) (bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block

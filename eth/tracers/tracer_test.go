@@ -71,7 +71,7 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64()))); err != nil {
+	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.CodeHash); err != nil {
 		return nil, err
 	}
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
