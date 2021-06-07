@@ -126,6 +126,9 @@ func lastSnapshot(db ethdb.RwKV) (uint64, error) {
 		}
 		return 0, ErrNotFound
 	}
+	if len(lastEnc) == 0 {
+		return 0, ErrNotFound
+	}
 
 	lastNum, err := dbutils.DecodeBlockNumber(lastEnc)
 	if err != nil {
