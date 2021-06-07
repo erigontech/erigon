@@ -154,7 +154,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 				return
 			default:
 				StageSyncStep()
-				//mark that migration started
+				//mark that migration started and changed started flag(for the first usage)
 				so.Do(func() {
 					wg.Done()
 				})
