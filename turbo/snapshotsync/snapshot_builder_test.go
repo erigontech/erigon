@@ -37,7 +37,7 @@ import (
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
 func TestSnapshotMigratorStage(t *testing.T) {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -123,17 +123,22 @@ func TestSnapshotMigratorStage(t *testing.T) {
 			panic(err)
 		}
 
-		err = sb.Final(tx)
-		if err != nil {
-			t.Error(err)
-			panic(err)
-		}
-
 		err = tx.Commit()
 		if err != nil {
 			t.Error(err)
 			panic(err)
 		}
+		roTX,err:=db.BeginRo(context.Background())
+		if err!=nil {
+		    t.Error(err)
+		}
+
+		err = sb.Final(roTX)
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		roTX.Rollback()
 		time.Sleep(time.Second)
 	}
 	wg := sync.WaitGroup{}
