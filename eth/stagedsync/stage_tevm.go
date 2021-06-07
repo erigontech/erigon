@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -252,6 +253,8 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
+	os.Exit(1)
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -308,6 +311,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", prevStageProgress)
 	s.Done()
+
 	return nil
 }
 

@@ -279,14 +279,10 @@ Loop:
 			writeChangesets = false
 		}
 
-		var (
-			checkTEVMCode func(contractHash common.Hash) (bool, error)
-		)
+		var checkTEVMCode func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.TEMV {
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
-		} else {
-			checkTEVMCode = nil
 		}
 
 		stageProgress = blockNum
