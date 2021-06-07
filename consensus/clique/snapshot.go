@@ -121,7 +121,7 @@ func lastSnapshot(db ethdb.RwKV) (uint64, error) {
 
 	lastEnc, err := tx.GetOne(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
 	if err != nil {
-		return 0, ErrNotFound
+		return 0, err
 	}
 	if len(lastEnc) == 0 {
 		return 0, ErrNotFound
