@@ -520,9 +520,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)
-		if b, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read Seal: %w", err)
-		}
 	}
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
