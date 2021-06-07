@@ -931,6 +931,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 		t.Fatal("incorrect last block", blockNum, dataTo)
 	}
 }
+
 func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapshotTxTo uint64) {
 	t.Helper()
 	bodyCursor, err := tx.Cursor(dbutils.BlockBodyPrefix)
@@ -991,7 +992,7 @@ func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapsho
 	}
 }
 
-func TestBlocks(t *testing.T) {
+func TestPruneBlocks(t *testing.T) {
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
