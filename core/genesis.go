@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -65,6 +66,7 @@ type Genesis struct {
 	Mixhash    common.Hash         `json:"mixHash"`
 	Coinbase   common.Address      `json:"coinbase"`
 	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
+	Seal       []rlp.RawValue      `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -283,6 +285,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.ErigonChainConfig
 	case ghash == params.CalaverasGenesisHash:
 		return params.CalaverasChainConfig
+	case ghash == params.SokolGenesisHash:
+		return params.SokolChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -349,6 +353,8 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		Coinbase:   g.Coinbase,
 		Root:       root,
 		BaseFee:    g.BaseFee,
+		Seal:       g.Seal,
+		WithSeal:   g.Seal != nil,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -573,6 +579,23 @@ func DefaultCalaverasGenesisBlock() *Genesis {
 		GasLimit:   0x47b760,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/calaveras.json"),
+	}
+}
+
+func DefaultSokolGenesisBlock() *Genesis {
+	/*
+		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+	*/
+
+	return &Genesis{
+		Config:    params.SokolChainConfig,
+		Timestamp: 0x0,
+		Seal: []rlp.RawValue{
+			hexutil.MustDecode("0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		},
+		GasLimit:   0x663BE0,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/sokol.json"),
 	}
 }
 

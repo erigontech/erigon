@@ -426,7 +426,7 @@ var (
 		Value: 30303,
 	}
 	ListenPort65Flag = cli.IntFlag{
-		Name:  "p2p.65.port",
+		Name:  "p2p.eth65.port",
 		Usage: "ETH65 Network listening port",
 		Value: 30304,
 	}
@@ -611,6 +611,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.CalaverasChainName:
 			urls = params.CalaverasBootnodes
+		case params.SokolChainName:
+			urls = params.SokolBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -651,6 +653,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.CalaverasChainName:
 			urls = params.CalaverasBootnodes
+		case params.SokolChainName:
+			urls = params.SokolBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -814,6 +818,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.CalaverasChainName:
 		return filepath.Join(datadir, "calaveras")
+	case params.SokolChainName:
+		return filepath.Join(datadir, "sokol")
 	default:
 		return datadir
 	}
@@ -1180,6 +1186,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
 		}
 		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
+	case params.SokolChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 77
+		}
+		cfg.Genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1266,6 +1277,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case params.CalaverasChainName:
 		genesis = core.DefaultCalaverasGenesisBlock()
+	case params.SokolChainName:
+		genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}
