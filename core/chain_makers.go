@@ -413,6 +413,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
+	//header.WithSeal = debug.HeadersSeal()
 
 	return header
 }

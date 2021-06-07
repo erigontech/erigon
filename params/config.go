@@ -296,7 +296,7 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
+		//LondonBlock:         big.NewInt(0),
 		Clique: &CliqueConfig{
 			Period: 30,
 			Epoch:  30000,
