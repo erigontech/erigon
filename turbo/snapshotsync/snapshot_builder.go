@@ -442,8 +442,8 @@ func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapsho
 	})
 }
 
-func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
-	log.Info("Remove blocks data", "from", currentSnapshot, "to", newSnapshot)
+func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {
+	log.Info("Remove blocks data", "to", newSnapshot)
 	if _, ok := db.(ethdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
@@ -456,6 +456,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot
 	if err != nil {
 		return err
 	}
+	defer blockBodySnapshotReadTX.Rollback()
 	ethtxSnapshotReadTX, err := blockBodySnapshotReadTX.Cursor(dbutils.EthTx)
 	if err != nil {
 		return err
@@ -478,7 +479,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot
 
 	bodiesCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
 	ethTXCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
-	err = ethdb.Walk(blockBodyWriteCursor, dbutils.BlockBodyKey(currentSnapshot, common.Hash{}), 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(blockBodyWriteCursor, dbutils.BlockBodyKey(0, common.Hash{}), 0, func(k, v []byte) (bool, error) {
 		if binary.BigEndian.Uint64(k) > newSnapshot {
 			return false, nil
 		}
@@ -512,20 +513,16 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot
 				return false, err
 			}
 
-			innerErr := blockBodyWriteCursor.Delete(collectKey, nil)
-			if innerErr != nil {
-				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
-			}
-
 			if bd.TxAmount > 0 {
 				txIdKey := make([]byte, 8)
 				binary.BigEndian.PutUint64(txIdKey, oldBaseTxId)
 				i := uint32(0)
 
-				for k, v, err := ethTXWriteCursor.Seek(txIdKey); k != nil; k, v, err = ethTXWriteCursor.Next() {
+				for k, v, err := ethTXWriteCursor.SeekExact(txIdKey); k != nil; k, v, err = ethTXWriteCursor.Next() {
 					if err != nil {
 						return false, err
 					}
+
 					err = ethTXCollector.Collect(dbutils.EncodeBlockNumber(rewriteId+uint64(i)), common.CopyBytes(v))
 					if err != nil {
 						return false, err
@@ -537,6 +534,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot
 					}
 				}
 			}
+			//we need to remove it to use snapshot data instead
 			for i := oldBaseTxId; i < oldBaseTxId+uint64(bd.TxAmount); i++ {
 				err = ethTXWriteCursor.Delete(dbutils.EncodeBlockNumber(i), nil)
 				if err != nil {

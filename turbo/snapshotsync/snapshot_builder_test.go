@@ -76,27 +76,23 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 	defer tx.Rollback()
 	err = GenerateHeaderData(tx, 0, 11)
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 	generateChan := make(chan int)
 	StageSyncStep := func() {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
 		defer tx.Rollback()
 
@@ -114,29 +110,25 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, true)
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
 
 		err = sb.SyncStages(currentSnapshotBlock, db, tx)
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
 
 		err = tx.Commit()
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
-		roTX,err:=db.BeginRo(context.Background())
-		if err!=nil {
-		    t.Error(err)
+		roTX, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Error(err)
 		}
 
 		err = sb.Final(roTX)
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
 		roTX.Rollback()
 		time.Sleep(time.Second)
@@ -424,20 +416,17 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 	defer tx.Rollback()
 	err = GenerateHeaderData(tx, 0, 11)
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 
 	writeStep := func(currentSnapshotBlock uint64) {
@@ -462,7 +451,6 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		rotx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Error(err)
-			panic(err)
 		}
 		defer rotx.Rollback()
 
@@ -882,7 +870,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 		t.Fatal(err)
 	}
 	if blockNum-1 != snapshotTo {
-		t.Fatal(blockNum)
+		t.Fatal(blockNum, snapshotTo)
 	}
 }
 
@@ -918,7 +906,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 		}
 		expected := common.Address{uint8(blockNum), numOfDuplicateBlocks, 1}
 		if *transactions[0].GetTo() != expected {
-			t.Fatal(*transactions[0].GetTo(), expected)
+			t.Fatal(k, blockNum, numOfDuplicateBlocks, bfs.BaseTxId, *transactions[0].GetTo(), expected.Bytes())
 		}
 		expected = common.Address{uint8(blockNum), numOfDuplicateBlocks, 2}
 		if *transactions[1].GetTo() != expected {
@@ -939,10 +927,72 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	if blockNum-1 != dataTo {
+		t.Fatal("incorrect last block", blockNum, dataTo)
+	}
+}
+func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapshotTxTo uint64) {
+	t.Helper()
+	bodyCursor, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bodyCursor.Close()
+	var blockNum uint64
+	var numOfDuplicateBlocks uint8
+	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+		numOfDuplicateBlocks++
+		if binary.BigEndian.Uint64(k[:8]) != blockNum {
+			t.Fatal("incorrect blocknum", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
+		}
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blockNum <= dataFrom {
+			if bytes.Equal(k[8:], canonicalHash.Bytes()) {
+				t.Fatal("snapshot data hasn't deleted")
+			}
+		}
+
+		bfs := types.BodyForStorage{}
+		err = rlp.DecodeBytes(v, &bfs)
+		if err != nil {
+			t.Fatal(err, v)
+		}
+		if bfs.BaseTxId <= snapshotTxTo {
+			t.Fatal("txid must be after last snapshot txid")
+		}
+		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(transactions) != 3 {
+			t.Fatal("incorrect tx num", len(transactions))
+		}
+
+		switch {
+		case blockNum <= dataFrom && numOfDuplicateBlocks == 2:
+			blockNum++
+			numOfDuplicateBlocks = 0
+		//after snapshot data
+		case blockNum > dataFrom && numOfDuplicateBlocks == 3:
+			blockNum++
+			numOfDuplicateBlocks = 0
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blockNum-1 != dataTo {
+		t.Fatal("incorrect last block", blockNum, dataTo)
+	}
 }
 
 func TestBlocks(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -974,40 +1024,33 @@ func TestBlocks(t *testing.T) {
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
+
 	defer tx.Rollback()
 	dataTo := uint64(15)
 	snapshotTo := uint64(10)
 	err = GenerateBodyData(tx, 0, dataTo)
 	if err != nil {
-		t.Error(err)
-		panic(err)
+		t.Fatal(err)
 	}
 	verifyFullBodiesData(t, tx, dataTo)
-	fmt.Println("Print origin bodies")
-	PrintBodyBuckets(t, tx)
 	err = tx.Commit()
-	if err != nil {
-		t.Error(err)
-		panic(err)
-	}
-
-	readTX, err := db.BeginRo(context.Background())
-	if err != nil {
-		t.Error(err)
-		panic(err)
-	}
-	defer readTX.Rollback()
-
-	bodySnapshotPath := path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
-
-	err = CreateBodySnapshot(readTX, 10, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	readTX, err := db.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bodySnapshotPath := path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readTX.Rollback()
 	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath, true)
 	if err != nil {
 		t.Fatal(err)
@@ -1019,9 +1062,14 @@ func TestBlocks(t *testing.T) {
 	}
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
-
-	fmt.Println("Print snapshot bodies")
-	PrintBodyBuckets(t, bodySnapshotTX)
+	ethTXCursor, err := bodySnapshotTX.Cursor(dbutils.EthTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastTxID, _, err := ethTXCursor.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	bodySnapshotTX.Rollback()
 	ch := make(chan struct{})
@@ -1043,7 +1091,7 @@ func TestBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = RemoveBlocksData(db, rwTX, 0, snapshotTo)
+	err = RemoveBlocksData(db, rwTX, snapshotTo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1057,11 +1105,113 @@ func TestBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("Print after remove bodies")
-	PrintBodyBuckets(t, withbodySnapshotTX)
+	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
+	withbodySnapshotTX.Rollback()
+
+	writeDBKV := db.WriteDB()
+
+	writeDBKVRoTX, err := writeDBKV.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyPrunedBlocksData(t, writeDBKVRoTX, snapshotTo, dataTo, binary.BigEndian.Uint64(lastTxID))
+	writeDBKVRoTX.Rollback()
+
+	tx, err = db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//snapshot to 20
+	dataFrom := uint64(16)
+	dataTo = uint64(20)
+	snapshotTo = uint64(20)
+	err = GenerateBodyData(tx, dataFrom, dataTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyFullBodiesData(t, tx, dataTo)
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bodySnapshotPath = path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
+	readTX, err = db.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readTX.Rollback()
+
+	kvSnapshot, err = OpenBodiesSnapshot(bodySnapshotPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bodySnapshotTX, err = kvSnapshot.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
+	ethTXCursor, err = bodySnapshotTX.Cursor(dbutils.EthTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastTxID, _, err = ethTXCursor.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bodySnapshotTX.Rollback()
+	ch = make(chan struct{})
+	db.UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, kvSnapshot, ch)
+	select {
+	case <-ch:
+	case <-time.After(time.Second * 5000):
+		t.Fatal("timeout on snapshot replace")
+	}
+	withbodySnapshotTX, err = db.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
+	withbodySnapshotTX.Rollback()
+
+	rwTX, err = db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = RemoveBlocksData(db, rwTX, snapshotTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = rwTX.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	withbodySnapshotTX, err = db.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	verifyFullBodiesData(t, withbodySnapshotTX, dataTo)
 	withbodySnapshotTX.Rollback()
+
+	writeDBKV = db.WriteDB()
+
+	writeDBKVRoTX, err = writeDBKV.BeginRo(context.Background())
+	defer writeDBKVRoTX.Rollback()
+	verifyPrunedBlocksData(t, writeDBKVRoTX, snapshotTo, dataTo, binary.BigEndian.Uint64(lastTxID))
+
 }
 
 func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) {
