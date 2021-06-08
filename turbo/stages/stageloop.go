@@ -33,6 +33,7 @@ func NewStagedSync(
 	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
 	blockHashes stagedsync.BlockHashesCfg,
+	snapshotHeaderGen stagedsync.HeadersSnapshotGenCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
@@ -48,7 +49,7 @@ func NewStagedSync(
 	test bool,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, snapshotHeaderGen, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -283,6 +284,7 @@ func NewStagedSync2(
 	bodyDownloadTimeout int,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
+	snapshotsDir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
 ) (*stagedsync.StagedSync, error) {
@@ -302,6 +304,7 @@ func NewStagedSync2(
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
+		stagedsync.StageHeadersSnapshotGenCfg(db, snapshotsDir),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
