@@ -260,9 +260,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
 				return err
 			}
-			rawdb.DeleteHeader(tx, hash, blockHeight)
 			rawdb.DeleteTd(tx, hash, blockHeight)
-			rawdb.DeleteHeaderNumber(tx, hash)
 		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
