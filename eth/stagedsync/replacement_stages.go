@@ -11,6 +11,7 @@ func ReplacementStages(ctx context.Context,
 	sm ethdb.StorageMode,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
+	headersSnapshotGenCfg HeadersSnapshotGenCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
@@ -59,7 +60,6 @@ func ReplacementStages(ctx context.Context,
 		{
 			ID: stages.CreateHeadersSnapshot,
 			Build: func(world StageParameters) *Stage {
-				headersSnapshotGenCfg := StageHeadersSnapshotGenCfg(world.DB.RwKV(), world.snapshotsDir)
 				return &Stage{
 					ID:                  stages.CreateHeadersSnapshot,
 					Description:         "Create headers snapshot",
