@@ -1256,7 +1256,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 		if err != nil {
 			t.Fatal(err, v)
 		}
-		fmt.Println(k,  bfs.BaseTxId, bfs.TxAmount)
+		fmt.Println(k, bfs.BaseTxId, bfs.TxAmount)
 		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
